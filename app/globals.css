@@ -75,6 +75,12 @@
 @keyframes border-beam{0%{offset-distance:0%}100%{offset-distance:100%}}
 .border-beam-el{animation:border-beam 8s linear infinite}
 
+@keyframes marquee{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+.animate-marquee{animation:marquee 32s linear infinite}
+
+@keyframes draw-line{to{stroke-dashoffset:0}}
+.draw-line{stroke-dasharray:1000;stroke-dashoffset:1000;animation:draw-line 1.6s ease-out forwards}
+
 :root{
   --bg:#0a0e18; --bg2:#0d1322; --panel:#121a2e; --panel2:#17203a; --line:#22304f; --line2:#2c3c60;
   --ink:#eef3fc; --mut:#8c9ab8; --mut2:#5f6d8c;
