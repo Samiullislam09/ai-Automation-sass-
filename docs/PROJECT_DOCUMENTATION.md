@@ -6,7 +6,7 @@
 
 **GrowthTeam AI** is a Next.js 14 marketing SaaS frontend: an "AI marketing team" product for small businesses. The pitch is six named AI agents (Boss AI + five specialists) that research, write, and distribute content, with every action gated behind human approval. The product is visualized as a **live animated isometric office** — each agent has a room that lights up when working and goes dark when offline.
 
-This repo is explicitly a **production-reference frontend, not a finished product**. Every place that needs a real backend has a `TODO(backend)` comment. State, the content pipeline, and payments are all simulated client-side with timers and `localStorage` so the full UX can be demoed and clicked through end-to-end before any backend exists.
+This repo started as a **production-reference frontend, not a finished product** — every place needing a real backend had a `TODO(backend)` comment, and state/content/payments were simulated client-side with timers and `localStorage`. **As of 2026-08-20, auth, the database, onboarding, the site crawler, and the agent-server framework are real** (Build Guide Steps 2–6 — see §1.2 below for the infrastructure and §11 for what's still pending). The content pipeline itself (Boss AI's actual writing) is still simulated until Steps 7–12.
 
 - **Stack**: Next.js 14.2.5 (App Router), React 18.3.1, TypeScript 5.4.5, Tailwind CSS 3.4.4 (config present but styling is mostly inline `style={}` objects + a global stylesheet).
 - **No auth/DB yet**: `npm install && npm run dev` runs the whole thing with zero env vars — everything persists to `localStorage` under the key `gt-state`.
@@ -23,6 +23,21 @@ The landing page (`app/page.tsx`) and its supporting components have been rebuil
 - **Fonts**: Manrope (body) + Plus Jakarta Sans (display/headings) via `next/font/google` — the reference's actual fonts (Cal Sans, Instrument Sans) are local/proprietary files not present in its exported repo, so Google Fonts equivalents were substituted.
 - **Scope**: this pass covered the landing page only, by explicit user choice. `/login`, `/signup`, `/onboarding`, `/whoami`, and all `/app/*` dashboard pages still use the original hand-rolled dark-only styling and have not been touched yet — they're next in line for the same design-system treatment.
 - **Known follow-up**: `npm audit` flags Next.js 14.2.5 itself (pre-existing, unrelated to this redesign) with a long list of advisories fixed only by upgrading to a much newer Next.js major/minor — that upgrade was deliberately out of scope for this UI pass and should be a separate, explicit decision.
+
+### 1.2 Backend infrastructure — real services now running (Build Guide Steps 2–6, 2026-08-20)
+
+Following `docs/Solo_Developer_Build_Guide.pdf` step by step, the demo-only architecture in §1 above has started being replaced with real infrastructure. This section is the plain-language answer to "what are we using, and why" — each service does one specific job, nothing overlaps.
+
+| Service | What it actually is | Why this project needs it | What's stored on it |
+|---|---|---|---|
+| **Supabase** | Hosted Postgres database + auth + file storage | The single source of truth: users, tenants, content, leads — everything permanent. Replaces the old `localStorage["gt-state"]`. | Everything real and permanent: `tenants`, `memberships`, `content_items`, `site_pages` (with embeddings), `jobs_log`, `leads`, `notifications`, `integrations` (WordPress/webhook credentials, encrypted). |
+| **Upstash (Redis)** | A hosted, serverless-friendly Redis — an extremely fast, *temporary* key-value store | BullMQ (the job-queue library) needs Redis to manage its queues. Think of it as a restaurant's order queue: a job sits here only until a worker picks it up and finishes it. | Nothing permanent — just in-flight job data (e.g. "write an article about X for tenant Y") that disappears once processed. Never real business data. |
+| **Railway** | A hosting platform that keeps a server running 24/7 (unlike Vercel, which only runs code per-request) | Hosts `/agent-server` — the background worker process that pulls jobs off the Redis queues and runs the AI agents. This has to be always-on, because a job might need to run even if no browser tab is open. | Nothing by itself — it just runs the agent-server's code. Costs ~$5/month after the free trial (an "always-on" server isn't free like Vercel's per-request model). |
+| **NVIDIA NIM** (`build.nvidia.com`) | Hosted AI models via one API key — the "Lightning" tier from `docs/AI_LOGIC.md` | Powers embeddings (`nv-embedqa-e5-v5`, for the site crawler's niche-understanding) and fast/cheap LLM calls (`nemotron-3.5-lightning-30b-a3b`, for niche summaries and — later — Boss AI's chat). One account covers both, so there's no second AI service to manage for this tier. | Nothing — it's a stateless API call in, text/vectors out. |
+| **Vercel** | Frontend hosting, deploys on every GitHub push | Hosts the actual Next.js app (`app/`) that users visit. | Nothing extra — same repo, just built and served. |
+| **GitHub** | Version control / code hosting | Where the code lives; Vercel and Railway both deploy *from* here on push. | Just the code (`.env*` files are gitignored — secrets never get pushed). |
+
+**The shape of a real request, end to end** (once Step 6's agent-server is live): browser → Next.js app (Vercel) → writes a job → Redis queue (Upstash) → agent-server (Railway) picks it up → calls NVIDIA NIM for the AI work → writes the result back to Supabase → dashboard reads it from Supabase and shows it.
 
 ## 2. Repo map
 
