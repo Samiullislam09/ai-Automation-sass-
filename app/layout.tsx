@@ -1,6 +1,11 @@
 import type { Metadata } from "next";
+import { Manrope, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 import { StoreProvider } from "@/lib/store";
+import { ThemeProvider } from "@/components/theme-provider";
+
+const manrope = Manrope({ subsets: ["latin"], variable: "--font-manrope" });
+const jakarta = Plus_Jakarta_Sans({ subsets: ["latin"], variable: "--font-jakarta" });
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://growthteam.example.com"), // TODO: final domain
@@ -14,9 +19,11 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body>
-        <StoreProvider>{children}</StoreProvider>
+    <html lang="en" suppressHydrationWarning>
+      <body className={`${manrope.variable} ${jakarta.variable}`}>
+        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
+          <StoreProvider>{children}</StoreProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

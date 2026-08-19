@@ -12,6 +12,18 @@ This repo is explicitly a **production-reference frontend, not a finished produc
 - **No auth/DB yet**: `npm install && npm run dev` runs the whole thing with zero env vars — everything persists to `localStorage` under the key `gt-state`.
 - **Build status** (per README): 17 routes, 0 build errors.
 
+### 1.1 UI redesign in progress (started 2026-08-19)
+
+The landing page (`app/page.tsx`) and its supporting components have been rebuilt to match the visual language of a reference template (`nexus-work-management-platform`, a v0.app "Apex" export) while keeping GrowthTeam AI's own branding and copy. This pulled in a real stack upgrade, not just a reskin:
+
+- **New dependencies**: Tailwind CSS upgraded 3→4 (CSS-first config, no more `tailwind.config.ts`), plus `shadcn/ui`-style primitives (`components/ui/button.tsx`, `components/ui/accordion.tsx`), `framer-motion`, `lucide-react`, `next-themes`, `lenis` (smooth scroll), `class-variance-authority`/`clsx`/`tailwind-merge`. Next.js/React versions were deliberately **not** upgraded (stayed on 14.2.5 / 18.3.1) — the new stack works fine on top of them.
+- **Dual token system in `app/globals.css`**: a new shadcn-style CSS variable set (`--background`, `--foreground`, `--card`, `--primary`, etc., with light values in `:root` and dark overrides in `.dark`) was added *alongside* the original hand-rolled variables (`--bg`, `--panel`, `--ac`, etc.) — the old ones were left untouched on purpose. Only the new landing page components use the new tokens; the dashboard/app pages still run on the old dark-only system and are unaffected by the theme toggle.
+- **Theme toggle**: `components/theme-provider.tsx` (wraps `next-themes`, wired into `app/layout.tsx` with `attribute="class" defaultTheme="dark" enableSystem`) + `components/theme-toggle.tsx` (sun/moon icon button in the new navbar). Light and dark both work on the landing page; first-time visitors default to dark to match the still-dark-only dashboard.
+- **New `components/landing/` folder**: `navbar.tsx` (floating pill nav), `hero.tsx` (animated text reveal, agent-avatar row instead of fake customer photos), `trust-strip.tsx` (marquee of *real* planned integrations — WordPress/GSC/GBP/Meta/LinkedIn/GA — not fabricated client logos), `office-section.tsx` (wraps the existing `<Office demo />`), `features.tsx` (bento grid using the actual 6 product features, plus a live mini pipeline-stage animation), `comparison.tsx` (the existing competitor comparison table, restyled), `pricing.tsx` (reads live from `lib/store.tsx`'s `PLANS`/`TOKEN_COST` — not hardcoded numbers), `faq.tsx` (shadcn Accordion, content sourced from `lib/landing-content.ts`), `final-cta.tsx`, `footer.tsx`, `smooth-scroll.tsx` (Lenis wrapper).
+- **Fonts**: Manrope (body) + Plus Jakarta Sans (display/headings) via `next/font/google` — the reference's actual fonts (Cal Sans, Instrument Sans) are local/proprietary files not present in its exported repo, so Google Fonts equivalents were substituted.
+- **Scope**: this pass covered the landing page only, by explicit user choice. `/login`, `/signup`, `/onboarding`, `/whoami`, and all `/app/*` dashboard pages still use the original hand-rolled dark-only styling and have not been touched yet — they're next in line for the same design-system treatment.
+- **Known follow-up**: `npm audit` flags Next.js 14.2.5 itself (pre-existing, unrelated to this redesign) with a long list of advisories fixed only by upgrading to a much newer Next.js major/minor — that upgrade was deliberately out of scope for this UI pass and should be a separate, explicit decision.
+
 ## 2. Repo map
 
 ```

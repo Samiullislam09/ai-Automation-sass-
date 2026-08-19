@@ -10,28 +10,32 @@
    below is untouched and keeps driving the existing dashboard pages,
    which stay dark-only until they get the same redesign pass.
    =================================================================== */
+/* Neutral zinc scale — matches the reference template's actual palette
+   (it hardcodes zinc-950/900/800/400 + an emerald-500 status dot; no
+   brand-teal accent). Light is a real light theme (white/zinc-950),
+   not the reference's own vestigial near-black "root". */
 :root{
-  --background:#f7faf9; --foreground:#0b1220;
-  --card:#ffffff; --card-foreground:#0b1220;
-  --popover:#ffffff; --popover-foreground:#0b1220;
-  --primary:#0e9c82; --primary-foreground:#f7fffd;
-  --secondary:#eef2f1; --secondary-foreground:#0b1220;
-  --muted:#eef2f1; --muted-foreground:#5b6b6a;
-  --accent:#e3f6f1; --accent-foreground:#0e6b57;
-  --destructive:#d1425a; --destructive-foreground:#ffffff;
-  --border:#e1e8e5; --input:#e1e8e5; --ring:#4fe3c1;
+  --background:#ffffff; --foreground:#09090b;
+  --card:#fafafa; --card-foreground:#09090b;
+  --popover:#ffffff; --popover-foreground:#09090b;
+  --primary:#09090b; --primary-foreground:#fafafa;
+  --secondary:#f4f4f5; --secondary-foreground:#09090b;
+  --muted:#f4f4f5; --muted-foreground:#71717a;
+  --accent:#f4f4f5; --accent-foreground:#09090b;
+  --destructive:#dc2626; --destructive-foreground:#ffffff;
+  --border:#e4e4e7; --input:#e4e4e7; --ring:#a1a1aa;
   --radius:1rem;
 }
 .dark{
-  --background:#0a0e18; --foreground:#eef3fc;
-  --card:#121a2e; --card-foreground:#eef3fc;
-  --popover:#121a2e; --popover-foreground:#eef3fc;
-  --primary:#4fe3c1; --primary-foreground:#04120d;
-  --secondary:#17203a; --secondary-foreground:#eef3fc;
-  --muted:#17203a; --muted-foreground:#8c9ab8;
-  --accent:#17203a; --accent-foreground:#eef3fc;
-  --destructive:#ff6b81; --destructive-foreground:#04120d;
-  --border:#22304f; --input:#22304f; --ring:#4fe3c1;
+  --background:#09090b; --foreground:#ffffff;
+  --card:#18181b; --card-foreground:#ffffff;
+  --popover:#18181b; --popover-foreground:#ffffff;
+  --primary:#ffffff; --primary-foreground:#09090b;
+  --secondary:#27272a; --secondary-foreground:#ffffff;
+  --muted:#27272a; --muted-foreground:#a1a1aa;
+  --accent:#27272a; --accent-foreground:#ffffff;
+  --destructive:#ef4444; --destructive-foreground:#ffffff;
+  --border:#27272a; --input:#27272a; --ring:#52525b;
 }
 @theme inline{
   --font-sans: var(--font-manrope), "Segoe UI", system-ui, sans-serif;

@@ -78,7 +78,7 @@ export function Pricing() {
                 <ul className="space-y-3 mb-8">
                   {copy.features.map((f) => (
                     <li key={f} className="flex items-center gap-3 text-sm text-foreground/90">
-                      <Check className="w-4 h-4 text-primary shrink-0" strokeWidth={1.5} />
+                      <Check className="w-4 h-4 text-emerald-500 shrink-0" strokeWidth={1.5} />
                       {f}
                     </li>
                   ))}

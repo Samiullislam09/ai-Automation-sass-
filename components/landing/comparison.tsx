@@ -39,7 +39,7 @@ export function Comparison() {
             <thead>
               <tr className="text-xs text-muted-foreground">
                 <th className="text-left px-5 py-4 font-medium"></th>
-                <th className="px-5 py-4 font-semibold text-primary">GrowthTeam AI</th>
+                <th className="px-5 py-4 font-semibold text-foreground">GrowthTeam AI</th>
                 <th className="px-5 py-4 font-medium">AI writing tools</th>
                 <th className="px-5 py-4 font-medium">Enterprise AI agents</th>
               </tr>

@@ -18,7 +18,7 @@ export function Hero() {
   return (
     <section className="relative min-h-screen flex flex-col items-center justify-center px-4 pt-28 pb-16 overflow-hidden">
       <div className="absolute inset-0 bg-gradient-to-b from-background via-background to-secondary/40 pointer-events-none" />
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[800px] h-[600px] bg-primary/10 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[800px] h-[600px] bg-foreground/5 rounded-full blur-3xl pointer-events-none" />
 
       <div className="relative z-10 max-w-5xl mx-auto text-center">
         <motion.div
@@ -27,7 +27,7 @@ export function Hero() {
           transition={{ duration: 0.6, delay: 0.2 }}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-card border border-border mb-8"
         >
-          <span className="w-2 h-2 rounded-full bg-primary pulse-glow" />
+          <span className="w-2 h-2 rounded-full bg-emerald-500 pulse-glow" />
           <span className="text-sm text-muted-foreground">The first AI team you can actually see working</span>
         </motion.div>
 
@@ -39,7 +39,7 @@ export function Hero() {
           </span>
           <span className="block overflow-hidden">
             <motion.span
-              className="block bg-gradient-to-r from-primary via-[#6ea8ff] to-[#b48bff] bg-clip-text text-transparent"
+              className="block text-muted-foreground"
               variants={textRevealVariants}
               initial="hidden"
               animate="visible"
@@ -69,7 +69,7 @@ export function Hero() {
           <Button
             size="lg"
             asChild
-            className="shimmer-btn bg-primary text-primary-foreground hover:bg-primary/90 rounded-full px-8 h-12 text-base font-medium shadow-lg shadow-primary/20"
+            className="shimmer-btn bg-primary text-primary-foreground hover:bg-primary/90 rounded-full px-8 h-12 text-base font-medium shadow-lg shadow-foreground/10"
           >
             <Link href="/signup">
               Hire your team free — no card
