@@ -22,8 +22,17 @@ app.post("/jobs/:type", async (req, res) => {
   const { tenantId, ...rest } = req.body ?? {};
   if (!tenantId) return res.status(400).json({ error: "tenantId is required" });
 
-  const job = await enqueue(type, { tenantId, ...rest });
-  res.json({ ok: true, jobId: job.id });
+  try {
+    // If Redis is unreachable, fail loudly within 8s instead of hanging the request forever.
+    const job = await Promise.race([
+      enqueue(type, { tenantId, ...rest }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Redis did not respond in time")), 8000)),
+    ]);
+    res.json({ ok: true, jobId: (job as { id?: string }).id });
+  } catch (e: any) {
+    console.error("[jobs] enqueue failed:", e.message);
+    res.status(503).json({ error: "Could not reach the job queue (Redis)", detail: e.message });
+  }
 });
 
 const httpServer = createServer(app);
