@@ -11,13 +11,13 @@ const ITEMS = [
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const { s } = useStore();
+  const { s, signOut } = useStore();
   const path = usePathname();
   const router = useRouter();
   useEffect(() => {
-    // client auth guard — TODO(backend): Next middleware + Supabase session
-    const t = setTimeout(() => { if (!s.user) router.replace("/login"); else if (!s.onboarded) router.replace("/onboarding"); }, 350);
-    return () => clearTimeout(t);
+    // real session is enforced server-side by middleware.ts now — this only handles the
+    // onboarding gate, which is still local demo state until Build Guide Step 4 wires it to the DB.
+    if (s.user && !s.onboarded) router.replace("/onboarding");
   }, [s.user, s.onboarded, router]);
 
   const unread = s.reports.filter((r: any) => r.unread).length;
@@ -39,6 +39,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </Link>
           ))}
           <div style={{ flex: 1 }} />
+          {s.user && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 4px 10px", fontSize: 12 }}>
+              <span className="mut" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.user.email}</span>
+              <a onClick={signOut} style={{ cursor: "pointer", color: "var(--mut)", flexShrink: 0, marginLeft: 8 }}>Log out</a>
+            </div>
+          )}
           <TokenBox />
         </aside>
         <main style={{ padding: "26px clamp(16px,3vw,38px)", maxWidth: 1180, width: "100%" }} className="appmain">{children}</main>

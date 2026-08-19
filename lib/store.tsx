@@ -8,6 +8,7 @@
  *  - Payments: replace applyPlan() with Paddle/LemonSqueezy checkout + webhooks.
  */
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
 
 export const TOKEN_COST: Record<string, number> = { article: 10, story: 4, social: 1 };
 export const PLANS: Record<string, { name: string; price: number; tokens: number; tagline: string }> = {
@@ -64,6 +65,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     loaded.current = true;
   }, []);
   useEffect(() => { if (loaded.current) try { localStorage.setItem("gt-state", JSON.stringify(s)); } catch {} }, [s]);
+
+  // real identity — TODO(backend Step 4): onboarded/memory/content still local demo state until DB-wired
+  useEffect(() => {
+    const supabase = createClient();
+    const toUser = (u: { email?: string | null } | null | undefined) =>
+      u?.email ? { name: u.email.split("@")[0].replace(/^\w/, (c: string) => c.toUpperCase()), email: u.email } : null;
+
+    supabase.auth.getUser().then(({ data }) => setS(prev => ({ ...prev, user: toUser(data.user) })));
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setS(prev => ({ ...prev, user: toUser(session?.user) }));
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
 
   const toast = (msg: string) => { const id = Date.now(); setToasts(t => [...t, { id, msg }]); setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3200); };
   const patch = (p: Partial<State> | ((prev: State) => Partial<State>)) => setS(prev => ({ ...prev, ...(typeof p === "function" ? p(prev) : p) }));
@@ -129,7 +143,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     toast(PLANS[plan].name + " activated!");
   };
 
-  const api = { s, patch, toast, act, setAgent, report, generate, approve, reject, applyPlan };
+  const signOut = async () => {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    setS(initial);
+    try { localStorage.removeItem("gt-state"); } catch {}
+    location.href = "/login";
+  };
+
+  const api = { s, patch, toast, act, setAgent, report, generate, approve, reject, applyPlan, signOut };
   return (
     <Ctx.Provider value={api}>
       {children}

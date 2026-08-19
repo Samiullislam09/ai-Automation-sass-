@@ -5,7 +5,7 @@ import { NextRequest } from "next/server";
  * TODO(backend): replace `brain()` with a call to NVIDIA NIM (Nemotron 3.5 Lightning):
  *   const r = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
  *     method:"POST", headers:{ Authorization:`Bearer ${process.env.NVIDIA_API_KEY}` },
- *     body: JSON.stringify({ model:"nvidia/nemotron-3.5-lightning", stream:true,
+ *     body: JSON.stringify({ model:"nvidia/nemotron-3.5-lightning-30b-a3b", stream:true,
  *       messages:[{role:"system",content:systemPromptWith(ctx)},{role:"user",content:q}] })
  *   });
  *   ...then pipe r.body through. The client already consumes a stream — no client change needed.

@@ -56,7 +56,7 @@ create table if not exists site_pages (
   url           text not null,
   title         text,
   content_text  text,
-  embedding     vector(768),
+  embedding     vector(768), -- superseded by 002_embedding_dim.sql (vector(1024), NVIDIA NIM)
   created_at    timestamptz not null default now()
 );
 
