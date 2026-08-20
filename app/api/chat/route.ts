@@ -132,12 +132,19 @@ export async function POST(req: NextRequest) {
     return new Response(wordStream(fallback(q, ctx || {})), { headers: { "Content-Type": "text/plain; charset=utf-8" } });
   }
 
-  try {
-    const business = await loadRealBusinessContext();
-    const text = await askLightning(q, ctx || {}, business);
-    return new Response(wordStream(text), { headers: { "Content-Type": "text/plain; charset=utf-8" } });
-  } catch (e: any) {
-    console.error("[chat] Lightning call failed, using fallback:", e.message);
-    return new Response(wordStream(fallback(q, ctx || {})), { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+  const business = await loadRealBusinessContext();
+
+  // Even with the compact prompt, this reasoning model is stochastic enough that a fresh
+  // "hi" occasionally still overthinks and hits finish_reason:length (live-tested: ~1 in 3
+  // in one run). A single retry catches most of that — two independent draws failing back
+  // to back is much rarer than one — without changing what the user sees on the happy path.
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const text = await askLightning(q, ctx || {}, business);
+      return new Response(wordStream(text), { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    } catch (e: any) {
+      console.error(`[chat] Lightning call failed (attempt ${attempt}/2):`, e.message);
+    }
   }
+  return new Response(wordStream(fallback(q, ctx || {})), { headers: { "Content-Type": "text/plain; charset=utf-8" } });
 }
