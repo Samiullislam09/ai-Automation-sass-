@@ -17,8 +17,11 @@ export async function POST() {
   if (!tenantId) return NextResponse.json({ ok: false, error: "Not signed in." }, { status: 401 });
 
   const { data: tenant } = await supabase.from("tenants").select("website_url, tone_profile").eq("id", tenantId).single();
-  const site = tenant?.website_url;
-  if (!site || !/^https?:\/\//.test(site)) {
+  // Defensive: /api/onboarding/complete normalizes this at save time now, but older rows
+  // (saved before that fix) may still be a bare domain with no protocol.
+  const raw = tenant?.website_url?.trim();
+  const site = raw ? (/^https?:\/\//i.test(raw) ? raw : `https://${raw}`) : null;
+  if (!site) {
     return NextResponse.json({ ok: false, error: "No valid website on file — crawl skipped." });
   }
 

@@ -15,10 +15,16 @@ export async function POST(request: Request) {
 
   const { websiteUrl, niche, toneProfile, icpProfile, wordpress, webhook } = await request.json();
 
+  // Users type domains without a protocol ("wca-global.com") — found live: that bare form
+  // got saved as-is, and every downstream reader (crawl routes, the new full-site crawler
+  // agent) requires ^https?:// before fetching, so it silently skipped the crawl entirely.
+  // Normalize once here so every reader can trust the stored value.
+  const normalizedUrl = websiteUrl?.trim() ? (/^https?:\/\//i.test(websiteUrl.trim()) ? websiteUrl.trim() : `https://${websiteUrl.trim()}`) : null;
+
   const { error: tenantErr } = await supabase
     .from("tenants")
     .update({
-      website_url: websiteUrl ?? null,
+      website_url: normalizedUrl,
       niche: niche ?? null,
       tone_profile: toneProfile ?? {},
       icp_profile: icpProfile ?? {},

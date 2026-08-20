@@ -22,8 +22,12 @@ export class CrawlerAgent extends Agent {
     const { tenantId } = job.data;
 
     const { data: tenant } = await supabase.from("tenants").select("website_url, tone_profile").eq("id", tenantId).single();
-    const site = tenant?.website_url;
-    if (!site || !/^https?:\/\//.test(site)) return { pagesCrawled: 0, reason: "no valid website_url on file" };
+    // Defensive: the main app normalizes this at save time now (bug found live — a bare
+    // domain like "wca-global.com" with no protocol got saved as-is and silently failed
+    // this exact check, every time), but older rows may still lack the protocol.
+    const raw = tenant?.website_url?.trim();
+    const site = raw ? (/^https?:\/\//i.test(raw) ? raw : `https://${raw}`) : null;
+    if (!site) return { pagesCrawled: 0, reason: "no valid website_url on file" };
 
     const urls = await discoverUrls(site, PAGE_LIMIT);
     let pagesCrawled = 0;
