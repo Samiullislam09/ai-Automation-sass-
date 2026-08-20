@@ -1,6 +1,18 @@
 import { PgBoss } from "pg-boss";
 import { env } from "./env.js";
 
+// Log (once) exactly what host/port/db we parsed out of DATABASE_URL — without the
+// password — so a bad/malformed env var value is obvious in the deploy logs instead of
+// surfacing only as a cryptic downstream DNS/connection error.
+try {
+  const parsed = new URL(env.DATABASE_URL);
+  console.log(
+    `[db] connecting to ${parsed.hostname}:${parsed.port || 5432}${parsed.pathname} (user: ${parsed.username || "(none)"}, password set: ${!!parsed.password})`
+  );
+} catch (e: any) {
+  console.error("[db] DATABASE_URL is not a valid URL:", e.message);
+}
+
 /** Job queue backend: Postgres (via pg-boss), not Redis/BullMQ.
  *
  *  Why: Upstash's free Redis tier has a hard 500,000 request/month cap, and BullMQ's
