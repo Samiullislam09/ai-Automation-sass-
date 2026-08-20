@@ -71,5 +71,22 @@ export async function POST(request: Request) {
     if (whErr) webhookSecret = null;
   }
 
+  // Kick off the FULL site crawl as a background job (agent-server, Railway) — not
+  // awaited, this request shouldn't wait on it. Onboarding's own /api/onboarding/crawl
+  // already did a quick ~15-page sample synchronously for immediate niche/topic feedback
+  // in the wizard; this follow-up goes deep (up to ~300 pages, no request-timeout
+  // constraint) so the tenant's real knowledge base — and every agent/chat reply that
+  // reads site_pages — reflects the whole site, not a sample.
+  const agentServerUrl = process.env.AGENT_SERVER_URL;
+  if (agentServerUrl) {
+    fetch(`${agentServerUrl}/jobs/crawler`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tenantId }),
+    }).catch((e) => console.error("[onboarding/complete] failed to enqueue full crawl:", e.message));
+  } else {
+    console.error("[onboarding/complete] AGENT_SERVER_URL not set — skipping full site crawl");
+  }
+
   return NextResponse.json({ ok: true, tenantId, wpConnected, webhookSecret });
 }
