@@ -5,7 +5,7 @@ import Office from "@/components/Office";
 import { Help } from "@/components/kit";
 import { PLANS, TOKEN_COST, useStore } from "@/lib/store";
 
-const STAGES = ["🔎 Mr. Keyword — validating topic & related queries", "📊 Analyzing top 10 ranking articles", "🧩 Building the content blueprint", "✍️ Mr. Writer — writing in your brand tone", "🛡️ Boss AI — quality gate check"];
+const STAGES = ["🔎 Mr. Keyword — validating topic & related queries", "📊 Analyzing top 10 ranking articles", "🧩 Building the content blueprint", "✍️ Mr. Writer — writing in your brand tone", "🛡️ Mr Lxwa — quality gate check"];
 
 export default function Dashboard() {
   const store = useStore();

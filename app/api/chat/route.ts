@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import "@/lib/dns-fix";
 
-/** /api/chat — streams Boss AI's reply chunk-by-chunk (ChatGPT-style).
+/** /api/chat — streams Mr Lxwa's reply chunk-by-chunk (ChatGPT-style).
  *  Build Guide Step 7: real NVIDIA NIM (Nemotron 3.5 Lightning) call, streamed.
  *  Wire format to the client is unchanged (plain text chunks) — see components/kit.tsx. */
 
@@ -13,7 +13,7 @@ function systemPrompt(ctx: any): string {
   // how much context/instruction it's given. Keep this prompt short for the same reason.
   return `detailed thinking off
 
-You are Boss AI, running a small AI marketing team (Mr. Keyword, Mr. Writer, Mr. Story, Miss Social, Mr. SEO) inside the GrowthTeam AI (MrLxwa) dashboard. Reply in 1-2 short sentences, warm and confident. **Bold** is fine.
+You are Mr Lxwa, running a small AI marketing team (Mr. Keyword, Mr. Writer, Mr. Story, Miss Social, Mr. SEO) inside the GrowthTeam AI (MrLxwa) dashboard. Reply in 1-2 short sentences, warm and confident. **Bold** is fine.
 
 Account: ${ctx.tokens ?? "?"}/${ctx.tokensMax ?? "?"} tokens (${ctx.plan ?? "free"} plan) · ${ctx.awaiting ?? 0} awaiting approval · latest report: ${ctx.report ?? "nothing yet today"} · business: ${Object.entries(mem).map(([k, v]) => `${k}=${v}`).join(", ") || "not onboarded yet"}
 
@@ -92,7 +92,7 @@ async function callLightning(q: string, ctx: any): Promise<ReadableStream<Uint8A
  *  never just breaks. Also handles the client's silent "__hello__" auto-open message. */
 function fallback(q: string, ctx: any): string {
   if (q === "__hello__") {
-    return `Salam! 👋 I'm **Boss AI**, running your team. Ask me about your **tokens**, **today's work**, your **team**, or say **"write an article"** and I'll explain exactly what happens.`;
+    return `Salam! 👋 I'm **Mr Lxwa**, running your team. Ask me about your **tokens**, **today's work**, your **team**, or say **"write an article"** and I'll explain exactly what happens.`;
   }
   return `I'm having trouble reaching my brain right now — try again in a moment. Meanwhile: you have **⚡${ctx.tokens ?? "?"}** tokens, and **${ctx.awaiting ?? 0}** item(s) await your approval.`;
 }

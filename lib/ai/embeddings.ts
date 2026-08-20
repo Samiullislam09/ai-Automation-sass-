@@ -2,7 +2,7 @@ import "@/lib/dns-fix";
 
 /** Provider-agnostic embeddings adapter (Build Guide Step 5).
  *  Default: NVIDIA NIM `nv-embedqa-e5-v5` — same free build.nvidia.com account/key the
- *  guide already has you create in Step 0 (and reuses for Lightning/Boss AI in Step 7),
+ *  guide already has you create in Step 0 (and reuses for Lightning/Mr Lxwa in Step 7),
  *  so there's no second AI account to sign up for. Its 1024 dimensions must match the
  *  `vector(1024)` column on `site_pages` — see supabase/migrations/002_embedding_dim.sql.
  *  Swap providers by changing EMBEDDINGS_PROVIDER in .env — call sites never change. */

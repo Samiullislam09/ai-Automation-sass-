@@ -37,18 +37,18 @@ export default function Memory() {
 
   const save = (i: number) => {
     patch((prev: any) => ({ memory: prev.memory.map((m: any, j: number) => j === i ? { ...m, v: val } : m) }));
-    act(`"Noted. All agents realigned."`, "Boss AI");
+    act(`"Noted. All agents realigned."`, "Mr Lxwa");
     toast("Memory updated — team adjusted."); setEdit(null);
   };
   const del = (i: number) => {
-    act(`"Forgotten."`, "Boss AI");
+    act(`"Forgotten."`, "Mr Lxwa");
     patch((prev: any) => ({ memory: prev.memory.filter((_: any, j: number) => j !== i) }));
     toast("Removed.");
   };
   const add = () => {
     if (!nk.trim() || !nv.trim()) return toast("Both fields needed");
     patch((prev: any) => ({ memory: [...prev.memory, { k: nk.trim(), v: nv.trim() }] }));
-    act(`learned something new from you: <b>${nk.trim()}</b>.`, "Boss AI");
+    act(`learned something new from you: <b>${nk.trim()}</b>.`, "Mr Lxwa");
     toast("Team memory updated."); setAdding(false); setNk(""); setNv("");
   };
 
@@ -132,7 +132,7 @@ export default function Memory() {
         </div>
       ))}
       <div className="card" style={{ marginTop: 16, display: "flex", gap: 12, alignItems: "center" }}>
-        <div className="corb" /><div className="sm"><b>Who am I?</b> — <Link href="/whoami">Read Boss AI&apos;s current understanding of your business →</Link></div>
+        <div className="corb" /><div className="sm"><b>Who am I?</b> — <Link href="/whoami">Read Mr Lxwa&apos;s current understanding of your business →</Link></div>
       </div>
       {adding && (
         <div className="modalwrap" onClick={() => setAdding(false)}>

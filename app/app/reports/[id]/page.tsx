@@ -22,7 +22,7 @@ export default function ReportDetail() {
       <div className="card">
         <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14 }}>
           <div className="corb" />
-          <div><b>Boss AI — end of day summary</b><div className="xs mut">{r.lines.length} activities · ⚡{s.tokensMax - s.tokens} tokens used this cycle</div></div>
+          <div><b>Mr Lxwa — end of day summary</b><div className="xs mut">{r.lines.length} activities · ⚡{s.tokensMax - s.tokens} tokens used this cycle</div></div>
         </div>
         {r.lines.map((l: any, i: number) => (
           <div key={i} style={{ display: "flex", gap: 10, padding: "8px 0", borderBottom: "1px solid #1a2440", fontSize: 13.5, alignItems: "baseline" }}>

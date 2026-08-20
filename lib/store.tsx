@@ -17,7 +17,7 @@ export const PLANS: Record<string, { name: string; price: number; tokens: number
   growth:  { name: "Growth",  price: 15, tokens: 400, tagline: "Serious volume + priority writing model" },
 };
 export const AGENTS = [
-  { id: "boss",   name: "Boss AI",     role: "Orchestrator",     ico: "🧠", c: "#17a98c" },
+  { id: "boss",   name: "Mr Lxwa",     role: "Orchestrator",     ico: "🧠", c: "#17a98c" },
   { id: "kw",     name: "Mr. Keyword", role: "Keyword Research", ico: "🔎", c: "#6ea8ff" },
   { id: "writer", name: "Mr. Writer",  role: "Article Writer",   ico: "✍️", c: "#b48bff" },
   { id: "story",  name: "Mr. Story",   role: "Stories & Images", ico: "🎨", c: "#ff8fb3" },
@@ -123,15 +123,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const title = TOPICS[Math.floor(Math.random() * TOPICS.length)];
     patch(prev => ({ busy: true, tokens: Math.max(0, prev.tokens - cost) }));
     const stages: [number, () => void][] = type === "article" ? [
-      [500,  () => { setAgent("kw", "w", "Validating keyword…"); act(`"Validate <b>${title}</b> and pull related queries, please."`, "Boss AI", "Mr. Keyword"); onStage?.(0); }],
-      [2100, () => { setAgent("kw", "i", "Idle"); setAgent("seo", "w", "Analyzing top 10…"); act(`"Topic is strong — 8 related queries found."`, "Mr. Keyword", "Boss AI"); onStage?.(1); }],
-      [3700, () => { setAgent("seo", "i", "Idle"); act(`"Blueprint ready — 3 titles, 9 sections, target 1,850 words."`, "Boss AI"); onStage?.(2); }],
-      [5300, () => { setAgent("writer", "w", "Writing section 4 of 9…"); act(`"Blueprint attached. Begin."`, "Boss AI", "Mr. Writer"); onStage?.(3); }],
-      [6900, () => { setAgent("writer", "i", "Idle"); setAgent("boss", "w", "Quality gate…"); act(`"Draft complete — 1,920 words. Over to you."`, "Mr. Writer", "Boss AI"); onStage?.(4); }],
-      [8300, () => { setAgent("boss", "i", "Monitoring team"); act(`"Quality gate passed ✓ — <b>${title}</b> is in your approval queue."`, "Boss AI"); finish(); }],
+      [500,  () => { setAgent("kw", "w", "Validating keyword…"); act(`"Validate <b>${title}</b> and pull related queries, please."`, "Mr Lxwa", "Mr. Keyword"); onStage?.(0); }],
+      [2100, () => { setAgent("kw", "i", "Idle"); setAgent("seo", "w", "Analyzing top 10…"); act(`"Topic is strong — 8 related queries found."`, "Mr. Keyword", "Mr Lxwa"); onStage?.(1); }],
+      [3700, () => { setAgent("seo", "i", "Idle"); act(`"Blueprint ready — 3 titles, 9 sections, target 1,850 words."`, "Mr Lxwa"); onStage?.(2); }],
+      [5300, () => { setAgent("writer", "w", "Writing section 4 of 9…"); act(`"Blueprint attached. Begin."`, "Mr Lxwa", "Mr. Writer"); onStage?.(3); }],
+      [6900, () => { setAgent("writer", "i", "Idle"); setAgent("boss", "w", "Quality gate…"); act(`"Draft complete — 1,920 words. Over to you."`, "Mr. Writer", "Mr Lxwa"); onStage?.(4); }],
+      [8300, () => { setAgent("boss", "i", "Monitoring team"); act(`"Quality gate passed ✓ — <b>${title}</b> is in your approval queue."`, "Mr Lxwa"); finish(); }],
     ] : [
-      [400,  () => { const ag = type === "story" ? "story" : "social"; setAgent(ag, "w", type === "story" ? "Designing frames…" : "Writing copy…"); act(`"New ${type} for <b>${title}</b> — please begin."`, "Boss AI", ag === "story" ? "Mr. Story" : "Miss Social"); }],
-      [3000, () => { const ag = type === "story" ? "story" : "social"; setAgent(ag, "i", "Idle"); act(`"Done — sending for your review."`, ag === "story" ? "Mr. Story" : "Miss Social", "Boss AI"); finish(); }],
+      [400,  () => { const ag = type === "story" ? "story" : "social"; setAgent(ag, "w", type === "story" ? "Designing frames…" : "Writing copy…"); act(`"New ${type} for <b>${title}</b> — please begin."`, "Mr Lxwa", ag === "story" ? "Mr. Story" : "Miss Social"); }],
+      [3000, () => { const ag = type === "story" ? "story" : "social"; setAgent(ag, "i", "Idle"); act(`"Done — sending for your review."`, ag === "story" ? "Mr. Story" : "Miss Social", "Mr Lxwa"); finish(); }],
     ];
     function finish() {
       patch(prev => ({ busy: false, content: [{ id: Date.now(), type, title, status: "awaiting", time: nowT(), tokens: cost }, ...prev.content] }));
@@ -145,20 +145,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const approve = (id: number) => patch(prev => {
     const c = prev.content.find(x => x.id === id); if (!c) return {};
-    act(`"It's live. Prepare distribution."`, "Boss AI", "Miss Social");
+    act(`"It's live. Prepare distribution."`, "Mr Lxwa", "Miss Social");
     setTimeout(() => report(`Published after your approval: "${c.title}"`), 0);
     toast("Published! Your team is distributing it.");
     return { content: prev.content.map(x => x.id === id ? { ...x, status: "published" } : x) };
   });
   const reject = (id: number) => patch(prev => {
     const c = prev.content.find(x => x.id === id); if (!c) return {};
-    act(`"Understood. We'll adjust and learn from this."`, "Boss AI");
+    act(`"Understood. We'll adjust and learn from this."`, "Mr Lxwa");
     setTimeout(() => report(`Rejected by you (team will adjust): "${c.title}"`), 0);
     return { content: prev.content.map(x => x.id === id ? { ...x, status: "rejected" } : x) };
   });
   const applyPlan = (plan: string) => { // TODO(backend): Paddle/LemonSqueezy webhook drives this
     patch({ plan, tokensMax: PLANS[plan].tokens, tokens: PLANS[plan].tokens });
-    act(`"We're on the <b>${PLANS[plan].name}</b> plan now — capacity increased. Let's grow. 🚀"`, "Boss AI");
+    act(`"We're on the <b>${PLANS[plan].name}</b> plan now — capacity increased. Let's grow. 🚀"`, "Mr Lxwa");
     report(`Plan changed to ${PLANS[plan].name} — token allowance now ${PLANS[plan].tokens}/month`);
     toast(PLANS[plan].name + " activated!");
   };

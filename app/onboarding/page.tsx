@@ -108,7 +108,7 @@ export default function Onboarding() {
         { k: "Goals", v: "More organic traffic, consistent publishing, and inbound leads" },
       ],
     });
-    act(`finished studying <b>${site}</b> and built the team memory.`, "Boss AI");
+    act(`finished studying <b>${site}</b> and built the team memory.`, "Mr Lxwa");
     router.push("/whoami");
   };
 
@@ -156,7 +156,7 @@ export default function Onboarding() {
         {step === 0 && (
           <>
             <h2 style={{ fontSize: 22 }}>Let&apos;s meet your business 👋</h2>
-            <p className="sm mut" style={{ margin: "8px 0 18px" }}>Paste your website — Boss AI will study it and learn everything by itself. This is the only typing you&apos;ll do.</p>
+            <p className="sm mut" style={{ margin: "8px 0 18px" }}>Paste your website — Mr Lxwa will study it and learn everything by itself. This is the only typing you&apos;ll do.</p>
             <div className="field"><label>Your website</label><input placeholder="https://yourbusiness.com" value={site} onChange={e => setSite(e.target.value)} /></div>
             <button className="btn btn-p" style={{ width: "100%", marginTop: 10 }} disabled={!site.trim()} onClick={() => setStep(1)}>Continue →</button>
             <p className="xs mut" style={{ textAlign: "center", marginTop: 12 }}>No website yet? <a style={{ cursor: "pointer" }} onClick={() => { setSite("(no website yet)"); setStep(1); }}>Skip — describe instead</a></p>
@@ -308,7 +308,7 @@ export async function POST(req: Request) {
 
         {step === 6 && (
           <>
-            <h2 style={{ fontSize: 20 }}>Boss AI is learning your business…</h2>
+            <h2 style={{ fontSize: 20 }}>Mr Lxwa is learning your business…</h2>
             <div style={{ display: "flex", flexDirection: "column", gap: 11, margin: "22px 0" }}>
               {thinking.map((t, i) => <div key={i} style={{ display: "flex", gap: 11, fontSize: 13.5, color: "var(--mut)", animation: "tin .4s ease" }}><span className="acc">✓</span>{t}</div>)}
             </div>

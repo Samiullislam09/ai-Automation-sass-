@@ -14,7 +14,7 @@ export default function HelpPage() {
         <p className="sm acc" style={{ marginBottom: 14 }}>{H.s}</p>
         <p className="sm" style={{ lineHeight: 1.8, color: "#c6d1e8" }}>{H.d}</p>
         <div className="card" style={{ marginTop: 20, display: "flex", gap: 12, alignItems: "center" }}>
-          <div className="corb" /><div className="sm">Still confused? Ask <b>Boss AI</b> in the chat — bottom-right of your dashboard.</div>
+          <div className="corb" /><div className="sm">Still confused? Ask <b>Mr Lxwa</b> in the chat — bottom-right of your dashboard.</div>
         </div>
       </div>
     </div>

@@ -6,14 +6,14 @@ import { PLANS, useStore } from "@/lib/store";
 /* ================= HELP: ? -> hover tooltip -> click detail ================= */
 export const HELP: Record<string, { t: string; s: string; d: string }> = {
   tokens:   { t: "Tokens", s: "Your monthly content credits. Article ⚡10, story ⚡4, post ⚡1 — refills every month.", d: "Tokens are the fuel of your AI team. Each plan includes a monthly allowance that refills on your billing date. Costs: Article = 10 (full SERP research + writing + QC), Web Story = 4, Social post = 1. Unused tokens don't roll over. Nothing is ever generated or charged without your explicit confirmation — every generation shows its cost first. Run out? Upgrade in one tap or wait for the refill." },
-  agents:   { t: "AI Team", s: "Six specialists — Boss AI assigns, others execute, you approve.", d: "Boss AI orchestrates and reviews everything; Mr. Keyword finds ranking opportunities; Mr. Writer writes from research blueprints; Mr. Story makes visuals; Miss Social distributes; Mr. SEO audits your site daily. Agents address each other by name — watch their coordination in the live feed. No agent ever publishes without your approval." },
-  approval: { t: "Approvals", s: "Nothing goes live without you. Approve / Edit / Reject every item.", d: "The approval queue is your control point. Finished work passes Boss AI's quality checklist, then waits here. One tap approves; the editor lets you change anything; rejecting with a note teaches the team. Until you approve, nothing touches your website or accounts — guaranteed." },
-  reports:  { t: "Daily Reports", s: "Boss AI writes a short report of every working day — stored forever.", d: "Each day the team works, Boss AI compiles an end-of-day report: what was produced, published, tokens spent, and what's next. Unread reports are badged; everything is stored and searchable. Your manager's standup, without the meeting." },
-  memory:   { t: "AI Memory", s: "What your team knows about you. Auto-built at setup, fully editable.", d: "During the 2-minute setup Boss AI studies your website and builds a memory: business, audience, tone, topics, goals. Every agent writes from this memory. Edit any item, add facts, or delete — all agents adjust instantly. Better memory = better content." },
-  pipeline: { t: "Content Pipeline", s: "Research → top-10 analysis → blueprint → writing → quality gate.", d: "Every article follows a 5-stage pipeline: Mr. Keyword validates the topic and pulls related queries; the top 10 ranking pages are analyzed for structure and gaps; a blueprint is generated (titles, outline, target length above the competition); Mr. Writer writes section-by-section in your tone; Boss AI runs the quality gate (originality, keywords, links, length). Then it waits for your approval." },
+  agents:   { t: "AI Team", s: "Six specialists — Mr Lxwa assigns, others execute, you approve.", d: "Mr Lxwa orchestrates and reviews everything; Mr. Keyword finds ranking opportunities; Mr. Writer writes from research blueprints; Mr. Story makes visuals; Miss Social distributes; Mr. SEO audits your site daily. Agents address each other by name — watch their coordination in the live feed. No agent ever publishes without your approval." },
+  approval: { t: "Approvals", s: "Nothing goes live without you. Approve / Edit / Reject every item.", d: "The approval queue is your control point. Finished work passes Mr Lxwa's quality checklist, then waits here. One tap approves; the editor lets you change anything; rejecting with a note teaches the team. Until you approve, nothing touches your website or accounts — guaranteed." },
+  reports:  { t: "Daily Reports", s: "Mr Lxwa writes a short report of every working day — stored forever.", d: "Each day the team works, Mr Lxwa compiles an end-of-day report: what was produced, published, tokens spent, and what's next. Unread reports are badged; everything is stored and searchable. Your manager's standup, without the meeting." },
+  memory:   { t: "AI Memory", s: "What your team knows about you. Auto-built at setup, fully editable.", d: "During the 2-minute setup Mr Lxwa studies your website and builds a memory: business, audience, tone, topics, goals. Every agent writes from this memory. Edit any item, add facts, or delete — all agents adjust instantly. Better memory = better content." },
+  pipeline: { t: "Content Pipeline", s: "Research → top-10 analysis → blueprint → writing → quality gate.", d: "Every article follows a 5-stage pipeline: Mr. Keyword validates the topic and pulls related queries; the top 10 ranking pages are analyzed for structure and gaps; a blueprint is generated (titles, outline, target length above the competition); Mr. Writer writes section-by-section in your tone; Mr Lxwa runs the quality gate (originality, keywords, links, length). Then it waits for your approval." },
   billing:  { t: "Billing & Plans", s: "Simple monthly plans. Change anytime, cancel anytime, keep your data.", d: "Free = 10 tokens/month (one full article) forever, no card. Starter $5 = 120 tokens (~10 articles or a mix). Growth $15 = 400 tokens + the premium writing model + lead generation. Upgrades apply instantly; downgrades at next cycle; cancellation keeps all your content and memory." },
   status:   { t: "Agent Status", s: "Green = working now · amber = idle · dark room = offline.", d: "The office shows your team live. A working agent's room is lit and animated with its current task on the name tag. Idle agents wait. Offline agents' rooms go dark (lights out, asleep). In production these states stream in real time from the agent server as jobs run." },
-  whoami:   { t: "Who Am I", s: "Boss AI's summary of your business — check it, correct it, done.", d: "After setup Boss AI writes a short brief: what your business does, who it serves, how it should sound, what it will write about. If anything is off, fix it in Memory — every agent adjusts immediately. This brief is the foundation of content quality." },
+  whoami:   { t: "Who Am I", s: "Mr Lxwa's summary of your business — check it, correct it, done.", d: "After setup Mr Lxwa writes a short brief: what your business does, who it serves, how it should sound, what it will write about. If anything is off, fix it in Memory — every agent adjusts immediately. This brief is the foundation of content quality." },
 };
 
 export function Help({ k }: { k: string }) {
@@ -109,13 +109,13 @@ export function BossChat() {
 
   return (
     <>
-      <button aria-label="Chat with Boss AI" className="bosschat-bubble" onClick={() => setOpen(o => !o)}
+      <button aria-label="Chat with Mr Lxwa" className="bosschat-bubble" onClick={() => setOpen(o => !o)}
         style={{ position: "fixed", bottom: 22, right: 22, zIndex: 150, width: 54, height: 54, borderRadius: "50%", background: "linear-gradient(135deg,var(--ac),var(--ac-d))", color: "#04120d", fontSize: 22, boxShadow: "0 8px 26px #4fe3c144", border: "none", cursor: "pointer" }}>💬</button>
 
       <div className={"bosschat-panel" + (open ? " is-open" : "")}
         style={{ position: "fixed", bottom: 88, right: 22, zIndex: 150, width: 336, maxWidth: "calc(100vw - 30px)", height: 440, maxHeight: "64vh", background: "#0f1730f5", border: "1px solid var(--line2)", borderRadius: 18, flexDirection: "column", overflow: "hidden", backdropFilter: "blur(12px)", boxShadow: "0 24px 60px #000c" }}>
         <div style={{ display: "flex", gap: 10, alignItems: "center", padding: "13px 15px", borderBottom: "1px solid var(--line)", background: "#121c38" }}>
-          <div className="corb" /><div><b style={{ fontSize: 13.5 }}>Boss AI</b><div className="xs acc">● online</div></div>
+          <div className="corb" /><div><b style={{ fontSize: 13.5 }}>Mr Lxwa</b><div className="xs acc">● online</div></div>
           <div style={{ flex: 1 }} />
           <button aria-label="Toggle voice replies" title="Read replies aloud" onClick={() => setVoiceOut(v => !v)}
             style={{ background: voiceOut ? "var(--ac)" : "none", color: voiceOut ? "#04120d" : "var(--mut)", border: "1px solid " + (voiceOut ? "var(--ac)" : "var(--line2)"), borderRadius: 8, width: 26, height: 26, cursor: "pointer", fontSize: 13 }}>🔊</button>
@@ -131,7 +131,7 @@ export function BossChat() {
               {listening ? "●" : "🎤"}
             </button>
           )}
-          <input placeholder={listening ? "Listening…" : "Ask Boss AI anything…"} value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === "Enter" && send()} />
+          <input placeholder={listening ? "Listening…" : "Ask Mr Lxwa anything…"} value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === "Enter" && send()} />
           <button className="btn btn-p btn-sm" onClick={send} disabled={busy}>➤</button>
         </div>
       </div>

@@ -46,7 +46,7 @@ const cards = [
   { icon: FileText, title: "Articles built to compete", body: "We analyze the top 10 results for your keyword, map their gaps, build a blueprint — then write something more complete." },
   { icon: Share2, title: "Every platform, one approval", body: "Facebook, Instagram, X and LinkedIn auto-posted. Quora & Reddit drafted ready-to-paste, so your accounts never get banned." },
   { icon: Target, title: "Leads with a reason", body: "Define your ideal customer once. Every lead arrives scored, verified, and with the reason it fits — no junk lists." },
-  { icon: ClipboardList, title: "A report every day", body: "Boss AI writes you a short daily report: what was done, what's next. A manager's standup without the meeting." },
+  { icon: ClipboardList, title: "A report every day", body: "Mr Lxwa writes you a short daily report: what was done, what's next. A manager's standup without the meeting." },
   { icon: Wrench, title: "Your site, cared for daily", body: "Broken links, slow pages, dropping rankings — detected daily, fixed with your approval." },
 ];
 

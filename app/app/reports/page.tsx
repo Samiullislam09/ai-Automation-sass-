@@ -24,7 +24,7 @@ export default function Reports() {
             </Link>
           );
         }) : (
-          <div className="card" style={{ textAlign: "center", padding: 40 }}><div style={{ fontSize: 30 }}>🗒</div><p className="mut sm" style={{ marginTop: 8 }}>No reports yet. As soon as your team does its first work today, Boss AI writes the day&apos;s report here.</p></div>
+          <div className="card" style={{ textAlign: "center", padding: 40 }}><div style={{ fontSize: 30 }}>🗒</div><p className="mut sm" style={{ marginTop: 8 }}>No reports yet. As soon as your team does its first work today, Mr Lxwa writes the day&apos;s report here.</p></div>
         )}
       </div>
     </>

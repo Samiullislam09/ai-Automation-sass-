@@ -10,7 +10,7 @@ export default function WhoAmI() {
     <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 22, position: "relative", zIndex: 1 }}>
       <div className="card" style={{ width: "100%", maxWidth: 560, padding: 32 }}>
         <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14 }}>
-          <div className="corb" /><b>Boss AI</b><span className="xs mut">· Who am I? <Help k="whoami" /></span>
+          <div className="corb" /><b>Mr Lxwa</b><span className="xs mut">· Who am I? <Help k="whoami" /></span>
         </div>
         <h2 style={{ fontSize: 20, marginBottom: 12 }}>Here&apos;s how I understand your business:</h2>
         <p className="sm" style={{ background: "var(--panel2)", border: "1px solid var(--line)", borderRadius: 12, padding: 14, lineHeight: 1.7 }}>
