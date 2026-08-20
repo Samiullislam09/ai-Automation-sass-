@@ -42,12 +42,13 @@ type State = {
   onboarded: boolean; plan: string; tokens: number; tokensMax: number;
   memory: Mem[]; content: ContentItem[]; reports: Report[]; activity: Activity[];
   agents: Record<string, AgentState>; busy: boolean;
+  focusAgent: string | null; // which office room the camera should zoom to (Office.tsx reads this)
 };
 const initial: State = {
   user: null, onboarded: false, plan: "free", tokens: 10, tokensMax: 10,
   memory: [], content: [], reports: [], activity: [],
   agents: Object.fromEntries(AGENTS.map(a => [a.id, { st: "i", task: "Idle" }])) as any,
-  busy: false,
+  busy: false, focusAgent: null,
 };
 
 const Ctx = createContext<any>(null);
@@ -107,6 +108,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const setAgent = (id: string, st: AgentState["st"], task: string) =>
     patch(prev => ({ agents: { ...prev.agents, [id]: { st, task } } }));
+
+  /** Tells the office camera (components/Office.tsx) to zoom to an agent's room —
+   *  called from chat (kit.tsx BossChat) when the user asks about a specific agent,
+   *  and from clicking a room directly. Auto-resets after holdMs unless re-triggered. */
+  const focusTokenRef = useRef(0);
+  const focusOn = (id: string | null, holdMs = 3400) => {
+    const myToken = ++focusTokenRef.current;
+    patch({ focusAgent: id });
+    if (id && holdMs > 0) {
+      setTimeout(() => { if (focusTokenRef.current === myToken) patch({ focusAgent: null }); }, holdMs);
+    }
+  };
 
   const report = (line: string) => patch(prev => {
     const key = new Date().toDateString();
@@ -171,7 +184,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     location.href = "/login";
   };
 
-  const api = { s, patch, toast, act, setAgent, report, generate, approve, reject, applyPlan, signOut };
+  const api = { s, patch, toast, act, setAgent, focusOn, report, generate, approve, reject, applyPlan, signOut };
   return (
     <Ctx.Provider value={api}>
       {children}

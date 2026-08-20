@@ -2,6 +2,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PLANS, useStore } from "@/lib/store";
+import { agentIdFromText } from "@/components/Office";
 
 /* ================= HELP: ? -> hover tooltip -> click detail ================= */
 export const HELP: Record<string, { t: string; s: string; d: string }> = {
@@ -105,7 +106,14 @@ export function BossChat() {
     setMsgs(m => { const c = [...m]; c[c.length - 1] = { ...c[c.length - 1], live: false }; return c; });
     setBusy(false);
   }
-  const send = () => { const v = input.trim(); if (!v || busy) return; setInput(""); setMsgs(m => [...m, { who: "me", txt: v }]); stream(v); };
+  const send = () => {
+    const v = input.trim(); if (!v || busy) return;
+    setInput(""); setMsgs(m => [...m, { who: "me", txt: v }]); stream(v);
+    // Office camera: if the question is about a specific agent, zoom the office there
+    // while the reply streams in — makes the dashboard feel like a real, alive office.
+    const agentId = agentIdFromText(v);
+    if (agentId) store?.focusOn(agentId, 5000);
+  };
 
   return (
     <>
