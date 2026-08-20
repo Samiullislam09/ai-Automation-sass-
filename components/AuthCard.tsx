@@ -1,11 +1,9 @@
 "use client";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 export function AuthCard({ mode }: { mode: "login" | "signup" }) {
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -41,8 +39,10 @@ export function AuthCard({ mode }: { mode: "login" | "signup" }) {
       const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
       setLoading(false);
       if (error) { setError(error.message); return; }
-      router.push("/app");
-      router.refresh();
+      // Hard navigation (not router.push) — guarantees the session cookie is fully
+      // written before the request that middleware checks. router.push here raced
+      // the cookie write and could bounce a just-logged-in user right back to /login.
+      window.location.href = "/app";
     }
   };
 
