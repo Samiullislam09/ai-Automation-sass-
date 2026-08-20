@@ -12,4 +12,6 @@ export const env = {
   SUPABASE_URL: required("SUPABASE_URL"),
   SUPABASE_SERVICE_ROLE_KEY: required("SUPABASE_SERVICE_ROLE_KEY"),
   CORS_ORIGIN: process.env.CORS_ORIGIN || "http://localhost:3000",
+  DATAFORSEO_LOGIN: process.env.DATAFORSEO_LOGIN || "",
+  DATAFORSEO_PASSWORD: process.env.DATAFORSEO_PASSWORD || "",
 };
