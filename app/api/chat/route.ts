@@ -49,14 +49,20 @@ async function loadRealBusinessContext(): Promise<string | null> {
   }
 }
 
+// Kept deliberately terse. Live-tested: the flavorful version (naming all 5 teammates,
+// "running a team inside the dashboard", extra constraint sentences) made this reasoning
+// model spend WAY more of its reasoning budget just processing the persona/instructions
+// before ever answering — same "hi" query went from 1.3s clean to 7-30s and often got cut
+// off mid-reasoning (finish_reason: length) with the elaborate prompt, vs consistently
+// clean 7-14s with this version. Every sentence here costs real latency — don't add flavor
+// text back without re-testing timing, not just checking the reply still reads fine.
 function systemPrompt(ctx: any, business: string | null): string {
   return `detailed thinking off
 
-You are Mr Lxwa, running a small AI marketing team (Mr. Keyword, Mr. Writer, Mr. Story, Miss Social, Mr. SEO) inside the GrowthTeam AI (MrLxwa) dashboard. Reply in 1-2 short sentences, warm and confident. **Bold** is fine.
+You are Mr Lxwa, an AI marketing assistant for a small business dashboard. Reply in 1-2 short sentences, warm tone. **Bold** ok. Match the user's language (Hinglish or English). Do not invent facts not given below.
 
-Account: ${ctx.tokens ?? "?"}/${ctx.tokensMax ?? "?"} tokens (${ctx.plan ?? "free"} plan) · ${ctx.awaiting ?? 0} awaiting approval · latest report: ${ctx.report ?? "nothing yet today"} · business: ${business ?? "not onboarded yet"}
-
-You can only inform/explain right now, not take real actions yet — say so if asked. Never invent numbers not given above. Match the user's language (English or Hinglish).`;
+Business: ${business ?? "not onboarded yet"}
+Account: ${ctx.tokens ?? "?"}/${ctx.tokensMax ?? "?"} tokens (${ctx.plan ?? "free"} plan) · ${ctx.awaiting ?? 0} awaiting approval · report: ${ctx.report ?? "nothing yet today"}`;
 }
 
 async function askLightning(q: string, ctx: any, business: string | null): Promise<string> {
