@@ -69,11 +69,14 @@ async function askLightning(q: string, ctx: any, business: string | null): Promi
     body: JSON.stringify({
       model: "nvidia/nemotron-3.5-lightning-30b-a3b",
       stream: false,
-      // Reply is supposed to be 1-2 sentences, but with no cap the reasoning model was
-      // free to spend an unbounded number of tokens on reasoning_content before ever
-      // emitting the real answer — the actual driver of the ~20s latency, not the
-      // network/host. Capping this bounds worst-case generation time.
-      max_tokens: 350,
+      // A tight cap (tried 350) backfires: this model writes reasoning_content BEFORE
+      // content, and when max_tokens cuts it off mid-reasoning, the API dumps that
+      // unfinished reasoning text into `content` too (confirmed live — got a raw,
+      // truncated "Here's a thinking process: ..." shown to the user instead of an
+      // answer). 1024 gives real prompts enough room to finish reasoning and still emit
+      // a clean final answer; the finish_reason check below is the actual safety net for
+      // the rare cases that still run long, not this number.
+      max_tokens: 1024,
       messages: [
         { role: "system", content: systemPrompt(ctx, business) },
         { role: "user", content: q },
@@ -85,8 +88,13 @@ async function askLightning(q: string, ctx: any, business: string | null): Promi
   if (!res.ok) throw new Error(`NVIDIA NIM chat failed (${res.status}): ${(await res.text().catch(() => "")).slice(0, 300)}`);
 
   const data = await res.json();
-  const text: string | undefined = data?.choices?.[0]?.message?.content;
+  const choice = data?.choices?.[0];
+  const text: string | undefined = choice?.message?.content;
   if (!text) throw new Error("NVIDIA NIM: no content in response");
+  // finish_reason "length" means generation got cut off — for this reasoning model that
+  // means `content` is unfinished reasoning narrative, not a real answer. Treat as a
+  // failure (caller falls back to the canned reply) rather than showing it to the user.
+  if (choice?.finish_reason === "length") throw new Error("NVIDIA NIM: response truncated mid-reasoning (finish_reason=length)");
   return text;
 }
 
