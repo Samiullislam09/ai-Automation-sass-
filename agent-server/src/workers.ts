@@ -1,5 +1,5 @@
-import { Worker, type Job } from "bullmq";
-import { connection } from "./redis.js";
+import type { Job } from "pg-boss";
+import { boss, ensureBossStarted } from "./db.js";
 import { AGENT_TYPES, type AgentType } from "./queues.js";
 import { KeywordAgent } from "./agents/keyword.js";
 import { WriterAgent } from "./agents/writer.js";
@@ -23,11 +23,11 @@ async function process(type: AgentType, job: Job<AgentJobData>) {
 
   if (await isOverDailyCap(tenantId, type)) {
     emitAgentStatus({ agent: type, tenant: tenantId, status: "idle", task: "Daily cap reached — skipped" });
-    // Not an error — a cap hit is expected/normal, so don't burn BullMQ's retry attempts on it.
+    // Not an error — a cap hit is expected/normal, so don't burn a retry on it.
     return { skipped: true, reason: "daily cap exceeded" };
   }
 
-  emitAgentStatus({ agent: type, tenant: tenantId, status: "running", task: `Working (attempt ${job.attemptsMade + 1})` });
+  emitAgentStatus({ agent: type, tenant: tenantId, status: "running", task: "Working" });
   const logId = await logJobStart(tenantId, type, job.name);
 
   try {
@@ -38,16 +38,16 @@ async function process(type: AgentType, job: Job<AgentJobData>) {
   } catch (err: any) {
     await logJobError(logId, err?.message ?? String(err));
     emitAgentStatus({ agent: type, tenant: tenantId, status: "error", task: err?.message ?? "Failed" });
-    throw err; // rethrow so BullMQ's attempts/backoff (see queues.ts) actually retries
+    throw err; // rethrow so pg-boss's retryLimit/retryBackoff (see queues.ts) actually retries
   }
 }
 
-export function startWorkers() {
-  return AGENT_TYPES.map(
-    (type) =>
-      new Worker<AgentJobData>(type, (job) => process(type, job), {
-        connection,
-        concurrency: 2,
-      })
-  );
+export async function startWorkers() {
+  await ensureBossStarted();
+  for (const type of AGENT_TYPES) {
+    // batchSize:1 (default) — handler gets a 1-element array; localConcurrency:2 mirrors
+    // the old BullMQ `concurrency: 2` per queue.
+    await boss.work<AgentJobData>(type, { localConcurrency: 2 }, async ([job]) => process(type, job));
+  }
+  console.log(`[workers] pg-boss workers started — agents: ${AGENT_TYPES.join(", ")}`);
 }

@@ -1,4 +1,4 @@
-import type { Job } from "bullmq";
+import type { Job } from "pg-boss";
 import { Agent, type AgentJobData } from "./base.js";
 
 /** Placeholder — real social auto-post (Meta/X/LinkedIn) lands in Phase 2. */

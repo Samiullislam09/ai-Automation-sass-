@@ -1,4 +1,4 @@
-import type { Job } from "bullmq";
+import type { Job } from "pg-boss";
 import { Agent, type AgentJobData } from "./base.js";
 
 /** Placeholder — real site audits / WordPress publish land in Step 12 + Phase 2. */

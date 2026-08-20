@@ -1,4 +1,4 @@
-import type { Job } from "bullmq";
+import type { Job } from "pg-boss";
 import { Agent, type AgentJobData } from "./base.js";
 import { writeArticle } from "../lib/writer.js";
 

@@ -1,8 +1,10 @@
+import "./lib/dns-fix.js";
 import express from "express";
 import cors from "cors";
 import { createServer } from "http";
 import { env } from "./env.js";
-import { AGENT_TYPES, enqueue, type AgentType } from "./queues.js";
+import { AGENT_TYPES, enqueue, initQueues, type AgentType } from "./queues.js";
+import { boss } from "./db.js";
 import { initSocket } from "./socket.js";
 import { startWorkers } from "./workers.js";
 
@@ -23,27 +25,36 @@ app.post("/jobs/:type", async (req, res) => {
   if (!tenantId) return res.status(400).json({ error: "tenantId is required" });
 
   try {
-    // If Redis is unreachable, fail loudly within 8s instead of hanging the request forever.
-    const job = await Promise.race([
+    // If Postgres is unreachable, fail loudly within 8s instead of hanging the request forever.
+    const jobId = await Promise.race([
       enqueue(type, { tenantId, ...rest }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("Redis did not respond in time")), 8000)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Postgres queue did not respond in time")), 8000)),
     ]);
-    res.json({ ok: true, jobId: (job as { id?: string }).id });
+    res.json({ ok: true, jobId });
   } catch (e: any) {
     console.error("[jobs] enqueue failed:", e.message);
-    res.status(503).json({ error: "Could not reach the job queue (Redis)", detail: e.message });
+    res.status(503).json({ error: "Could not reach the job queue (Postgres)", detail: e.message });
   }
 });
 
-const httpServer = createServer(app);
-initSocket(httpServer);
-const workers = startWorkers();
+async function main() {
+  await initQueues(); // declares each agent's queue in Postgres before anything sends/works them
 
-httpServer.listen(env.PORT, () => {
-  console.log(`[agent-server] listening on :${env.PORT} — agents: ${AGENT_TYPES.join(", ")}`);
-});
+  const httpServer = createServer(app);
+  initSocket(httpServer);
+  await startWorkers();
 
-process.on("SIGTERM", async () => {
-  await Promise.all(workers.map((w) => w.close()));
-  httpServer.close();
+  httpServer.listen(env.PORT, () => {
+    console.log(`[agent-server] listening on :${env.PORT} — agents: ${AGENT_TYPES.join(", ")}`);
+  });
+
+  process.on("SIGTERM", async () => {
+    await boss.stop();
+    httpServer.close();
+  });
+}
+
+main().catch((e) => {
+  console.error("[agent-server] fatal startup error:", e);
+  process.exit(1);
 });

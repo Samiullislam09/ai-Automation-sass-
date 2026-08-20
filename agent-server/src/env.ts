@@ -8,7 +8,9 @@ function required(name: string): string {
 
 export const env = {
   PORT: Number(process.env.PORT) || 4000,
-  REDIS_URL: required("REDIS_URL"),
+  // Postgres connection string for the job queue (pg-boss) — Supabase project's
+  // "Connection string" (Project Settings -> Database), not the service-role API key.
+  DATABASE_URL: required("DATABASE_URL"),
   SUPABASE_URL: required("SUPABASE_URL"),
   SUPABASE_SERVICE_ROLE_KEY: required("SUPABASE_SERVICE_ROLE_KEY"),
   CORS_ORIGIN: process.env.CORS_ORIGIN || "http://localhost:3000",

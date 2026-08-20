@@ -1,4 +1,4 @@
-import type { Job } from "bullmq";
+import type { Job } from "pg-boss";
 import { Agent, type AgentJobData } from "./base.js";
 
 /** Placeholder — real Lead Hunter (Google Places + email-finder + scoring) lands in Phase 3. */
