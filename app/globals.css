@@ -86,9 +86,12 @@
 .draw-line{stroke-dasharray:1000;stroke-dashoffset:1000;animation:draw-line 1.6s ease-out forwards}
 
 :root{
-  --bg:#0a0e18; --bg2:#0d1322; --panel:#121a2e; --panel2:#17203a; --line:#22304f; --line2:#2c3c60;
-  --ink:#eef3fc; --mut:#8c9ab8; --mut2:#5f6d8c;
-  --ac:#4fe3c1; --ac-d:#17a98c; --amb:#ffb95e; --red:#ff6b81; --blu:#6ea8ff; --vio:#b48bff;
+  /* Dashboard app (/app/**) theme — light/white, per product decision. Was dark-navy;
+     flipped to a light palette here (single source, every dashboard page/component
+     reads these vars — no per-page edits needed). */
+  --bg:#eaf4ff; --bg2:#f4f8fd; --panel:#ffffff; --panel2:#f4f8fd; --line:#e3ebf6; --line2:#d7e2f0;
+  --ink:#1c2540; --mut:#5b6784; --mut2:#93a0bd;
+  --ac:#0ea589; --ac-d:#0a7a65; --amb:#e08a3c; --red:#e0435f; --blu:#3672e0; --vio:#8b5ce0;
   --tr:.22s cubic-bezier(.4,0,.2,1);
 }
 *{box-sizing:border-box}
@@ -106,16 +109,16 @@ input:focus,textarea:focus{border-color:var(--ac)}
 .btn-p{background:linear-gradient(135deg,var(--ac),var(--ac-d));color:#04120d;box-shadow:0 4px 18px #4fe3c133}
 .btn-p:hover{box-shadow:0 6px 26px #4fe3c155;transform:translateY(-1px)}
 .btn-g{background:var(--panel2);border:1px solid var(--line2)}
-.btn-g:hover{background:#1c2846;border-color:var(--ac)}
+.btn-g:hover{background:var(--line);border-color:var(--ac)}
 .btn-sm{padding:7px 14px;font-size:13px;border-radius:9px}
-.btn-red{background:#3a1b26;border:1px solid #6b2a3d;color:#ff9fb0}
+.btn-red{background:#fdeaee;border:1px solid #f3c3cd;color:#c23052}
 .btn:disabled{opacity:.45;cursor:not-allowed;transform:none!important}
 
 .card{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:17px;transition:border-color var(--tr)}
 .card:hover{border-color:var(--line2)}
 .help{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--panel2);border:1px solid var(--line2);color:var(--mut);font-size:10px;font-weight:700;margin-left:6px;vertical-align:1px;cursor:pointer;transition:all var(--tr)}
 .help:hover{background:var(--ac);color:#04120d;border-color:var(--ac)}
-.tipbox{position:fixed;z-index:200;max-width:260px;background:#1b2542;border:1px solid var(--line2);border-radius:11px;padding:10px 12px;font-size:12px;line-height:1.5;box-shadow:0 12px 34px #000a}
+.tipbox{position:fixed;z-index:200;max-width:260px;background:var(--panel);color:var(--ink);border:1px solid var(--line2);border-radius:11px;padding:10px 12px;font-size:12px;line-height:1.5;box-shadow:0 12px 34px #1c254033}
 .toastwrap{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);z-index:300;display:flex;flex-direction:column;gap:8px;align-items:center}
 .toast{background:#152039f0;border:1px solid var(--line2);border-left:3px solid var(--ac);border-radius:11px;padding:10px 16px;font-size:13px;box-shadow:0 10px 30px #000a;animation:tin .3s ease}
 @keyframes tin{from{opacity:0;transform:translateY(10px)}to{opacity:1}}
@@ -131,7 +134,7 @@ input:focus,textarea:focus{border-color:var(--ac)}
 .pstep.done{opacity:1}
 .pstep .ic{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;background:var(--panel);font-size:13px;flex:none}
 .pstep.on .ic{background:var(--ac);color:#04120d;animation:pulse2 1.2s ease-in-out infinite}
-.pstep.done .ic{background:#173c33;color:var(--ac)}
+.pstep.done .ic{background:#dcf5ee;color:var(--ac-d)}
 @keyframes pulse2{50%{box-shadow:0 0 0 6px #4fe3c122}}
 .spin{width:14px;height:14px;border:2px solid #4fe3c144;border-top-color:var(--ac);border-radius:50%;animation:sp 1s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
@@ -143,7 +146,7 @@ input:focus,textarea:focus{border-color:var(--ac)}
 
 /* status pills */
 .pillst{font-size:10.5px;font-weight:700;padding:3px 10px;border-radius:999px;flex:none}
-.st-pub{background:#12352c;color:var(--ac)} .st-wait{background:#3a2f16;color:var(--amb)} .st-draft{background:#1a2440;color:var(--blu)} .st-fail{background:#3a1b26;color:#ff9fb0}
+.st-pub{background:#dcf5ee;color:var(--ac-d)} .st-wait{background:#fdf0e2;color:var(--amb)} .st-draft{background:#e9edfc;color:var(--blu)} .st-fail{background:#fdeaee;color:#c23052}
 
 /* ================= ISOMETRIC OFFICE ================= */
 .office{position:relative;overflow:hidden;border-radius:18px;border:1px solid var(--line);background:radial-gradient(600px 360px at 50% 20%,#141d38,#0b101f 70%);min-height:340px}
@@ -205,8 +208,8 @@ input:focus,textarea:focus{border-color:var(--ac)}
 
 /* chat */
 .cm{max-width:86%;padding:9px 12px;border-radius:13px;font-size:13px;line-height:1.55;animation:tin .3s ease}
-.cm.bot{background:#1a2543;border:1px solid var(--line);border-bottom-left-radius:4px;align-self:flex-start}
-.cm.me{background:linear-gradient(135deg,#1f8f78,#17a98c);border-bottom-right-radius:4px;align-self:flex-end;color:#eafffa}
+.cm.bot{background:var(--panel2);border:1px solid var(--line);border-bottom-left-radius:4px;align-self:flex-start;color:var(--ink)}
+.cm.me{background:linear-gradient(135deg,var(--ac),var(--ac-d));border-bottom-right-radius:4px;align-self:flex-end;color:#fff}
 .cursor::after{content:"▍";animation:blink 1s steps(1) infinite;color:var(--ac)}
 @keyframes blink{50%{opacity:0}}
 

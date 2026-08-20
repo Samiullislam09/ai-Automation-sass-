@@ -2,10 +2,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import { AGENTS, useStore } from "@/lib/store";
 
-/** Animated 2D office — SVG rooms, camera pans/zooms to whichever agent is relevant
- *  (click a room, or mention that agent in chat — store.s.focusAgent drives it via
- *  store.focusOn()). Camera transform is applied imperatively via refs (measured
- *  container pixels), matching the technique proven in the reference build. */
+/** Animated 2D office — SVG rooms on a light sky, camera pans/zooms to whichever
+ *  agent is relevant (click a room, or mention that agent in chat — store.s.focusAgent
+ *  drives it via store.focusOn()). Camera transform is applied imperatively via refs
+ *  (measured container pixels), matching the technique proven in the reference build. */
 
 const ROOMS: Record<string, { cx: number; cy: number; w: number; h: number }> = {
   kw:     { cx: 230, cy: 200, w: 210, h: 160 },
@@ -17,6 +17,7 @@ const ROOMS: Record<string, { cx: number; cy: number; w: number; h: number }> = 
 };
 const STALL = { cx: 600, cy: 660 };
 const VB_W = 1200, VB_H = 720;
+const CLOUDS = [[120, 70, 1.1], [520, 45, 0.8], [900, 100, 1.3], [300, 140, 0.7], [1050, 170, 0.9]];
 
 const BOSS_LINES = [
   "Mr. Writer, blueprint aa raha hai…",
@@ -37,21 +38,31 @@ export function agentIdFromText(text: string): string | null {
   return null;
 }
 
+function Cloud({ x, y, s, i }: { x: number; y: number; s: number; i: number }) {
+  return (
+    <g className="office-cloud" style={{ animationDelay: `${i * -9}s`, ["--y" as any]: `${y}px`, transformOrigin: `${x}px ${y}px` }} transform={`translate(${x},${y}) scale(${s})`}>
+      <ellipse cx="0" cy="0" rx="46" ry="18" fill="#fff" opacity="0.9" />
+      <ellipse cx="-26" cy="6" rx="28" ry="14" fill="#fff" opacity="0.85" />
+      <ellipse cx="28" cy="7" rx="30" ry="15" fill="#fff" opacity="0.85" />
+      <ellipse cx="4" cy="-10" rx="24" ry="16" fill="#fff" opacity="0.95" />
+    </g>
+  );
+}
 function plant() {
   return (
     <g>
-      <ellipse cx="0" cy="16" rx="9" ry="3" fill="#000" opacity="0.18" />
-      <rect x="-7" y="5" width="14" height="11" rx="2" fill="#6b4a30" />
-      <ellipse cx="0" cy="-4" rx="14" ry="16" fill="#2fa563" />
-      <ellipse cx="-5" cy="-9" rx="8" ry="10" fill="#3fbf78" />
+      <ellipse cx="0" cy="16" rx="9" ry="3" fill="#1c2540" opacity="0.14" />
+      <rect x="-7" y="5" width="14" height="11" rx="2" fill="#8a5a3c" />
+      <ellipse cx="0" cy="-4" rx="14" ry="16" fill="#3fa06b" />
+      <ellipse cx="-5" cy="-9" rx="8" ry="10" fill="#4db67d" />
     </g>
   );
 }
 function bookshelf() {
-  const cols = ["#6ea8ff", "#ff8fb3", "#7ee787", "#ffb95e"];
+  const cols = ["#3672e0", "#e0538e", "#2fa563", "#e08a3c"];
   return (
     <g>
-      <rect x="-20" y="-18" width="40" height="36" rx="3" fill="#3a2a1e" />
+      <rect x="-20" y="-18" width="40" height="36" rx="3" fill="#8a5a3c" />
       {cols.map((c, i) => <rect key={i} x={-17 + i * 9.5} y="-14" width="7" height="28" fill={c} />)}
     </g>
   );
@@ -59,12 +70,12 @@ function bookshelf() {
 function Character({ color, working }: { color: string; working: boolean }) {
   return (
     <g className={"office-char" + (working ? " is-working" : "")}>
-      <ellipse cx="0" cy="34" rx="17" ry="5" fill="#000" opacity="0.28" />
+      <ellipse cx="0" cy="34" rx="17" ry="5" fill="#1c2540" opacity="0.18" />
       <g className="office-char-bob">
         <rect x="-13" y="4" width="26" height="26" rx="9" fill={color} />
-        <rect x="-13" y="4" width="26" height="9" rx="7" fill="#fff" opacity="0.18" />
-        <circle cx="0" cy="-8" r="14" fill="#f0c090" />
-        <path d="M -14 -9 Q -14 -24 0 -24 Q 14 -24 14 -9 Q 14 -15 0 -16 Q -14 -15 -14 -9 Z" fill="#2a2118" />
+        <rect x="-13" y="4" width="26" height="9" rx="7" fill="#fff" opacity="0.22" />
+        <circle cx="0" cy="-8" r="14" fill="#f5cba0" />
+        <path d="M -14 -9 Q -14 -24 0 -24 Q 14 -24 14 -9 Q 14 -15 0 -16 Q -14 -15 -14 -9 Z" fill="#332822" />
         <circle cx="-5" cy="-7" r="1.4" fill="#241c1a" /><circle cx="5" cy="-7" r="1.4" fill="#241c1a" />
         <path d="M -4 0 Q 0 2.5 4 0" stroke="#241c1a" strokeWidth="1.3" fill="none" strokeLinecap="round" />
       </g>
@@ -74,11 +85,11 @@ function Character({ color, working }: { color: string; working: boolean }) {
 function Desk({ working }: { working: boolean }) {
   return (
     <g transform="translate(0,26)">
-      <rect x="-42" y="2" width="84" height="13" rx="4" fill="#4a3628" />
-      <rect x="-42" y="-2" width="84" height="8" rx="4" fill="#5c4531" />
-      <rect x="-36" y="12" width="7" height="16" fill="#3a2a1e" /><rect x="29" y="12" width="7" height="16" fill="#3a2a1e" />
-      <rect x="-20" y="-26" width="40" height="27" rx="4" fill="#0d1322" stroke="#3a4c74" strokeWidth="2" />
-      <rect x="-16" y="-22" width="32" height="18" rx="2" fill={working ? "#0e3830" : "#131a2c"} />
+      <rect x="-42" y="2" width="84" height="13" rx="4" fill="#5c4531" />
+      <rect x="-42" y="-2" width="84" height="8" rx="4" fill="#6f5540" />
+      <rect x="-36" y="12" width="7" height="16" fill="#4a3628" /><rect x="29" y="12" width="7" height="16" fill="#4a3628" />
+      <rect x="-20" y="-26" width="40" height="27" rx="4" fill="#212a40" stroke="#4a5c82" strokeWidth="2" />
+      <rect x="-16" y="-22" width="32" height="18" rx="2" fill={working ? "#123832" : "#161c2c"} />
       {working && (
         <g opacity="0.9">
           <rect x="-13" y="-18" width="20" height="2" fill="#4fe3c1" opacity="0.9" />
@@ -92,13 +103,13 @@ function Desk({ working }: { working: boolean }) {
   );
 }
 function RoomTag({ name, task, st }: { name: string; task: string; st: "w" | "i" | "o" }) {
-  const dot = st === "w" ? "#4fe3c1" : st === "i" ? "#ffb95e" : "#5f6d8c";
+  const dot = st === "w" ? "#0ea589" : st === "i" ? "#e08a3c" : "#93a0bd";
   return (
     <div style={{ display: "flex", justifyContent: "center" }}>
-      <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#0d1322f2", border: "1px solid #2c3c60", borderRadius: 9, padding: "5px 11px", whiteSpace: "nowrap", boxShadow: "0 6px 16px #00000055" }}>
+      <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#ffffffef", border: "1px solid #e3ebf6", borderRadius: 9, padding: "5px 11px", whiteSpace: "nowrap", boxShadow: "0 6px 16px #1c254022" }}>
         <span style={{ width: 6, height: 6, borderRadius: "50%", background: dot, boxShadow: st !== "o" ? `0 0 6px ${dot}` : "none", flex: "none" }} />
-        <span style={{ fontSize: 11, fontWeight: 700, color: "#eef3fc" }}>{name}</span>
-        <span style={{ fontSize: 9.5, color: "#8c9ab8" }}>{task}</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "#1c2540" }}>{name}</span>
+        <span style={{ fontSize: 9.5, color: "#5b6784" }}>{task}</span>
       </div>
     </div>
   );
@@ -172,14 +183,20 @@ export default function Office({ demo = false }: { demo?: boolean }) {
   };
 
   return (
-    <div ref={stageRef} className="office2d" style={{ position: "relative", width: "100%", aspectRatio: `${VB_W}/${VB_H}`, borderRadius: 16, overflow: "hidden", background: "radial-gradient(120% 100% at 50% 0%,#122036 0%,#0a0e18 60%,#070a12 100%)", cursor: shownFocus ? "zoom-out" : "default" }} onClick={clickBackground}>
+    <div ref={stageRef} className="office2d" style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden", background: "linear-gradient(180deg,#bfe3ff 0%,#dcf0ff 38%,#f2f9ff 72%,#ffffff 100%)", cursor: shownFocus ? "zoom-out" : "default" }} onClick={clickBackground}>
       <div ref={worldRef} style={{ position: "absolute", inset: 0, transition: "transform 1.1s cubic-bezier(.5,0,.15,1)", willChange: "transform" }}>
-        <svg viewBox={`0 0 ${VB_W} ${VB_H}`} width="100%" height="100%" style={{ display: "block", position: "absolute", inset: 0 }}>
+        <svg viewBox={`0 0 ${VB_W} ${VB_H}`} width="100%" height="100%" style={{ display: "block", position: "absolute", inset: 0 }} preserveAspectRatio="xMidYMid slice">
           <defs>
             <radialGradient id="bossglow" cx="50%" cy="45%" r="60%">
-              <stop offset="0%" stopColor="#d8fff5" /><stop offset="45%" stopColor="#4fe3c1" /><stop offset="100%" stopColor="#17a98c" stopOpacity="0" />
+              <stop offset="0%" stopColor="#d8fff5" /><stop offset="45%" stopColor="#4fe3c1" /><stop offset="100%" stopColor="#0ea589" stopOpacity="0" />
+            </radialGradient>
+            <radialGradient id="sunglow" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stopColor="#fff8e0" stopOpacity="0.95" /><stop offset="100%" stopColor="#fff8e0" stopOpacity="0" />
             </radialGradient>
           </defs>
+
+          <circle cx="1080" cy="70" r="60" fill="url(#sunglow)" />
+          {CLOUDS.map((c, i) => <Cloud key={i} x={c[0]} y={c[1]} s={c[2]} i={i} />)}
 
           {/* connection tubes from Mr Lxwa to every room */}
           {AGENTS.filter(a => a.id !== "boss").map(a => {
@@ -188,8 +205,8 @@ export default function Office({ demo = false }: { demo?: boolean }) {
             const d = `M ${b.cx} ${b.cy} Q ${mx} ${my} ${r.cx} ${r.cy}`;
             return (
               <g key={a.id}>
-                <path d={d} fill="none" stroke="#22304f" strokeWidth="3" opacity="0.6" />
-                <circle r="3" fill="#4fe3c1" opacity="0.85"><animateMotion dur={`${3 + Math.random() * 2}s`} repeatCount="indefinite" path={d} /></circle>
+                <path d={d} fill="none" stroke="#5fb3e0" strokeWidth="3" opacity="0.35" />
+                <circle r="3" fill="#0ea589" opacity="0.85"><animateMotion dur={`${3 + Math.random() * 2}s`} repeatCount="indefinite" path={d} /></circle>
               </g>
             );
           })}
@@ -201,23 +218,23 @@ export default function Office({ demo = false }: { demo?: boolean }) {
             const dim = st.st === "o" ? 0.55 : 1;
             return (
               <g key={a.id} onClick={e => { e.stopPropagation(); clickRoom(a.id); }} style={{ cursor: "pointer" }}>
-                <ellipse cx={r.cx} cy={r.cy + r.h / 2 + 10} rx={r.w / 2 + 14} ry="13" fill="#000" opacity="0.25" />
+                <ellipse cx={r.cx} cy={r.cy + r.h / 2 + 10} rx={r.w / 2 + 14} ry="13" fill="#1c2540" opacity="0.14" />
                 <rect x={r.cx - r.w / 2} y={r.cy - r.h / 2} width={r.w} height={r.h} rx="22"
-                  fill={isBoss ? "#101c30" : "#111a2e"} stroke={a.c} strokeOpacity={st.st === "w" ? 0.85 : 0.35} strokeWidth="2.5"
+                  fill={isBoss ? "#ffffff" : "#f7fafd"} stroke={a.c} strokeOpacity={st.st === "w" ? 0.85 : 0.4} strokeWidth="2.5"
                   opacity={dim} style={{ transition: "opacity .4s, stroke-opacity .4s" }} />
-                <rect x={r.cx - r.w / 2} y={r.cy - r.h / 2} width={r.w} height={r.h * 0.35} rx="22" fill="#ffffff" opacity={dim * 0.04} />
+                <rect x={r.cx - r.w / 2} y={r.cy - r.h / 2} width={r.w} height={r.h * 0.35} rx="22" fill="#ffffff" opacity={dim * 0.6} />
 
                 {isBoss ? (
                   <g transform={`translate(${r.cx},${r.cy})`}>
                     <circle r="66" fill="url(#bossglow)" className="office-orb-glow" />
-                    <circle r="42" fill="none" stroke="#4fe3c1" strokeWidth="1.5" opacity="0.5" className="office-ring" />
-                    <circle r="30" fill="none" stroke="#4fe3c1" strokeWidth="1" opacity="0.4" strokeDasharray="4 6" className="office-ring2" />
-                    <circle r="20" fill="#0f2c26" stroke="#4fe3c1" strokeWidth="1.5" className="office-core" />
+                    <circle r="42" fill="none" stroke="#0ea589" strokeWidth="1.5" opacity="0.55" className="office-ring" />
+                    <circle r="30" fill="none" stroke="#0ea589" strokeWidth="1" opacity="0.4" strokeDasharray="4 6" className="office-ring2" />
+                    <circle r="20" fill="#eafffa" stroke="#0ea589" strokeWidth="1.5" className="office-core" />
                     <text y="6" textAnchor="middle" fontSize="18">🧠</text>
                     {showBub && (
                       <foreignObject x="-140" y={-r.h / 2 - 62} width="280" height="46">
                         <div {...{ xmlns: "http://www.w3.org/1999/xhtml" }} style={{ display: "flex", justifyContent: "center" }}>
-                          <div style={{ background: "#0d1322", color: "#eef3fc", fontSize: 11, fontWeight: 600, padding: "8px 12px", borderRadius: "12px 12px 12px 3px", boxShadow: "0 10px 24px #000a" }}>{bubble}</div>
+                          <div style={{ background: "#1c2540", color: "#fff", fontSize: 11, fontWeight: 600, padding: "8px 12px", borderRadius: "12px 12px 12px 3px", boxShadow: "0 10px 24px #1c254044" }}>{bubble}</div>
                         </div>
                       </foreignObject>
                     )}
@@ -234,7 +251,7 @@ export default function Office({ demo = false }: { demo?: boolean }) {
                 )}
 
                 {st.st === "o" && (
-                  <text x={r.cx + r.w / 2 - 26} y={r.cy - r.h / 2 + 24} fontSize="13" fontWeight="800" fill="#5f6d8c">Z z z</text>
+                  <text x={r.cx + r.w / 2 - 26} y={r.cy - r.h / 2 + 24} fontSize="13" fontWeight="800" fill="#93a0bd">Z z z</text>
                 )}
 
                 <foreignObject x={r.cx - 100} y={r.cy - r.h / 2 - 34} width="200" height="30">
@@ -246,19 +263,19 @@ export default function Office({ demo = false }: { demo?: boolean }) {
 
           {/* chai stall + walking character */}
           <g>
-            <ellipse cx={STALL.cx} cy={STALL.cy + 50} rx="70" ry="12" fill="#000" opacity="0.22" />
-            <rect x={STALL.cx - 66} y={STALL.cy - 40} width="132" height="88" rx="16" fill="#161c2c" stroke="#3a2f1e" strokeWidth="2" />
-            <text x={STALL.cx} y={STALL.cy - 48} textAnchor="middle" fontSize="12" fontWeight="800" fill="#e0a55c">☕ Chacha&apos;s Chai</text>
+            <ellipse cx={STALL.cx} cy={STALL.cy + 50} rx="70" ry="12" fill="#1c2540" opacity="0.12" />
+            <rect x={STALL.cx - 66} y={STALL.cy - 40} width="132" height="88" rx="16" fill="#fff7ec" stroke="#e08a3c" strokeOpacity="0.5" strokeWidth="2" />
+            <text x={STALL.cx} y={STALL.cy - 48} textAnchor="middle" fontSize="12" fontWeight="800" fill="#a4611c">☕ Chacha&apos;s Chai</text>
             <text x={STALL.cx} y={STALL.cy + 14} textAnchor="middle" fontSize="24">🫖</text>
           </g>
           <g style={{ transition: "transform 1.6s cubic-bezier(.45,.05,.55,.95)", transform: `translate(${chai.cx}px,${chai.cy}px)` }}>
-            <ellipse cx="0" cy="20" rx="11" ry="3.5" fill="#000" opacity="0.25" />
+            <ellipse cx="0" cy="20" rx="11" ry="3.5" fill="#1c2540" opacity="0.18" />
             <rect x="-9" y="0" width="18" height="18" rx="7" fill="#e08a3c" />
             <circle cx="0" cy="-9" r="10" fill="#f0c090" />
             {chai.say && (
               <foreignObject x="-70" y="-42" width="140" height="26">
                 <div {...{ xmlns: "http://www.w3.org/1999/xhtml" }} style={{ display: "flex", justifyContent: "center" }}>
-                  <div style={{ background: "#0d1322", color: "#ffb95e", fontSize: 10, fontWeight: 700, padding: "4px 9px", borderRadius: 8 }}>Chai garam! ☕</div>
+                  <div style={{ background: "#1c2540", color: "#ffd699", fontSize: 10, fontWeight: 700, padding: "4px 9px", borderRadius: 8 }}>Chai garam! ☕</div>
                 </div>
               </foreignObject>
             )}
@@ -266,8 +283,12 @@ export default function Office({ demo = false }: { demo?: boolean }) {
         </svg>
       </div>
 
-      <div className="xs mut" style={{ position: "absolute", left: 14, top: 12, pointerEvents: "none", zIndex: 2 }}>
-        ● Your office — live{shownFocus ? " · click anywhere to zoom out" : " · click a room to zoom"}
+      <div style={{ position: "absolute", left: 18, top: 16, pointerEvents: "none", zIndex: 2 }}>
+        <div style={{ fontSize: 14, fontWeight: 800, color: "#1c2540", display: "flex", alignItems: "center", gap: 7 }}>
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#16b083", boxShadow: "0 0 8px #16b083" }} className="office-pulse-dot" />
+          Your office — live
+        </div>
+        <div style={{ fontSize: 11, color: "#5b6784", marginTop: 2 }}>{shownFocus ? "Click anywhere to zoom out" : "Click a room to zoom · ask Mr Lxwa about anyone"}</div>
       </div>
 
       <style jsx global>{`
@@ -280,6 +301,10 @@ export default function Office({ demo = false }: { demo?: boolean }) {
         @keyframes office-rot { to{ transform: rotate(360deg); } }
         .office-core { animation: office-core-pulse 2.6s ease-in-out infinite; transform-origin: center; }
         @keyframes office-core-pulse { 50%{ transform: scale(1.1); } }
+        .office-cloud { animation: office-drift 90s linear infinite; }
+        @keyframes office-drift { from{ transform: translate(-60px, var(--y, 0px)); } to{ transform: translate(1320px, var(--y, 0px)); } }
+        .office-pulse-dot { animation: office-pulse 2s infinite; }
+        @keyframes office-pulse { 50%{ opacity: .4; } }
         @media (prefers-reduced-motion: reduce) {
           .office2d * { animation: none !important; transition: none !important; }
         }

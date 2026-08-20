@@ -121,8 +121,8 @@ export function BossChat() {
         style={{ position: "fixed", bottom: 22, right: 22, zIndex: 150, width: 54, height: 54, borderRadius: "50%", background: "linear-gradient(135deg,var(--ac),var(--ac-d))", color: "#04120d", fontSize: 22, boxShadow: "0 8px 26px #4fe3c144", border: "none", cursor: "pointer" }}>💬</button>
 
       <div className={"bosschat-panel" + (open ? " is-open" : "")}
-        style={{ position: "fixed", bottom: 88, right: 22, zIndex: 150, width: 336, maxWidth: "calc(100vw - 30px)", height: 440, maxHeight: "64vh", background: "#0f1730f5", border: "1px solid var(--line2)", borderRadius: 18, flexDirection: "column", overflow: "hidden", backdropFilter: "blur(12px)", boxShadow: "0 24px 60px #000c" }}>
-        <div style={{ display: "flex", gap: 10, alignItems: "center", padding: "13px 15px", borderBottom: "1px solid var(--line)", background: "#121c38" }}>
+        style={{ position: "fixed", bottom: 88, right: 22, zIndex: 150, width: 336, maxWidth: "calc(100vw - 30px)", height: 440, maxHeight: "64vh", background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 18, flexDirection: "column", overflow: "hidden", backdropFilter: "blur(12px)", boxShadow: "0 24px 60px #1c254033" }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", padding: "13px 15px", borderBottom: "1px solid var(--line)", background: "var(--bg2)" }}>
           <div className="corb" /><div><b style={{ fontSize: 13.5 }}>Mr Lxwa</b><div className="xs acc">● online</div></div>
           <div style={{ flex: 1 }} />
           <button aria-label="Toggle voice replies" title="Read replies aloud" onClick={() => setVoiceOut(v => !v)}
@@ -152,7 +152,7 @@ export function BossChat() {
           .bosschat-panel {
             display: flex !important;
             top: 0; bottom: 0 !important; right: 0;
-            height: 100vh; max-height: 100vh; width: 360px; max-width: 360px;
+            height: 100vh; max-height: 100vh; width: 300px; max-width: 300px;
             border-radius: 0 !important; border-top: none; border-bottom: none; border-right: none;
           }
         }
