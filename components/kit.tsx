@@ -42,9 +42,16 @@ export function BossChat() {
   const box = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
   const spokenCount = useRef(0);
+  const helloFired = useRef(false); // React 18 Strict Mode double-invokes mount effects in dev —
+  // without this guard, two concurrent "__hello__" streams both write into the same
+  // message slot and every word came out doubled ("Salam! Salam!").
 
   useEffect(() => { box.current?.scrollTo(0, 99999); }, [msgs, open]);
-  useEffect(() => { if (!msgs.length) stream("__hello__"); }, []); // eslint-disable-line
+  useEffect(() => {
+    if (helloFired.current) return;
+    helloFired.current = true;
+    stream("__hello__");
+  }, []); // eslint-disable-line
 
   // Speech recognition (mic input) — Chrome/Edge only (webkitSpeechRecognition); silently
   // hide the mic button elsewhere rather than showing something that won't work.
@@ -132,7 +139,7 @@ export function BossChat() {
       <style jsx global>{`
         .bosschat-panel { display: none; }
         .bosschat-panel.is-open { display: flex; }
-        @media (min-width: 1180px) {
+        @media (min-width: 900px) {
           .bosschat-bubble, .bosschat-close { display: none !important; }
           .bosschat-panel {
             display: flex !important;
