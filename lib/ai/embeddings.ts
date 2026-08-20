@@ -1,3 +1,5 @@
+import "@/lib/dns-fix";
+
 /** Provider-agnostic embeddings adapter (Build Guide Step 5).
  *  Default: NVIDIA NIM `nv-embedqa-e5-v5` — same free build.nvidia.com account/key the
  *  guide already has you create in Step 0 (and reuses for Lightning/Boss AI in Step 7),

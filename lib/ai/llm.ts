@@ -1,3 +1,5 @@
+import "@/lib/dns-fix";
+
 /** Provider-agnostic LLM adapter (Build Guide Step 5 niche-summary, and reused for
  *  Boss AI in Step 7 — see the fetch call already documented in app/api/chat/route.ts).
  *  Default: NVIDIA NIM `nemotron-3.5-lightning` — same account/key as the embeddings

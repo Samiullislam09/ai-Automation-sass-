@@ -66,6 +66,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           .mnavbar { display: flex !important; }
         }
         .mnavbar { display: none; position: fixed; bottom: 0; left: 0; right: 0; z-index: 140; background: #0c1120f2; border-top: 1px solid var(--line); backdrop-filter: blur(12px); justify-content: space-around; padding: 8px 4px calc(8px + env(safe-area-inset-bottom)); }
+        /* reserve space so page content doesn't sit under the fixed chat dock (see components/kit.tsx BossChat) */
+        @media (min-width: 1180px) {
+          .appmain { padding-right: calc(clamp(16px,3vw,38px) + 360px) !important; }
+        }
       `}</style>
     </div>
   );

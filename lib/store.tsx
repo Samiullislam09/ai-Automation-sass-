@@ -66,15 +66,35 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
   useEffect(() => { if (loaded.current) try { localStorage.setItem("gt-state", JSON.stringify(s)); } catch {} }, [s]);
 
-  // real identity — TODO(backend Step 4): onboarded/memory/content still local demo state until DB-wired
+  // real identity — user + onboarded status come from Supabase (source of truth), not
+  // just local browser state, so a new browser/session doesn't re-ask the wizard.
+  // Memory/content are still local demo state — TODO(backend): wire once the real
+  // content pipeline (agent-server, Step 9+) lands.
   useEffect(() => {
     const supabase = createClient();
     const toUser = (u: { email?: string | null } | null | undefined) =>
       u?.email ? { name: u.email.split("@")[0].replace(/^\w/, (c: string) => c.toUpperCase()), email: u.email } : null;
 
-    supabase.auth.getUser().then(({ data }) => setS(prev => ({ ...prev, user: toUser(data.user) })));
+    const syncFromSession = async (u: { id: string; email?: string | null } | null | undefined) => {
+      setS(prev => ({ ...prev, user: toUser(u) }));
+      if (!u) return;
+      try {
+        const { data } = await supabase
+          .from("memberships")
+          .select("tenants(onboarded)")
+          .eq("user_id", u.id)
+          .maybeSingle();
+        const onboarded = !!(data as any)?.tenants?.onboarded;
+        setS(prev => ({ ...prev, onboarded }));
+      } catch {
+        // transient network hiccup — keep whatever local state already had rather than
+        // wrongly bouncing an already-onboarded user back into the wizard
+      }
+    };
+
+    supabase.auth.getUser().then(({ data }) => syncFromSession(data.user));
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      setS(prev => ({ ...prev, user: toUser(session?.user) }));
+      syncFromSession(session?.user);
     });
     return () => sub.subscription.unsubscribe();
   }, []);

@@ -22,6 +22,7 @@ export async function POST(request: Request) {
       niche: niche ?? null,
       tone_profile: toneProfile ?? {},
       icp_profile: icpProfile ?? {},
+      onboarded: true, // DB is the source of truth now — not just local browser state
     })
     .eq("id", tenantId);
 

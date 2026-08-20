@@ -29,18 +29,61 @@ export function Help({ k }: { k: string }) {
   );
 }
 
-/* ================= BOSS AI CHAT — real streaming (ChatGPT-style) ================= */
+/* ================= BOSS AI CHAT — real streaming + voice, fixed dock on desktop ================= */
 export function BossChat() {
   const store = useStore();
   const [open, setOpen] = useState(false);
   const [msgs, setMsgs] = useState<{ who: "bot" | "me"; txt: string; live?: boolean }[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [voiceOut, setVoiceOut] = useState(false);
+  const [voiceSupported, setVoiceSupported] = useState(false);
   const box = useRef<HTMLDivElement>(null);
-  useEffect(() => { box.current?.scrollTo(0, 99999); }, [msgs, open]);
-  useEffect(() => { if (open && !msgs.length) stream("__hello__"); }, [open]); // eslint-disable-line
+  const recognitionRef = useRef<any>(null);
+  const spokenCount = useRef(0);
 
-  /** Streams from /api/chat (Server-Sent chunks) — swap the route's brain for NIM in production. */
+  useEffect(() => { box.current?.scrollTo(0, 99999); }, [msgs, open]);
+  useEffect(() => { if (!msgs.length) stream("__hello__"); }, []); // eslint-disable-line
+
+  // Speech recognition (mic input) — Chrome/Edge only (webkitSpeechRecognition); silently
+  // hide the mic button elsewhere rather than showing something that won't work.
+  useEffect(() => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) return;
+    setVoiceSupported(true);
+    const rec = new SR();
+    rec.continuous = false; rec.interimResults = false; rec.lang = "en-IN";
+    rec.onresult = (e: any) => { setInput(e.results[0][0].transcript); setListening(false); };
+    rec.onerror = () => setListening(false);
+    rec.onend = () => setListening(false);
+    recognitionRef.current = rec;
+  }, []);
+
+  const toggleMic = () => {
+    if (!recognitionRef.current) return;
+    if (listening) { recognitionRef.current.stop(); setListening(false); }
+    else { setListening(true); recognitionRef.current.start(); }
+  };
+
+  // Speech synthesis (voice replies) — reads out each finished bot message once, if enabled.
+  const speak = (text: string) => {
+    if (!voiceOut || !("speechSynthesis" in window)) return;
+    const utter = new SpeechSynthesisUtterance(text.replace(/\*\*(.+?)\*\*/g, "$1"));
+    utter.rate = 1.02;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utter);
+  };
+
+  useEffect(() => {
+    const last = msgs[msgs.length - 1];
+    if (last && last.who === "bot" && !last.live && msgs.length > spokenCount.current) {
+      spokenCount.current = msgs.length;
+      speak(last.txt);
+    }
+  }, [msgs]); // eslint-disable-line
+
+  /** Streams from /api/chat (real NVIDIA NIM, word-by-word). */
   async function stream(q: string) {
     setBusy(true);
     setMsgs(m => [...m, { who: "bot", txt: "", live: true }]);
@@ -59,23 +102,46 @@ export function BossChat() {
 
   return (
     <>
-      <button aria-label="Chat with Boss AI" onClick={() => setOpen(o => !o)}
+      <button aria-label="Chat with Boss AI" className="bosschat-bubble" onClick={() => setOpen(o => !o)}
         style={{ position: "fixed", bottom: 22, right: 22, zIndex: 150, width: 54, height: 54, borderRadius: "50%", background: "linear-gradient(135deg,var(--ac),var(--ac-d))", color: "#04120d", fontSize: 22, boxShadow: "0 8px 26px #4fe3c144", border: "none", cursor: "pointer" }}>💬</button>
-      {open && (
-        <div style={{ position: "fixed", bottom: 88, right: 22, zIndex: 150, width: 336, maxWidth: "calc(100vw - 30px)", height: 440, maxHeight: "64vh", background: "#0f1730f5", border: "1px solid var(--line2)", borderRadius: 18, display: "flex", flexDirection: "column", overflow: "hidden", backdropFilter: "blur(12px)", boxShadow: "0 24px 60px #000c" }}>
-          <div style={{ display: "flex", gap: 10, alignItems: "center", padding: "13px 15px", borderBottom: "1px solid var(--line)", background: "#121c38" }}>
-            <div className="corb" /><div><b style={{ fontSize: 13.5 }}>Boss AI</b><div className="xs acc">● online</div></div>
-            <button onClick={() => setOpen(false)} style={{ marginLeft: "auto", background: "none", border: "none", color: "var(--mut)", cursor: "pointer" }}>✕</button>
-          </div>
-          <div ref={box} style={{ flex: 1, overflowY: "auto", padding: 13, display: "flex", flexDirection: "column", gap: 9 }}>
-            {msgs.map((m, i) => <div key={i} className={"cm " + m.who + (m.live ? " cursor" : "")} dangerouslySetInnerHTML={{ __html: m.txt.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>") }} />)}
-          </div>
-          <div style={{ display: "flex", gap: 8, padding: 11, borderTop: "1px solid var(--line)" }}>
-            <input placeholder="Ask Boss AI anything…" value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === "Enter" && send()} />
-            <button className="btn btn-p btn-sm" onClick={send} disabled={busy}>➤</button>
-          </div>
+
+      <div className={"bosschat-panel" + (open ? " is-open" : "")}
+        style={{ position: "fixed", bottom: 88, right: 22, zIndex: 150, width: 336, maxWidth: "calc(100vw - 30px)", height: 440, maxHeight: "64vh", background: "#0f1730f5", border: "1px solid var(--line2)", borderRadius: 18, flexDirection: "column", overflow: "hidden", backdropFilter: "blur(12px)", boxShadow: "0 24px 60px #000c" }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", padding: "13px 15px", borderBottom: "1px solid var(--line)", background: "#121c38" }}>
+          <div className="corb" /><div><b style={{ fontSize: 13.5 }}>Boss AI</b><div className="xs acc">● online</div></div>
+          <div style={{ flex: 1 }} />
+          <button aria-label="Toggle voice replies" title="Read replies aloud" onClick={() => setVoiceOut(v => !v)}
+            style={{ background: voiceOut ? "var(--ac)" : "none", color: voiceOut ? "#04120d" : "var(--mut)", border: "1px solid " + (voiceOut ? "var(--ac)" : "var(--line2)"), borderRadius: 8, width: 26, height: 26, cursor: "pointer", fontSize: 13 }}>🔊</button>
+          <button className="bosschat-close" onClick={() => setOpen(false)} style={{ background: "none", border: "none", color: "var(--mut)", cursor: "pointer" }}>✕</button>
         </div>
-      )}
+        <div ref={box} style={{ flex: 1, overflowY: "auto", padding: 13, display: "flex", flexDirection: "column", gap: 9 }}>
+          {msgs.map((m, i) => <div key={i} className={"cm " + m.who + (m.live ? " cursor" : "")} dangerouslySetInnerHTML={{ __html: m.txt.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>") }} />)}
+        </div>
+        <div style={{ display: "flex", gap: 8, padding: 11, borderTop: "1px solid var(--line)" }}>
+          {voiceSupported && (
+            <button aria-label="Speak your message" onClick={toggleMic}
+              style={{ flexShrink: 0, width: 34, height: 34, borderRadius: 9, border: "1px solid var(--line2)", background: listening ? "#e05252" : "var(--panel2)", color: listening ? "#fff" : "var(--mut)", cursor: "pointer", fontSize: 14 }}>
+              {listening ? "●" : "🎤"}
+            </button>
+          )}
+          <input placeholder={listening ? "Listening…" : "Ask Boss AI anything…"} value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === "Enter" && send()} />
+          <button className="btn btn-p btn-sm" onClick={send} disabled={busy}>➤</button>
+        </div>
+      </div>
+
+      <style jsx global>{`
+        .bosschat-panel { display: none; }
+        .bosschat-panel.is-open { display: flex; }
+        @media (min-width: 1180px) {
+          .bosschat-bubble, .bosschat-close { display: none !important; }
+          .bosschat-panel {
+            display: flex !important;
+            top: 0; bottom: 0 !important; right: 0;
+            height: 100vh; max-height: 100vh; width: 360px; max-width: 360px;
+            border-radius: 0 !important; border-top: none; border-bottom: none; border-right: none;
+          }
+        }
+      `}</style>
     </>
   );
 }

@@ -1,4 +1,5 @@
 import * as cheerio from "cheerio";
+import "@/lib/dns-fix";
 
 const UA = "MrLxwaBot/1.0 (+https://mrlxwa.com; learning your site to write about it)";
 
