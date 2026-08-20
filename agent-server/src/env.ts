@@ -14,4 +14,5 @@ export const env = {
   CORS_ORIGIN: process.env.CORS_ORIGIN || "http://localhost:3000",
   DATAFORSEO_LOGIN: process.env.DATAFORSEO_LOGIN || "",
   DATAFORSEO_PASSWORD: process.env.DATAFORSEO_PASSWORD || "",
+  NVIDIA_API_KEY: process.env.NVIDIA_API_KEY || "",
 };
