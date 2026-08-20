@@ -16,13 +16,24 @@ export const PLANS: Record<string, { name: string; price: number; tokens: number
   starter: { name: "Starter", price: 5,  tokens: 120, tagline: "~10 articles + stories & posts every month" },
   growth:  { name: "Growth",  price: 15, tokens: 400, tagline: "Serious volume + priority writing model" },
 };
+// "live" agents have real backend wiring (agent-server queue jobs, see agent-server/src/agents/).
+// The rest are visual roster slots for now (roadmap placeholders) — shown in the office same as
+// the reference "AI Command Center" layout, but their status stays "idle"/decorative until a real
+// agent is built for them. Not faked as working; see Office.tsx's room tag for how this is signaled.
 export const AGENTS = [
-  { id: "boss",   name: "Mr Lxwa",     role: "Orchestrator",     ico: "🧠", c: "#17a98c" },
-  { id: "kw",     name: "Mr. Keyword", role: "Keyword Research", ico: "🔎", c: "#6ea8ff" },
-  { id: "writer", name: "Mr. Writer",  role: "Article Writer",   ico: "✍️", c: "#b48bff" },
-  { id: "story",  name: "Mr. Story",   role: "Stories & Images", ico: "🎨", c: "#ff8fb3" },
-  { id: "social", name: "Miss Social", role: "Social Media",     ico: "📣", c: "#ffb95e" },
-  { id: "seo",    name: "Mr. SEO",     role: "SEO & Site Care",  ico: "📈", c: "#7ee787" },
+  { id: "boss",      name: "Mr Lxwa",       role: "Orchestrator",       ico: "🧠", c: "#7c5cff", live: true },
+  { id: "kw",        name: "Mr. Keyword",   role: "Keyword Research",   ico: "🔎", c: "#6ea8ff", live: true },
+  { id: "writer",    name: "Mr. Writer",    role: "Article Writer",     ico: "✍️", c: "#b48bff", live: true },
+  { id: "image",     name: "Mr. Image",     role: "Image Generation",   ico: "🖼️", c: "#ff8fb3", live: false },
+  { id: "seo",       name: "Mr. SEO",       role: "SEO & Site Care",    ico: "📈", c: "#7ee787", live: true },
+  { id: "social",    name: "Miss Social",   role: "Social Media",       ico: "📣", c: "#ffb95e", live: true },
+  { id: "reply",     name: "Mr. Reply",     role: "Comment Replies",    ico: "💬", c: "#5ec9d6", live: false },
+  { id: "email",     name: "Mr. Email",     role: "Email Outreach",     ico: "✉️", c: "#f5c451", live: false },
+  { id: "analytics", name: "Miss Analytics",role: "Analytics",          ico: "📊", c: "#6ea8ff", live: false },
+  { id: "story",     name: "Mr. Story",     role: "Web Stories",        ico: "🎨", c: "#ff8fb3", live: false },
+  { id: "qa",        name: "Mr. QA",        role: "Quality Review",     ico: "🔍", c: "#e08a3c", live: true }, // powers the real quality gate (Step 12)
+  { id: "publish",   name: "Mr. Publish",   role: "WordPress Publish",  ico: "📤", c: "#a78bfa", live: true }, // powers real WordPress/webhook publish (Step 12)
+  { id: "backup",    name: "Mr. Backup",    role: "Backups",            ico: "🗄️", c: "#8b93b8", live: false },
 ];
 const TOPICS = [
   "How to Get More Local Customers in 2026",
@@ -48,7 +59,7 @@ type State = {
 const initial: State = {
   user: null, onboarded: false, plan: "free", tokens: 10, tokensMax: 10,
   memory: [], content: [], reports: [], activity: [],
-  agents: Object.fromEntries(AGENTS.map(a => [a.id, { st: "i", task: "Idle" }])) as any,
+  agents: Object.fromEntries(AGENTS.map(a => [a.id, a.live ? { st: "i", task: "Idle" } : { st: "o", task: "Coming soon" }])) as any,
   busy: false, focusAgent: null, onboardedChecked: false,
 };
 

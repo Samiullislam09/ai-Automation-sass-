@@ -85,13 +85,22 @@
 @keyframes draw-line{to{stroke-dashoffset:0}}
 .draw-line{stroke-dasharray:1000;stroke-dashoffset:1000;animation:draw-line 1.6s ease-out forwards}
 
-:root{
-  /* Dashboard app (/app/**) theme — light/white, per product decision. Was dark-navy;
-     flipped to a light palette here (single source, every dashboard page/component
-     reads these vars — no per-page edits needed). */
+:root, .light{
+  /* Dashboard app (/app/**) — LIGHT variant. Dark is the primary/default look (see .dark
+     below, matches the "AI Command Center" reference) — this is the secondary option,
+     toggled via the same next-themes .dark/.light class already applied to <html> by the
+     root ThemeProvider (app/layout.tsx), so no separate toggle mechanism needed here. */
   --bg:#eaf4ff; --bg2:#f4f8fd; --panel:#ffffff; --panel2:#f4f8fd; --line:#e3ebf6; --line2:#d7e2f0;
   --ink:#1c2540; --mut:#5b6784; --mut2:#93a0bd;
-  --ac:#0ea589; --ac-d:#0a7a65; --amb:#e08a3c; --red:#e0435f; --blu:#3672e0; --vio:#8b5ce0;
+  --ac:#7c5cff; --ac-d:#6a45f5; --amb:#e08a3c; --red:#e0435f; --blu:#3672e0; --vio:#8b5ce0; --grn:#12b76a;
+  --tr:.22s cubic-bezier(.4,0,.2,1);
+}
+.dark{
+  /* Dashboard app (/app/**) — DARK variant, the primary look. Matches the "AI Command
+     Center" reference (deep indigo/navy, violet accent, pixel-office dashboard). */
+  --bg:#0a0d1f; --bg2:#0d1128; --panel:#12162e; --panel2:#171b38; --line:#242a4f; --line2:#2d3460;
+  --ink:#f1f2fa; --mut:#8b93b8; --mut2:#5c6491;
+  --ac:#7c5cff; --ac-d:#6a45f5; --amb:#f5a623; --red:#ef4444; --blu:#3b82f6; --vio:#a78bfa; --grn:#22c55e;
   --tr:.22s cubic-bezier(.4,0,.2,1);
 }
 *{box-sizing:border-box}

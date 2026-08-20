@@ -7,16 +7,27 @@ import { AGENTS, useStore } from "@/lib/store";
  *  drives it via store.focusOn()). Camera transform is applied imperatively via refs
  *  (measured container pixels), matching the technique proven in the reference build. */
 
+// 3-row layout matching the "AI Command Center" reference: 3 rooms flanking the (bigger)
+// Orchestrator on top, then two 5-room rows below. Purely data-driven — the render loop,
+// connection tubes, and chai-wala's idle-room picker all iterate AGENTS/ROOMS already, so
+// adding entries here is the only change needed to grow the office.
 const ROOMS: Record<string, { cx: number; cy: number; w: number; h: number }> = {
-  kw:     { cx: 230, cy: 200, w: 210, h: 160 },
-  boss:   { cx: 600, cy: 190, w: 300, h: 190 },
-  writer: { cx: 970, cy: 200, w: 210, h: 160 },
-  story:  { cx: 230, cy: 500, w: 210, h: 160 },
-  social: { cx: 600, cy: 510, w: 210, h: 160 },
-  seo:    { cx: 970, cy: 500, w: 210, h: 160 },
+  kw:        { cx: 230, cy: 170, w: 210, h: 160 },
+  boss:      { cx: 600, cy: 170, w: 320, h: 200 },
+  writer:    { cx: 970, cy: 170, w: 210, h: 160 },
+  image:     { cx: 150, cy: 430, w: 190, h: 150 },
+  seo:       { cx: 375, cy: 430, w: 190, h: 150 },
+  social:    { cx: 600, cy: 430, w: 190, h: 150 },
+  reply:     { cx: 825, cy: 430, w: 190, h: 150 },
+  email:     { cx: 1050, cy: 430, w: 190, h: 150 },
+  analytics: { cx: 150, cy: 680, w: 190, h: 150 },
+  story:     { cx: 375, cy: 680, w: 190, h: 150 },
+  qa:        { cx: 600, cy: 680, w: 190, h: 150 },
+  publish:   { cx: 825, cy: 680, w: 190, h: 150 },
+  backup:    { cx: 1050, cy: 680, w: 190, h: 150 },
 };
-const STALL = { cx: 600, cy: 660 };
-const VB_W = 1200, VB_H = 720;
+const STALL = { cx: 600, cy: 870 };
+const VB_W = 1200, VB_H = 960;
 const CLOUDS = [[120, 70, 1.1], [520, 45, 0.8], [900, 100, 1.3], [300, 140, 0.7], [1050, 170, 0.9]];
 
 const BOSS_LINES = [
@@ -31,8 +42,15 @@ export function agentIdFromText(text: string): string | null {
   const l = text.toLowerCase();
   if (/\bwriter\b|\barticle\b|\blikho\b|\bwrite\b/.test(l)) return "writer";
   if (/\bkeyword\b|\bresearch\b|\branking\b/.test(l)) return "kw";
-  if (/\bstory\b|\bvisual\b|\bimage\b|\bdesign\b/.test(l)) return "story";
+  if (/\bimage\b|\bphoto\b|\bgraphic\b/.test(l)) return "image";
+  if (/\bstory\b|\bvisual\b|\bdesign\b/.test(l)) return "story";
   if (/\bsocial\b|\bpost\b|\binstagram\b|\bfacebook\b|\blinkedin\b/.test(l)) return "social";
+  if (/\breply\b|\bcomment\b/.test(l)) return "reply";
+  if (/\bemail\b|\boutreach\b/.test(l)) return "email";
+  if (/\banalytics\b|\bstats\b|\btraffic\b/.test(l)) return "analytics";
+  if (/\bqa\b|\bquality\b|\breview\b/.test(l)) return "qa";
+  if (/\bpublish\b|\bwordpress\b/.test(l)) return "publish";
+  if (/\bbackup\b/.test(l)) return "backup";
   if (/\bseo\b|\baudit\b|\bsite\b/.test(l)) return "seo";
   if (/\blxwa\b|\bboss\b|\bmain ai\b|\borchestrat/.test(l)) return "boss";
   return null;
@@ -92,9 +110,9 @@ function Desk({ working }: { working: boolean }) {
       <rect x="-16" y="-22" width="32" height="18" rx="2" fill={working ? "#123832" : "#161c2c"} />
       {working && (
         <g opacity="0.9">
-          <rect x="-13" y="-18" width="20" height="2" fill="#4fe3c1" opacity="0.9" />
-          <rect x="-13" y="-14" width="14" height="2" fill="#4fe3c1" opacity="0.6" />
-          <rect x="-13" y="-10" width="17" height="2" fill="#4fe3c1" opacity="0.45" />
+          <rect x="-13" y="-18" width="20" height="2" fill="var(--blu)" opacity="0.9" />
+          <rect x="-13" y="-14" width="14" height="2" fill="var(--blu)" opacity="0.6" />
+          <rect x="-13" y="-10" width="17" height="2" fill="var(--blu)" opacity="0.45" />
         </g>
       )}
       <rect x="16" y="8" width="12" height="8" rx="1.5" fill="#efe6d4" opacity="0.9" />
@@ -103,13 +121,13 @@ function Desk({ working }: { working: boolean }) {
   );
 }
 function RoomTag({ name, task, st }: { name: string; task: string; st: "w" | "i" | "o" }) {
-  const dot = st === "w" ? "#0ea589" : st === "i" ? "#e08a3c" : "#93a0bd";
+  const dot = st === "w" ? "var(--grn)" : st === "i" ? "var(--amb)" : "var(--mut2)";
   return (
     <div style={{ display: "flex", justifyContent: "center" }}>
-      <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#ffffffef", border: "1px solid #e3ebf6", borderRadius: 9, padding: "5px 11px", whiteSpace: "nowrap", boxShadow: "0 6px 16px #1c254022" }}>
+      <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 9, padding: "5px 11px", whiteSpace: "nowrap", boxShadow: "0 6px 16px #00000033" }}>
         <span style={{ width: 6, height: 6, borderRadius: "50%", background: dot, boxShadow: st !== "o" ? `0 0 6px ${dot}` : "none", flex: "none" }} />
-        <span style={{ fontSize: 11, fontWeight: 700, color: "#1c2540" }}>{name}</span>
-        <span style={{ fontSize: 9.5, color: "#5b6784" }}>{task}</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "var(--ink)" }}>{name}</span>
+        <span style={{ fontSize: 9.5, color: "var(--mut)" }}>{task}</span>
       </div>
     </div>
   );
@@ -117,7 +135,18 @@ function RoomTag({ name, task, st }: { name: string; task: string; st: "w" | "i"
 
 export default function Office({ demo = false }: { demo?: boolean }) {
   const store = useStore();
-  const FAKE = React.useMemo(() => Object.fromEntries(AGENTS.map((a, i) => [a.id, { st: (i === 5 ? "o" : i === 4 ? "i" : "w") as "w" | "i" | "o", task: ["Orchestrating", "Searching keywords…", "Writing article…", "Designing story…", "Idle — chai break", "Offline"][i] }])), []);
+  // Demo/landing-page state — live agents get a "working" flavor task, roadmap (non-live)
+  // agents show "Coming soon" so the demo doesn't pretend an unbuilt agent is running.
+  const FAKE_TASKS: Record<string, string> = {
+    boss: "Orchestrating", kw: "Searching keywords…", writer: "Writing article…", seo: "Analyzing SEO…",
+    social: "Scheduling posts…", qa: "Reviewing content…", publish: "Publishing to WordPress…",
+  };
+  const FAKE = React.useMemo(() => Object.fromEntries(AGENTS.map((a) => [
+    a.id,
+    a.live
+      ? { st: (FAKE_TASKS[a.id] ? "w" : "i") as "w" | "i" | "o", task: FAKE_TASKS[a.id] ?? "Idle" }
+      : { st: "o" as const, task: "Coming soon" },
+  ])), []);
   const agents = demo || !store ? FAKE : store.s.agents;
   const active = demo ? null : store?.s.focusAgent ?? null;
 
@@ -183,12 +212,12 @@ export default function Office({ demo = false }: { demo?: boolean }) {
   };
 
   return (
-    <div ref={stageRef} className="office2d" style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden", background: "linear-gradient(180deg,#bfe3ff 0%,#dcf0ff 38%,#f2f9ff 72%,#ffffff 100%)", cursor: shownFocus ? "zoom-out" : "default" }} onClick={clickBackground}>
+    <div ref={stageRef} className="office2d" style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden", background: "linear-gradient(180deg, var(--bg2) 0%, var(--bg) 55%, var(--panel) 100%)", cursor: shownFocus ? "zoom-out" : "default" }} onClick={clickBackground}>
       <div ref={worldRef} style={{ position: "absolute", inset: 0, transition: "transform 1.1s cubic-bezier(.5,0,.15,1)", willChange: "transform" }}>
         <svg viewBox={`0 0 ${VB_W} ${VB_H}`} width="100%" height="100%" style={{ display: "block", position: "absolute", inset: 0 }} preserveAspectRatio="xMidYMid slice">
           <defs>
             <radialGradient id="bossglow" cx="50%" cy="45%" r="60%">
-              <stop offset="0%" stopColor="#d8fff5" /><stop offset="45%" stopColor="#4fe3c1" /><stop offset="100%" stopColor="#0ea589" stopOpacity="0" />
+              <stop offset="0%" stopColor="#c7e6ff" /><stop offset="45%" stopColor="var(--blu)" /><stop offset="100%" stopColor="var(--blu)" stopOpacity="0" />
             </radialGradient>
             <radialGradient id="sunglow" cx="50%" cy="50%" r="50%">
               <stop offset="0%" stopColor="#fff8e0" stopOpacity="0.95" /><stop offset="100%" stopColor="#fff8e0" stopOpacity="0" />
@@ -206,7 +235,7 @@ export default function Office({ demo = false }: { demo?: boolean }) {
             return (
               <g key={a.id}>
                 <path d={d} fill="none" stroke="#5fb3e0" strokeWidth="3" opacity="0.35" />
-                <circle r="3" fill="#0ea589" opacity="0.85"><animateMotion dur={`${3 + Math.random() * 2}s`} repeatCount="indefinite" path={d} /></circle>
+                <circle r="3" fill="var(--blu)" opacity="0.85"><animateMotion dur={`${3 + Math.random() * 2}s`} repeatCount="indefinite" path={d} /></circle>
               </g>
             );
           })}
@@ -220,16 +249,16 @@ export default function Office({ demo = false }: { demo?: boolean }) {
               <g key={a.id} onClick={e => { e.stopPropagation(); clickRoom(a.id); }} style={{ cursor: "pointer" }}>
                 <ellipse cx={r.cx} cy={r.cy + r.h / 2 + 10} rx={r.w / 2 + 14} ry="13" fill="#1c2540" opacity="0.14" />
                 <rect x={r.cx - r.w / 2} y={r.cy - r.h / 2} width={r.w} height={r.h} rx="22"
-                  fill={isBoss ? "#ffffff" : "#f7fafd"} stroke={a.c} strokeOpacity={st.st === "w" ? 0.85 : 0.4} strokeWidth="2.5"
+                  fill={isBoss ? "var(--panel2)" : "var(--panel)"} stroke={a.c} strokeOpacity={st.st === "w" ? 0.85 : 0.4} strokeWidth="2.5"
                   opacity={dim} style={{ transition: "opacity .4s, stroke-opacity .4s" }} />
-                <rect x={r.cx - r.w / 2} y={r.cy - r.h / 2} width={r.w} height={r.h * 0.35} rx="22" fill="#ffffff" opacity={dim * 0.6} />
+                <rect x={r.cx - r.w / 2} y={r.cy - r.h / 2} width={r.w} height={r.h * 0.35} rx="22" fill="var(--line)" opacity={dim * 0.35} />
 
                 {isBoss ? (
                   <g transform={`translate(${r.cx},${r.cy})`}>
                     <circle r="66" fill="url(#bossglow)" className="office-orb-glow" />
-                    <circle r="42" fill="none" stroke="#0ea589" strokeWidth="1.5" opacity="0.55" className="office-ring" />
-                    <circle r="30" fill="none" stroke="#0ea589" strokeWidth="1" opacity="0.4" strokeDasharray="4 6" className="office-ring2" />
-                    <circle r="20" fill="#eafffa" stroke="#0ea589" strokeWidth="1.5" className="office-core" />
+                    <circle r="42" fill="none" stroke="var(--blu)" strokeWidth="1.5" opacity="0.55" className="office-ring" />
+                    <circle r="30" fill="none" stroke="var(--blu)" strokeWidth="1" opacity="0.4" strokeDasharray="4 6" className="office-ring2" />
+                    <circle r="20" fill="var(--panel2)" stroke="var(--blu)" strokeWidth="1.5" className="office-core" />
                     <text y="6" textAnchor="middle" fontSize="18">🧠</text>
                     {showBub && (
                       <foreignObject x="-140" y={-r.h / 2 - 62} width="280" height="46">
@@ -284,11 +313,11 @@ export default function Office({ demo = false }: { demo?: boolean }) {
       </div>
 
       <div style={{ position: "absolute", left: 18, top: 16, pointerEvents: "none", zIndex: 2 }}>
-        <div style={{ fontSize: 14, fontWeight: 800, color: "#1c2540", display: "flex", alignItems: "center", gap: 7 }}>
-          <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#16b083", boxShadow: "0 0 8px #16b083" }} className="office-pulse-dot" />
+        <div style={{ fontSize: 14, fontWeight: 800, color: "var(--ink)", display: "flex", alignItems: "center", gap: 7 }}>
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--grn)", boxShadow: "0 0 8px var(--grn)" }} className="office-pulse-dot" />
           Your office — live
         </div>
-        <div style={{ fontSize: 11, color: "#5b6784", marginTop: 2 }}>{shownFocus ? "Click anywhere to zoom out" : "Click a room to zoom · ask Mr Lxwa about anyone"}</div>
+        <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 2 }}>{shownFocus ? "Click anywhere to zoom out" : "Click a room to zoom · ask Mr Lxwa about anyone"}</div>
       </div>
 
       <style jsx global>{`
