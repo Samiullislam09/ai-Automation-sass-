@@ -43,12 +43,13 @@ type State = {
   memory: Mem[]; content: ContentItem[]; reports: Report[]; activity: Activity[];
   agents: Record<string, AgentState>; busy: boolean;
   focusAgent: string | null; // which office room the camera should zoom to (Office.tsx reads this)
+  onboardedChecked: boolean; // true once we've actually asked Supabase — see AppLayout's guard
 };
 const initial: State = {
   user: null, onboarded: false, plan: "free", tokens: 10, tokensMax: 10,
   memory: [], content: [], reports: [], activity: [],
   agents: Object.fromEntries(AGENTS.map(a => [a.id, { st: "i", task: "Idle" }])) as any,
-  busy: false, focusAgent: null,
+  busy: false, focusAgent: null, onboardedChecked: false,
 };
 
 const Ctx = createContext<any>(null);
@@ -78,7 +79,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
     const syncFromSession = async (u: { id: string; email?: string | null } | null | undefined) => {
       setS(prev => ({ ...prev, user: toUser(u) }));
-      if (!u) return;
+      if (!u) { setS(prev => ({ ...prev, onboardedChecked: true })); return; }
       try {
         const { data } = await supabase
           .from("memberships")
@@ -86,10 +87,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           .eq("user_id", u.id)
           .maybeSingle();
         const onboarded = !!(data as any)?.tenants?.onboarded;
-        setS(prev => ({ ...prev, onboarded }));
+        setS(prev => ({ ...prev, onboarded, onboardedChecked: true }));
       } catch {
         // transient network hiccup — keep whatever local state already had rather than
-        // wrongly bouncing an already-onboarded user back into the wizard
+        // wrongly bouncing an already-onboarded user back into the wizard. Also don't mark
+        // "checked" here — AppLayout's guard waits for a real answer, not a failed one.
       }
     };
 

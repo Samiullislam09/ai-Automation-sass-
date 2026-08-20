@@ -15,10 +15,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const router = useRouter();
   useEffect(() => {
-    // real session is enforced server-side by middleware.ts now — this only handles the
-    // onboarding gate, which is still local demo state until Build Guide Step 4 wires it to the DB.
-    if (s.user && !s.onboarded) router.replace("/onboarding");
-  }, [s.user, s.onboarded, router]);
+    // real session is enforced server-side by middleware.ts. Onboarding status comes from
+    // Supabase (lib/store.tsx syncFromSession) — wait for onboardedChecked before deciding,
+    // or an already-onboarded user gets bounced to /onboarding during the brief window before
+    // that DB check resolves (it defaults to false until then).
+    if (s.user && s.onboardedChecked && !s.onboarded) router.replace("/onboarding");
+  }, [s.user, s.onboarded, s.onboardedChecked, router]);
 
   const unread = s.reports.filter((r: any) => r.unread).length;
   const wait = s.content.filter((c: any) => c.status === "awaiting").length;
