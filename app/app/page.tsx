@@ -3,21 +3,18 @@ import Link from "next/link";
 import { useState } from "react";
 import Office from "@/components/Office";
 import { Help } from "@/components/kit";
-import { PLANS, TOKEN_COST, useStore } from "@/lib/store";
+import { useStore } from "@/lib/store";
 
 const STAGES = ["🔎 Mr. Keyword — validating topic & related queries", "📊 Analyzing top 10 ranking articles", "🧩 Building the content blueprint", "✍️ Mr. Writer — writing in your brand tone", "🛡️ Mr Lxwa — quality gate check"];
 
 export default function Dashboard() {
   const store = useStore();
-  const { s, generate, applyPlan } = store;
+  const { s, generate } = store;
   const [confirm, setConfirm] = useState<string | null>(null);
-  const [paywall, setPaywall] = useState<number | null>(null);
   const [pipe, setPipe] = useState<{ title: string; stage: number } | null>(null);
 
   const start = (type: string) => {
-    const cost = TOKEN_COST[type];
     if (s.busy) return store.toast("Team is already working — one job at a time");
-    if (s.tokens < cost) { setPaywall(cost); return; }
     setConfirm(type);
   };
   const run = (type: string) => {
@@ -42,7 +39,6 @@ export default function Dashboard() {
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 14, margin: "18px 0 22px" }}>
         {[
-          [<>Tokens left <Help k="tokens" /></>, <>{s.tokens}<small className="mut" style={{ fontSize: 14 }}>/{s.tokensMax}</small></>, `${PLANS[s.plan].name} plan · refills monthly`],
           ["Content published", pub, <span key="u" className="acc">↑ growing your presence</span>],
           [<>Awaiting approval <Help k="approval" /></>, wait, <Link key="a" className="sm" href="/app/approvals">Review now →</Link>],
           [<>Daily reports <Help k="reports" /></>, s.reports.length, <Link key="r" className="sm" href="/app/reports">{s.reports.filter((r: any) => r.unread).length} unread →</Link>],
@@ -63,7 +59,6 @@ export default function Dashboard() {
               <button key={g[0]} className="btn btn-g" style={{ justifyContent: "flex-start", padding: "13px 15px" }} onClick={() => start(g[0])}>
                 <span style={{ fontSize: 17 }}>{g[1]}</span>
                 <span style={{ textAlign: "left", flex: 1 }}><b style={{ display: "block", fontSize: 13.5 }}>{g[2]}</b><span className="xs mut">{g[3]}</span></span>
-                <span className="xs" style={{ background: "var(--panel)", border: "1px solid var(--line2)", padding: "3px 9px", borderRadius: 8 }}>⚡ {TOKEN_COST[g[0]]}</span>
               </button>
             ))}
           </div>
@@ -85,25 +80,10 @@ export default function Dashboard() {
         <div className="modalwrap" onClick={() => setConfirm(null)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <h3 style={{ marginTop: 0 }}>Create a {confirm === "article" ? "full article" : confirm}?</h3>
-            <p className="sm mut">This will use <b className="acc">⚡ {TOKEN_COST[confirm]} tokens</b> (you have {s.tokens}). The result waits for your approval — nothing publishes automatically.</p>
+            <p className="sm mut">The result waits for your approval — nothing publishes automatically.</p>
             <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
               <button className="btn btn-g" onClick={() => setConfirm(null)}>Cancel</button>
               <button className="btn btn-p" style={{ flex: 1 }} onClick={() => run(confirm)}>Confirm — start my team</button>
-            </div>
-          </div>
-        </div>
-      )}
-      {paywall !== null && (
-        <div className="modalwrap" onClick={() => setPaywall(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 34, marginBottom: 8 }}>⚡</div>
-            <h3 style={{ margin: 0 }}>Not enough tokens</h3>
-            <p className="sm mut" style={{ margin: "8px 0 4px" }}>This needs <b className="acc">{paywall} tokens</b> — you have <b>{s.tokens}</b>.</p>
-            <p className="sm mut">Your free tokens refill next month, or upgrade now:</p>
-            <div className="card" style={{ textAlign: "left", margin: "16px 0", borderColor: "var(--ac)" }}><b>Starter — $5/mo</b><div className="sm mut">120 tokens · ~10 articles + stories & posts every month</div></div>
-            <div style={{ display: "flex", gap: 10 }}>
-              <button className="btn btn-g" onClick={() => setPaywall(null)}>Later</button>
-              <button className="btn btn-p" style={{ flex: 1 }} onClick={() => { setPaywall(null); applyPlan("starter"); }}>Upgrade to Starter →</button>
             </div>
           </div>
         </div>

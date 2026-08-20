@@ -1,7 +1,7 @@
 "use client";
 import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { PLANS, useStore } from "@/lib/store";
+import { useStore } from "@/lib/store";
 import { agentIdFromText } from "@/components/Office";
 
 /* ================= HELP: ? -> hover tooltip -> click detail ================= */
@@ -161,20 +161,3 @@ export function BossChat() {
   );
 }
 
-/* small shared bits */
-export function TokenBox() {
-  const { s } = useStore();
-  return (
-    <div className="card" style={{ padding: 13 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--mut)" }}>
-        <span>Tokens <Help k="tokens" /></span><b className="acc">{s.tokens}/{s.tokensMax}</b>
-      </div>
-      <div style={{ height: 6, borderRadius: 3, background: "#1a2440", margin: "9px 0", overflow: "hidden" }}>
-        <i style={{ display: "block", height: "100%", borderRadius: 3, background: "linear-gradient(90deg,var(--ac),var(--blu))", width: (s.tokens / s.tokensMax * 100) + "%", transition: "width .6s ease" }} />
-      </div>
-      <div style={{ display: "flex", justifyContent: "space-between" }} className="xs">
-        <span className="mut">{PLANS[s.plan].name} plan</span><a href="/app/billing" className="acc">Upgrade →</a>
-      </div>
-    </div>
-  );
-}

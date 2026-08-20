@@ -134,7 +134,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const generate = (type: string, onStage?: (i: number) => void, onDone?: () => void) => {
     const cost = TOKEN_COST[type];
     const title = TOPICS[Math.floor(Math.random() * TOPICS.length)];
-    patch(prev => ({ busy: true, tokens: Math.max(0, prev.tokens - cost) }));
+    patch({ busy: true }); // unlimited/free for now — no token deduction
     const stages: [number, () => void][] = type === "article" ? [
       [500,  () => { setAgent("kw", "w", "Validating keyword…"); act(`"Validate <b>${title}</b> and pull related queries, please."`, "Mr Lxwa", "Mr. Keyword"); onStage?.(0); }],
       [2100, () => { setAgent("kw", "i", "Idle"); setAgent("seo", "w", "Analyzing top 10…"); act(`"Topic is strong — 8 related queries found."`, "Mr. Keyword", "Mr Lxwa"); onStage?.(1); }],

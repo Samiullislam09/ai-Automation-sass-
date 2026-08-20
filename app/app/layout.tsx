@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { useStore } from "@/lib/store";
-import { BossChat, TokenBox } from "@/components/kit";
+import { BossChat } from "@/components/kit";
 
 const ITEMS = [
   ["Dashboard", "▦", "/app"], ["Content", "✍️", "/app/content"], ["Approvals", "☑", "/app/approvals"],
@@ -45,7 +45,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <a onClick={signOut} style={{ cursor: "pointer", color: "var(--mut)", flexShrink: 0, marginLeft: 8 }}>Log out</a>
             </div>
           )}
-          <TokenBox />
         </aside>
         <main style={{ padding: "26px clamp(16px,3vw,38px)", maxWidth: 1180, width: "100%" }} className="appmain">{children}</main>
       </div>
