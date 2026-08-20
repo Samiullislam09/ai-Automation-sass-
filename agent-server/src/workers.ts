@@ -6,6 +6,7 @@ import { WriterAgent } from "./agents/writer.js";
 import { SocialAgent } from "./agents/social.js";
 import { SeoAgent } from "./agents/seo.js";
 import { LeadsAgent } from "./agents/leads.js";
+import { CrawlerAgent } from "./agents/crawler.js";
 import type { Agent, AgentJobData } from "./agents/base.js";
 import { isOverDailyCap, logJobStart, logJobFinish, logJobError } from "./jobsLog.js";
 import { emitAgentStatus } from "./socket.js";
@@ -16,6 +17,7 @@ const AGENTS: Record<AgentType, Agent> = {
   social: new SocialAgent(),
   seo: new SeoAgent(),
   leads: new LeadsAgent(),
+  crawler: new CrawlerAgent(),
 };
 
 async function process(type: AgentType, job: Job<AgentJobData>) {
