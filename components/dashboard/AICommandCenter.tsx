@@ -1205,8 +1205,14 @@ export default function AICommandCenter(): JSX.Element {
 
     async function fetchLive() {
       const res = await fetch(`/api/dashboard/live?since=${encodeURIComponent(cursor)}`);
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error || "live fetch failed");
+      // A dev-mode hot-recompile (or any non-JSON error page) can return an empty/HTML body —
+      // read as text first so a bad response logs something readable instead of a bare
+      // "Unexpected end of JSON input" that gives no clue what actually happened.
+      const raw = await res.text();
+      let data: any;
+      try { data = JSON.parse(raw); }
+      catch { throw new Error(`live endpoint returned non-JSON (status ${res.status}): ${raw.slice(0, 200) || "(empty body)"}`); }
+      if (!data.ok) throw new Error(data.error || `live fetch failed (status ${res.status})`);
       return data;
     }
 
