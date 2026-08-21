@@ -263,7 +263,7 @@ export default function Office({ demo = false }: { demo?: boolean }) {
                     {showBub && (
                       <foreignObject x="-140" y={-r.h / 2 - 62} width="280" height="46">
                         <div {...{ xmlns: "http://www.w3.org/1999/xhtml" }} style={{ display: "flex", justifyContent: "center" }}>
-                          <div style={{ background: "#1c2540", color: "#fff", fontSize: 11, fontWeight: 600, padding: "8px 12px", borderRadius: "12px 12px 12px 3px", boxShadow: "0 10px 24px #1c254044" }}>{bubble}</div>
+                          <div style={{ background: "var(--panel2)", color: "var(--ink)", fontSize: 11, fontWeight: 600, padding: "8px 12px", borderRadius: "12px 12px 12px 3px", boxShadow: "0 10px 24px #00000066" }}>{bubble}</div>
                         </div>
                       </foreignObject>
                     )}
@@ -304,7 +304,7 @@ export default function Office({ demo = false }: { demo?: boolean }) {
             {chai.say && (
               <foreignObject x="-70" y="-42" width="140" height="26">
                 <div {...{ xmlns: "http://www.w3.org/1999/xhtml" }} style={{ display: "flex", justifyContent: "center" }}>
-                  <div style={{ background: "#1c2540", color: "#ffd699", fontSize: 10, fontWeight: 700, padding: "4px 9px", borderRadius: 8 }}>Chai garam! ☕</div>
+                  <div style={{ background: "var(--panel2)", color: "var(--amb)", fontSize: 10, fontWeight: 700, padding: "4px 9px", borderRadius: 8 }}>Chai garam! ☕</div>
                 </div>
               </foreignObject>
             )}

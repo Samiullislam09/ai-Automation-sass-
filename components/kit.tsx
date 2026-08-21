@@ -118,7 +118,7 @@ export function BossChat() {
   return (
     <>
       <button aria-label="Chat with Mr Lxwa" className="bosschat-bubble" onClick={() => setOpen(o => !o)}
-        style={{ position: "fixed", bottom: 22, right: 22, zIndex: 150, width: 54, height: 54, borderRadius: "50%", background: "linear-gradient(135deg,var(--ac),var(--ac-d))", color: "#04120d", fontSize: 22, boxShadow: "0 8px 26px #4fe3c144", border: "none", cursor: "pointer" }}>💬</button>
+        style={{ position: "fixed", bottom: 22, right: 22, zIndex: 150, width: 54, height: 54, borderRadius: "50%", background: "linear-gradient(135deg,var(--ac),var(--ac-d))", color: "#ffffff", fontSize: 22, boxShadow: "0 8px 26px #6a5af044", border: "none", cursor: "pointer" }}>💬</button>
 
       <div className={"bosschat-panel" + (open ? " is-open" : "")}
         style={{ position: "fixed", bottom: 88, right: 22, zIndex: 150, width: 336, maxWidth: "calc(100vw - 30px)", height: 440, maxHeight: "64vh", background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 18, flexDirection: "column", overflow: "hidden", backdropFilter: "blur(12px)", boxShadow: "0 24px 60px #1c254033" }}>
@@ -126,7 +126,7 @@ export function BossChat() {
           <div className="corb" /><div><b style={{ fontSize: 13.5 }}>Mr Lxwa</b><div className="xs acc">● online</div></div>
           <div style={{ flex: 1 }} />
           <button aria-label="Toggle voice replies" title="Read replies aloud" onClick={() => setVoiceOut(v => !v)}
-            style={{ background: voiceOut ? "var(--ac)" : "none", color: voiceOut ? "#04120d" : "var(--mut)", border: "1px solid " + (voiceOut ? "var(--ac)" : "var(--line2)"), borderRadius: 8, width: 26, height: 26, cursor: "pointer", fontSize: 13 }}>🔊</button>
+            style={{ background: voiceOut ? "var(--ac)" : "none", color: voiceOut ? "#ffffff" : "var(--mut)", border: "1px solid " + (voiceOut ? "var(--ac)" : "var(--line2)"), borderRadius: 8, width: 26, height: 26, cursor: "pointer", fontSize: 13 }}>🔊</button>
           <button className="bosschat-close" onClick={() => setOpen(false)} style={{ background: "none", border: "none", color: "var(--mut)", cursor: "pointer" }}>✕</button>
         </div>
         <div ref={box} style={{ flex: 1, overflowY: "auto", padding: 13, display: "flex", flexDirection: "column", gap: 9 }}>
@@ -152,7 +152,9 @@ export function BossChat() {
           .bosschat-panel {
             display: flex !important;
             top: 0; bottom: 0 !important; right: 0;
-            height: 100vh; max-height: 100vh; width: 300px; max-width: 300px;
+            /* 268px matches the AI Command Center reference build's chat column exactly, and
+               app/app/layout.tsx reserves the same width via --chatw. */
+            height: 100vh; max-height: 100vh; width: 268px; max-width: 268px;
             border-radius: 0 !important; border-top: none; border-bottom: none; border-right: none;
           }
         }

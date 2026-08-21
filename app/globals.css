@@ -98,15 +98,18 @@
 .dark{
   /* Dashboard app (/app/**) — DARK variant, the primary look. Matches the "AI Command
      Center" reference (deep indigo/navy, violet accent, pixel-office dashboard). */
-  --bg:#0a0d1f; --bg2:#0d1128; --panel:#12162e; --panel2:#171b38; --line:#242a4f; --line2:#2d3460;
-  --ink:#f1f2fa; --mut:#8b93b8; --mut2:#5c6491;
-  --ac:#7c5cff; --ac-d:#6a45f5; --amb:#f5a623; --red:#ef4444; --blu:#3b82f6; --vio:#a78bfa; --grn:#22c55e;
+  /* Values copied verbatim from the AI Command Center reference build's :root
+     (components/dashboard/AICommandCenter.tsx) so /app/** and that scene are the same palette,
+     not two dark themes that almost match. bg/bg2/panel/panel2 map to its bg/panel/card/card2. */
+  --bg:#04060e; --bg2:#080b16; --panel:#0a0e1b; --panel2:#0d1220; --line:#161b2c; --line2:#212842;
+  --ink:#f2f4fa; --mut:#9aa3b8; --mut2:#697089;
+  --ac:#6a5af0; --ac-d:#5242d8; --amb:#f5a524; --red:#ef4444; --blu:#3b82f6; --vio:#a78bfa; --grn:#2fd671; --teal:#2dd4bf;
   --tr:.22s cubic-bezier(.4,0,.2,1);
 }
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
 body{background:var(--bg);color:var(--ink);font-family:Inter,"Segoe UI",system-ui,sans-serif;font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden;margin:0}
-body::before{content:"";position:fixed;inset:0;background:radial-gradient(900px 500px at 80% -10%,#4fe3c10d,transparent 60%),radial-gradient(700px 500px at 0% 110%,#6ea8ff0a,transparent 60%);pointer-events:none;z-index:0}
+body::before{content:"";position:fixed;inset:0;background:radial-gradient(900px 500px at 80% -10%,#6a5af00d,transparent 60%),radial-gradient(700px 500px at 0% 110%,#6ea8ff0a,transparent 60%);pointer-events:none;z-index:0}
 a{color:var(--ac);text-decoration:none}
 input,select,textarea{font-family:inherit;font-size:14px;background:var(--panel2);border:1px solid var(--line2);border-radius:10px;color:var(--ink);padding:11px 13px;width:100%;outline:none;transition:border-color var(--tr)}
 input:focus,textarea:focus{border-color:var(--ac)}
@@ -115,8 +118,8 @@ input:focus,textarea:focus{border-color:var(--ac)}
 
 .btn{display:inline-flex;align-items:center;gap:8px;justify-content:center;padding:11px 20px;border-radius:11px;font-weight:600;font-size:14px;transition:transform var(--tr),box-shadow var(--tr),background var(--tr);cursor:pointer;border:none;color:inherit;background:none;font-family:inherit}
 .btn:active{transform:scale(.97)}
-.btn-p{background:linear-gradient(135deg,var(--ac),var(--ac-d));color:#04120d;box-shadow:0 4px 18px #4fe3c133}
-.btn-p:hover{box-shadow:0 6px 26px #4fe3c155;transform:translateY(-1px)}
+.btn-p{background:linear-gradient(135deg,var(--ac),var(--ac-d));color:#ffffff;box-shadow:0 4px 18px #6a5af033}
+.btn-p:hover{box-shadow:0 6px 26px #6a5af055;transform:translateY(-1px)}
 .btn-g{background:var(--panel2);border:1px solid var(--line2)}
 .btn-g:hover{background:var(--line);border-color:var(--ac)}
 .btn-sm{padding:7px 14px;font-size:13px;border-radius:9px}
@@ -126,7 +129,7 @@ input:focus,textarea:focus{border-color:var(--ac)}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:17px;transition:border-color var(--tr)}
 .card:hover{border-color:var(--line2)}
 .help{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--panel2);border:1px solid var(--line2);color:var(--mut);font-size:10px;font-weight:700;margin-left:6px;vertical-align:1px;cursor:pointer;transition:all var(--tr)}
-.help:hover{background:var(--ac);color:#04120d;border-color:var(--ac)}
+.help:hover{background:var(--ac);color:#ffffff;border-color:var(--ac)}
 .tipbox{position:fixed;z-index:200;max-width:260px;background:var(--panel);color:var(--ink);border:1px solid var(--line2);border-radius:11px;padding:10px 12px;font-size:12px;line-height:1.5;box-shadow:0 12px 34px #1c254033}
 .toastwrap{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);z-index:300;display:flex;flex-direction:column;gap:8px;align-items:center}
 .toast{background:#152039f0;border:1px solid var(--line2);border-left:3px solid var(--ac);border-radius:11px;padding:10px 16px;font-size:13px;box-shadow:0 10px 30px #000a;animation:tin .3s ease}
@@ -142,12 +145,12 @@ input:focus,textarea:focus{border-color:var(--ac)}
 .pstep.on{opacity:1;border-color:var(--ac)}
 .pstep.done{opacity:1}
 .pstep .ic{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;background:var(--panel);font-size:13px;flex:none}
-.pstep.on .ic{background:var(--ac);color:#04120d;animation:pulse2 1.2s ease-in-out infinite}
+.pstep.on .ic{background:var(--ac);color:#ffffff;animation:pulse2 1.2s ease-in-out infinite}
 .pstep.done .ic{background:#dcf5ee;color:var(--ac-d)}
-@keyframes pulse2{50%{box-shadow:0 0 0 6px #4fe3c122}}
-.spin{width:14px;height:14px;border:2px solid #4fe3c144;border-top-color:var(--ac);border-radius:50%;animation:sp 1s linear infinite}
+@keyframes pulse2{50%{box-shadow:0 0 0 6px #6a5af022}}
+.spin{width:14px;height:14px;border:2px solid #6a5af044;border-top-color:var(--ac);border-radius:50%;animation:sp 1s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
-.corb{width:28px;height:28px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#b9fff0,var(--ac) 55%,#0e7d68);box-shadow:0 0 14px #4fe3c166;animation:pulse2 2.6s infinite;flex:none}
+.corb{width:28px;height:28px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#cfc6ff,var(--ac) 55%,#3b2fa8);box-shadow:0 0 14px #6a5af066;animation:pulse2 2.6s infinite;flex:none}
 @keyframes bob{50%{transform:translateY(-3px)}}
 @keyframes fadeup{from{opacity:0;transform:translateY(18px)}to{opacity:1}}
 .rv{opacity:0;transform:translateY(22px);transition:opacity .6s ease,transform .6s ease}
@@ -183,7 +186,7 @@ input:focus,textarea:focus{border-color:var(--ac)}
 .otag .tk{color:var(--mut);font-size:8.5px;display:block}
 @keyframes typebob{0%,100%{transform:rotateZ(-45deg) rotateX(-55deg) translateY(0)}50%{transform:rotateZ(-45deg) rotateX(-55deg) translateY(-2.5px)}}
 @keyframes breathe{0%,100%{transform:rotateZ(-45deg) rotateX(-55deg) scale(1)}50%{transform:rotateZ(-45deg) rotateX(-55deg) scale(1.03)}}
-@keyframes scrflick{0%,100%{box-shadow:0 0 8px 2px #4fe3c177}50%{box-shadow:0 0 14px 4px #4fe3c8aa}}
+@keyframes scrflick{0%,100%{box-shadow:0 0 8px 2px #6a5af077}50%{box-shadow:0 0 14px 4px #7c6cf5aa}}
 .oroom[data-st="w"] .ochar{animation:typebob 1s ease-in-out infinite}
 .oroom[data-st="w"] .omon .scr{background:#0e2b28;animation:scrflick 1.6s infinite}
 .oroom[data-st="i"] .ochar{animation:breathe 3.4s ease-in-out infinite}
@@ -198,8 +201,8 @@ input:focus,textarea:focus{border-color:var(--ac)}
 .oroom[data-st="o"] .ozzz{animation:zfloat 2.6s ease-in-out infinite}
 @keyframes zfloat{0%{opacity:0;transform:rotateZ(-45deg) rotateX(-55deg) translateY(4px)}30%{opacity:.9}100%{opacity:0;transform:rotateZ(-45deg) rotateX(-55deg) translateY(-14px)}}
 .oorb{position:absolute;left:50%;top:38%;width:26px;height:26px;margin-left:-13px}
-.oorb .core{width:26px;height:26px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#b9fff0,#4fe3c1 55%,#0e7d68);box-shadow:0 0 18px 5px #4fe3c180;animation:orbp 2.8s ease-in-out infinite}
-@keyframes orbp{50%{box-shadow:0 0 28px 8px #4fe3c1aa;transform:scale(1.06)}}
+.oorb .core{width:26px;height:26px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#cfc6ff,#6a5af0 55%,#3b2fa8);box-shadow:0 0 18px 5px #6a5af080;animation:orbp 2.8s ease-in-out infinite}
+@keyframes orbp{50%{box-shadow:0 0 28px 8px #6a5af0aa;transform:scale(1.06)}}
 .obub{position:absolute;left:50%;top:4%;transform:rotateZ(-45deg) rotateX(-55deg) translateX(-50%);transform-origin:bottom center;background:#eef4ff;color:#15203a;font-size:9.5px;padding:5px 9px;border-radius:9px 9px 9px 2px;white-space:nowrap;font-weight:600;box-shadow:0 4px 12px #0006;transition:opacity .4s}
 .chai{position:absolute;width:30px;height:46px;z-index:5;transition:left 2.4s cubic-bezier(.45,.05,.55,.95),top 2.4s cubic-bezier(.45,.05,.55,.95);pointer-events:none}
 .chai .sp2{position:absolute;inset:0;transform-origin:bottom center;transform:rotateZ(-45deg) rotateX(-55deg)}
