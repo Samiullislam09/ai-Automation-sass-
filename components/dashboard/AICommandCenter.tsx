@@ -43,7 +43,7 @@
  * ---------------------------------------------------------------
  */
 "use client";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useStore, PLANS } from "@/lib/store";
 
@@ -1167,6 +1167,9 @@ export default function AICommandCenter(): JSX.Element {
   // effect only runs once — see __aicMounted — so it can't just read `s` from its own scope).
   const sRef = useRef(s);
   useEffect(() => { sRef.current = s; }, [s]);
+  // TEMP DIAGNOSTIC — see the boot effect below. Remove with the badge.
+  const [badge, setBadge] = useState<{ ok: boolean; text: string } | null>(null);
+  const [pollBadge, setPollBadge] = useState<string>("poll: waiting…");
 
   // ---------- boot: mount the vanilla engine + wire it to real data (runs once) ----------
   useEffect(() => {
@@ -1188,10 +1191,23 @@ export default function AICommandCenter(): JSX.Element {
 
     // Execute the vanilla engine in the global scope. It queries the DOM
     // by id / class, so it just needs SCENE_HTML mounted first (it is).
+    // TEMP DIAGNOSTIC (remove once the dashboard is confirmed working): the on-screen badge
+    // below is the only way to tell, from a screenshot alone, whether the browser is running
+    // this build at all and whether the engine booted — a stale bundle shows no badge, a
+    // crashed engine shows a red one with the real error.
+    let bootErr: string | null = null;
     try {
       // eslint-disable-next-line no-new-func
       new Function(ENGINE_SRC)();
-    } catch (e) { console.error("[AICommandCenter] engine boot failed:", e); }
+    } catch (e: any) {
+      bootErr = e?.message || String(e);
+      console.error("[AICommandCenter] engine boot failed:", e);
+    }
+    setBadge(
+      bootErr
+        ? { ok: false, text: `TEST BUILD · ENGINE CRASHED: ${bootErr}` }
+        : { ok: true, text: `TEST BUILD ✔ engine OK · window.engine=${typeof (window as any).engine}` }
+    );
 
     // =========================================================================================
     // [BACKEND-EVENTS] real hydrate + poll loop — GET /api/dashboard/live is the only source of
@@ -1334,7 +1350,11 @@ export default function AICommandCenter(): JSX.Element {
         if (bell) { bell.textContent = String(data.stats.errorsToday); bell.style.display = data.stats.errorsToday ? "flex" : "none"; }
 
         cursor = data.serverTime;
-      } catch (e) { console.error("[AICommandCenter] hydrate failed:", e); }
+        setPollBadge(`hydrate OK ${new Date().toLocaleTimeString()} · rooms=${Object.keys(data.agentStates || {}).length} feed=${(data.feed || []).length}`);
+      } catch (e: any) {
+        setPollBadge(`hydrate FAILED: ${e?.message || e}`);
+        console.error("[AICommandCenter] hydrate failed:", e);
+      }
     }
 
     async function poll() {
@@ -1363,7 +1383,11 @@ export default function AICommandCenter(): JSX.Element {
           else if (c.status === "failed") engine.incident("qa");
         }
         cursor = data.serverTime;
-      } catch (e) { console.error("[AICommandCenter] poll failed:", e); }
+        setPollBadge(`poll OK ${new Date().toLocaleTimeString()} · rooms=${Object.keys(data.agentStates || {}).length} feed=${(data.feed || []).length}`);
+      } catch (e: any) {
+        setPollBadge(`poll FAILED: ${e?.message || e}`);
+        console.error("[AICommandCenter] poll failed:", e);
+      }
     }
 
     hydrate();
@@ -1471,6 +1495,22 @@ export default function AICommandCenter(): JSX.Element {
 
       {/* Scoped styles — every selector matches the class names used in the HTML build. */}
       <style dangerouslySetInnerHTML={{ __html: SCENE_CSS }} />
+
+      {/* TEMP DIAGNOSTIC BADGE — remove once /app is confirmed working. Rendered by React (not
+          the vanilla engine) on purpose: if this is missing entirely the browser is serving a
+          stale bundle; if it's red the engine threw and the message is the real reason. */}
+      <div
+        style={{
+          position: "fixed", top: 0, left: 0, right: 0, zIndex: 999999,
+          font: "12px/1.5 ui-monospace, Menlo, Consolas, monospace",
+          padding: "6px 12px", color: "#fff", whiteSpace: "pre-wrap",
+          background: badge ? (badge.ok ? "#166534" : "#991b1b") : "#78350f",
+        }}
+      >
+        {badge ? badge.text : "TEST BUILD · React mounted, engine effect has not run yet"}
+        {"  |  "}
+        {pollBadge}
+      </div>
 
       {/* The scene + sidebar + chat + engine-owned DOM.
           The engine attaches its own listeners to these nodes on mount. */}

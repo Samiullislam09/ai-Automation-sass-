@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
 import { getDashboardStats, getAgentRoomStates } from "@/lib/dashboard-data";
-import { AGENTS as STORE_AGENTS } from "@/lib/store";
+import { AGENTS as STORE_AGENTS } from "@/lib/agents-data";
 
 /** Powers the AI Command Center pixel scene — the ONLY source of truth for what animates
  *  in the office. No random/demo loop: the client polls this on an interval and diffs

@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { AGENTS as STORE_AGENTS } from "@/lib/store";
+import { AGENTS as STORE_AGENTS } from "@/lib/agents-data";
 
 /** Shared real-data queries for the dashboard (stat cards, the AI Command Center scene,
  *  and its polling feed). One place so /api/dashboard/stats and /api/dashboard/live can't

@@ -9,6 +9,7 @@
  */
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { AGENTS } from "@/lib/agents-data";
 
 export const TOKEN_COST: Record<string, number> = { article: 10, story: 4, social: 1 };
 export const PLANS: Record<string, { name: string; price: number; tokens: number; tagline: string }> = {
@@ -20,21 +21,9 @@ export const PLANS: Record<string, { name: string; price: number; tokens: number
 // The rest are visual roster slots for now (roadmap placeholders) — shown in the office same as
 // the reference "AI Command Center" layout, but their status stays "idle"/decorative until a real
 // agent is built for them. Not faked as working; see Office.tsx's room tag for how this is signaled.
-export const AGENTS = [
-  { id: "boss",      name: "Mr Lxwa",       role: "Orchestrator",       ico: "🧠", c: "#7c5cff", live: true },
-  { id: "kw",        name: "Mr. Keyword",   role: "Keyword Research",   ico: "🔎", c: "#6ea8ff", live: true },
-  { id: "writer",    name: "Mr. Writer",    role: "Article Writer",     ico: "✍️", c: "#b48bff", live: true },
-  { id: "image",     name: "Mr. Image",     role: "Image Generation",   ico: "🖼️", c: "#ff8fb3", live: false },
-  { id: "seo",       name: "Mr. SEO",       role: "SEO & Site Care",    ico: "📈", c: "#7ee787", live: true },
-  { id: "social",    name: "Miss Social",   role: "Social Media",       ico: "📣", c: "#ffb95e", live: true },
-  { id: "reply",     name: "Mr. Reply",     role: "Comment Replies",    ico: "💬", c: "#5ec9d6", live: false },
-  { id: "email",     name: "Mr. Email",     role: "Email Outreach",     ico: "✉️", c: "#f5c451", live: false },
-  { id: "analytics", name: "Miss Analytics",role: "Analytics",          ico: "📊", c: "#6ea8ff", live: false },
-  { id: "story",     name: "Mr. Story",     role: "Web Stories",        ico: "🎨", c: "#ff8fb3", live: false },
-  { id: "qa",        name: "Mr. QA",        role: "Quality Review",     ico: "🔍", c: "#e08a3c", live: true }, // powers the real quality gate (Step 12)
-  { id: "publish",   name: "Mr. Publish",   role: "WordPress Publish",  ico: "📤", c: "#a78bfa", live: true }, // powers real WordPress/webhook publish (Step 12)
-  { id: "backup",    name: "Mr. Backup",    role: "Backups",            ico: "🗄️", c: "#8b93b8", live: false },
-];
+// Lives in lib/agents-data.ts (a plain, non-"use client" module) so server-only code
+// (lib/dashboard-data.ts) can import the same array without crashing — see that file's comment.
+export { AGENTS };
 const TOPICS = [
   "How to Get More Local Customers in 2026",
   "10 Mistakes Small Businesses Make Online",
