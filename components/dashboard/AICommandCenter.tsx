@@ -175,7 +175,7 @@ const SCENE_HTML = `<div class="app">
         <div class="off up" id="off-image" style="left:0.908%;top:50.645%;width:16.246%;height:20.0%"><span class="moon">🌙</span><span class="sign">OFF DAY</span><span class="zz">Z z z</span></div>
         <div class="hs" id="hs-image" data-id="image" style="left:0.908%;top:50.645%;width:16.246%;height:20.0%"></div>
         <div class="say" id="say-seo" style="left:27.447%;top:51.181%"></div>
-        <div class="wscr" id="ws-seo" style="left:36.125%;top:51.935%;width:-0.505%;height:12.903%"><i style="top:20%;--w:62%;--d:0s"></i><i style="top:44%;--w:48%;--d:.5s"></i><i style="top:66%;--w:70%;--d:.95s"></i></div>
+        <div class="wscr" id="ws-seo" style="left:36.125%;top:51.935%;width:5.045%;height:12.903%"><i style="top:20%;--w:62%;--d:0s"></i><i style="top:44%;--w:48%;--d:.5s"></i><i style="top:66%;--w:70%;--d:.95s"></i></div>
         <div class="errfx" id="ef-seo" style="left:20.585%;top:50.645%;width:15.237%;height:20.0%;display:none"></div>
         <div class="off up" id="off-seo" style="left:20.585%;top:50.645%;width:15.237%;height:20.0%"><span class="moon">🌙</span><span class="sign">OFF DAY</span><span class="zz">Z z z</span></div>
         <div class="hs" id="hs-seo" data-id="seo" style="left:20.585%;top:50.645%;width:15.237%;height:20.0%"></div>
@@ -508,18 +508,18 @@ img{display:block}
 .send:hover{background:var(--purple2);transform:translateY(-1px)}
 
 /* ===== RESPONSIVE: 3 breakpoints (large / medium / mobile) ===== */
-/* Large ≥1280px = 3 cols (default above) */
-/* Medium 900-1279px = 2 cols, chat becomes a slide-in drawer from the right */
-@media(max-width:1279px){
-  .app{grid-template-columns:var(--sbw) 1fr}
+/* Large ≥901px = 3 cols (default above), chat panel always visible */
+/* This threshold used to be 1280px, which meant the chat panel was an off-screen drawer on
+   every 1024/1366-wide laptop — i.e. the reported "chatbot show nahi ho raha". It was reachable
+   only via #chatToggle in the topbar, which is not discoverable. The sidebar is 72px and the
+   chat 268px, so a 3-column layout still leaves ~570px+ for the scene at 900px. */
+@media(max-width:900px){
   .chat{position:fixed;top:0;right:0;width:340px;max-width:92vw;height:100vh;z-index:200;
         transform:translateX(105%);transition:transform .35s cubic-bezier(.55,.06,.25,1);
         box-shadow:-14px 0 40px rgba(0,0,0,.55)}
   body.chat-open .chat{transform:none}
   body.chat-open::after{content:'';position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:199;animation:fadeIn .25s}
-}
-/* Mobile ≤900px = single column, sidebar becomes a slide-in drawer too */
-@media(max-width:900px){
+  /* …and below 900px the sidebar becomes a drawer too and the whole thing goes single-column. */
   body{overflow:auto;height:auto}
   .app{grid-template-columns:1fr;height:auto;min-height:100vh}
   .side{position:fixed;top:0;left:0;height:100vh;width:262px;z-index:210;
@@ -892,10 +892,12 @@ function setState(id, st){
   recount();
 }
 function recount(){
+  /* Only #stWork is derived from the scene (it IS "how many agents are lit up right now").
+     #stWait and #stErr are real DB numbers — approvals waiting and errors today — which this
+     used to overwrite with room-state counts every time any agent changed state, so the two
+     cards disagreed with the rest of the dashboard. The snapshot owns those two now. */
   const v=Object.entries(AGENTS).filter(([k])=>k!=='boss').map(([,a])=>a.state);
-  $('#stWork').textContent = v.filter(s=>s==='working').length + 1; /* +1 boss */
-  $('#stWait').textContent = v.filter(s=>s==='off'||s==='waiting').length;
-  $('#stErr').textContent  = v.filter(s=>s==='error').length;
+  const w=$('#stWork'); if(w) w.textContent = v.filter(s=>s==='working').length + 1; /* +1 boss */
 }
 
 /* ---------- SCENE FX ---------- */
@@ -943,8 +945,16 @@ async function celebrate(id, title){               // COMPLETE event
   tasksDone(); feedAdd(A.name+' completed “'+title+'”');
   await sleep(350); zoomOut();
 }
-let done=1284;
-function tasksDone(){ done++; $('#stTasks').textContent=done.toLocaleString('en-US'); }
+/* "Tasks Completed" is a real DB count (content_items published, see lib/dashboard-data.ts) that
+   the snapshot writes into #stTasks every 7s. This used to start from a hardcoded 1284 and
+   increment on every celebration, painting a made-up number over the real one. Now it just bumps
+   whatever the last real value was, so the card reacts instantly and the next snapshot corrects
+   it — no invented baseline. */
+function tasksDone(){
+  const el=$('#stTasks'); if(!el) return;
+  const cur=parseInt(String(el.textContent).replace(/[^0-9]/g,''),10);
+  el.textContent=((Number.isFinite(cur)?cur:0)+1).toLocaleString('en-US');
+}
 function feedAdd(txt){
   const f=$('.feed'); if(!f) return;
   const r=document.createElement('div'); r.className='fi'; r.style.animationDelay='0s';
@@ -1041,7 +1051,11 @@ function openPanel(id){
 }
 function closePanel(){ panel.classList.remove('on'); $$('.hs').forEach(x=>x.classList.remove('sel')); zoomOut(); }
 scene.addEventListener('click', e=>{ if(e.target===scene||e.target.classList.contains('sbg')) { touch(); closePanel(); } });
-document.addEventListener('keydown', e=>{ if(e.key==='Escape'){ touch(); closePanel(); } });
+/* Document-level listeners outlive this scene's DOM, so they get the React effect's abort
+   signal (set on window just before the engine boots). Everything else is bound to nodes inside
+   the scene and dies with them. */
+const __aicSig = window.__aicSignal;
+document.addEventListener('keydown', e=>{ if(e.key==='Escape'){ touch(); closePanel(); } }, {signal: __aicSig});
 
 /* ---------- CHAT (mention an agent = camera focus + intro; "new task: X" = real task) ---------- */
 const NAME_RX = {writer:/writer/i, seo:/\\bseo\\b/i, image:/\\bimage/i, social:/social/i, reply:/\\breply/i,
@@ -1095,7 +1109,7 @@ $('#chatClose') && $('#chatClose').addEventListener('click', ()=>document.body.c
 document.addEventListener('click', e=>{ /* click outside drawer closes it */
   if(document.body.classList.contains('sb-open') && !e.target.closest('.side') && !e.target.closest('#sbToggle')) document.body.classList.remove('sb-open');
   if(document.body.classList.contains('chat-open') && !e.target.closest('.chat') && !e.target.closest('#chatToggle')) document.body.classList.remove('chat-open');
-}, true);
+}, {capture: true, signal: __aicSig});
 /* REAL SITE: persist state, e.g. localStorage.setItem('sb', ...) */
 
 /* VOICE INPUT — uses Web Speech API when available; otherwise fake demo */
@@ -1164,7 +1178,8 @@ export default function AICommandCenter(): JSX.Element {
   const { s, signOut } = useStore();
   const router = useRouter();
   // Always-current snapshot of store state for the chat handler's closure below (the boot
-  // effect only runs once — see __aicMounted — so it can't just read `s` from its own scope).
+  // effect only runs once — see the root.dataset.aicBooted guard — so it can't just read `s`
+  // from its own scope).
   const sRef = useRef(s);
   useEffect(() => { sRef.current = s; }, [s]);
   // TEMP DIAGNOSTIC — see the boot effect below. Remove with the badge.
@@ -1173,21 +1188,33 @@ export default function AICommandCenter(): JSX.Element {
 
   // ---------- boot: mount the vanilla engine + wire it to real data (runs once) ----------
   useEffect(() => {
-    // React StrictMode fires effects twice in dev — guard so the engine
-    // (which mutates DOM and sets window.engine) initialises only once.
-    if ((window as any).__aicMounted) return;
-    (window as any).__aicMounted = true;
+    // React StrictMode fires mount -> cleanup -> mount against the SAME host DOM, so a
+    // window-level flag that the cleanup resets does not actually guard anything: the engine
+    // booted twice over one scene, leaving two AGENTS graphs and doubled listeners on every
+    // hotspot (verified: 50 listeners attached, then 50 again). The second engine is the one
+    // window.engine points at, so hover read stale state and a click's focus() was immediately
+    // undone by the other engine's zoomOut(). Marking the node itself is remount-safe: StrictMode
+    // reuses the node (stays a no-op), a genuine remount gets a fresh node and boots properly.
+    const root = rootRef.current;
+    if (!root || root.dataset.aicBooted) return;
+    root.dataset.aicBooted = "1";
 
-    // Track intervals / timeouts the engine spawns, for clean unmount.
+    // Track intervals / timeouts the engine spawns, for clean unmount. The patch is installed
+    // ONLY across the synchronous new Function(ENGINE_SRC)() call below and removed immediately
+    // after — leaving it in place for the whole mount captured every timer the rest of the app
+    // created (auth refresh, router, Supabase) and cancelled them all on unmount.
     const timers: number[] = [];
     const _si = window.setInterval;
     const _st = window.setTimeout;
-    (window as any).setInterval = (fn: any, ms: any, ...args: any[]) => {
-      const id = _si(fn, ms, ...args); timers.push(id); return id;
+    const patchTimers = () => {
+      (window as any).setInterval = (fn: any, ms: any, ...args: any[]) => {
+        const id = _si(fn, ms, ...args); timers.push(id); return id;
+      };
+      (window as any).setTimeout = (fn: any, ms: any, ...args: any[]) => {
+        const id = _st(fn, ms, ...args); timers.push(id); return id;
+      };
     };
-    (window as any).setTimeout = (fn: any, ms: any, ...args: any[]) => {
-      const id = _st(fn, ms, ...args); timers.push(id); return id;
-    };
+    const unpatchTimers = () => { (window as any).setInterval = _si; (window as any).setTimeout = _st; };
 
     // Execute the vanilla engine in the global scope. It queries the DOM
     // by id / class, so it just needs SCENE_HTML mounted first (it is).
@@ -1196,12 +1223,20 @@ export default function AICommandCenter(): JSX.Element {
     // this build at all and whether the engine booted — a stale bundle shows no badge, a
     // crashed engine shows a red one with the real error.
     let bootErr: string | null = null;
+    // The engine's two document-level listeners (Escape-to-close, click-outside-to-close-drawer)
+    // used to survive unmount forever, so after leaving /app every Escape and every click in the
+    // app still ran dead scene code. It reads this signal and binds them with it.
+    const engineAbort = new AbortController();
+    (window as any).__aicSignal = engineAbort.signal;
+    patchTimers();
     try {
       // eslint-disable-next-line no-new-func
       new Function(ENGINE_SRC)();
     } catch (e: any) {
       bootErr = e?.message || String(e);
       console.error("[AICommandCenter] engine boot failed:", e);
+    } finally {
+      unpatchTimers();
     }
     setBadge(
       bootErr
@@ -1232,21 +1267,35 @@ export default function AICommandCenter(): JSX.Element {
       return data;
     }
 
-    async function hydrate() {
-      try {
-        const data = await fetchLive();
-        if (cancelled) return;
-        const engine = (window as any).engine;
-        if (!engine) return;
+    // Everything the snapshot paints. Split out of the old hydrate() because poll() fetched the
+    // exact same payload every 7s and then threw all of it away except jobs/contentEvents — so
+    // room states, the feed, the donut and every stat were applied ONCE at mount and then frozen
+    // for the life of the page. All of it is idempotent, so both callers can run it.
+    function applySnapshot(data: any, isFirst: boolean) {
+      const engine = (window as any).engine;
+      if (!engine) return;
 
         // resting state for every room, straight from the DB (see getAgentRoomStates)
         for (const [id, st] of Object.entries<any>(data.agentStates || {})) {
-          if (engine.AGENTS[id]) engine.AGENTS[id].task = st.task;
+          // A room id the scene doesn't have (a new agent added server-side) used to throw
+          // inside setState and abort the whole snapshot, leaving the dashboard on placeholders.
+          if (!engine.AGENTS[id]) continue;
+          engine.AGENTS[id].task = st.task;
+          // Keep the hover tooltip's progress bar/TODO honest — it read AGENTS[id].todo, which
+          // nothing ever refreshed, so it always showed the shipped placeholder list.
+          engine.AGENTS[id].todo = st.state === "working"
+            ? [["Accepted", "done"], [st.task, "doing"], ["Report to Boss", "todo"]]
+            : st.state === "error"
+              ? [["Task failed", "error"], ["Waiting on retry", "todo"]]
+              : [["No active task", "todo"]];
           engine.setState(id, st.state);
         }
-        // seed "already seen" so the first poll doesn't replay old history as brand-new events
-        for (const j of data.jobs || []) jobSeen.set(j.id, j.status);
-        for (const c of data.contentEvents || []) itemSeen.set(c.id, c.status);
+        // Seed "already seen" ONLY on the first snapshot, so the initial paint doesn't replay
+        // old history as brand-new events.
+        if (isFirst) {
+          for (const j of data.jobs || []) jobSeen.set(j.id, j.status);
+          for (const c of data.contentEvents || []) itemSeen.set(c.id, c.status);
+        }
 
         // Live Activity Feed — drop the shipped demo rows, show genuine recent history
         const feedEl = document.querySelector(".feed");
@@ -1349,20 +1398,23 @@ export default function AICommandCenter(): JSX.Element {
         const bell = document.querySelector(".bell .b-cnt") as HTMLElement | null;
         if (bell) { bell.textContent = String(data.stats.errorsToday); bell.style.display = data.stats.errorsToday ? "flex" : "none"; }
 
-        cursor = data.serverTime;
-        setPollBadge(`hydrate OK ${new Date().toLocaleTimeString()} · rooms=${Object.keys(data.agentStates || {}).length} feed=${(data.feed || []).length}`);
-      } catch (e: any) {
-        setPollBadge(`hydrate FAILED: ${e?.message || e}`);
-        console.error("[AICommandCenter] hydrate failed:", e);
-      }
     }
 
-    async function poll() {
-      try {
-        const data = await fetchLive();
-        if (cancelled) return;
-        const engine = (window as any).engine;
-        if (!engine) return;
+    // How far back each request looks. jobs_log rows are filtered server-side by created_at
+    // (there is no updated_at column), so a row was only ever returned during the single 7s
+    // window it was inserted in — by the time its status changed to success/error it was already
+    // behind the cursor and could never come back. That made completeWork()/incident()
+    // unreachable in practice: nothing ever finished, celebrated, or errored on screen.
+    // Re-serving the last 2 minutes each time fixes it; jobSeen/itemSeen already dedupe replays.
+    const LOOKBACK_MS = 2 * 60 * 1000;
+    const advanceCursor = (serverTime: string) => {
+      const t = Date.parse(serverTime);
+      cursor = new Date((Number.isFinite(t) ? t : Date.now()) - LOOKBACK_MS).toISOString();
+    };
+
+    function applyEvents(data: any) {
+      const engine = (window as any).engine;
+      if (!engine) return;
 
         for (const j of data.jobs || []) {
           const room = JOB_TO_ROOM[j.agent];
@@ -1370,7 +1422,9 @@ export default function AICommandCenter(): JSX.Element {
           const prev = jobSeen.get(j.id);
           if (prev === j.status) continue;
           jobSeen.set(j.id, j.status);
-          if (prev === undefined) { if (j.status === "running" || j.status === "queued") engine.startWork(room, TASK_LABEL[room] || "Working…"); }
+          // A first sighting that is ALREADY terminal used to match no branch at all and animate
+          // nothing — a job that starts and finishes inside one poll window is very common.
+          if (j.status === "running" || j.status === "queued") engine.startWork(room, TASK_LABEL[room] || "Working…");
           else if (j.status === "success") engine.completeWork(room, engine.AGENTS[room]?.task || TASK_LABEL[room] || "Task");
           else if (j.status === "error") engine.incident(room);
         }
@@ -1378,20 +1432,38 @@ export default function AICommandCenter(): JSX.Element {
           const prev = itemSeen.get(c.id);
           if (prev === c.status) continue;
           itemSeen.set(c.id, c.status);
-          if (prev === undefined && c.status === "awaiting_approval") engine.startWork("qa", c.title || "Reviewing new article");
+          // Same fix: this used to require prev === undefined, so an item moving draft ->
+          // awaiting_approval (the normal path) never woke the QA room, because the draft row
+          // had already been seen.
+          if (c.status === "awaiting_approval") engine.startWork("qa", c.title || "Reviewing new article");
           else if (c.status === "published") engine.completeWork("publish", c.title || "Article");
           else if (c.status === "failed") engine.incident("qa");
         }
-        cursor = data.serverTime;
-        setPollBadge(`poll OK ${new Date().toLocaleTimeString()} · rooms=${Object.keys(data.agentStates || {}).length} feed=${(data.feed || []).length}`);
+    }
+
+    let firstSnapshotDone = false;
+    async function tick() {
+      try {
+        const data = await fetchLive();
+        if (cancelled) return;
+        if (!(window as any).engine) return;
+        applySnapshot(data, !firstSnapshotDone);
+        // Events are only dispatched once a first snapshot has established the baseline, so a
+        // retry after a failed first fetch can't replay five minutes of history as live events.
+        if (firstSnapshotDone) applyEvents(data);
+        firstSnapshotDone = true;
+        advanceCursor(data.serverTime);
+        setPollBadge(`live OK ${new Date().toLocaleTimeString()} · rooms=${Object.keys(data.agentStates || {}).length} feed=${(data.feed || []).length}`);
       } catch (e: any) {
-        setPollBadge(`poll FAILED: ${e?.message || e}`);
-        console.error("[AICommandCenter] poll failed:", e);
+        // No early return on failure: the loop keeps running, so a transient error no longer
+        // strands the scene on its shipped placeholder content for the whole session.
+        setPollBadge(`live FAILED: ${e?.message || e}`);
+        console.error("[AICommandCenter] live fetch failed:", e);
       }
     }
 
-    hydrate();
-    const pollId = window.setInterval(poll, 7000);
+    tick();
+    const pollId = window.setInterval(tick, 7000);
 
     // =========================================================================================
     // [BACKEND-CHAT] real POST /api/chat, streamed word-by-word into a live bubble
@@ -1461,10 +1533,13 @@ export default function AICommandCenter(): JSX.Element {
     return () => {
       cancelled = true;
       clearInterval(pollId);
-      (window as any).setInterval = _si;
-      (window as any).setTimeout = _st;
+      unpatchTimers();                       // no-op unless an exception left the patch installed
+      engineAbort.abort();                   // drops the engine's document-level listeners
+      delete (window as any).__aicSignal;
       timers.forEach((id) => { clearInterval(id); clearTimeout(id); });
-      (window as any).__aicMounted = false;
+      // NOTE: the boot guard is NOT reset here. It lives on the host node (root.dataset.aicBooted)
+      // precisely so StrictMode's mount -> cleanup -> mount cycle can't boot a second engine over
+      // the first one's DOM. A real remount gets a fresh node and boots normally.
       delete (window as any).__aicRealChat;
       delete (window as any).__aicTriggerJob;
       navHandlers.forEach(([el, h]) => el.removeEventListener("click", h));
@@ -1505,6 +1580,9 @@ export default function AICommandCenter(): JSX.Element {
           font: "12px/1.5 ui-monospace, Menlo, Consolas, monospace",
           padding: "6px 12px", color: "#fff", whiteSpace: "pre-wrap",
           background: badge ? (badge.ok ? "#166534" : "#991b1b") : "#78350f",
+          // Fixed + full-width at the very top means it sits directly over the topbar (bell,
+          // chat toggle, avatar). Without this it silently swallowed every click on that strip.
+          pointerEvents: "none",
         }}
       >
         {badge ? badge.text : "TEST BUILD · React mounted, engine effect has not run yet"}
@@ -1544,6 +1622,9 @@ declare global {
     };
     __aicRealChat?: (text: string) => Promise<void>;
     __aicTriggerJob?: (type: string, topic: string) => Promise<boolean>;
+    /** Set by the boot effect just before the engine runs; the engine binds its two
+     *  document-level listeners with it so unmount can drop them. */
+    __aicSignal?: AbortSignal;
     _runProgress?: (on: boolean) => void;
     SpeechRecognition?: any;
     webkitSpeechRecognition?: any;
