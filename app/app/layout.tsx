@@ -31,11 +31,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const plan = PLANS[s.plan] ?? PLANS.free;
   const initial = (s.user?.name || s.user?.email || "?").trim().charAt(0).toUpperCase();
 
-  // The dashboard root (components/dashboard/AICommandCenter.tsx) renders its own full
-  // sidebar + topbar + chat panel — pixel-perfect port of the reference build, see its own
-  // header comment. Every other /app/* page still gets this shared shell.
-  if (isDashboard) return <>{children}</>;
-
   return (
     <div style={{ position: "relative", zIndex: 1 }}>
       <div className="shell" style={{ display: "grid", gridTemplateColumns: "244px 1fr", height: "100vh" }}>
