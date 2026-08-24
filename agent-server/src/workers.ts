@@ -9,12 +9,15 @@ import { SeoAgent } from "./agents/seo.js";
 import { LeadsAgent } from "./agents/leads.js";
 import { CrawlerAgent } from "./agents/crawler.js";
 import type { Agent, AgentJobData } from "./agents/base.js";
-import { dailyUsage, logJobStart, logJobFinish, logJobError, logJobSkipped } from "./jobsLog.js";
+import { dailyUsage, logJobStart, logJobFinish, logJobError, logJobProgress, logJobSkipped } from "./jobsLog.js";
 import { emitAgentStatus } from "./socket.js";
 import { explainAgentError } from "./lib/errors.js";
 
 // queues.ts sets retryLimit: 2, i.e. the first run plus two retries.
 const MAX_ATTEMPTS = 3;
+
+// Minimum gap between progress writes for one job.
+const PROGRESS_MS = 2000;
 
 const AGENT_LABEL: Record<string, string> = {
   boss: "Mr Lxwa", keyword: "Mr. Keyword", writer: "Mr. Writer",
@@ -77,8 +80,18 @@ async function process(type: AgentType, job: JobWithMetadata<AgentJobData>) {
   const logId = await logJobStart(tenantId, type, taskLabel, attempt);
   const startedAt = Date.now();
 
+  // One write every PROGRESS_MS at most: a 300-page crawl calling this per page would
+  // otherwise be 300 extra round trips, and the dashboard only polls every few seconds anyway.
+  let lastProgressAt = 0;
+  const onProgress = (progress: Record<string, unknown>) => {
+    const now = Date.now();
+    if (now - lastProgressAt < PROGRESS_MS) return;
+    lastProgressAt = now;
+    void logJobProgress(logId, progress, attempt);
+  };
+
   try {
-    const result = await AGENTS[type].run(job);
+    const result = await AGENTS[type].run(job, { onProgress });
     await logJobFinish(logId, result);
     emitAgentStatus({ agent: type, tenant: tenantId, status: "idle", task: "Done" });
     return result;

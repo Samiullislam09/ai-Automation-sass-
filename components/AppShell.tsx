@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { useStore, PLANS } from "@/lib/store";
 import { BossChat } from "@/components/kit";
 import LiveAgents from "@/components/LiveAgents";
+import CrawlBanner from "@/components/CrawlBanner";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Icon } from "@/components/app-icons";
 
@@ -131,6 +132,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <Link href="/app/billing" className="tb-plan" title="Your plan">{plan.name}</Link>
             <AccountMenu initial={initial} onSignOut={signOut} />
           </header>
+
+          {/* Above the content, below the topbar: the crawl is the one long-running job with
+              no room in the office, so it needs to be visible from every page. */}
+          <CrawlBanner />
 
           <main className={"appmain" + (isDashboard ? " is-dash" : "")}>{children}</main>
         </div>

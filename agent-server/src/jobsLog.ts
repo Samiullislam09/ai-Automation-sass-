@@ -18,6 +18,18 @@ export async function logJobStart(tenantId: string, agent: string, action: strin
   return data?.id as string | undefined;
 }
 
+/** Live progress on a job that is still running. Overwrites `detail.progress` only — the
+ *  attempt number written at start has to survive, because the daily-cap count reads it. */
+export async function logJobProgress(id: string | undefined, progress: Record<string, unknown>, attempt: number) {
+  if (!id) return;
+  const { error } = await supabase
+    .from("jobs_log")
+    .update({ detail: { attempt, progress } })
+    .eq("id", id)
+    .eq("status", "running"); // a finished job must never be dragged back to "in progress"
+  if (error) console.error("[jobsLog] progress update failed:", error.message);
+}
+
 export async function logJobFinish(id: string | undefined, detail: unknown) {
   if (!id) return;
   const { error } = await supabase.from("jobs_log").update({ status: "success", detail }).eq("id", id);

@@ -70,7 +70,7 @@ export async function getAgentRoomStates(supabase: SupabaseClient, tenantId: str
     // `action` is the real human task label the enqueuer passed (e.g. Writing "how to ..."),
     // see agent-server/src/workers.ts. Older rows only carry the queue name, so TASKS below
     // is still the fallback rather than showing the word "writer" as a task.
-    .select("agent, action, status, created_at")
+    .select("agent, action, status, detail, created_at")
     .eq("tenant_id", tenantId)
     .in("agent", Object.keys(JOB_AGENT_TO_ROOM))
     .order("created_at", { ascending: false })
@@ -83,7 +83,12 @@ export async function getAgentRoomStates(supabase: SupabaseClient, tenantId: str
     seen.add(room);
     const ageMs = Date.now() - new Date(j.created_at).getTime();
     const label = j.action && j.action !== j.agent ? j.action : (TASKS[room] ?? "Working…");
-    if (j.status === "running" || j.status === "queued") rooms[room] = { state: "working", task: label };
+    if (j.status === "running" || j.status === "queued") {
+      // "Researching X · 12/40" reads as progress; the label on its own reads as a spinner.
+      const p = (j as any).detail?.progress;
+      const suffix = p?.total ? ` · ${p.done ?? 0}/${p.total}` : "";
+      rooms[room] = { state: "working", task: label + suffix };
+    }
     else if (j.status === "error" && ageMs < 10 * 60 * 1000) rooms[room] = { state: "error", task: "Needs a restart" };
     // Refused by the daily cap. Amber, not red: nothing is broken, but the room must not sit
     // there looking peacefully asleep when the user just asked it to do something.
@@ -99,6 +104,40 @@ export async function getAgentRoomStates(supabase: SupabaseClient, tenantId: str
   if ((awaitingCount ?? 0) > 0) rooms.qa = { state: "waiting", task: `${awaitingCount} item(s) awaiting review` };
 
   return rooms;
+}
+
+/** The site crawl, while it is happening.
+ *
+ *  The crawler is the longest job in the product — up to ~300 pages, one embedding call each,
+ *  paced under NVIDIA's rate limit, so ten minutes is normal. It also has no room in the
+ *  office (JOB_AGENT_TO_ROOM above), so without this there was nowhere at all to see that it
+ *  was running, and the only symptom was that nothing appeared to be happening.
+ *
+ *  Returns null unless a crawl is genuinely in flight. A "running" row older than 30 minutes
+ *  is a crashed worker, not progress, and claiming otherwise would be worse than silence. */
+export async function getRunningCrawl(supabase: SupabaseClient, tenantId: string) {
+  const { data } = await supabase
+    .from("jobs_log")
+    .select("detail, created_at")
+    .eq("tenant_id", tenantId)
+    .eq("agent", "crawler")
+    .eq("status", "running")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!data) return null;
+  if (Date.now() - new Date(data.created_at).getTime() > 30 * 60 * 1000) return null;
+
+  const p = ((data.detail as any) ?? {}).progress ?? {};
+  return {
+    startedAt: data.created_at,
+    phase: p.phase ?? "starting",
+    done: Number(p.done ?? 0),
+    total: Number(p.total ?? 0),
+    current: p.current ?? null,
+    label: p.label ?? null,
+  };
 }
 
 const TASKS: Record<string, string> = {
@@ -224,7 +263,18 @@ function describeJob(jobAgent: string, status: string, detail: any): { summary: 
     if (detail?.cause && String(detail.cause) !== summary) items.push(`Technical: ${String(detail.cause).slice(0, 300)}`);
     return { summary, items };
   }
-  if (status !== "success") return { summary: "Working…", items: [] };
+  if (status !== "success") {
+    // A job that is still running now reports where it has got to (see the AgentContext
+    // handed to every agent) — "Working…" for ten minutes is indistinguishable from stuck.
+    const p = detail?.progress;
+    if (p?.total) {
+      const done = p.done ?? 0;
+      const where = p.current ? ` — ${String(p.current).replace(/^https?:\/\//, "")}` : "";
+      return { summary: `${done} of ${p.total} pages read${where}`, items: [] };
+    }
+    if (p?.label) return { summary: String(p.label), items: [] };
+    return { summary: "Working…", items: [] };
+  }
   if (!detail || typeof detail !== "object") return { summary: "Finished.", items: [] };
 
   if (jobAgent === "boss") {

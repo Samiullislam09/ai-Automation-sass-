@@ -64,7 +64,7 @@ export default function LiveAgents() {
       }
 
       const jobs: Job[] = data.recentJobs ?? [];
-      api?.patch?.({ stats: data.stats ?? null, recentJobs: jobs, liveError: null });
+      api?.patch?.({ stats: data.stats ?? null, recentJobs: jobs, crawl: data.crawl ?? null, liveError: null });
 
       const finished = jobs.filter((j) => j.status === "success" || j.status === "error");
       if (!primed.current) {

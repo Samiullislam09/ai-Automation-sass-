@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
-import { getDashboardStats, getAgentRoomStates, getRecentJobs } from "@/lib/dashboard-data";
+import { getDashboardStats, getAgentRoomStates, getRecentJobs, getRunningCrawl } from "@/lib/dashboard-data";
 import { AGENTS as STORE_AGENTS } from "@/lib/agents-data";
 
 /** Powers the AI Command Center pixel scene — the ONLY source of truth for what animates
@@ -18,12 +18,15 @@ export async function GET(req: NextRequest) {
   const since = req.nextUrl.searchParams.get("since");
   const sinceIso = since && !isNaN(Date.parse(since)) ? since : new Date(Date.now() - 5 * 60 * 1000).toISOString();
 
-  const [rooms, stats, recentJobs, { data: jobs }, { data: contentItems }, { data: pendingItems }] = await Promise.all([
+  const [rooms, stats, recentJobs, crawl, { data: jobs }, { data: contentItems }, { data: pendingItems }] = await Promise.all([
     getAgentRoomStates(supabase, tenantId),
     getDashboardStats(supabase, tenantId),
     // each with a human summary of what it produced — powers the "just finished" popup on the
     // office and the "who is working right now" strip in the chat
     getRecentJobs(supabase, tenantId, 8),
+    // The site crawl has no office room and takes ~10 minutes; this is the only place it is
+    // visible while it runs.
+    getRunningCrawl(supabase, tenantId),
     supabase.from("jobs_log").select("id, agent, status, created_at").eq("tenant_id", tenantId).gte("created_at", sinceIso).order("created_at", { ascending: true }).limit(40),
     supabase.from("content_items").select("id, status, title, type, updated_at").eq("tenant_id", tenantId).gte("updated_at", sinceIso).order("updated_at", { ascending: true }).limit(40),
     supabase.from("content_items").select("id, title, type, created_at").eq("tenant_id", tenantId).eq("status", "awaiting_approval").order("created_at", { ascending: false }).limit(5),
@@ -56,6 +59,7 @@ export async function GET(req: NextRequest) {
     serverTime: new Date().toISOString(),
     agentStates: rooms,
     recentJobs,
+    crawl,
     jobs: jobs ?? [],
     contentEvents: contentItems ?? [],
     pending: (pendingItems ?? []).map((p) => ({ id: p.id, title: p.title ?? p.type, createdAt: p.created_at })),

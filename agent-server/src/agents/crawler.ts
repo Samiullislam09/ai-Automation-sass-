@@ -1,5 +1,5 @@
 import type { Job } from "pg-boss";
-import { Agent, type AgentJobData } from "./base.js";
+import { Agent, type AgentContext, type AgentJobData } from "./base.js";
 import { discoverUrls, extractPage } from "../lib/crawl.js";
 import { embed } from "../lib/embeddings.js";
 import { completeJson } from "../lib/llm.js";
@@ -18,7 +18,7 @@ const PAGE_LIMIT = Number(process.env.CRAWL_PAGE_LIMIT) || 300;
  *  (RAG over site_pages) would read from. */
 export class CrawlerAgent extends Agent {
   type = "crawler";
-  async run(job: Job<AgentJobData>) {
+  async run(job: Job<AgentJobData>, ctx: AgentContext) {
     const { tenantId } = job.data;
 
     const { data: tenant } = await supabase.from("tenants").select("website_url, tone_profile").eq("id", tenantId).single();
@@ -29,7 +29,9 @@ export class CrawlerAgent extends Agent {
     const site = raw ? (/^https?:\/\//i.test(raw) ? raw : `https://${raw}`) : null;
     if (!site) return { pagesCrawled: 0, reason: "no valid website_url on file" };
 
+    ctx.onProgress({ phase: "discovering", label: "Finding pages on your site…" });
     const urls = await discoverUrls(site, PAGE_LIMIT);
+    ctx.onProgress({ phase: "reading", done: 0, total: urls.length, label: `Found ${urls.length} page(s) to read` });
     let pagesCrawled = 0;
     let unreadable = 0;
     const titles: string[] = [];
@@ -37,7 +39,12 @@ export class CrawlerAgent extends Agent {
     // crawl could quietly leave holes in the knowledge base and still report success.
     const failures: { url: string; error: string }[] = [];
 
+    let seen = 0;
     for (const url of urls) {
+      seen++;
+      // Reported BEFORE the page is fetched, so the URL on screen is the one being worked on
+      // rather than the one that just finished.
+      ctx.onProgress({ phase: "reading", done: pagesCrawled, seen, total: urls.length, current: url });
       const page = await extractPage(url);
       if (!page) { unreadable++; continue; }
       try {
@@ -67,6 +74,8 @@ export class CrawlerAgent extends Agent {
         failures,
       };
     }
+
+    ctx.onProgress({ phase: "summarising", done: pagesCrawled, total: urls.length, label: "Working out what this business does…" });
 
     // Re-summarize niche/topics from the FULL set of titles now on file, not just this
     // run's — a fuller picture than onboarding's quick pass could ever have had.

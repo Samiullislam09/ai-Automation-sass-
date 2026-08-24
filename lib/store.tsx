@@ -52,6 +52,9 @@ type State = {
   /** The full-screen "it's done" takeover (components/Celebration.tsx). Holds the real
    *  jobs_log row that just landed — summary and items as the agent returned them. */
   celebration: { id: string; agentId: string; status: string; summary: string; items: string[] } | null;
+  /** The site crawl while it runs. It has no room in the office and takes ~10 minutes, so
+   *  without this there is nowhere to see that anything is happening at all. */
+  crawl: { phase: string; done: number; total: number; current: string | null; label: string | null; startedAt: string } | null;
   liveError: string | null;
   focusAgent: string | null; // which office room the camera should zoom to (Office.tsx reads this)
   onboardedChecked: boolean; // true once we've actually asked Supabase — see AppLayout's guard
@@ -61,7 +64,7 @@ const initial: State = {
   memory: [], content: [], reports: [], activity: [],
   agents: Object.fromEntries(AGENTS.map(a => [a.id, a.live ? { st: "i", task: "Idle" } : { st: "o", task: "Coming soon" }])) as any,
   busy: false, focusAgent: null, onboardedChecked: false,
-  stats: null, recentJobs: [], flash: null, celebration: null, liveError: null,
+  stats: null, recentJobs: [], flash: null, celebration: null, crawl: null, liveError: null,
 };
 
 const Ctx = createContext<any>(null);
@@ -79,7 +82,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const raw = localStorage.getItem("gt-state");
       // Live fields are server truth — never restore yesterday's copy of them from localStorage,
       // or the office shows an agent "working" on a job that finished hours ago.
-      if (raw) setS({ ...initial, ...JSON.parse(raw), stats: null, recentJobs: [], flash: null, celebration: null, liveError: null });
+      if (raw) setS({ ...initial, ...JSON.parse(raw), stats: null, recentJobs: [], flash: null, celebration: null, crawl: null, liveError: null });
     } catch {}
     loaded.current = true;
   }, []);
