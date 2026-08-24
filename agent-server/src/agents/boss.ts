@@ -28,6 +28,10 @@ export class BossAgent extends Agent {
     // How many articles to plan this run. Kept small on purpose: writer's daily cap is 10
     // (agent-server/src/config/caps.ts) and every one of these becomes a real LLM call.
     const count = Math.min(Math.max(Number((job.data as any).count) || 3, 1), 5);
+    // Passed straight through to Mr. Keyword, so the caller decides what happens after
+    // research: write immediately (true), research only (false), or put the keywords in front
+    // of the human first ("choose"). Defaults to writing, which is what "run the team" means.
+    const chain = (job.data as any).chain ?? true;
 
     // Ask the web app to refresh Search Console / GA4 first, so a scheduled 9am run plans
     // against this week's numbers rather than whatever was last pulled by hand. Best-effort:
@@ -85,7 +89,7 @@ export class BossAgent extends Agent {
       await enqueue("keyword", {
         tenantId,
         topic: t.topic,
-        chain: true,
+        chain,
         taskLabel: `Researching "${t.topic}"`,
       });
     }
@@ -93,6 +97,7 @@ export class BossAgent extends Agent {
     return {
       planned: topics.length,
       topics,
+      chain,
       // Recorded in jobs_log so the dashboard can say WHY these topics, not just which.
       groundedIn: insights.connected
         ? { source: "google-search-console", period: insights.period, strikingDistance: insights.strikingDistance.length }

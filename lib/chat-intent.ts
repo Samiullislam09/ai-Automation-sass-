@@ -9,8 +9,9 @@
  *  would spend real LLM/DataForSEO credits on a job nobody asked for. */
 
 export type ChatIntent =
-  | { kind: "write"; topic: string | null } // write ONE article (topic optional)
-  | { kind: "plan" }                        // "run the team" — Mr Lxwa picks the topics himself
+  | { kind: "write"; topic: string | null }    // write ONE article (topic optional)
+  | { kind: "research"; topic: string | null } // keywords only — explicitly NOT an article
+  | { kind: "plan" }                           // "run the team" — Mr Lxwa picks the topics himself
   | null;
 
 // "how does X work", "kya", "kaise", "?" — these are questions ABOUT the work, not orders.
@@ -27,11 +28,40 @@ const PLAN_ORDER = /\b(run the team|start the team|start team|team ko chalao|kaa
 // duplicate drafts every time the user asked how it was going.
 const STATUS_QUESTION = /\b(update|status|progress|kya hua|kya huwa|kiya hua|kiya huwa|ho gaya|hogaya|likha|likh diya|done|finished|ready|kahan tak|kitna hua)\b/i;
 
+// "keyword research karke do", "sirf keyword nikalo", "find me some keywords".
+const RESEARCH_NOUN = /\b(keywords?|key ?word|kw)\b/i;
+const RESEARCH_VERB = /\b(research|find|nikal\w*|dhund\w*|dedo|de do|karke do|karo|do|suggest|give)\b/i;
+
+// The bug this exists for: "ek keyword research karke do ... but artical nahi likhna" matched
+// WRITE_VERB on "likhna" and ARTICLE_NOUN on "artical", so an explicit instruction NOT to
+// write an article was read as an order to write one — and one got written.
+//
+// Matches a negation appearing shortly before a writing word, which is how it is said in both
+// languages: "artical nahi likhna", "don't write the article", "article mat likho".
+const NO_WRITE = new RegExp(
+  [
+    "\\b(?:nahi|nahin|mat|bina)\\b[^.!?]{0,40}?\\b(?:likh\\w*|banao|banana|write|writing)\\b",
+    "\\b(?:don'?t|do not|no|without|never|skip)\\b[^.!?]{0,40}?\\b(?:write|writing|draft|publish)\\b",
+    "\\b(?:artic\\w*|blogs?|posts?)\\b[^.!?]{0,20}?\\b(?:nahi|nahin|mat)\\b",
+  ].join("|"),
+  "i"
+);
+
 export function detectChatIntent(raw: string): ChatIntent {
   const q = (raw ?? "").trim();
   if (!q || q === "__hello__") return null;
 
   if (PLAN_ORDER.test(q)) return { kind: "plan" };
+
+  // Checked BEFORE the write matcher. "Research the keywords but don't write anything" is a
+  // real, common instruction, and treating it as an article order is the worst possible
+  // reading of it — it spends the credits and produces the exact thing that was refused.
+  const refusesWriting = NO_WRITE.test(q);
+  const asksForKeywords = RESEARCH_NOUN.test(q) && RESEARCH_VERB.test(q);
+  if (asksForKeywords && (refusesWriting || !ARTICLE_NOUN.test(q))) {
+    return { kind: "research", topic: extractTopic(q) };
+  }
+  if (refusesWriting) return null;
 
   // A question about articles ("how do you write an article?") must stay a conversation.
   if (QUESTION.test(q)) return null;

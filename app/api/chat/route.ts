@@ -267,11 +267,21 @@ function fallback(q: string, ctx: any): string {
  *  makes him hand the blueprint to Mr. Writer — see agent-server/src/agents/keyword.ts).
  *  Without one, Mr Lxwa's planner picks the topics from the business's own data. */
 async function startWork(intent: NonNullable<ReturnType<typeof detectChatIntent>>, tenantId: string): Promise<string> {
-  const topic = intent.kind === "write" ? intent.topic : null;
+  const topic = intent.kind === "write" || intent.kind === "research" ? intent.topic : null;
+
+  // What happens AFTER research, decided by what was actually asked for:
+  //   "research"  -> false    nothing gets written. This is the whole point of the mode.
+  //   "write"     -> "choose" the keywords go in front of the user with a countdown first.
+  //   "plan"      -> true     a batch was asked for; writing all of them is the request.
+  const chain = intent.kind === "research" ? false : intent.kind === "write" ? "choose" : true;
 
   const res = topic
-    ? await enqueueAgentJob("keyword", tenantId, { topic, chain: true, taskLabel: `Researching "${topic}"` })
-    : await enqueueAgentJob("boss", tenantId, { count: intent.kind === "plan" ? 3 : 1 });
+    ? await enqueueAgentJob("keyword", tenantId, {
+        topic,
+        chain,
+        taskLabel: intent.kind === "research" ? `Keyword research: "${topic}"` : `Researching "${topic}"`,
+      })
+    : await enqueueAgentJob("boss", tenantId, { count: intent.kind === "plan" ? 3 : 1, chain });
 
   if (!res.ok) {
     // 429 is the daily cap, which is a completely different situation from "the server is
@@ -284,20 +294,44 @@ async function startWork(intent: NonNullable<ReturnType<typeof detectChatIntent>
     return `I couldn't put the team to work: **${res.error}** — so I'm not going to pretend it's running. Nothing was started, and no credits were used. ${next}`;
   }
 
+  if (intent.kind === "research") {
+    const head = topic
+      ? `On it — **Mr. Keyword** is researching **"${topic}"**.`
+      : `On it — **Mr. Keyword** is finding the best keywords for your business.`;
+    return [
+      head,
+      "",
+      "**No article will be written.** You asked for research, so research is all that runs.",
+      "I'll post the keywords here with their search volume and competition as soon as they land — then tell me which one you want written, if any.",
+    ].join("\n");
+  }
+
   const head = topic
     ? `On it — **"${topic}"** is now a real job, not a chat answer.`
     : intent.kind === "plan"
       ? `Starting the team now — I'm picking this week's topics from your own niche and the pages we crawled.`
       : `On it. You didn't name a topic, so I'm choosing one from your niche and the pages we crawled.`;
 
-  const steps = [
-    topic ? `**Mr. Keyword** is pulling real search volume + related queries for it.`
-          : `**Me (Mr Lxwa)** → then **Mr. Keyword** validates each topic with real search data.`,
-    `If the demand is real he builds the blueprint and hands it to **Mr. Writer** — if nobody searches for it, he stops there and tells you why.`,
-    `**Mr. Writer** drafts it, it goes through the quality gate, and lands in **Approvals**. Nothing gets published without you.`,
-  ];
+  const steps =
+    intent.kind === "plan"
+      ? [
+          `**Mr. Keyword** validates each topic with real search data.`,
+          `If the demand is real he builds the blueprint and hands it to **Mr. Writer** — if nobody searches for it, he stops there and tells you why.`,
+          `**Mr. Writer** drafts it, it goes through the quality gate, and lands in **Approvals**. Nothing gets published without you.`,
+        ]
+      : [
+          `**Mr. Keyword** pulls the real search volume and competition for the options.`,
+          `Then **you pick** — the keywords appear on the dashboard with a countdown. Don't pick and I start with the recommended one.`,
+          `**Mr. Writer** drafts it, it goes through the quality gate, and lands in **Approvals**. Nothing gets published without you.`,
+        ];
 
-  return `${head}\n\n1. ${steps[0]}\n2. ${steps[1]}\n3. ${steps[2]}\n\nWatch the office below — each room lights up when its turn starts.`;
+  return `${head}
+
+1. ${steps[0]}
+2. ${steps[1]}
+3. ${steps[2]}
+
+Watch the office below — each room lights up when its turn starts.`;
 }
 
 function wordStream(text: string): ReadableStream<Uint8Array> {

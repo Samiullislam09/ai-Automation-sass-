@@ -58,6 +58,11 @@ type State = {
   /** Finished-job announcements for the chat. Mr Lxwa confirms the work in the conversation
    *  itself — a toast that has already faded is not an answer to "did it happen?". */
   chatNotices: { id: string; text: string; tone: "done" | "error" }[];
+  /** The keyword table waiting on the user, counting down (components/KeywordChoice.tsx). */
+  keywordChoice: {
+    id: string; topic: string; candidates: any[]; recommended: string;
+    chosen: string | null; status: string; expires_at: string;
+  } | null;
   liveError: string | null;
   focusAgent: string | null; // which office room the camera should zoom to (Office.tsx reads this)
   onboardedChecked: boolean; // true once we've actually asked Supabase — see AppLayout's guard
@@ -67,7 +72,7 @@ const initial: State = {
   memory: [], content: [], reports: [], activity: [],
   agents: Object.fromEntries(AGENTS.map(a => [a.id, a.live ? { st: "i", task: "Idle" } : { st: "o", task: "Coming soon" }])) as any,
   busy: false, focusAgent: null, onboardedChecked: false,
-  stats: null, recentJobs: [], flash: null, celebration: null, crawl: null, chatNotices: [], liveError: null,
+  stats: null, recentJobs: [], flash: null, celebration: null, crawl: null, chatNotices: [], keywordChoice: null, liveError: null,
 };
 
 const Ctx = createContext<any>(null);
@@ -85,7 +90,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const raw = localStorage.getItem("gt-state");
       // Live fields are server truth — never restore yesterday's copy of them from localStorage,
       // or the office shows an agent "working" on a job that finished hours ago.
-      if (raw) setS({ ...initial, ...JSON.parse(raw), stats: null, recentJobs: [], flash: null, celebration: null, crawl: null, chatNotices: [], liveError: null });
+      if (raw) setS({ ...initial, ...JSON.parse(raw), stats: null, recentJobs: [], flash: null, celebration: null, crawl: null, chatNotices: [], keywordChoice: null, liveError: null });
     } catch {}
     loaded.current = true;
   }, []);
@@ -248,6 +253,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  /** Put a line in the chat from anywhere in the app. The chat is where people look to work
+   *  out what happened, so anything worth knowing has to be able to reach it. */
+  const pushChatNotice = (text: string, tone: "done" | "error" = "done") =>
+    patch(prev => ({
+      chatNotices: [...prev.chatNotices, { id: `local-${prev.chatNotices.length}-${text.slice(0, 24)}`, text, tone }].slice(-20),
+    }));
+
   const applyPlan = (plan: string) => { // TODO(backend): Paddle/LemonSqueezy webhook drives this
     // The plan has to reach the DB, not just this browser: agent-server reads tenants.plan to
     // decide the tenant's daily allowance, so a plan that only lived in localStorage meant a
@@ -272,7 +284,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     location.href = "/login";
   };
 
-  const api = { s, patch, toast, act, setAgent, focusOn, report, generate, approve, reject, applyPlan, saveMemory, signOut };
+  const api = { s, patch, toast, act, setAgent, focusOn, report, generate, approve, reject, applyPlan, saveMemory, pushChatNotice, signOut };
   return (
     <Ctx.Provider value={api}>
       {children}

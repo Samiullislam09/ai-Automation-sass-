@@ -140,6 +140,27 @@ export async function getRunningCrawl(supabase: SupabaseClient, tenantId: string
   };
 }
 
+/** The keyword choice waiting on the user right now, if there is one.
+ *
+ *  "Pending" means genuinely pending: not yet picked, not yet consumed by the writer, and not
+ *  past its deadline. Showing a countdown for an article that already started being written
+ *  would be a lie, and a lie that invites a click that does nothing. */
+export async function getPendingKeywordChoice(supabase: SupabaseClient, tenantId: string) {
+  const { data, error } = await supabase
+    .from("keyword_choices")
+    .select("id, topic, candidates, recommended, chosen, status, expires_at, created_at")
+    .eq("tenant_id", tenantId)
+    .eq("status", "pending")
+    .gt("expires_at", new Date().toISOString())
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  // Migration 012 not applied yet — the pipeline still works, it just doesn't ask first.
+  if (error || !data) return null;
+  return data;
+}
+
 const TASKS: Record<string, string> = {
   boss: "Planning this week’s content",
   keyword: "Researching keywords",
@@ -293,7 +314,10 @@ function describeJob(jobAgent: string, status: string, detail: any): { summary: 
     // the AI fallback has no number at all and is shown without one.
     const items = related.map((r: any) => {
       if (!r?.keyword) return "";
-      if (r.searchVolume != null) return `${r.keyword} — ${r.searchVolume}/mo searches`;
+      if (r.searchVolume != null) {
+        const comp = r.competitionLevel ? `, ${String(r.competitionLevel).toLowerCase()} competition` : "";
+        return `${r.keyword} — ${r.searchVolume}/mo searches${comp}`;
+      }
       if (r.impressions != null) {
         const pos = r.position != null ? `, currently position ${Number(r.position).toFixed(1)}` : "";
         return `${r.keyword} — ${r.impressions} impressions on your site${pos}`;
@@ -304,6 +328,24 @@ function describeJob(jobAgent: string, status: string, detail: any): { summary: 
     // Search Console — real measured data, just not market volume. This has to be checked
     // BEFORE the searchDataAvailable test below, which is false for this source too and
     // would otherwise credit the AI for queries Google actually reported.
+    // Research only — the user explicitly asked for keywords and no article. Say so, and say
+    // what to type next, because "here are your keywords" with no next step is a dead end.
+    if (detail.researchOnly) {
+      const rec = detail.recommended ? ` Best of these: “${detail.recommended}”${detail.recommendedWhy ? ` — ${detail.recommendedWhy}` : ""}` : "";
+      return {
+        summary: `Found ${items.length} keyword(s) for “${detail.topic}”. No article was written, because none was asked for.${rec}`,
+        items,
+      };
+    }
+
+    // Waiting on a human. The countdown itself lives in components/KeywordChoice.tsx.
+    if (detail.awaitingChoice) {
+      return {
+        summary: `Found ${items.length} option(s) for “${detail.topic}” — waiting for you to pick one, or “${detail.recommended}” starts automatically.`,
+        items,
+      };
+    }
+
     if (detail.source === "gsc") {
       return {
         summary: `The keyword provider was down, so these came from your own Search Console — real searches Google already shows your site for. Blueprint handed to Mr. Writer.`,
@@ -338,6 +380,11 @@ function describeJob(jobAgent: string, status: string, detail: any): { summary: 
     if (used.searchConsole) items.push("Used your Search Console data for links and vocabulary");
     if (gate.passed === false && Array.isArray(gate.reasons) && gate.reasons.length) {
       items.push(`Gate flagged: ${gate.reasons.join("; ")}`);
+    }
+    // Which keyword this was written about, and whether the human chose it. Six weeks later
+    // "why is this article about THAT?" is a fair question with a real answer.
+    if (detail.chosenBy) {
+      items.unshift(detail.chosenBy === "user" ? `Keyword you picked: ${detail.topic}` : `Keyword auto-picked (recommended): ${detail.topic}`);
     }
     return { summary: `Wrote “${title}”${words ? ` — ${words} words` : ""}; it ${verdict}.`, items };
   }

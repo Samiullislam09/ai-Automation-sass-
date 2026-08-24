@@ -28,7 +28,10 @@ export async function initQueues() {
   }
 }
 
-export async function enqueue(type: AgentType, data: AgentJobData) {
+/** `startAfter` (seconds) is how the keyword agent holds a writer job open while the human
+ *  gets a chance to pick a different keyword — pg-boss keeps it and hands it to a worker when
+ *  the window closes, so the article gets written whether or not anyone was watching. */
+export async function enqueue(type: AgentType, data: AgentJobData, options?: { startAfter?: number }) {
   await ensureBossStarted();
-  return boss.send(type, data as unknown as object);
+  return boss.send(type, data as unknown as object, options ?? {});
 }

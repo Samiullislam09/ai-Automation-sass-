@@ -1,9 +1,10 @@
 import type { Job } from "pg-boss";
-import { Agent, type AgentJobData } from "./base.js";
+import { Agent, type AgentContext, type AgentJobData } from "./base.js";
 import { writeArticle, type WriterContext } from "../lib/writer.js";
 import { gateArticle, extractTitle } from "../lib/qualityGate.js";
 import { supabase } from "../supabase.js";
 import { loadInsights, writerBlock } from "../lib/insights.js";
+import { buildBlueprint, type Research } from "../lib/blueprint.js";
 
 /** Build Guide Step 11 — Mr. Writer drafts the article.
  *  Currently runs on NVIDIA (Lightning tier) as a temporary stand-in for the
@@ -11,10 +12,25 @@ import { loadInsights, writerBlock } from "../lib/insights.js";
  *  for exactly what to change before production. */
 export class WriterAgent extends Agent {
   type = "writer";
-  async run(job: Job<AgentJobData>) {
+  async run(job: Job<AgentJobData>, ctx: AgentContext) {
     const { tenantId } = job.data;
-    const topic = (job.data as any).topic as string | undefined;
-    const blueprint = (job.data as any).blueprint as string | undefined;
+    let topic = (job.data as any).topic as string | undefined;
+    let blueprint = (job.data as any).blueprint as string | undefined;
+    const choiceId = (job.data as any).choiceId as string | undefined;
+
+    // Scheduled behind a keyword choice: the human had a window to pick, and this is where we
+    // find out what they picked. The blueprint is rebuilt for the keyword that actually won —
+    // reusing the recommended one's brief would write about the wrong thing.
+    let chosenBy: "user" | "auto" | null = null;
+    if (choiceId) {
+      const resolved = await resolveChoice(tenantId, choiceId);
+      if (!resolved) throw new Error(`The keyword choice ${choiceId} is gone — nothing was written.`);
+      topic = resolved.keyword;
+      blueprint = buildBlueprint(resolved.keyword, resolved.research);
+      chosenBy = resolved.chosenBy;
+      ctx.onProgress({ label: `Writing "${resolved.keyword}" (${chosenBy === "user" ? "you picked it" : "auto-picked"})` });
+    }
+
     if (!topic?.trim()) throw new Error("writer job needs a 'topic' string");
 
     // Ground the draft in THIS business: its niche, audience, tone and its own crawled
@@ -59,6 +75,7 @@ export class WriterAgent extends Agent {
 
     return {
       topic,
+      chosenBy,
       title,
       blueprint: blueprint ?? null,
       body,
@@ -67,6 +84,37 @@ export class WriterAgent extends Agent {
       qualityGate: gate,
     };
   }
+}
+
+/** Reads the choice the human was given, marks it used, and reports which way it went.
+ *  Marking it used is what stops the dashboard showing a countdown for an article that has
+ *  already started being written. */
+async function resolveChoice(
+  tenantId: string,
+  choiceId: string
+): Promise<{ keyword: string; research: Research; chosenBy: "user" | "auto" } | null> {
+  const { data, error } = await supabase
+    .from("keyword_choices")
+    .select("recommended, chosen, research, status")
+    .eq("id", choiceId)
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+
+  if (error || !data) {
+    console.error("[writer] could not read keyword choice:", error?.message ?? "not found");
+    return null;
+  }
+
+  const chosenBy: "user" | "auto" = data.chosen ? "user" : "auto";
+  const keyword = (data.chosen as string) || (data.recommended as string);
+
+  await supabase
+    .from("keyword_choices")
+    .update({ status: "used", chosen: keyword, chosen_by: chosenBy })
+    .eq("id", choiceId)
+    .eq("tenant_id", tenantId);
+
+  return { keyword, research: (data.research ?? {}) as Research, chosenBy };
 }
 
 async function loadWriterContext(tenantId: string): Promise<WriterContext> {
