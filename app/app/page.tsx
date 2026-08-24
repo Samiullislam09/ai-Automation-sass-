@@ -134,18 +134,8 @@ export default function Dashboard() {
 
   return (
     <div className="dash-wrap">
-      <div className="dash-stats">
-        {CARDS.map(([key, ico, label, accent], i) => (
-          <div key={key} className="dstat" style={{ animationDelay: `${0.02 + i * 0.04}s` }}>
-            <span className="dstat-ic" style={{ color: accent, background: `color-mix(in srgb, ${accent} 14%, transparent)` }}>{ico}</span>
-            <div style={{ minWidth: 0 }}>
-              <div className="v">{stats ? fmt(key, stats[key]) : "—"}</div>
-              <div className="l">{label}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-
+      {/* Office first: it is the point of this screen. The counters used to sit on top and
+          push it down — they're a summary, so they read better underneath it. */}
       <div className="dash-bar">
         <button className="runbtn" onClick={runTeam} disabled={running}>
           {running ? "Starting…" : "▶ Run the team"}
@@ -161,10 +151,22 @@ export default function Dashboard() {
         <Office />
       </div>
 
+      <div className="dash-stats">
+        {CARDS.map(([key, ico, label, accent], i) => (
+          <div key={key} className="dstat" style={{ animationDelay: `${0.02 + i * 0.04}s` }}>
+            <span className="dstat-ic" style={{ color: accent, background: `color-mix(in srgb, ${accent} 14%, transparent)` }}>{ico}</span>
+            <div style={{ minWidth: 0 }}>
+              <div className="v">{stats ? fmt(key, stats[key]) : "—"}</div>
+              <div className="l">{label}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
       <style jsx>{`
         .dash-wrap { position: absolute; inset: 0; display: flex; flex-direction: column; }
         .dash-stats { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px;
-                      padding: 16px clamp(14px, 2.4vw, 26px) 12px; flex: none; }
+                      padding: 0 clamp(14px, 2.4vw, 26px) clamp(14px, 2.4vw, 22px); flex: none; }
         .dstat { background: var(--panel); border: 1px solid var(--line); border-radius: 11px;
                  padding: 11px 12px; display: flex; align-items: center; gap: 10px; min-width: 0;
                  transition: transform .2s, border-color .2s;
@@ -178,7 +180,7 @@ export default function Dashboard() {
         @keyframes dstat-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 
         .dash-bar { display: flex; align-items: center; gap: 12px; flex: none;
-                    padding: 0 clamp(14px, 2.4vw, 26px) 10px; min-width: 0; }
+                    padding: 14px clamp(14px, 2.4vw, 26px) 10px; min-width: 0; }
         .runbtn { flex: none; border: 1px solid var(--ac); background: var(--ac); color: #fff;
                   font-size: 12px; font-weight: 700; padding: 8px 14px; border-radius: 9px;
                   cursor: pointer; transition: background .18s, transform .18s, opacity .18s; }
@@ -189,16 +191,16 @@ export default function Dashboard() {
         .err { color: var(--amb); }
 
         .dash-office { flex: 1; position: relative; min-height: 0;
-                       margin: 0 clamp(14px, 2.4vw, 26px) clamp(14px, 2.4vw, 26px);
+                       margin: 0 clamp(14px, 2.4vw, 26px) clamp(12px, 1.6vw, 16px);
                        border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
                        background: var(--bg2); }
 
         @media (max-width: 1400px) { .dash-stats { grid-template-columns: repeat(4, 1fr); } }
         @media (max-width: 860px) {
           .dash-wrap { position: relative; inset: auto; height: 100%; }
-          .dash-stats { grid-template-columns: repeat(2, 1fr); padding: 12px 14px 10px; }
-          .dash-bar { padding: 0 14px 10px; }
-          .dash-office { margin: 0 14px 14px; min-height: 340px; }
+          .dash-stats { grid-template-columns: repeat(2, 1fr); padding: 0 14px 14px; }
+          .dash-bar { padding: 12px 14px 10px; }
+          .dash-office { margin: 0 14px 12px; min-height: 340px; }
         }
       `}</style>
     </div>

@@ -120,8 +120,10 @@ export function BossChat() {
       <button aria-label="Chat with Mr Lxwa" className="bosschat-bubble" onClick={() => setOpen(o => !o)}
         style={{ position: "fixed", bottom: 22, right: 22, zIndex: 150, width: 54, height: 54, borderRadius: "50%", background: "linear-gradient(135deg,var(--ac),var(--ac-d))", color: "#ffffff", fontSize: 22, boxShadow: "0 8px 26px #6a5af044", border: "none", cursor: "pointer" }}>💬</button>
 
-      <div className={"bosschat-panel" + (open ? " is-open" : "")}
-        style={{ position: "fixed", bottom: 88, right: 22, zIndex: 150, width: 336, maxWidth: "calc(100vw - 30px)", height: 440, maxHeight: "64vh", background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 18, flexDirection: "column", overflow: "hidden", backdropFilter: "blur(12px)", boxShadow: "0 24px 60px #1c254033" }}>
+      {/* Size/position live in CSS only — they used to be inline, and inline styles beat the
+          desktop media query below, so the "full-height docked column" never applied: the
+          panel stayed a 336x440 floating card that covered the office. */}
+      <div className={"bosschat-panel" + (open ? " is-open" : "")}>
         <div style={{ display: "flex", gap: 10, alignItems: "center", padding: "13px 15px", borderBottom: "1px solid var(--line)", background: "var(--bg2)" }}>
           <div className="corb" /><div><b style={{ fontSize: 13.5 }}>Mr Lxwa</b><div className="xs acc">● online</div></div>
           <div style={{ flex: 1 }} />
@@ -130,7 +132,9 @@ export function BossChat() {
           <button className="bosschat-close" onClick={() => setOpen(false)} style={{ background: "none", border: "none", color: "var(--mut)", cursor: "pointer" }}>✕</button>
         </div>
         <div ref={box} style={{ flex: 1, overflowY: "auto", padding: 13, display: "flex", flexDirection: "column", gap: 9 }}>
-          {msgs.map((m, i) => <div key={i} className={"cm " + m.who + (m.live ? " cursor" : "")} dangerouslySetInnerHTML={{ __html: m.txt.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>") }} />)}
+          {/* Mr Lxwa's "I've put the team on it" replies are numbered, multi-line — without the
+              \n -> <br> the whole pipeline collapsed into one unreadable paragraph. */}
+          {msgs.map((m, i) => <div key={i} className={"cm " + m.who + (m.live ? " cursor" : "")} dangerouslySetInnerHTML={{ __html: m.txt.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br/>") }} />)}
         </div>
         <div style={{ display: "flex", gap: 8, padding: 11, borderTop: "1px solid var(--line)" }}>
           {voiceSupported && (
@@ -145,17 +149,25 @@ export function BossChat() {
       </div>
 
       <style jsx global>{`
-        .bosschat-panel { display: none; }
+        /* mobile / narrow: floating card opened by the bubble */
+        .bosschat-panel {
+          display: none; position: fixed; bottom: 88px; right: 22px; z-index: 150;
+          width: 336px; max-width: calc(100vw - 30px); height: 440px; max-height: 64vh;
+          background: var(--panel); border: 1px solid var(--line); border-radius: 18px;
+          flex-direction: column; overflow: hidden; backdrop-filter: blur(12px);
+          box-shadow: 0 24px 60px #1c254033;
+        }
         .bosschat-panel.is-open { display: flex; }
+
+        /* desktop: a real full-height column docked to the right edge. The width is the same
+           --chatw app/app/layout.tsx reserves for it, so it never covers the office again. */
         @media (min-width: 900px) {
           .bosschat-bubble, .bosschat-close { display: none !important; }
           .bosschat-panel {
-            display: flex !important;
-            top: 0; bottom: 0 !important; right: 0;
-            /* 268px matches the AI Command Center reference build's chat column exactly, and
-               app/app/layout.tsx reserves the same width via --chatw. */
-            height: 100vh; max-height: 100vh; width: 268px; max-width: 268px;
-            border-radius: 0 !important; border-top: none; border-bottom: none; border-right: none;
+            display: flex; top: 0; bottom: 0; right: 0;
+            height: 100vh; max-height: 100vh;
+            width: var(--chatw, 288px); max-width: var(--chatw, 288px);
+            border-radius: 0; border-top: none; border-bottom: none; border-right: none;
           }
         }
       `}</style>

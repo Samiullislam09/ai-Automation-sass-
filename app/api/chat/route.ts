@@ -2,6 +2,8 @@ import { NextRequest } from "next/server";
 import "@/lib/dns-fix";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
+import { detectChatIntent } from "@/lib/chat-intent";
+import { enqueueAgentJob } from "@/lib/agent-jobs";
 
 /** /api/chat — Mr Lxwa's reply. Build Guide Step 7: real NVIDIA NIM call.
  *
@@ -18,17 +20,17 @@ import { getCurrentTenantId } from "@/lib/supabase/tenant";
  *  onboarding wizard — it's never persisted, so on every fresh login/page load it's back
  *  to [] and Mr Lxwa had nothing real to answer "what do you know about my business?"
  *  with. This queries the tenant's actual saved profile + crawled site data instead. */
-async function loadRealBusinessContext(): Promise<string | null> {
+async function loadRealBusinessContext(): Promise<{ tenantId: string | null; business: string | null }> {
   try {
     const supabase = await createClient();
     const tenantId = await getCurrentTenantId(supabase);
-    if (!tenantId) return null;
+    if (!tenantId) return { tenantId: null, business: null };
 
     const [{ data: tenant }, { data: samplePages }] = await Promise.all([
       supabase.from("tenants").select("website_url, niche, tone_profile, icp_profile, onboarded").eq("id", tenantId).single(),
       supabase.from("site_pages").select("title").eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(6),
     ]);
-    if (!tenant || !tenant.onboarded) return null;
+    if (!tenant || !tenant.onboarded) return { tenantId, business: null };
 
     const tone = (tenant.tone_profile as any) ?? {};
     const icp = (tenant.icp_profile as any) ?? {};
@@ -42,10 +44,10 @@ async function loadRealBusinessContext(): Promise<string | null> {
     if (Array.isArray(tone.topics) && tone.topics.length) facts.push(`content topics=${tone.topics.join(", ")}`);
     if (samplePages?.length) facts.push(`recently read pages=${samplePages.map((p) => p.title).join(", ")}`);
 
-    return facts.length ? facts.join(" · ") : null;
+    return { tenantId, business: facts.length ? facts.join(" · ") : null };
   } catch (e: any) {
     console.error("[chat] failed to load real tenant context:", e.message);
-    return null;
+    return { tenantId: null, business: null };
   }
 }
 
@@ -54,7 +56,9 @@ function systemPrompt(ctx: any, business: string | null): string {
 
 Account: ${ctx.tokens ?? "?"}/${ctx.tokensMax ?? "?"} tokens (${ctx.plan ?? "free"} plan) · ${ctx.awaiting ?? 0} awaiting approval · latest report: ${ctx.report ?? "nothing yet today"} · business: ${business ?? "not onboarded yet"}
 
-You can only inform/explain right now, not take real actions yet — say so if asked. Never invent numbers not given above. Match the user's language (English or Hinglish).`;
+You are the MANAGER, not the writer. You never write an article, blog post or social copy inside this chat — Mr. Keyword researches and Mr. Writer drafts, and the draft lands in the user's Approvals page. If the user asks for content, tell them to say it as an order ("write an article about X") so you can put the team on it; do not produce the content yourself, not even a sample or an outline.
+
+Real actions you CAN start: planning topics and writing articles (the request is enqueued for the real team). Everything else — publishing, social scheduling, email — is not built yet; say so plainly. Never invent numbers not given above. Match the user's language (English or Hinglish).`;
 }
 
 async function askLightning(q: string, ctx: any, business: string | null): Promise<string> {
@@ -106,6 +110,37 @@ function fallback(q: string, ctx: any): string {
   return `I'm having trouble reaching my brain right now — try again in a moment. Meanwhile: **${ctx.awaiting ?? 0}** item(s) await your approval.`;
 }
 
+/** Enqueues the real job an order maps to and describes the pipeline that will now run.
+ *  With a topic we can skip the planner and go straight to Mr. Keyword (chain: true is what
+ *  makes him hand the blueprint to Mr. Writer — see agent-server/src/agents/keyword.ts).
+ *  Without one, Mr Lxwa's planner picks the topics from the business's own data. */
+async function startWork(intent: NonNullable<ReturnType<typeof detectChatIntent>>, tenantId: string): Promise<string> {
+  const topic = intent.kind === "write" ? intent.topic : null;
+
+  const res = topic
+    ? await enqueueAgentJob("keyword", tenantId, { topic, chain: true, taskLabel: `Researching "${topic}"` })
+    : await enqueueAgentJob("boss", tenantId, { count: intent.kind === "plan" ? 3 : 1 });
+
+  if (!res.ok) {
+    return `I couldn't put the team to work: **${res.error}** — so I'm not going to pretend it's running. Nothing was started, and no tokens were used. Try again once the agent server is reachable.`;
+  }
+
+  const head = topic
+    ? `On it — **"${topic}"** is now a real job, not a chat answer.`
+    : intent.kind === "plan"
+      ? `Starting the team now — I'm picking this week's topics from your own niche and the pages we crawled.`
+      : `On it. You didn't name a topic, so I'm choosing one from your niche and the pages we crawled.`;
+
+  const steps = [
+    topic ? `**Mr. Keyword** is pulling real search volume + related queries for it.`
+          : `**Me (Mr Lxwa)** → then **Mr. Keyword** validates each topic with real search data.`,
+    `If the demand is real he builds the blueprint and hands it to **Mr. Writer** — if nobody searches for it, he stops there and tells you why.`,
+    `**Mr. Writer** drafts it, it goes through the quality gate, and lands in **Approvals**. Nothing gets published without you.`,
+  ];
+
+  return `${head}\n\n1. ${steps[0]}\n2. ${steps[1]}\n3. ${steps[2]}\n\nWatch the office below — each room lights up when its turn starts.`;
+}
+
 function wordStream(text: string): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   return new ReadableStream({
@@ -125,7 +160,18 @@ export async function POST(req: NextRequest) {
     return new Response(wordStream(fallback(q, ctx || {})), { headers: { "Content-Type": "text/plain; charset=utf-8" } });
   }
 
-  const business = await loadRealBusinessContext();
+  const { tenantId, business } = await loadRealBusinessContext();
+
+  // ---- ORDERS BEFORE CONVERSATION ------------------------------------------------------
+  // "write me an article" is a job, not a question. Before spending a chat call on it we hand
+  // it to the real queue and answer with what actually started — so the office animation and
+  // the Approvals page match what the chat just claimed. See lib/chat-intent.ts.
+  const intent = detectChatIntent(q);
+  if (intent && tenantId) {
+    const text = await startWork(intent, tenantId);
+    return new Response(wordStream(text), { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+  }
+
 
   // Cheap defense-in-depth on top of chat_template_kwargs.thinking:false above — costs
   // nothing on the (now common) happy path, catches the rare remaining transient failure.
