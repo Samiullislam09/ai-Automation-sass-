@@ -53,20 +53,22 @@ export function detectChatIntent(raw: string): ChatIntent {
 
   if (PLAN_ORDER.test(q)) return { kind: "plan" };
 
-  // Checked BEFORE the write matcher. "Research the keywords but don't write anything" is a
-  // real, common instruction, and treating it as an article order is the worst possible
-  // reading of it — it spends the credits and produces the exact thing that was refused.
-  const refusesWriting = NO_WRITE.test(q);
-  const asksForKeywords = RESEARCH_NOUN.test(q) && RESEARCH_VERB.test(q);
-  if (asksForKeywords && (refusesWriting || !ARTICLE_NOUN.test(q))) {
-    return { kind: "research", topic: extractTopic(q) };
-  }
-  if (refusesWriting) return null;
-
   // A question about articles ("how do you write an article?") must stay a conversation.
   if (QUESTION.test(q)) return null;
   if (STATUS_QUESTION.test(q)) return null;
-  if (!WRITE_VERB.test(q) || !ARTICLE_NOUN.test(q)) return null;
+
+  // Wanting an article means a WRITING word aimed at an article — not merely mentioning one.
+  // "keyword nikal ke do for the next article" mentions an article and asks for nothing to be
+  // written; requiring only ARTICLE_NOUN made that fall through to conversation, and Mr Lxwa
+  // answered "main team ko order nahi de sakta" to a perfectly clear instruction.
+  const refusesWriting = NO_WRITE.test(q);
+  const wantsWriting = !refusesWriting && WRITE_VERB.test(q) && ARTICLE_NOUN.test(q);
+  const asksForKeywords = RESEARCH_NOUN.test(q) && RESEARCH_VERB.test(q);
+
+  // Research wins whenever keywords were asked for and nothing was asked to be written.
+  // "keyword nikalo aur article bhi likho" asks for both, and the write path does both.
+  if (asksForKeywords && !wantsWriting) return { kind: "research", topic: extractTopic(q) };
+  if (!wantsWriting) return null;
 
   return { kind: "write", topic: extractTopic(q) };
 }

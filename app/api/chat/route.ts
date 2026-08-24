@@ -3,6 +3,7 @@ import "@/lib/dns-fix";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
 import { detectChatIntent } from "@/lib/chat-intent";
+import { classifyIntent } from "@/lib/chat-classify";
 import { enqueueAgentJob } from "@/lib/agent-jobs";
 
 /** /api/chat — Mr Lxwa's reply. Build Guide Step 7: real NVIDIA NIM call.
@@ -382,7 +383,10 @@ export async function POST(req: NextRequest) {
   // "write me an article" is a job, not a question. Before spending a chat call on it we hand
   // it to the real queue and answer with what actually started — so the office animation and
   // the Approvals page match what the chat just claimed. See lib/chat-intent.ts.
-  const intent = detectChatIntent(q);
+  // Fast path first: the matcher is instant and right about the obvious phrasings. When it
+  // is unsure, the model decides — that is exactly where the matcher kept being wrong, and
+  // adding a fourth list of verbs to it was never going to end.
+  const intent = detectChatIntent(q) ?? (await classifyIntent(q, history));
   const recentWork = intent ? null : await loadRecentWork(tenantId);
 
   if (intent && tenantId) {
