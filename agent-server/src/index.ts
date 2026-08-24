@@ -13,7 +13,28 @@ const app = express();
 app.use(cors({ origin: env.CORS_ORIGIN.split(",").map((s) => s.trim()) }));
 app.use(express.json());
 
+const STARTED_AT = new Date().toISOString();
+
 app.get("/health", (_req, res) => res.send("ok"));
+
+/** Which commit is actually running here.
+ *
+ *  Railway does not auto-deploy this repo, so "the fix is pushed" and "the fix is live" have
+ *  drifted apart more than once — and the only way to tell was to run a real job and read the
+ *  error wording. One curl answers it now. Railway injects RAILWAY_GIT_COMMIT_SHA itself. */
+app.get("/version", (_req, res) => {
+  const sha = process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || "";
+  res.json({
+    commit: sha ? sha.slice(0, 7) : "unknown",
+    startedAt: STARTED_AT,
+    uptimeSeconds: Math.round(process.uptime()),
+    agents: AGENT_TYPES,
+    // Cheap, honest capability flags — each one is a feature whose absence has previously
+    // been mistaken for a bug in the web app rather than a stale deploy.
+    features: { scheduler: true, keywordAiFallback: true, writerThinkingDisabled: true },
+    tokenGate: !!env.AGENT_SERVER_TOKEN,
+  });
+});
 
 // Enqueue a job — the Next.js app calls this once the real agents are wired in (Steps 9+).
 // Useful right now for smoke-testing the queue/worker/jobs_log framework itself.
