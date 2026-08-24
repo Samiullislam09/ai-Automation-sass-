@@ -95,13 +95,31 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setS(prev => ({ ...prev, user: toUser(u) }));
       if (!u) { setS(prev => ({ ...prev, onboardedChecked: true })); return; }
       try {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from("memberships")
           .select("tenants(onboarded)")
-          .eq("user_id", u.id)
+          // A user with two memberships made maybeSingle() error out, and the error was
+          // ignored — which read as "not onboarded". limit(1) matches getCurrentTenantId().
+          .limit(1)
           .maybeSingle();
-        const onboarded = !!(data as any)?.tenants?.onboarded;
-        setS(prev => ({ ...prev, onboarded, onboardedChecked: true }));
+
+        // "The query failed" is not "this account is new". The redirect lives on the server
+        // now (app/app/layout.tsx), but this flag still drives UI, and inferring false from a
+        // failed read is exactly the mistake that sent finished accounts back to the wizard.
+        if (error) {
+          console.error("[store] onboarded lookup failed:", error.message);
+        } else {
+          const onboarded = !!(data as any)?.tenants?.onboarded;
+          setS(prev => ({ ...prev, onboarded, onboardedChecked: true }));
+        }
+
+        // The team's memory now lives in the DB (migration 010) instead of localStorage,
+        // which signing out deletes — that's why logging out looked like it erased
+        // everything the team had learned.
+        fetch("/api/memory")
+          .then((r) => r.json())
+          .then((d) => { if (d?.ok && Array.isArray(d.facts)) setS(prev => ({ ...prev, memory: d.facts })); })
+          .catch(() => {});
 
         // The plan is fetched separately, NOT added to the select above: `plan` only exists
         // after migration 009, and asking for a missing column fails the whole row read —
@@ -199,6 +217,28 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setTimeout(() => report(`Rejected by you (team will adjust): "${c.title}"`), 0);
     return { content: prev.content.map(x => x.id === id ? { ...x, status: "rejected" } : x) };
   });
+  /** Single writer for the memory list: update the screen immediately, persist behind it,
+   *  and put the old list back if the write fails — so what you see is never a fact that
+   *  quietly failed to save. */
+  const saveMemory = async (facts: Mem[]) => {
+    let previous: Mem[] = [];
+    setS(prev => { previous = prev.memory; return { ...prev, memory: facts }; });
+    try {
+      const res = await fetch("/api/memory", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ facts }),
+      });
+      const data = await res.json();
+      if (!data?.ok) throw new Error(data?.error ?? "save failed");
+      if (Array.isArray(data.facts)) setS(prev => ({ ...prev, memory: data.facts }));
+    } catch (e: any) {
+      console.error("[store] memory not saved:", e?.message);
+      setS(prev => ({ ...prev, memory: previous }));
+      toast("Memory save nahi hua — dobara try karo.");
+    }
+  };
+
   const applyPlan = (plan: string) => { // TODO(backend): Paddle/LemonSqueezy webhook drives this
     // The plan has to reach the DB, not just this browser: agent-server reads tenants.plan to
     // decide the tenant's daily allowance, so a plan that only lived in localStorage meant a
@@ -223,7 +263,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     location.href = "/login";
   };
 
-  const api = { s, patch, toast, act, setAgent, focusOn, report, generate, approve, reject, applyPlan, signOut };
+  const api = { s, patch, toast, act, setAgent, focusOn, report, generate, approve, reject, applyPlan, saveMemory, signOut };
   return (
     <Ctx.Provider value={api}>
       {children}

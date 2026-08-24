@@ -27,7 +27,7 @@ function pillClass(status: string) {
 }
 
 export default function Memory() {
-  const { s, patch, toast, act } = useStore();
+  const { s, toast, act, saveMemory } = useStore();
   const [edit, setEdit] = useState<number | null>(null);
   const [val, setVal] = useState("");
   const [adding, setAdding] = useState(false);
@@ -51,19 +51,21 @@ export default function Memory() {
       .catch(() => setInsights({ ok: false, connected: false }));
   }, []);
 
+  // Every edit goes through saveMemory, which writes to the DB — the list used to live only
+  // in localStorage, so signing out erased it.
   const save = (i: number) => {
-    patch((prev: any) => ({ memory: prev.memory.map((m: any, j: number) => j === i ? { ...m, v: val } : m) }));
+    saveMemory(s.memory.map((m: any, j: number) => j === i ? { ...m, v: val } : m));
     act(`"Noted. All agents realigned."`, "Mr Lxwa");
     toast("Memory updated — team adjusted."); setEdit(null);
   };
   const del = (i: number) => {
     act(`"Forgotten."`, "Mr Lxwa");
-    patch((prev: any) => ({ memory: prev.memory.filter((_: any, j: number) => j !== i) }));
+    saveMemory(s.memory.filter((_: any, j: number) => j !== i));
     toast("Removed.");
   };
   const add = () => {
     if (!nk.trim() || !nv.trim()) return toast("Both fields needed");
-    patch((prev: any) => ({ memory: [...prev.memory, { k: nk.trim(), v: nv.trim() }] }));
+    saveMemory([...s.memory, { k: nk.trim(), v: nv.trim() }]);
     act(`learned something new from you: <b>${nk.trim()}</b>.`, "Mr Lxwa");
     toast("Team memory updated."); setAdding(false); setNk(""); setNv("");
   };
