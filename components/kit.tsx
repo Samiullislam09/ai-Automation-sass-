@@ -47,12 +47,65 @@ export function BossChat() {
   // without this guard, two concurrent "__hello__" streams both write into the same
   // message slot and every word came out doubled ("Salam! Salam!").
 
+  // Chat used to live only in React state: a refresh, or moving between /app pages, threw the
+  // whole conversation away — including the reply that told you which job had just started.
+  // It is persisted now (migration 011), so the panel reopens where you left off.
+  const [convId, setConvId] = useState<string | null>(null);
+  const [convs, setConvs] = useState<{ id: string; title: string | null; updated_at: string }[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+
   useEffect(() => { box.current?.scrollTo(0, 99999); }, [msgs, open]);
+
   useEffect(() => {
     if (helloFired.current) return;
     helloFired.current = true;
-    stream("__hello__");
+    (async () => {
+      try {
+        const r = await fetch("/api/chat/conversations").then((res) => res.json());
+        if (r?.ok && r.conversations?.length) {
+          setConvs(r.conversations);
+          await openConversation(r.conversations[0].id);
+          return;
+        }
+      } catch {
+        // Migration 011 not applied, or offline. Chat still works, it just won't remember.
+      }
+      stream("__hello__");
+    })();
   }, []); // eslint-disable-line
+
+  const refreshConvs = () =>
+    fetch("/api/chat/conversations")
+      .then((r) => r.json())
+      .then((d) => { if (d?.ok) setConvs(d.conversations); })
+      .catch(() => {});
+
+  async function openConversation(id: string) {
+    try {
+      const r = await fetch(`/api/chat/conversations/${id}`).then((res) => res.json());
+      if (!r?.ok) return;
+      setConvId(id);
+      setMsgs(r.messages.map((m: any) => ({ who: m.role === "user" ? "me" : "bot", txt: m.content })));
+      // Reopening a thread must not read every old reply out loud.
+      spokenCount.current = r.messages.length;
+      setShowHistory(false);
+    } catch {}
+  }
+
+  function newChat() {
+    setConvId(null);
+    setMsgs([]);
+    spokenCount.current = 0;
+    setShowHistory(false);
+    // No conversation row is created until you actually say something — same as ChatGPT.
+    stream("__hello__");
+  }
+
+  async function deleteConversation(id: string) {
+    await fetch(`/api/chat/conversations/${id}`, { method: "DELETE" }).catch(() => {});
+    setConvs((c) => c.filter((x) => x.id !== id));
+    if (id === convId) newChat();
+  }
 
   // Speech recognition (mic input) — Chrome/Edge only (webkitSpeechRecognition); silently
   // hide the mic button elsewhere rather than showing something that won't work.
@@ -104,7 +157,11 @@ export function BossChat() {
       .filter((m) => m.txt.trim() && !m.live)
       .slice(-8)
       .map((m) => ({ role: m.who === "me" ? "user" : "assistant", content: m.txt.slice(0, 700) }));
-    const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ q, ctx, history }) });
+    const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ q, ctx, history, conversationId: convId }) });
+    // The server opens (or reopens) the thread and names it on a header, so the rest of the
+    // session keeps writing into the same one without waiting for the stream to finish.
+    const returned = res.headers.get("X-Conversation-Id");
+    if (returned && returned !== convId) setConvId(returned);
     const reader = res.body!.getReader(); const dec = new TextDecoder();
     while (true) {
       const { done, value } = await reader.read(); if (done) break;
@@ -113,6 +170,8 @@ export function BossChat() {
     }
     setMsgs(m => { const c = [...m]; c[c.length - 1] = { ...c[c.length - 1], live: false }; return c; });
     setBusy(false);
+    // Titles are set from the first question, so the list only becomes useful after a turn.
+    if (q !== "__hello__") void refreshConvs();
   }
   const send = () => {
     const v = input.trim(); if (!v || busy) return;
@@ -135,15 +194,37 @@ export function BossChat() {
         <div style={{ display: "flex", gap: 10, alignItems: "center", padding: "13px 15px", borderBottom: "1px solid var(--line)", background: "var(--bg2)" }}>
           <div className="corb" /><div><b style={{ fontSize: 13.5 }}>Mr Lxwa</b><div className="xs acc">● online</div></div>
           <div style={{ flex: 1 }} />
+          <button aria-label="Chat history" title="Past chats" onClick={() => setShowHistory(h => !h)}
+            style={{ background: showHistory ? "var(--ac)" : "none", color: showHistory ? "#ffffff" : "var(--mut)", border: "1px solid " + (showHistory ? "var(--ac)" : "var(--line2)"), borderRadius: 8, width: 26, height: 26, cursor: "pointer", fontSize: 12 }}>🕐</button>
+          <button aria-label="New chat" title="New chat" onClick={newChat}
+            style={{ background: "none", color: "var(--mut)", border: "1px solid var(--line2)", borderRadius: 8, width: 26, height: 26, cursor: "pointer", fontSize: 15, lineHeight: 1 }}>+</button>
           <button aria-label="Toggle voice replies" title="Read replies aloud" onClick={() => setVoiceOut(v => !v)}
             style={{ background: voiceOut ? "var(--ac)" : "none", color: voiceOut ? "#ffffff" : "var(--mut)", border: "1px solid " + (voiceOut ? "var(--ac)" : "var(--line2)"), borderRadius: 8, width: 26, height: 26, cursor: "pointer", fontSize: 13 }}>🔊</button>
           <button className="bosschat-close" onClick={() => setOpen(false)} style={{ background: "none", border: "none", color: "var(--mut)", cursor: "pointer" }}>✕</button>
         </div>
-        <div ref={box} style={{ flex: 1, overflowY: "auto", padding: 13, display: "flex", flexDirection: "column", gap: 9 }}>
-          {/* Mr Lxwa's "I've put the team on it" replies are numbered, multi-line — without the
-              \n -> <br> the whole pipeline collapsed into one unreadable paragraph. */}
-          {msgs.map((m, i) => <div key={i} className={"cm " + m.who + (m.live ? " cursor" : "")} dangerouslySetInnerHTML={{ __html: m.txt.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br/>") }} />)}
-        </div>
+        {/* History replaces the transcript rather than floating over it — the panel is only
+            ~300px wide, and an overlay at that width is a worse list than a full-height one. */}
+        {showHistory ? (
+          <div style={{ flex: 1, overflowY: "auto", padding: 13 }}>
+            {!convs.length && <p className="xs mut" style={{ margin: 0 }}>Koi purani chat nahi hai. Ab se har baat yahan save hoti jayegi.</p>}
+            {convs.map((c) => (
+              <div key={c.id} className={"chist" + (c.id === convId ? " is-on" : "")}>
+                <button onClick={() => openConversation(c.id)}>
+                  <span className="chist-t">{c.title || "New chat"}</span>
+                  <span className="chist-d">{new Date(c.updated_at).toLocaleString()}</span>
+                </button>
+                <span className="chist-x" title="Delete" onClick={() => deleteConversation(c.id)}>✕</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div ref={box} style={{ flex: 1, overflowY: "auto", padding: 13, display: "flex", flexDirection: "column", gap: 9 }}>
+            {/* Mr Lxwa's "I've put the team on it" replies are numbered, multi-line — without the
+                \n -> <br> the whole pipeline collapsed into one unreadable paragraph. */}
+            {msgs.map((m, i) => <div key={i} className={"cm " + m.who + (m.live ? " cursor" : "")} dangerouslySetInnerHTML={{ __html: m.txt.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br/>") }} />)}
+          </div>
+        )}
+
         {/* Live work strip — the same jobs the office is animating, spelled out under the
             conversation so you always know who is busy and on what, without switching screens. */}
         <LiveStrip />

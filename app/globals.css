@@ -226,3 +226,14 @@ input:focus,textarea:focus{border-color:var(--ac)}
 @keyframes blink{50%{opacity:0}}
 
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* Chat history list (components/kit.tsx BossChat). Lives here with the rest of the chat
+   panel's styles — the styled-jsx transform crashes on kit.tsx. */
+.chist{display:flex;align-items:center;gap:6px;border-radius:9px;margin-bottom:4px}
+.chist:hover{background:var(--panel2)}
+.chist.is-on{background:var(--panel2);box-shadow:inset 2px 0 0 var(--ac)}
+.chist button{flex:1;min-width:0;text-align:left;background:none;border:none;cursor:pointer;padding:7px 8px;display:block}
+.chist-t{display:block;font-size:12px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chist-d{display:block;font-size:9.5px;color:var(--mut2);margin-top:2px}
+.chist-x{flex:none;color:var(--mut2);cursor:pointer;padding:0 8px;font-size:11px}
+.chist-x:hover{color:var(--red)}

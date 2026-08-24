@@ -116,6 +116,88 @@ function cleanHistory(raw: unknown): Turn[] {
     .map((t: any) => ({ role: t.role, content: String(t.content).slice(0, 700) }));
 }
 
+
+/* ── Persistence ───────────────────────────────────────────────────────────────────────
+ * Chat used to live only in React state, so a refresh threw away the whole conversation —
+ * including the part where Mr Lxwa told you which job he had just started. Every turn is
+ * now written to chat_messages (migration 011) and the panel reopens where you left off.
+ * All of it is best-effort: if the tables aren't there yet, or a write fails, the reply
+ * still streams. Losing the transcript is bad; losing the answer is worse.
+ */
+
+/** The conversation this turn belongs to, creating one on the first message. */
+async function ensureConversation(tenantId: string, conversationId: string | null): Promise<string | null> {
+  try {
+    const supabase = await createClient();
+    if (conversationId) {
+      const { data } = await supabase
+        .from("chat_conversations")
+        .select("id")
+        .eq("id", conversationId)
+        .eq("tenant_id", tenantId)
+        .maybeSingle();
+      if (data?.id) return data.id;
+      // Unknown id (deleted in another tab, or someone else's) — start a fresh one rather
+      // than writing messages into a conversation this tenant doesn't own.
+    }
+    const { data: { user } } = await supabase.auth.getUser();
+    const { data, error } = await supabase
+      .from("chat_conversations")
+      .insert({ tenant_id: tenantId, user_id: user?.id ?? null })
+      .select("id")
+      .single();
+    if (error) throw new Error(error.message);
+    return data.id;
+  } catch (e: any) {
+    console.error("[chat] could not open a conversation:", e?.message);
+    return null;
+  }
+}
+
+async function saveTurn(tenantId: string, conversationId: string, question: string, answer: string) {
+  try {
+    const supabase = await createClient();
+    await supabase.from("chat_messages").insert([
+      { conversation_id: conversationId, tenant_id: tenantId, role: "user", content: question },
+      { conversation_id: conversationId, tenant_id: tenantId, role: "assistant", content: answer },
+    ]);
+    // The title is the first thing you asked, which is what makes the list scannable.
+    const { data: conv } = await supabase
+      .from("chat_conversations")
+      .select("title")
+      .eq("id", conversationId)
+      .maybeSingle();
+    await supabase
+      .from("chat_conversations")
+      .update({
+        updated_at: new Date().toISOString(),
+        ...(conv?.title ? {} : { title: question.trim().slice(0, 80) }),
+      })
+      .eq("id", conversationId)
+      .eq("tenant_id", tenantId);
+  } catch (e: any) {
+    console.error("[chat] could not save the turn:", e?.message);
+  }
+}
+
+/** History from the database rather than from the client. The browser's copy is fine, but
+ *  it only has what this tab happens to be showing — after a refresh that is nothing. */
+async function loadHistoryFromDb(tenantId: string, conversationId: string): Promise<Turn[]> {
+  try {
+    const supabase = await createClient();
+    const { data } = await supabase
+      .from("chat_messages")
+      .select("role, content")
+      .eq("conversation_id", conversationId)
+      .eq("tenant_id", tenantId)
+      .order("created_at", { ascending: false })
+      .limit(8);
+    return cleanHistory((data ?? []).reverse());
+  } catch {
+    return [];
+  }
+}
+
 async function askLightning(q: string, ctx: any, business: string | null, recentWork: string | null, history: Turn[]): Promise<string> {
   const key = process.env.NVIDIA_API_KEY;
   if (!key) throw new Error("NVIDIA_API_KEY missing");
@@ -215,8 +297,8 @@ function wordStream(text: string): ReadableStream<Uint8Array> {
 }
 
 export async function POST(req: NextRequest) {
-  const { q, ctx, history: rawHistory } = await req.json();
-  const history = cleanHistory(rawHistory);
+  const { q, ctx, history: rawHistory, conversationId } = await req.json();
+  let history = cleanHistory(rawHistory);
 
   // "__hello__" is a silent UI trigger (chat auto-opens with a greeting) — always instant/canned,
   // no need to spend a model call on a fixed message.
@@ -226,6 +308,24 @@ export async function POST(req: NextRequest) {
 
   const { tenantId, business } = await loadRealBusinessContext();
 
+  // Open (or reopen) the thread this turn belongs to. The id goes back on a header so the
+  // panel can keep using it for the rest of the session without waiting for the stream.
+  const convId = tenantId ? await ensureConversation(tenantId, typeof conversationId === "string" ? conversationId : null) : null;
+  if (tenantId && convId) {
+    const stored = await loadHistoryFromDb(tenantId, convId);
+    if (stored.length) history = stored;
+  }
+
+  const reply = (text: string) => {
+    if (tenantId && convId) void saveTurn(tenantId, convId, q, text);
+    return new Response(wordStream(text), {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        ...(convId ? { "X-Conversation-Id": convId } : {}),
+      },
+    });
+  };
+
   // ---- ORDERS BEFORE CONVERSATION ------------------------------------------------------
   // "write me an article" is a job, not a question. Before spending a chat call on it we hand
   // it to the real queue and answer with what actually started — so the office animation and
@@ -234,7 +334,7 @@ export async function POST(req: NextRequest) {
   const recentWork = intent ? null : await loadRecentWork(tenantId);
   if (intent && tenantId) {
     const text = await startWork(intent, tenantId);
-    return new Response(wordStream(text), { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    return reply(text);
   }
 
 
@@ -243,10 +343,10 @@ export async function POST(req: NextRequest) {
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
       const text = await askLightning(q, ctx || {}, business, recentWork, history);
-      return new Response(wordStream(text), { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+      return reply(text);
     } catch (e: any) {
       console.error(`[chat] Lightning call failed (attempt ${attempt}/2):`, e.message);
     }
   }
-  return new Response(wordStream(fallback(q, ctx || {})), { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+  return reply(fallback(q, ctx || {}));
 }
