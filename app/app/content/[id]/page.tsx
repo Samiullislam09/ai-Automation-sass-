@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { renderMarkdown } from "@/lib/md";
 import { useStore } from "@/lib/store";
 
@@ -36,7 +36,17 @@ const STATUS_LABEL: Record<string, string> = {
   rejected: "Rejected",
 };
 
-export default function ArticleReview({ params }: { params: { id: string } }) {
+/** NOTE: the id comes from useParams(), not from a `params` prop.
+ *
+ *  Every other dynamic route in this app (app/app/reports/[id], app/help/[k]) reads it that
+ *  way and renders; this page took the prop and rendered NOTHING — no markup, no error in the
+ *  console, no error boundary hit. A Client Component page that takes `params` is serialised
+ *  into the RSC payload and suspended on, and when that goes wrong the segment resolves to
+ *  nothing at all, silently. Matching the convention that demonstrably works here removes
+ *  that whole failure mode. */
+export default function ArticleReview() {
+  const params = useParams<{ id: string }>();
+  const id = String(params?.id ?? "");
   const { toast, act, report } = useStore();
   const router = useRouter();
 
@@ -59,7 +69,8 @@ export default function ArticleReview({ params }: { params: { id: string } }) {
   const dirty = body !== savedBody || title !== savedTitle;
 
   useEffect(() => {
-    fetch(`/api/content/${params.id}`)
+    if (!id) { setErr("No article id in the URL."); return; }
+    fetch(`/api/content/${id}`)
       .then((r) => r.json())
       .then((d) => {
         if (!d.ok) { setErr(d.error ?? "Could not load this article."); return; }
@@ -71,7 +82,7 @@ export default function ArticleReview({ params }: { params: { id: string } }) {
         setSavedTitle(d.item.title ?? "");
       })
       .catch((e) => setErr(e?.message ?? "Network error."));
-  }, [params.id]);
+  }, [id]);
 
   // Leaving with unsaved edits is almost always a mistake — the browser's own prompt is the
   // only one that can't be missed.
@@ -91,7 +102,7 @@ export default function ArticleReview({ params }: { params: { id: string } }) {
     if (!text || revising) return;
     setRevising(true);
     try {
-      const res = await fetch(`/api/content/${params.id}/revise`, {
+      const res = await fetch(`/api/content/${id}/revise`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ instruction: text, body }),
@@ -120,7 +131,7 @@ export default function ArticleReview({ params }: { params: { id: string } }) {
   const save = async () => {
     setBusy("save");
     try {
-      const res = await fetch(`/api/content/${params.id}`, {
+      const res = await fetch(`/api/content/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ body, title }),
@@ -140,7 +151,7 @@ export default function ArticleReview({ params }: { params: { id: string } }) {
     if (dirty) { toast("Pehle changes save karo, phir publish."); return; }
     setBusy("approve");
     try {
-      const res = await fetch(`/api/content/${params.id}/approve`, { method: "POST" });
+      const res = await fetch(`/api/content/${id}/approve`, { method: "POST" });
       const data = await res.json();
       if (!data.ok) { toast(data.error ?? "Publish failed."); return; }
       act(`"It's live."`, "Mr Lxwa");
@@ -155,7 +166,7 @@ export default function ArticleReview({ params }: { params: { id: string } }) {
   const reject = async () => {
     setBusy("reject");
     try {
-      await fetch(`/api/content/${params.id}/reject`, { method: "POST" });
+      await fetch(`/api/content/${id}/reject`, { method: "POST" });
       toast("Rejected — the team will adjust.");
       router.push("/app/approvals");
     } finally {
