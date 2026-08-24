@@ -85,13 +85,31 @@ const CARDS: Card[] = [
   },
 ];
 
-/** Listed on purpose rather than hidden: people ask where Analytics is, and an empty card
- *  that says "not built yet" is a better answer than a Connect button that does nothing. */
-const PLANNED = [
-  { name: "Google Analytics", why: "Traffic per published article, inside Reports." },
-  { name: "Google Search Console", why: "Real impressions and positions to feed keyword research." },
-  { name: "Google Business Profile", why: "Auto-posting local updates." },
-];
+type GoogleState = {
+  ok: boolean;
+  configured?: boolean;
+  connected?: boolean;
+  email?: string | null;
+  scopes?: string[];
+  selection?: { gscSiteUrl: string | null; ga4PropertyId: string | null; gbpLocationName: string | null };
+  sites?: { siteUrl: string; permission: string }[] | { error: string };
+  properties?: { property: string; displayName: string; account: string }[] | { error: string };
+  locations?: { name: string; title: string; address: string | null }[] | { error: string };
+  lastSync?: string | null;
+  tokenError?: string;
+};
+
+const RETURN_MESSAGE: Record<string, string> = {
+  connected: "",
+  denied: "Google pe permission deny kar di gayi.",
+  bad_state: "Security check fail — dobara try karo (cookie block to nahi hai?).",
+  no_refresh_token: "Google ne refresh token nahi diya. myaccount.google.com/permissions pe ja kar is app ka access hatao, phir dobara connect karo.",
+  not_configured: "GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET set nahi hain.",
+  error: "Google connect nahi ho paya.",
+};
+
+const listOf = <T,>(v: T[] | { error: string } | undefined): T[] => (Array.isArray(v) ? v : []);
+const errorOf = (v: unknown): string | null => (v && !Array.isArray(v) && (v as any).error) || null;
 
 export default function Connect() {
   const { toast } = useStore();
@@ -250,18 +268,7 @@ export default function Connect() {
         })}
       </div>
 
-      <h2 style={{ fontSize: 15, margin: "26px 0 8px" }}>Abhi available nahi</h2>
-      <div className="card" style={{ padding: "13px 16px" }}>
-        {PLANNED.map((p) => (
-          <div key={p.name} style={{ display: "flex", gap: 10, alignItems: "baseline", padding: "5px 0" }}>
-            <b style={{ fontSize: 12.5, minWidth: 168 }}>{p.name}</b>
-            <span className="sm mut">{p.why}</span>
-          </div>
-        ))}
-        <p className="sm mut" style={{ marginTop: 8, fontSize: 11 }}>
-          Ye teeno Google OAuth verification maangte hain — jab tak wo nahi hota, yahan fake Connect button nahi rakha gaya.
-        </p>
-      </div>
+      <GoogleSection onToast={toast} />
 
       <p className="sm mut" style={{ marginTop: 18 }}>
         Kab kya publish ho — wo <Link href="/app/schedule" className="acc">Schedule</Link> me set hota hai.
@@ -280,6 +287,218 @@ export default function Connect() {
         .conn-actions { display: flex; gap: 8px; margin-top: auto; flex-wrap: wrap; }
         .pill { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 7px; }
       `}</style>
+    </>
+  );
+}
+
+/** Google — Search Console, Analytics 4 and Business Profile in one OAuth connection.
+ *
+ *  This card is the reason the agents can stop guessing. Search Console tells us the exact
+ *  searches this site is already shown for and where it ranks; that goes into
+ *  `site_insights` and from there into topic planning, keyword research and the article
+ *  itself. Nothing here invents a number: if Google returns nothing, the card says nothing.
+ */
+function GoogleSection({ onToast }: { onToast: (m: string) => void }) {
+  const [g, setG] = useState<GoogleState | null>(null);
+  const [sel, setSel] = useState({ gscSiteUrl: "", ga4PropertyId: "", gbpLocationName: "" });
+  const [busy, setBusy] = useState("");
+  const [msg, setMsg] = useState("");
+  const [syncResult, setSyncResult] = useState<any>(null);
+
+  const load = () =>
+    fetch("/api/integrations/google")
+      .then((r) => r.json())
+      .then((d: GoogleState) => {
+        setG(d);
+        setSel({
+          gscSiteUrl: d.selection?.gscSiteUrl ?? "",
+          ga4PropertyId: d.selection?.ga4PropertyId ?? "",
+          gbpLocationName: d.selection?.gbpLocationName ?? "",
+        });
+      })
+      .catch(() => setG({ ok: false }));
+
+  useEffect(() => {
+    // Read the OAuth outcome off the URL rather than useSearchParams(), which would force
+    // this whole page behind a Suspense boundary just to show one line of text.
+    const status = new URLSearchParams(window.location.search).get("google");
+    if (status) {
+      setMsg(RETURN_MESSAGE[status] ?? RETURN_MESSAGE.error);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+    load();
+  }, []);
+
+  const syncNow = async (quiet = false) => {
+    setBusy("sync");
+    const res = await fetch("/api/integrations/google/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ force: true }),
+    }).then((r) => r.json()).catch((e) => ({ ok: false, error: e?.message }));
+    setBusy("");
+    setSyncResult(res);
+    if (!quiet) onToast(res.ok ? "Google data refresh ho gaya." : "Refresh fail hua.");
+    load();
+  };
+
+  const saveSelection = async () => {
+    setBusy("save");
+    const res = await fetch("/api/integrations/google", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(sel),
+    }).then((r) => r.json()).catch(() => ({ ok: false }));
+    setBusy("");
+    if (!res.ok) { setMsg(res.error ?? "Save nahi hua."); return; }
+    onToast("Google selection saved.");
+    // The first sync after choosing a property is the whole point of choosing it.
+    void syncNow(true);
+  };
+
+  const disconnect = async () => {
+    setBusy("disc");
+    await fetch("/api/integrations/google", { method: "DELETE" }).catch(() => {});
+    setBusy("");
+    onToast("Google disconnect ho gaya.");
+    setSyncResult(null);
+    load();
+  };
+
+  if (!g) return <p className="sm mut" style={{ marginTop: 26 }}>Google status check ho raha hai…</p>;
+
+  const sites = listOf(g.sites);
+  const properties = listOf(g.properties);
+  const locations = listOf(g.locations);
+  const hasGbpScope = (g.scopes ?? []).some((s) => s.includes("business.manage"));
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+
+  return (
+    <>
+      <h2 style={{ fontSize: 15, margin: "26px 0 8px" }}>Google — Search Console, Analytics, Business Profile</h2>
+
+      <div className="card" style={{ padding: "16px 17px" }}>
+        {msg && <p className="sm" style={{ color: "#ff6b6b", marginTop: 0 }}>{msg}</p>}
+
+        {!g.configured ? (
+          <>
+            <p className="sm mut" style={{ margin: "0 0 8px" }}>
+              Ye feature ban chuka hai, lekin chalane ke liye ek Google Cloud OAuth client chahiye (ek baar ka setup).
+            </p>
+            <ol className="sm mut" style={{ margin: "0 0 8px 18px", lineHeight: 1.7 }}>
+              <li>console.cloud.google.com → naya project → ye APIs enable karo: <b>Search Console API</b>, <b>Google Analytics Admin API</b>, <b>Google Analytics Data API</b>.</li>
+              <li>Credentials → OAuth client ID → Web application. Authorized redirect URI: <code>{origin}/api/integrations/google/callback</code></li>
+              <li>Vercel me <code>GOOGLE_CLIENT_ID</code> aur <code>GOOGLE_CLIENT_SECRET</code> daal kar redeploy karo.</li>
+            </ol>
+            <p className="sm mut" style={{ margin: 0, fontSize: 11 }}>
+              OAuth screen &ldquo;Testing&rdquo; mode me apne hi Google account ke liye turant kaam karta hai — Google verification tab chahiye jab dusre customers ko dena ho.
+            </p>
+          </>
+        ) : !g.connected ? (
+          <>
+            <p className="sm mut" style={{ margin: "0 0 12px", maxWidth: 620 }}>
+              Connect karte hi team ko pata chal jayega ki <b>log asal me kya search karke tumhari site pe aate hain</b>,
+              kaunse keyword page 2 pe atke hain, aur kaunse page traffic la rahe hain. Mr Lxwa phir wahi topics chunta hai
+              jinke liye site pehle se dikh rahi hai — guess ke bajaye evidence.
+            </p>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <a className="btn btn-p" href="/api/integrations/google/start">Connect Google</a>
+              <a className="btn btn-g" href="/api/integrations/google/start?gbp=1">Business Profile bhi jodo</a>
+            </div>
+            <p className="sm mut" style={{ marginTop: 10, fontSize: 11 }}>
+              Sirf read-only access maanga jaata hai. Kuch post ya change nahi hota.
+            </p>
+          </>
+        ) : (
+          <>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+              <span className="st-pub" style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 7 }}>Connected</span>
+              {g.email && <span className="sm mut">{g.email}</span>}
+              {g.lastSync && <span className="sm mut">· last sync {new Date(g.lastSync).toLocaleString()}</span>}
+            </div>
+
+            {g.tokenError && (
+              <p className="sm" style={{ color: "#ff6b6b" }}>
+                {g.tokenError} — <a className="acc" href="/api/integrations/google/start">dobara connect karo</a>
+              </p>
+            )}
+
+            <div className="field">
+              <label>Search Console property (keyword research isi se hoti hai)</label>
+              <select value={sel.gscSiteUrl} onChange={(e) => setSel((s) => ({ ...s, gscSiteUrl: e.target.value }))}>
+                <option value="">— select —</option>
+                {sites.map((s) => <option key={s.siteUrl} value={s.siteUrl}>{s.siteUrl}</option>)}
+              </select>
+              {errorOf(g.sites) && <p className="sm" style={{ color: "#ff6b6b", fontSize: 11 }}>{errorOf(g.sites)}</p>}
+              {!errorOf(g.sites) && !sites.length && (
+                <p className="sm mut" style={{ fontSize: 11 }}>Is Google account pe koi verified Search Console property nahi mili.</p>
+              )}
+            </div>
+
+            <div className="field">
+              <label>Analytics 4 property</label>
+              <select value={sel.ga4PropertyId} onChange={(e) => setSel((s) => ({ ...s, ga4PropertyId: e.target.value }))}>
+                <option value="">— select —</option>
+                {properties.map((p) => (
+                  <option key={p.property} value={p.property}>{p.displayName} ({p.account})</option>
+                ))}
+              </select>
+              {errorOf(g.properties) && <p className="sm" style={{ color: "#ff6b6b", fontSize: 11 }}>{errorOf(g.properties)}</p>}
+            </div>
+
+            {hasGbpScope ? (
+              <div className="field">
+                <label>Business Profile location</label>
+                <select value={sel.gbpLocationName} onChange={(e) => setSel((s) => ({ ...s, gbpLocationName: e.target.value }))}>
+                  <option value="">— select —</option>
+                  {locations.map((l) => <option key={l.name} value={l.name}>{l.title}{l.address ? ` — ${l.address}` : ""}</option>)}
+                </select>
+                {errorOf(g.locations) && <p className="sm mut" style={{ fontSize: 11 }}>{errorOf(g.locations)}</p>}
+              </div>
+            ) : (
+              <p className="sm mut" style={{ fontSize: 11, marginBottom: 10 }}>
+                Business Profile connected nahi hai. <a className="acc" href="/api/integrations/google/start?gbp=1">Ise bhi jodo →</a>{" "}
+                (Google is API ka access alag se approve karta hai — approve na hone tak wo khali rahega.)
+              </p>
+            )}
+
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+              <button className="btn btn-p" disabled={!!busy} onClick={saveSelection}>
+                {busy === "save" ? "Saving…" : "Save & sync"}
+              </button>
+              <button className="btn btn-g" disabled={!!busy} onClick={() => syncNow()}>
+                {busy === "sync" ? "Google se data la rahe hain…" : "Refresh data now"}
+              </button>
+              <button className="btn btn-g" disabled={!!busy} onClick={disconnect}>Disconnect</button>
+            </div>
+
+            {syncResult && (
+              <div style={{ marginTop: 12, fontSize: 12 }}>
+                {syncResult.ok ? (
+                  <>
+                    <p className="sm mut" style={{ margin: 0 }}>
+                      {syncResult.skipped
+                        ? syncResult.reason
+                        : `${syncResult.counts?.queries ?? 0} searches · ${syncResult.counts?.gscPages ?? 0} pages (Search Console) · ${syncResult.counts?.ga4Pages ?? 0} pages (GA4) · ${syncResult.period?.start} → ${syncResult.period?.end}`}
+                    </p>
+                    {syncResult.note && <p className="sm mut" style={{ margin: "4px 0 0" }}>{syncResult.note}</p>}
+                    {syncResult.errors && Object.entries(syncResult.errors).map(([k, v]) => (
+                      <p key={k} className="sm" style={{ color: "#ff6b6b", margin: "4px 0 0" }}>{k}: {String(v)}</p>
+                    ))}
+                  </>
+                ) : (
+                  <p className="sm" style={{ color: "#ff6b6b", margin: 0 }}>{syncResult.error}</p>
+                )}
+              </div>
+            )}
+
+            <p className="sm mut" style={{ marginTop: 12, fontSize: 11 }}>
+              Ye data <Link href="/app/memory" className="acc">Memory</Link> me dikhta hai aur har planning run se pehle
+              apne aap refresh hota hai. Kuch publish ya change nahi kiya jaata — sirf padha jaata hai.
+            </p>
+          </>
+        )}
+      </div>
     </>
   );
 }

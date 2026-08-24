@@ -23,6 +23,9 @@ export type WriterContext = {
   tone?: string | null;
   /** Real crawled pages, used for internal links — never invented URLs. */
   pages?: { title: string; url: string }[];
+  /** Pre-rendered block of measured Search Console / GA4 facts about this site
+   *  (agent-server/src/lib/insights.ts). Empty string when Google isn't connected. */
+  searchEvidence?: string;
 };
 
 export async function writeArticle(topic: string, blueprint?: string, context?: WriterContext): Promise<string> {
@@ -46,6 +49,7 @@ export const WRITING_RULES = [
   "Write for the business's stated audience, in its stated tone.",
   "Use only facts present in the business context or in the blueprint. Never invent statistics, prices, awards, client names or dates.",
   "Link to the business's own crawled pages where genuinely relevant, using their real URLs.",
+  "Never print a Search Console impression, click, position or session count in the article — that data shapes what you write, it is not content for the reader.",
   "Short paragraphs (2-4 sentences), no filler, no 'in today's fast-paced world' openings.",
   "End with one concrete next step the reader can take.",
   "1200-1800 words, starting with a single '# Title' line.",

@@ -3,6 +3,7 @@ import { Agent, type AgentJobData } from "./base.js";
 import { writeArticle, type WriterContext } from "../lib/writer.js";
 import { gateArticle, extractTitle } from "../lib/qualityGate.js";
 import { supabase } from "../supabase.js";
+import { loadInsights, writerBlock } from "../lib/insights.js";
 
 /** Build Guide Step 11 — Mr. Writer drafts the article.
  *  Currently runs on NVIDIA (Lightning tier) as a temporary stand-in for the
@@ -48,6 +49,7 @@ export class WriterAgent extends Agent {
             audience: !!context.audience,
             tone: !!context.tone,
             pages: context.pages?.length ?? 0,
+            searchConsole: !!context.searchEvidence,
           },
         },
       })
@@ -69,9 +71,10 @@ export class WriterAgent extends Agent {
 
 async function loadWriterContext(tenantId: string): Promise<WriterContext> {
   try {
-    const [{ data: tenant }, { data: pages }] = await Promise.all([
+    const [{ data: tenant }, { data: pages }, insights] = await Promise.all([
       supabase.from("tenants").select("name, website_url, niche, tone_profile, icp_profile").eq("id", tenantId).single(),
       supabase.from("site_pages").select("title, url").eq("tenant_id", tenantId).limit(12),
+      loadInsights(tenantId),
     ]);
     const tone = (tenant?.tone_profile as any) ?? {};
     const icp = (tenant?.icp_profile as any) ?? {};
@@ -82,6 +85,7 @@ async function loadWriterContext(tenantId: string): Promise<WriterContext> {
       audience: tone.audience ?? icp.businessType ?? null,
       tone: tone.tone ?? null,
       pages: (pages ?? []).filter((p: any) => p.title && p.url).map((p: any) => ({ title: p.title, url: p.url })),
+      searchEvidence: writerBlock(insights),
     };
   } catch (e: any) {
     // Context is an improvement, not a prerequisite — a lookup failure must not cost the

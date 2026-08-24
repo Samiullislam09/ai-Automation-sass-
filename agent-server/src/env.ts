@@ -21,4 +21,9 @@ export const env = {
   // does not break the moment this ships, but /jobs/:type is a public URL that spends real
   // LLM + DataForSEO credits: set it in BOTH Railway and Vercel and the endpoint locks.
   AGENT_SERVER_TOKEN: process.env.AGENT_SERVER_TOKEN || "",
+  // Base URL of the Next.js app (e.g. https://yourapp.vercel.app). Used to ask it to refresh
+  // Google Search Console / GA4 data before planning — the Google refresh token is encrypted
+  // with a key that only the web side has, so this server never touches it directly.
+  // Needs AGENT_SERVER_TOKEN set on both sides; without both, the refresh is simply skipped.
+  WEB_APP_URL: process.env.WEB_APP_URL || "",
 };

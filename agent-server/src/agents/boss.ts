@@ -3,6 +3,8 @@ import { Agent, type AgentJobData } from "./base.js";
 import { supabase } from "../supabase.js";
 import { completeJson } from "../lib/llm.js";
 import { enqueue } from "../queues.js";
+import { loadInsights, planningBlock } from "../lib/insights.js";
+import { syncGoogleInsights } from "../lib/googleSync.js";
 
 /** Mr Lxwa — the orchestrator. Until now every agent only ran when a human poked an
  *  endpoint, and nothing connected them: Mr. Keyword's research went into jobs_log and
@@ -27,10 +29,16 @@ export class BossAgent extends Agent {
     // (agent-server/src/config/caps.ts) and every one of these becomes a real LLM call.
     const count = Math.min(Math.max(Number((job.data as any).count) || 3, 1), 5);
 
-    const [{ data: tenant }, { data: pages }, { data: existing }] = await Promise.all([
+    // Ask the web app to refresh Search Console / GA4 first, so a scheduled 9am run plans
+    // against this week's numbers rather than whatever was last pulled by hand. Best-effort:
+    // it no-ops when Google isn't connected, and a failure must not stop the plan.
+    await syncGoogleInsights(tenantId);
+
+    const [{ data: tenant }, { data: pages }, { data: existing }, insights] = await Promise.all([
       supabase.from("tenants").select("name, website_url, niche, tone_profile").eq("id", tenantId).single(),
       supabase.from("site_pages").select("title").eq("tenant_id", tenantId).limit(40),
       supabase.from("content_items").select("title").eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(30),
+      loadInsights(tenantId),
     ]);
 
     const pageTitles = (pages ?? []).map((p: any) => p.title).filter(Boolean);
@@ -38,7 +46,7 @@ export class BossAgent extends Agent {
 
     // Nothing to reason from = no plan. The alternative is inventing topics for a business
     // we know nothing about, which is exactly what this product is not supposed to do.
-    if (!tenant?.niche && !pageTitles.length) {
+    if (!tenant?.niche && !pageTitles.length && !insights.connected) {
       return {
         planned: 0,
         reason: "No niche set and no crawled pages yet — run the site crawler (or finish onboarding) before planning content.",
@@ -55,6 +63,9 @@ export class BossAgent extends Agent {
       `Choose exactly ${count} NEW blog topics this business should publish next.`,
       "Rules: each topic must be something their real customers would search for; specific, not generic;",
       "no topic may duplicate or closely paraphrase anything listed above.",
+      insights.connected
+        ? "Because real search data is given above, at least half the topics MUST come from the striking-distance or high-impression lists, quoted closely enough that the article can target that exact query."
+        : "",
       "",
       'Reply with ONLY JSON: {"topics":[{"topic":"...","why":"one short sentence"}]}',
     ].filter(Boolean).join("\n");
@@ -79,6 +90,13 @@ export class BossAgent extends Agent {
       });
     }
 
-    return { planned: topics.length, topics };
+    return {
+      planned: topics.length,
+      topics,
+      // Recorded in jobs_log so the dashboard can say WHY these topics, not just which.
+      groundedIn: insights.connected
+        ? { source: "google-search-console", period: insights.period, strikingDistance: insights.strikingDistance.length }
+        : { source: "site-crawl-and-niche" },
+    };
   }
 }
