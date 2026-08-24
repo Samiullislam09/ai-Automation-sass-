@@ -12,22 +12,16 @@ import { AGENTS, useStore, type AgentState } from "@/lib/store";
 // connection tubes, and chai-wala's idle-room picker all iterate AGENTS/ROOMS already, so
 // adding entries here is the only change needed to grow the office.
 const ROOMS: Record<string, { cx: number; cy: number; w: number; h: number }> = {
-  kw:        { cx: 230, cy: 170, w: 210, h: 160 },
-  boss:      { cx: 600, cy: 170, w: 320, h: 200 },
-  writer:    { cx: 970, cy: 170, w: 210, h: 160 },
-  image:     { cx: 150, cy: 430, w: 190, h: 150 },
-  seo:       { cx: 375, cy: 430, w: 190, h: 150 },
-  social:    { cx: 600, cy: 430, w: 190, h: 150 },
-  reply:     { cx: 825, cy: 430, w: 190, h: 150 },
-  email:     { cx: 1050, cy: 430, w: 190, h: 150 },
-  analytics: { cx: 150, cy: 680, w: 190, h: 150 },
-  story:     { cx: 375, cy: 680, w: 190, h: 150 },
-  qa:        { cx: 600, cy: 680, w: 190, h: 150 },
-  publish:   { cx: 825, cy: 680, w: 190, h: 150 },
-  backup:    { cx: 1050, cy: 680, w: 190, h: 150 },
+  // Five rooms, laid out big enough to actually read on a laptop: Mr Lxwa in the middle of the
+  // top row with the two researchers either side, and the two post-writing stages below.
+  kw:      { cx: 195, cy: 250, w: 300, h: 215 },
+  boss:    { cx: 600, cy: 215, w: 420, h: 250 },
+  writer:  { cx: 1005, cy: 250, w: 300, h: 215 },
+  qa:      { cx: 355, cy: 595, w: 330, h: 230 },
+  publish: { cx: 845, cy: 595, w: 330, h: 230 },
 };
-const STALL = { cx: 600, cy: 870 };
-const VB_W = 1200, VB_H = 960;
+const STALL = { cx: 600, cy: 615 };
+const VB_W = 1200, VB_H = 800;
 const CLOUDS = [[120, 70, 1.1], [520, 45, 0.8], [900, 100, 1.3], [300, 140, 0.7], [1050, 170, 0.9]];
 
 const BOSS_LINES = [
@@ -40,19 +34,11 @@ const BOSS_LINES = [
 /** Free-text → agent id, so the chat widget knows which room to focus the camera on. */
 export function agentIdFromText(text: string): string | null {
   const l = text.toLowerCase();
-  if (/\bwriter\b|\barticle\b|\blikho\b|\bwrite\b/.test(l)) return "writer";
-  if (/\bkeyword\b|\bresearch\b|\branking\b/.test(l)) return "kw";
-  if (/\bimage\b|\bphoto\b|\bgraphic\b/.test(l)) return "image";
-  if (/\bstory\b|\bvisual\b|\bdesign\b/.test(l)) return "story";
-  if (/\bsocial\b|\bpost\b|\binstagram\b|\bfacebook\b|\blinkedin\b/.test(l)) return "social";
-  if (/\breply\b|\bcomment\b/.test(l)) return "reply";
-  if (/\bemail\b|\boutreach\b/.test(l)) return "email";
-  if (/\banalytics\b|\bstats\b|\btraffic\b/.test(l)) return "analytics";
-  if (/\bqa\b|\bquality\b|\breview\b/.test(l)) return "qa";
+  if (/\bwriter\b|\bartic\w*\b|\blikho\b|\bwrite\b|\bdraft\b/.test(l)) return "writer";
+  if (/\bkeyword\b|\bresearch\b|\branking\b|\bsearch volume\b/.test(l)) return "kw";
+  if (/\bqa\b|\bquality\b|\breview\b|\bgate\b/.test(l)) return "qa";
   if (/\bpublish\b|\bwordpress\b/.test(l)) return "publish";
-  if (/\bbackup\b/.test(l)) return "backup";
-  if (/\bseo\b|\baudit\b|\bsite\b/.test(l)) return "seo";
-  if (/\blxwa\b|\bboss\b|\bmain ai\b|\borchestrat/.test(l)) return "boss";
+  if (/\blxwa\b|\bboss\b|\bmain ai\b|\borchestrat|\bplan\b/.test(l)) return "boss";
   return null;
 }
 
@@ -127,9 +113,9 @@ function RoomTag({ name, task, st }: { name: string; task: string; st: AgentStat
   return (
     <div style={{ display: "flex", justifyContent: "center" }}>
       <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 9, padding: "5px 11px", whiteSpace: "nowrap", boxShadow: "0 6px 16px #00000033" }}>
-        <span style={{ width: 6, height: 6, borderRadius: "50%", background: dot, boxShadow: st !== "o" ? `0 0 6px ${dot}` : "none", flex: "none" }} />
-        <span style={{ fontSize: 11, fontWeight: 700, color: "var(--ink)" }}>{name}</span>
-        <span style={{ fontSize: 9.5, color: "var(--mut)" }}>{task}</span>
+        <span style={{ width: 7, height: 7, borderRadius: "50%", background: dot, boxShadow: st !== "o" ? `0 0 7px ${dot}` : "none", flex: "none" }} />
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--ink)" }}>{name}</span>
+        <span style={{ fontSize: 11, color: "var(--mut)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 150 }}>{task}</span>
       </div>
     </div>
   );
@@ -314,9 +300,9 @@ export default function Office({ demo = false, solo = null, onSelect, flash = nu
                   </g>
                 ) : (
                   <>
-                    <g transform={`translate(${r.cx - r.w / 2 + 30},${r.cy - r.h / 2 + 34}) scale(0.85)`} opacity={dim * 0.9}>{plant()}</g>
-                    <g transform={`translate(${r.cx + r.w / 2 - 30},${r.cy - r.h / 2 + 30}) scale(0.75)`} opacity={dim * 0.9}>{bookshelf()}</g>
-                    <g transform={`translate(${r.cx},${r.cy + r.h / 2 - 46})`} opacity={dim} style={{ transition: "opacity .4s" }}>
+                    <g transform={`translate(${r.cx - r.w / 2 + 40},${r.cy - r.h / 2 + 46}) scale(1.2)`} opacity={dim * 0.9}>{plant()}</g>
+                    <g transform={`translate(${r.cx + r.w / 2 - 40},${r.cy - r.h / 2 + 42}) scale(1.05)`} opacity={dim * 0.9}>{bookshelf()}</g>
+                    <g transform={`translate(${r.cx},${r.cy + r.h / 2 - 62}) scale(1.35)`} opacity={dim} style={{ transition: "opacity .4s" }}>
                       <Desk working={st.st === "w"} />
                       <g transform="translate(0,-58)"><Character color={a.c} working={st.st === "w"} /></g>
                     </g>
@@ -341,7 +327,7 @@ export default function Office({ demo = false, solo = null, onSelect, flash = nu
                   </foreignObject>
                 )}
 
-                <foreignObject x={r.cx - 100} y={r.cy - r.h / 2 - 34} width="200" height="30">
+                <foreignObject x={r.cx - 140} y={r.cy - r.h / 2 - 38} width="280" height="34">
                   <RoomTag name={a.name} task={st.task} st={st.st} />
                 </foreignObject>
               </g>

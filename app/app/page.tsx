@@ -76,19 +76,8 @@ export default function Dashboard() {
 
   return (
     <div className="dash-wrap">
-      {/* Office first: it is the point of this screen. The counters are a summary, so they
-          read better underneath it. */}
-      <div className="dash-bar">
-        <button className="runbtn" onClick={runTeam} disabled={running}>
-          {running ? "Starting…" : "▶ Run the team"}
-        </button>
-        <span className="barnote">
-          {liveErr
-            ? <span className="err">{liveErr}</span>
-            : runMsg ?? "Live — click any agent to watch what it is doing."}
-        </span>
-      </div>
-
+      {/* The office owns the first screen: nothing above it, nothing cropping it. Scroll for
+          the counters and the controls. */}
       <div className="dash-office">
         <Office solo={selected} onSelect={setSelected} flash={flash} />
         {selected && <AgentStage id={selected} onClose={() => setSelected(null)} />}
@@ -106,29 +95,32 @@ export default function Dashboard() {
         ))}
       </div>
 
+      <div className="dash-bar">
+        <button className="runbtn" onClick={runTeam} disabled={running}>
+          {running ? "Starting…" : "▶ Run the team"}
+        </button>
+        <span className="barnote">
+          {liveErr
+            ? <span className="err">{liveErr}</span>
+            : runMsg ?? "Click any agent in the office to watch what it is doing."}
+        </span>
+      </div>
+
       <style jsx>{`
-        .dash-wrap { position: absolute; inset: 0; display: flex; flex-direction: column; }
+        /* The office fills the first viewport; everything else is below the fold. --topbar is
+           the /app header's height (app/app/layout.tsx), so the frame lands exactly on the
+           fold instead of guessing. dvh, not vh, so mobile browser chrome can't crop it. */
+        .dash-wrap { display: flex; flex-direction: column; min-height: 100%; }
 
-        .dash-bar { display: flex; align-items: center; gap: 12px; flex: none;
-                    padding: 14px clamp(14px, 2.4vw, 26px) 10px; min-width: 0; }
-        .runbtn { flex: none; border: 1px solid var(--ac); background: var(--ac); color: #fff;
-                  font-size: 12px; font-weight: 700; padding: 8px 14px; border-radius: 9px;
-                  cursor: pointer; transition: background .18s, transform .18s, opacity .18s; }
-        .runbtn:hover:not(:disabled) { background: var(--ac-d); transform: translateY(-1px); }
-        .runbtn:disabled { opacity: .6; cursor: default; }
-        .barnote { font-size: 11px; color: var(--mut); min-width: 0; overflow: hidden;
-                   text-overflow: ellipsis; white-space: nowrap; }
-        .err { color: var(--amb); }
-
-        /* The office must never be cropped: the SVG inside uses preserveAspectRatio="meet",
-           and this frame keeps enough height for the whole scene to fit. */
-        .dash-office { flex: 1; position: relative; min-height: 300px;
-                       margin: 0 clamp(14px, 2.4vw, 26px) clamp(12px, 1.6vw, 16px);
+        .dash-office { position: relative; flex: none;
+                       height: calc(100dvh - var(--topbar, 60px) - 28px);
+                       min-height: 360px;
+                       margin: 14px clamp(12px, 2.2vw, 24px) 0;
                        border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
                        background: var(--bg2); }
 
-        .dash-stats { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px;
-                      padding: 0 clamp(14px, 2.4vw, 26px) clamp(14px, 2.4vw, 22px); flex: none; }
+        .dash-stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px;
+                      padding: 14px clamp(12px, 2.2vw, 24px) 0; flex: none; }
         .dstat { background: var(--panel); border: 1px solid var(--line); border-radius: 11px;
                  padding: 11px 12px; display: flex; align-items: center; gap: 10px; min-width: 0;
                  transition: transform .2s, border-color .2s;
@@ -141,12 +133,24 @@ export default function Dashboard() {
              white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         @keyframes dstat-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 
-        @media (max-width: 1400px) { .dash-stats { grid-template-columns: repeat(4, 1fr); } }
-        @media (max-width: 860px) {
-          .dash-wrap { position: relative; inset: auto; height: 100%; }
-          .dash-stats { grid-template-columns: repeat(2, 1fr); padding: 0 14px 14px; }
-          .dash-bar { padding: 12px 14px 10px; }
-          .dash-office { margin: 0 14px 12px; min-height: 340px; }
+        .dash-bar { display: flex; align-items: center; gap: 12px; flex: none; flex-wrap: wrap;
+                    padding: 14px clamp(12px, 2.2vw, 24px) clamp(16px, 2.2vw, 24px); min-width: 0; }
+        .runbtn { flex: none; border: 1px solid var(--ac); background: var(--ac); color: #fff;
+                  font-size: 12px; font-weight: 700; padding: 9px 15px; border-radius: 9px;
+                  cursor: pointer; transition: background .18s, transform .18s, opacity .18s; }
+        .runbtn:hover:not(:disabled) { background: var(--ac-d); transform: translateY(-1px); }
+        .runbtn:disabled { opacity: .6; cursor: default; }
+        .barnote { font-size: 11px; color: var(--mut); min-width: 0; flex: 1;
+                   overflow: hidden; text-overflow: ellipsis; }
+        .err { color: var(--amb); }
+
+        @media (max-width: 1100px) { .dash-stats { grid-template-columns: repeat(3, 1fr); } }
+        @media (max-width: 720px) {
+          .dash-stats { grid-template-columns: repeat(2, 1fr); padding: 12px 12px 0; }
+          .dash-office { height: calc(100dvh - var(--topbar, 56px) - 24px); min-height: 320px;
+                         margin: 12px 12px 0; }
+          .dash-bar { padding: 12px; }
+          .barnote { flex: 1 0 100%; white-space: normal; }
         }
       `}</style>
     </div>

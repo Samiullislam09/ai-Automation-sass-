@@ -222,9 +222,9 @@ function describeJob(jobAgent: string, status: string, detail: any): { summary: 
       r?.searchVolume != null ? `${r.keyword} — ${r.searchVolume}/mo` : String(r?.keyword ?? "")
     ).filter(Boolean);
 
-    if (detail.searchDataAvailable === false) {
+    if (detail.source === "ai" || detail.searchDataAvailable === false) {
       return {
-        summary: `Live keyword data was unavailable (${detail.searchDataError ?? "provider error"}), so the topic went to Mr. Writer grounded in your site profile instead.`,
+        summary: `DataForSEO was unavailable (${detail.searchDataError ?? "provider error"}), so these came from the AI as customer questions — suggestions, not measured volumes — and the topic still went to Mr. Writer.`,
         items,
       };
     }

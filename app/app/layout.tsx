@@ -146,7 +146,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
            10% is ~100px on a 1024px laptop — unreadable for a conversation — so it's 10vw
            with a 272px floor and a 340px ceiling: the office keeps ~75-85% of the width and
            the chat text still wraps sanely. */
-        .appshell { --sbw: 72px; --chatw: clamp(272px, 10vw, 340px); }
+        .appshell { --sbw: 72px; --chatw: clamp(272px, 10vw, 340px); --topbar: 60px; }
         .appshell.nav-open { --sbw: 244px; }
         .shell { display: grid; grid-template-columns: var(--sbw) 1fr; height: 100vh;
                  transition: grid-template-columns .45s cubic-bezier(.55,.06,.25,1); }
@@ -238,7 +238,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
         /* ---- main ---- */
         .appmain { flex: 1; min-height: 0; overflow-y: auto; padding: 22px clamp(14px,2.4vw,26px) 26px; }
-        .appmain.is-dash { padding: 0; overflow: hidden; position: relative; }
+        /* The dashboard scrolls now: the office takes the first screenful, the counters and
+           the controls sit under the fold. */
+        .appmain.is-dash { padding: 0; overflow-y: auto; position: relative; }
         /* The dashboard's own padding is 0 (the office fills it edge to edge), but it still has
            to keep clear of the chat dock — without this the office ran underneath it. */
         @media (min-width: 900px) {
@@ -255,8 +257,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           .sidedesk { display: none !important; }
           .col { height: auto; min-height: 100vh; }
           .appmain { padding: 16px 14px 96px !important; height: auto !important; }
-          .appmain.is-dash { padding: 0 0 76px !important; overflow: visible; height: 78vh; }
+          .appmain.is-dash { padding: 0 0 76px !important; overflow-y: auto; height: auto; }
           .topbar { padding: 11px 14px 10px; }
+          .appshell { --topbar: 56px; }
           .hello { font-size: 15px; }
           .mnavbar { display: flex !important; }
         }

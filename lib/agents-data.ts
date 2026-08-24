@@ -7,23 +7,29 @@
  *  throws the moment server code touches it (here: STORE_AGENTS.filter(...)). Keeping this one
  *  array in a plain module is the fix; do not move it back into store.tsx.
  *
- * "live" agents have real backend wiring (agent-server queue jobs, see agent-server/src/agents/).
- * The rest are visual roster slots for now (roadmap placeholders) — shown in the office same as
- * the reference "AI Command Center" layout, but their status stays "idle"/decorative until a real
- * agent is built for them. Not faked as working; see Office.tsx's room tag for how this is signaled.
+ * THE TEAM IS THE FIVE AGENTS THAT ACTUALLY EXIST. The office used to show thirteen — eight of
+ * them permanently asleep with "Coming soon" over their heads, which made a real run look like
+ * a mostly-dead building and left no room on screen for the ones doing the work. The roadmap
+ * names still live below in ROADMAP, so nothing is lost, but they are not staff until they have
+ * an agent-server implementation and a queue.
  */
 export const AGENTS = [
-  { id: "boss",      name: "Mr Lxwa",       role: "Orchestrator",       ico: "🧠", c: "#7c5cff", live: true },
-  { id: "kw",        name: "Mr. Keyword",   role: "Keyword Research",   ico: "🔎", c: "#6ea8ff", live: true },
-  { id: "writer",    name: "Mr. Writer",    role: "Article Writer",     ico: "✍️", c: "#b48bff", live: true },
-  { id: "image",     name: "Mr. Image",     role: "Image Generation",   ico: "🖼️", c: "#ff8fb3", live: false },
-  { id: "seo",       name: "Mr. SEO",       role: "SEO & Site Care",    ico: "📈", c: "#7ee787", live: false }, // agent-server/src/agents/seo.ts is still a stub — not real yet
-  { id: "social",    name: "Miss Social",   role: "Social Media",       ico: "📣", c: "#ffb95e", live: false }, // agent-server/src/agents/social.ts is still a stub — not real yet
-  { id: "reply",     name: "Mr. Reply",     role: "Comment Replies",    ico: "💬", c: "#5ec9d6", live: false },
-  { id: "email",     name: "Mr. Email",     role: "Email Outreach",     ico: "✉️", c: "#f5c451", live: false },
-  { id: "analytics", name: "Miss Analytics",role: "Analytics",          ico: "📊", c: "#6ea8ff", live: false },
-  { id: "story",     name: "Mr. Story",     role: "Web Stories",        ico: "🎨", c: "#ff8fb3", live: false },
-  { id: "qa",        name: "Mr. QA",        role: "Quality Review",     ico: "🔍", c: "#e08a3c", live: true }, // powers the real quality gate (Step 12)
-  { id: "publish",   name: "Mr. Publish",   role: "WordPress Publish",  ico: "📤", c: "#a78bfa", live: true }, // powers real WordPress/webhook publish (Step 12)
-  { id: "backup",    name: "Mr. Backup",    role: "Backups",            ico: "🗄️", c: "#8b93b8", live: false },
+  { id: "boss",    name: "Mr Lxwa",     role: "Orchestrator",      ico: "🧠", c: "#7c5cff", live: true },
+  { id: "kw",      name: "Mr. Keyword", role: "Keyword Research",  ico: "🔎", c: "#6ea8ff", live: true },
+  { id: "writer",  name: "Mr. Writer",  role: "Article Writer",    ico: "✍️", c: "#b48bff", live: true },
+  { id: "qa",      name: "Mr. QA",      role: "Quality Review",    ico: "🔍", c: "#e08a3c", live: true }, // the real quality gate (Step 12)
+  { id: "publish", name: "Mr. Publish", role: "WordPress Publish", ico: "📤", c: "#a78bfa", live: true }, // real WordPress/webhook publish (Step 12)
+];
+
+/** Not staff yet — no agent-server implementation, no queue, so they get no room and are not
+ *  counted anywhere. Kept here so the roadmap is visible in code rather than in someone's head. */
+export const ROADMAP = [
+  { id: "image",     name: "Mr. Image",      role: "Image Generation" },
+  { id: "seo",       name: "Mr. SEO",        role: "SEO & Site Care" },
+  { id: "social",    name: "Miss Social",    role: "Social Media" },
+  { id: "reply",     name: "Mr. Reply",      role: "Comment Replies" },
+  { id: "email",     name: "Mr. Email",      role: "Email Outreach" },
+  { id: "analytics", name: "Miss Analytics", role: "Analytics" },
+  { id: "story",     name: "Mr. Story",      role: "Web Stories" },
+  { id: "backup",    name: "Mr. Backup",     role: "Backups" },
 ];
