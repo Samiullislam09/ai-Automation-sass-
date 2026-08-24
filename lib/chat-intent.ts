@@ -22,6 +22,10 @@ const WRITE_VERB = /\b(write|writing|draft|create|make|generate|publish|likh|lik
 // queued draft when in fact nothing had been queued at all.
 const ARTICLE_NOUN = /\b(artic\w*|artcile|artikel|blogs?|posts?|content|piece)\b/i;
 const PLAN_ORDER = /\b(run the team|start the team|start team|team ko chalao|kaam shuru|start working|plan (this week|the week|content|topics)|get to work)\b/i;
+// "kya update hai, article likha?" is someone checking on work already ordered. It must
+// never re-queue the job — that would quietly spend the credits again and stack up
+// duplicate drafts every time the user asked how it was going.
+const STATUS_QUESTION = /\b(update|status|progress|kya hua|kya huwa|kiya hua|kiya huwa|ho gaya|hogaya|likha|likh diya|done|finished|ready|kahan tak|kitna hua)\b/i;
 
 export function detectChatIntent(raw: string): ChatIntent {
   const q = (raw ?? "").trim();
@@ -31,6 +35,7 @@ export function detectChatIntent(raw: string): ChatIntent {
 
   // A question about articles ("how do you write an article?") must stay a conversation.
   if (QUESTION.test(q)) return null;
+  if (STATUS_QUESTION.test(q)) return null;
   if (!WRITE_VERB.test(q) || !ARTICLE_NOUN.test(q)) return null;
 
   return { kind: "write", topic: extractTopic(q) };

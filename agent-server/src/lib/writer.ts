@@ -28,6 +28,11 @@ export type WriterContext = {
   searchEvidence?: string;
 };
 
+/** A full article is the longest single generation in this product. 60s was the old value
+ *  and it was simply too tight — every retry burned another minute and the user watched
+ *  three identical timeouts stack up in the office. */
+const WRITER_TIMEOUT_MS = Number(process.env.WRITER_TIMEOUT_MS) || 180_000;
+
 export async function writeArticle(topic: string, blueprint?: string, context?: WriterContext): Promise<string> {
   const provider = process.env.WRITER_PROVIDER || "nvidia";
   switch (provider) {
@@ -84,12 +89,24 @@ async function writeWithNvidia(topic: string, blueprint?: string, context?: Writ
     `\nOutput markdown only — no preamble, no explanation of what you wrote.`,
   ].filter(Boolean).join("\n");
 
-  const res = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+  let res: Response;
+  try {
+    res = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
     body: JSON.stringify({
       model: "nvidia/nemotron-3.5-lightning-30b-a3b",
       stream: false,
+      // THE reason articles kept dying on "The operation was aborted due to timeout".
+      // "detailed thinking off" in the system prompt is only a soft hint to this Nemotron
+      // hybrid-reasoning model — it happily ignored it and spent minutes generating
+      // reasoning_content before writing a word. chat_template_kwargs.thinking:false is the
+      // actual API-level switch. The chat route found this months ago; the writer, which is
+      // by far the longest generation in the product, never got it. DO NOT remove.
+      chat_template_kwargs: { thinking: false },
+      // An 1800-word article is roughly 2,600 tokens; without an explicit ceiling the
+      // endpoint's default could cut the draft off mid-sentence.
+      max_tokens: 4096,
       messages: [
         {
           role: "system",
@@ -100,12 +117,26 @@ async function writeWithNvidia(topic: string, blueprint?: string, context?: Writ
         { role: "user", content: prompt },
       ],
     }),
-    signal: AbortSignal.timeout(60000),
-  });
+    signal: AbortSignal.timeout(WRITER_TIMEOUT_MS),
+    });
+  } catch (e: any) {
+    // undici's own wording ("The operation was aborted due to timeout") gave no clue which
+    // call died or how long it waited — that message went straight to the user's dashboard.
+    if (e?.name === "TimeoutError" || /aborted|timeout/i.test(e?.message ?? "")) {
+      throw new Error(`Mr. Writer's model did not answer within ${Math.round(WRITER_TIMEOUT_MS / 1000)}s. The draft was not written — nothing was saved.`);
+    }
+    throw e;
+  }
 
   if (!res.ok) throw new Error(`NVIDIA writer call failed (${res.status}): ${(await res.text().catch(() => "")).slice(0, 300)}`);
   const data: any = await res.json();
-  const text = data?.choices?.[0]?.message?.content;
+  const choice = data?.choices?.[0];
+  const text = choice?.message?.content;
   if (!text) throw new Error("NVIDIA writer: no content in response");
+  // A truncated draft passes nothing useful downstream — it would fail the quality gate and
+  // land in Approvals as a half article. Fail loudly here instead.
+  if (choice?.finish_reason === "length") {
+    throw new Error("Mr. Writer's draft was cut off by the model's token limit before it finished.");
+  }
   return text;
 }

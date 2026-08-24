@@ -96,7 +96,15 @@ export function BossChat() {
     setBusy(true);
     setMsgs(m => [...m, { who: "bot", txt: "", live: true }]);
     const ctx = store ? { tokens: store.s.tokens, tokensMax: store.s.tokensMax, plan: store.s.plan, memory: store.s.memory, awaiting: store.s.content.filter((c: any) => c.status === "awaiting").length, report: store.s.reports[0]?.lines?.slice(-1)[0]?.s } : {};
-    const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ q, ctx }) });
+    // The conversation so far. Without this every message was a cold start: ask for an
+    // article, then ask "kya update hai?" one message later and Mr Lxwa had no idea he had
+    // just been asked for anything. The empty placeholder bubble added a line above is
+    // dropped, and old turns are trimmed so a long session can't grow the prompt forever.
+    const history = msgs
+      .filter((m) => m.txt.trim() && !m.live)
+      .slice(-8)
+      .map((m) => ({ role: m.who === "me" ? "user" : "assistant", content: m.txt.slice(0, 700) }));
+    const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ q, ctx, history }) });
     const reader = res.body!.getReader(); const dec = new TextDecoder();
     while (true) {
       const { done, value } = await reader.read(); if (done) break;

@@ -59,6 +59,12 @@ Account: ${ctx.tokens ?? "?"}/${ctx.tokensMax ?? "?"} tokens (${ctx.plan ?? "fre
 WHAT THE TEAM ACTUALLY DID (real jobs_log rows — the only work you may claim happened):
 ${recentWork ?? "nothing yet — no jobs have run for this account."}
 
+IF THE USER IS ASKING ABOUT PROGRESS — "kya update hai", "article likha?", "what happened", "is it done", "any news" — that is a STATUS question, not an order. Answer it from the list above and nowhere else:
+- The newest matching row wins. Say what it was and whether it finished.
+- If it FAILED, say so first and quote the reason in plain words. Never answer a status question by asking the user to re-issue the order when the list shows the job already ran or failed — that is the single most annoying thing you can do.
+- If the list has nothing about what they're asking, say plainly that nothing has run for it yet.
+The conversation above is yours to remember: if you already told the user you put the team on something, do not act as if you never heard of it.
+
 You are the MANAGER, not the writer. You never write an article, blog post or social copy inside this chat — Mr. Keyword researches and Mr. Writer drafts, and the draft lands in the user's Approvals page. If the user asks for content, tell them to say it as an order ("write an article about X") so you can put the team on it; do not produce the content yourself, not even a sample or an outline.
 
 Real actions you CAN start: planning topics and writing articles. BUT NOT IN THIS REPLY — if you are answering, the order was not recognised, so NOTHING has been queued. Never say "queued", "enqueued", "I've started it" or "Mr. Writer is on it" here; instead ask the user to type it as a plain order, exactly like: write an article about <topic>. Everything else — publishing, social scheduling, email — is not built yet; say so plainly. Never invent numbers or work not listed above. Match the user's language (English or Hinglish).`;
@@ -94,7 +100,20 @@ async function loadRecentWork(tenantId: string | null): Promise<string | null> {
   }
 }
 
-async function askLightning(q: string, ctx: any, business: string | null, recentWork: string | null): Promise<string> {
+type Turn = { role: "user" | "assistant"; content: string };
+
+/** The chat had no memory at all: every POST sent one question and nothing else, so asking
+ *  for an article and then asking "kya update hai?" produced a reply that had never heard of
+ *  the article. Trimmed and sanitised here rather than trusted from the client. */
+function cleanHistory(raw: unknown): Turn[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((t: any) => (t?.role === "user" || t?.role === "assistant") && typeof t?.content === "string" && t.content.trim())
+    .slice(-8)
+    .map((t: any) => ({ role: t.role, content: String(t.content).slice(0, 700) }));
+}
+
+async function askLightning(q: string, ctx: any, business: string | null, recentWork: string | null, history: Turn[]): Promise<string> {
   const key = process.env.NVIDIA_API_KEY;
   if (!key) throw new Error("NVIDIA_API_KEY missing");
 
@@ -115,6 +134,7 @@ async function askLightning(q: string, ctx: any, business: string | null, recent
       max_tokens: 1024,
       messages: [
         { role: "system", content: systemPrompt(ctx, business, recentWork) },
+        ...history,
         { role: "user", content: q },
       ],
     }),
@@ -185,7 +205,8 @@ function wordStream(text: string): ReadableStream<Uint8Array> {
 }
 
 export async function POST(req: NextRequest) {
-  const { q, ctx } = await req.json();
+  const { q, ctx, history: rawHistory } = await req.json();
+  const history = cleanHistory(rawHistory);
 
   // "__hello__" is a silent UI trigger (chat auto-opens with a greeting) — always instant/canned,
   // no need to spend a model call on a fixed message.
@@ -211,7 +232,7 @@ export async function POST(req: NextRequest) {
   // nothing on the (now common) happy path, catches the rare remaining transient failure.
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      const text = await askLightning(q, ctx || {}, business, recentWork);
+      const text = await askLightning(q, ctx || {}, business, recentWork, history);
       return new Response(wordStream(text), { headers: { "Content-Type": "text/plain; charset=utf-8" } });
     } catch (e: any) {
       console.error(`[chat] Lightning call failed (attempt ${attempt}/2):`, e.message);
