@@ -79,8 +79,15 @@ export function capFor(agentType: string, plan?: string | null, overrides?: Reco
 
   // 3. The plan. An unknown plan value is treated as free rather than as unlimited — the
   //    safe direction when the data is wrong.
-  const caps = PLAN_CAPS[(plan as Plan) ?? "free"] ?? PLAN_CAPS.free;
-  return caps[agentType] ?? PLAN_CAPS.free[agentType] ?? 10;
+  //
+  //    `??` must not be used to walk this chain. null is a MEANINGFUL value here ("no daily
+  //    cap"), and `??` treats it as absent — so growth's `boss: null` fell straight through
+  //    to the free plan's 5, and a growth tenant was told "daily limit reached on the growth
+  //    plan (limit 5)". Presence of the key is the question, not truthiness of the value.
+  const caps = PLAN_CAPS[plan as Plan] ?? PLAN_CAPS.free;
+  if (Object.prototype.hasOwnProperty.call(caps, agentType)) return caps[agentType];
+  if (Object.prototype.hasOwnProperty.call(PLAN_CAPS.free, agentType)) return PLAN_CAPS.free[agentType];
+  return 10;
 }
 
 /** What /version reports, so the dashboard can show a tenant their real allowance.
