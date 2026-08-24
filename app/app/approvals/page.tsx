@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useStore } from "@/lib/store";
 import { Help } from "@/components/kit";
@@ -90,7 +91,10 @@ export default function Approvals() {
             </div>
             <p className="sm mut" style={{ background: "var(--panel2)", borderRadius: 10, padding: 12, border: "1px solid var(--line)", margin: 0 }}>{qcSummary(c)}</p>
             <div style={{ display: "flex", gap: 9, marginTop: 13, flexWrap: "wrap" }}>
-              <button className="btn btn-p btn-sm" disabled={busy === c.id} onClick={() => approve(c)}>✓ Approve & publish</button>
+              {/* Approving from a two-line summary was approving on faith. This opens the
+                  draft as a real page, with hand-editing and an AI editor beside it. */}
+              <Link href={`/app/content/${c.id}`} className="btn btn-p btn-sm">Read &amp; edit</Link>
+              <button className="btn btn-g btn-sm" disabled={busy === c.id} onClick={() => approve(c)}>✓ Approve & publish</button>
               <button className="btn btn-red btn-sm" disabled={busy === c.id} onClick={() => reject(c)}>Reject</button>
             </div>
           </div>
