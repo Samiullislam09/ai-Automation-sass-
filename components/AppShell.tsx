@@ -6,7 +6,6 @@ import { useStore, PLANS } from "@/lib/store";
 import { BossChat } from "@/components/kit";
 import LiveAgents from "@/components/LiveAgents";
 import CrawlBanner from "@/components/CrawlBanner";
-import KeywordChoice from "@/components/KeywordChoice";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Icon } from "@/components/app-icons";
 
@@ -150,10 +149,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </Link>
         ))}
       </nav>
-
-      {/* Fixed to the viewport, so the countdown is visible from any /app page — missing it
-          because you were on Reports would mean the recommended keyword won by default. */}
-      <KeywordChoice />
 
       {/* one poll for the whole shell: office rooms, stat row and the chat all read its result */}
       <LiveAgents />

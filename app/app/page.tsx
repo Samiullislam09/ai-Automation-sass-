@@ -18,6 +18,7 @@ import { useEffect, useState } from "react";
 import Office from "@/components/Office";
 import AgentStage from "@/components/AgentStage";
 import Celebration from "@/components/Celebration";
+import KeywordChoice from "@/components/KeywordChoice";
 import { setSoundEnabled, soundEnabled } from "@/lib/chime";
 import { useStore } from "@/lib/store";
 
@@ -50,6 +51,9 @@ export default function Dashboard() {
   // work takes over the screen. null = the whole office.
   const [selected, setSelected] = useState<string | null>(null);
   const celebrating = !!store?.s?.celebration;
+  // The keyword table belongs where the team is, not floating over it. Same treatment as a
+  // finished job: the office fades back and the thing that needs you fills the space.
+  const choosing = !!store?.s?.keywordChoice && !celebrating;
 
   // localStorage is browser-only, so it is read after mount — reading it during render would
   // make the server and the client disagree about the button's state.
@@ -98,11 +102,12 @@ export default function Dashboard() {
         {/* The office fades back rather than unmounting: it keeps the room states and the
             camera exactly where they were, so dismissing the card returns you to the same
             scene instead of a re-entry animation. */}
-        <div className={"dash-scene" + (celebrating ? " is-hidden" : "")}>
+        <div className={"dash-scene" + (celebrating || choosing ? " is-hidden" : "")}>
           <Office solo={selected} onSelect={setSelected} flash={flash} />
           {selected && <AgentStage id={selected} onClose={() => setSelected(null)} />}
         </div>
         <Celebration />
+        {choosing && <KeywordChoice />}
       </div>
 
       <div className="dash-stats">

@@ -194,6 +194,9 @@ async function loadHistoryFromDb(tenantId: string, conversationId: string): Prom
       .select("role, content")
       .eq("conversation_id", conversationId)
       .eq("tenant_id", tenantId)
+      // Team reports are not things anyone said — feeding them back as assistant turns would
+      // have the model believing it wrote them, and it already has this in its live status.
+      .neq("kind", "event")
       .order("created_at", { ascending: false })
       .limit(8);
     return cleanHistory((data ?? []).reverse());

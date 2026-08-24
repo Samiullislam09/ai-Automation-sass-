@@ -57,6 +57,9 @@ export function BossChat() {
   const [convs, setConvs] = useState<{ id: string; title: string | null; updated_at: string }[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const shownNotices = useRef<Set<string>>(new Set());
+  // Read inside the notice effect, which must not re-run every time the conversation id
+  // changes — re-running it would re-post every notice it had already stored.
+  const convIdRef = useRef<string | null>(null);
 
   // Mr Lxwa confirming the work in the chat itself. LiveAgents fills the queue from the same
   // jobs_log rows the office animates, so the confirmation can't claim work that didn't run.
@@ -65,16 +68,29 @@ export function BossChat() {
     const fresh = notices.filter((n: any) => !shownNotices.current.has(n.id));
     if (!fresh.length) return;
     fresh.forEach((n: any) => shownNotices.current.add(n.id));
-    setMsgs((m) => [
-      ...m,
-      ...fresh.map((n: any) => ({
-        who: "sys" as const,
-        txt: n.tone === "error" ? `✕ ${n.text}` : `✓ ${n.text}`,
-        tone: n.tone,
-      })),
-    ]);
+    const lines = fresh.map((n: any) => ({
+      who: "sys" as const,
+      txt: n.tone === "error" ? `✕ ${n.text}` : `✓ ${n.text}`,
+      tone: n.tone,
+    }));
+    setMsgs((m) => [...m, ...lines]);
+
+    // Into the transcript too (migration 013). These used to be React state only, so the
+    // keyword table with its measured volumes — the thing most worth looking back at —
+    // disappeared on the next refresh.
+    for (const line of lines) {
+      fetch("/api/chat/events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId: convIdRef.current, text: line.txt, tone: line.tone }),
+      })
+        .then((r) => r.json())
+        .then((d) => { if (d?.ok && d.conversationId && !convIdRef.current) setConvId(d.conversationId); })
+        .catch(() => {});
+    }
   }, [notices]);
 
+  useEffect(() => { convIdRef.current = convId; }, [convId]);
   useEffect(() => { box.current?.scrollTo(0, 99999); }, [msgs, open]);
 
   useEffect(() => {
@@ -106,7 +122,15 @@ export function BossChat() {
       const r = await fetch(`/api/chat/conversations/${id}`).then((res) => res.json());
       if (!r?.ok) return;
       setConvId(id);
-      setMsgs(r.messages.map((m: any) => ({ who: m.role === "user" ? "me" : "bot", txt: m.content })));
+      setMsgs(
+        r.messages.map((m: any) =>
+          m.kind === "event"
+            ? { who: "sys" as const, txt: m.content, tone: (m.tone === "error" ? "error" : "done") as "done" | "error" }
+            : { who: (m.role === "user" ? "me" : "bot") as "me" | "bot", txt: m.content }
+        )
+      );
+      // Already on screen — don't let the live poll append them a second time.
+      r.messages.filter((m: any) => m.kind === "event").forEach((m: any) => shownNotices.current.add(`stored-${m.content}`));
       // Reopening a thread must not read every old reply out loud.
       spokenCount.current = r.messages.length;
       setShowHistory(false);

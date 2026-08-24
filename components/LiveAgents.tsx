@@ -43,6 +43,7 @@ export default function LiveAgents() {
   const seenJobs = useRef<Set<string>>(new Set());
   const primed = useRef(false); // first poll only records history, it never announces it
   const flashTimer = useRef<any>(null);
+  const announcedChoice = useRef<string | null>(null);
 
   const poll = useCallback(async () => {
     if (stopped.current || inFlight.current) return;
@@ -61,6 +62,32 @@ export default function LiveAgents() {
         const id = ROOM_TO_AGENT[room] ?? room;
         const next = toAgentState(id, r);
         api?.setAgent?.(id, next.st, next.task);
+      }
+
+      // The keyword options go into the chat from here rather than from the panel that draws
+      // the table: the panel only exists on the dashboard, and someone reading Reports when
+      // the countdown starts still needs to see what they were offered.
+      const choice = data.keywordChoice;
+      if (choice?.id && announcedChoice.current !== choice.id) {
+        announcedChoice.current = choice.id;
+        const rows = (choice.candidates ?? []).slice(0, 5).map((c: any, i: number) => {
+          const bits = [`${i + 1}. ${c.keyword}`];
+          if (c.searchVolume != null) bits.push(`${c.searchVolume}/mo`);
+          if (c.competitionLevel) bits.push(`${String(c.competitionLevel).toLowerCase()} competition`);
+          if (c.impressions != null) bits.push(`${c.impressions} impressions on your site`);
+          if (c.recommended) bits.push("← recommended");
+          return bits.join(" · ");
+        });
+        api?.patch?.((prev: any) => ({
+          chatNotices: [
+            ...(prev.chatNotices ?? []),
+            {
+              id: `choice-${choice.id}`,
+              tone: "done" as const,
+              text: [`Mr. Keyword's options for "${choice.topic}":`, ...rows, "", "Pick one on the dashboard, or the recommended one starts automatically."].join("\n"),
+            },
+          ].slice(-20),
+        }));
       }
 
       const jobs: Job[] = data.recentJobs ?? [];
