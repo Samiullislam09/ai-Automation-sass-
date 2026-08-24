@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { marked } from "marked";
+import { renderMarkdown } from "@/lib/md";
 import { useStore } from "@/lib/store";
 
 /** Read the article like a reader would, then change it — by hand or by asking.
@@ -82,7 +82,8 @@ export default function ArticleReview({ params }: { params: { id: string } }) {
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
 
-  const html = useMarkdown(body);
+  // Rendered synchronously: no promise, no effect, no third-party bundle to fail to load.
+  const html = useMemo(() => renderMarkdown(body), [body]);
   const stats = useMemo(() => liveStats(body), [body]);
 
   const revise = async () => {
@@ -162,17 +163,29 @@ export default function ArticleReview({ params }: { params: { id: string } }) {
     }
   };
 
-  if (err) return <p className="sm" style={{ color: "#ff6b6b" }}>{err} <Link href="/app/approvals" className="acc">← Back</Link></p>;
-  if (!item) return <p className="sm mut">Loading…</p>;
-
+  // The chrome renders unconditionally. Returning a bare <p> for the loading and error
+  // states meant that if anything at all went wrong the whole page was an empty black
+  // rectangle with no way back — which is indistinguishable from a broken app.
   return (
     <div className="rv">
       <div className="rv-top">
         <Link href="/app/approvals" className="rv-back">← Approvals</Link>
-        <span className="rv-status">{STATUS_LABEL[item.status] ?? item.status}</span>
-        <span className="rv-stats">{stats.words} words · {stats.sections} sections · {stats.links} links</span>
+        {item && <span className="rv-status">{STATUS_LABEL[item.status] ?? item.status}</span>}
+        {item && <span className="rv-stats">{stats.words} words · {stats.sections} sections · {stats.links} links</span>}
         {dirty && <span className="rv-dirty">Unsaved changes</span>}
       </div>
+
+      {err && (
+        <div className="card" style={{ padding: "16px 18px", borderColor: "#ff6b6b" }}>
+          <b style={{ fontSize: 13.5 }}>Couldn&apos;t open this article</b>
+          <p className="sm" style={{ color: "#ff6b6b", margin: "6px 0 0" }}>{err}</p>
+        </div>
+      )}
+
+      {!item && !err && <p className="sm mut">Loading the draft…</p>}
+
+      {item && (
+      <>
 
       <div className="rv-cols">
         <div className="rv-main">
@@ -255,6 +268,8 @@ export default function ArticleReview({ params }: { params: { id: string } }) {
           </div>
         </aside>
       </div>
+      </>
+      )}
 
       <style jsx>{`
         .rv { max-width: 1180px; }
@@ -314,25 +329,6 @@ export default function ArticleReview({ params }: { params: { id: string } }) {
 
     </div>
   );
-}
-
-/** Markdown -> HTML for the reading view.
- *
- *  Raw HTML in the source is escaped BEFORE parsing, so only tags markdown itself produces
- *  ever reach the DOM. The draft is model-written and then hand-editable, and this component
- *  injects the result with dangerouslySetInnerHTML — escaping is what makes that safe without
- *  adding a sanitiser dependency. The cost is that deliberate inline HTML shows as text,
- *  which is the right trade for an article written in markdown. */
-function useMarkdown(md: string): string {
-  const [html, setHtml] = useState("");
-  useEffect(() => {
-    const escaped = md.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    let alive = true;
-    // marked.parse can be sync or async depending on version/options — handle both.
-    Promise.resolve(marked.parse(escaped)).then((out) => { if (alive) setHtml(String(out)); });
-    return () => { alive = false; };
-  }, [md]);
-  return html;
 }
 
 /** Recomputed as you type, so the header never quotes the length of a draft you just changed. */

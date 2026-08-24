@@ -151,7 +151,16 @@ export function BossChat() {
   // Speech synthesis (voice replies) — reads out each finished bot message once, if enabled.
   const speak = (text: string) => {
     if (!voiceOut || !("speechSynthesis" in window)) return;
-    const utter = new SpeechSynthesisUtterance(text.replace(/\*\*(.+?)\*\*/g, "$1"));
+    // Markdown is for the eye. Read aloud, "**Mr. Keyword**" becomes "star star Mr Keyword
+    // star star" in some voices, and a bare URL is unlistenable.
+    const spoken = text
+      .replace(/\*\*(.+?)\*\*/g, "$1")
+      .replace(/[*_`#>]/g, "")
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .replace(/https?:\/\/\S+/g, "the link")
+      .replace(/\s+/g, " ")
+      .trim();
+    const utter = new SpeechSynthesisUtterance(spoken);
     utter.rate = 1.02;
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utter);
