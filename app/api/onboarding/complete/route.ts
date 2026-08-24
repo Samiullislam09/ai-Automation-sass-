@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
 import { encrypt } from "@/lib/crypto";
 import { generateWebhookSecret } from "@/lib/webhook";
+import { normalizeSiteUrl } from "@/lib/crawl";
 
 /** Build Guide Step 4 — persists the onboarding wizard to Supabase:
  *  tenant profile (niche/tone/ICP) always, WordPress integration if provided. */
@@ -15,11 +16,22 @@ export async function POST(request: Request) {
 
   const { websiteUrl, niche, toneProfile, icpProfile, wordpress, webhook } = await request.json();
 
-  // Users type domains without a protocol ("wca-global.com") — found live: that bare form
-  // got saved as-is, and every downstream reader (crawl routes, the new full-site crawler
-  // agent) requires ^https?:// before fetching, so it silently skipped the crawl entirely.
-  // Normalize once here so every reader can trust the stored value.
-  const normalizedUrl = websiteUrl?.trim() ? (/^https?:\/\//i.test(websiteUrl.trim()) ? websiteUrl.trim() : `https://${websiteUrl.trim()}`) : null;
+  // Users type domains without a protocol ("wca-global.com") — found live, that bare form got
+  // saved as-is and every downstream reader requires ^https?:// before fetching, so the crawl
+  // silently did nothing. Normalised once here so every reader can trust the stored value.
+  //
+  // And it is VALIDATED, not just prefixed. The wizard's own "Skip — describe instead" link
+  // used to hand this route the literal string "(no website yet)"; prefixing turned that into
+  // "https://(no website yet)", which is what later took the crawler down with "Invalid URL".
+  // No website is a legitimate answer — it is stored as null. A typo is not, and is refused.
+  const rawUrl = typeof websiteUrl === "string" ? websiteUrl.trim() : "";
+  const normalizedUrl = rawUrl ? normalizeSiteUrl(rawUrl) : null;
+  if (rawUrl && !normalizedUrl) {
+    return NextResponse.json(
+      { ok: false, error: `"${rawUrl}" isn't a website address. Give something like https://yourbusiness.com, or skip this step.` },
+      { status: 400 }
+    );
+  }
 
   const { error: tenantErr } = await supabase
     .from("tenants")

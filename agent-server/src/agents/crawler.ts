@@ -1,6 +1,6 @@
 import type { Job } from "pg-boss";
 import { Agent, type AgentContext, type AgentJobData } from "./base.js";
-import { discoverUrls, extractPage } from "../lib/crawl.js";
+import { discoverUrls, extractPage, normalizeSiteUrl } from "../lib/crawl.js";
 import { embed } from "../lib/embeddings.js";
 import { completeJson } from "../lib/llm.js";
 import { supabase } from "../supabase.js";
@@ -26,8 +26,18 @@ export class CrawlerAgent extends Agent {
     // domain like "wca-global.com" with no protocol got saved as-is and silently failed
     // this exact check, every time), but older rows may still lack the protocol.
     const raw = tenant?.website_url?.trim();
-    const site = raw ? (/^https?:\/\//i.test(raw) ? raw : `https://${raw}`) : null;
-    if (!site) return { pagesCrawled: 0, reason: "no valid website_url on file" };
+    const site = normalizeSiteUrl(raw);
+    if (!site) {
+      // RETURNED, not thrown. A stored value that isn't a URL cannot be fixed by retrying,
+      // and this used to throw "Invalid URL" three times in a row with nothing naming the
+      // field, the value, or the tenant.
+      return {
+        pagesCrawled: 0,
+        reason: raw
+          ? `The website on file isn't a usable address: ${JSON.stringify(raw)}. Fix it in onboarding and run the crawl again.`
+          : "No website on file — nothing to crawl.",
+      };
+    }
 
     ctx.onProgress({ phase: "discovering", label: "Finding pages on your site…" });
     const urls = await discoverUrls(site, PAGE_LIMIT);

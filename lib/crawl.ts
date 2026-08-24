@@ -5,8 +5,41 @@ const UA = "MrLxwaBot/1.0 (+https://mrlxwa.com; learning your site to write abou
 
 /** Finds page URLs for a site — sitemap.xml first (incl. sitemap-index), falls back to
  *  crawling same-domain links off the homepage. Capped, per Build Guide Step 5. */
+/** A website address we can actually fetch, or null.
+ *
+ *  `new URL()` throws on anything that isn't one, and the only call that mattered was
+ *  unguarded — so a bad value stored on the tenant took the whole crawl down with
+ *  "Invalid URL" and burned all three retries on data that retrying could never fix.
+ *  Found live: onboarding's own "Skip — describe instead" link wrote the literal string
+ *  "(no website yet)" into the field, which then had "https://" prefixed onto it.
+ *
+ *  Returns a normalised origin+path so every caller compares the same shape. */
+export function normalizeSiteUrl(raw: string | null | undefined): string | null {
+  const v = String(raw ?? "").trim();
+  if (!v) return null;
+  // A scheme that isn't http(s) is not a website. Without this check "mailto:a@b.com" got
+  // "https://" glued in front and parsed as the host b.com with "mailto:a" as userinfo.
+  if (/^[a-z][a-z0-9+.-]*:/i.test(v) && !/^https?:\/\//i.test(v)) return null;
+  const withScheme = /^https?:\/\//i.test(v) ? v : `https://${v}`;
+  try {
+    const u = new URL(withScheme);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    // Credentials in a website address mean it was pasted from somewhere it shouldn't be.
+    if (u.username || u.password) return null;
+    // No dot means it isn't a public site; whitespace means it was never a URL at all.
+    if (!u.hostname.includes(".") || /\s/.test(u.hostname)) return null;
+    return u.origin + (u.pathname === "/" ? "" : u.pathname.replace(/\/+$/, ""));
+  } catch {
+    return null;
+  }
+}
+
 export async function discoverUrls(siteUrl: string, limit: number): Promise<string[]> {
-  const origin = new URL(siteUrl).origin;
+  const site = normalizeSiteUrl(siteUrl);
+  // Guarded, and with the offending value in the message — "Invalid URL" on its own told
+  // nobody which field was wrong or where it came from.
+  if (!site) throw new Error(`Not a usable website address: ${JSON.stringify(siteUrl)}`);
+  const origin = new URL(site).origin;
 
   const fromSitemap = await tryFetchSitemap(`${origin}/sitemap.xml`, limit);
   if (fromSitemap.length) return fromSitemap.slice(0, limit);

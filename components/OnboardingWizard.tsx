@@ -17,6 +17,10 @@ export default function OnboardingWizard() {
   const router = useRouter();
   const [step, setStep] = useState(0);
   const [site, setSite] = useState("");
+  // "I don't have a website" is a real answer and has to be stored as one. It used to be
+  // stored by typing the sentence "(no website yet)" INTO the website field, which the API
+  // then prefixed with https:// — and that value later took the whole crawler down.
+  const [noSite, setNoSite] = useState(false);
   const [ans, setAns] = useState<Record<string, string>>({});
   const [thinking, setThinking] = useState<string[]>([]);
 
@@ -86,7 +90,7 @@ export default function OnboardingWizard() {
 
   const goToLearning = async () => {
     setStep(6);
-    const lines = [`Reading ${site} …`, "Detecting your niche and topics …", "Learning your brand tone …", "Mapping content opportunities …", "Building your team's memory …"];
+    const lines = [noSite ? "Working from your answers…" : `Reading ${site} …`, "Detecting your niche and topics …", "Learning your brand tone …", "Mapping content opportunities …", "Building your team's memory …"];
     lines.forEach((l, i) => setTimeout(() => setThinking(t => [...t, l]), 500 + i * 700));
 
     // Build Guide Step 5 — real crawl + embeddings, running while the animation plays above.
@@ -102,13 +106,13 @@ export default function OnboardingWizard() {
     // Straight to the DB (migration 010). These used to be patched into local state only,
     // so the very first thing the team "learned" was erased by the first sign-out.
     saveMemory([
-      { k: "Website", v: site }, { k: "Business type", v: ans.type }, { k: "Audience", v: ans.aud },
+      ...(site.trim() ? [{ k: "Website", v: site.trim() }] : []), { k: "Business type", v: ans.type }, { k: "Audience", v: ans.aud },
       { k: "Brand tone", v: ans.tone }, { k: "Publishing pace", v: ans.pace },
       { k: "Niche summary", v: niche },
       ...(topics ? [{ k: "Content topics", v: topics }] : []),
       { k: "Goals", v: "More organic traffic, consistent publishing, and inbound leads" },
     ]);
-    act(`finished studying <b>${site}</b> and built the team memory.`, "Mr Lxwa");
+    act(noSite ? "built the team memory from your answers." : `finished studying <b>${site}</b> and built the team memory.`, "Mr Lxwa");
     router.push("/whoami");
   };
 
@@ -120,7 +124,8 @@ export default function OnboardingWizard() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          websiteUrl: site,
+          // null, not a placeholder sentence — see the note on `noSite` above.
+          websiteUrl: site.trim() || null,
           niche: nicheSummary(),
           toneProfile: { tone: ans.tone, audience: ans.aud, pace: ans.pace },
           icpProfile: { businessType: ans.type, audience: ans.aud },
@@ -159,7 +164,7 @@ export default function OnboardingWizard() {
             <p className="sm mut" style={{ margin: "8px 0 18px" }}>Paste your website — Mr Lxwa will study it and learn everything by itself. This is the only typing you&apos;ll do.</p>
             <div className="field"><label>Your website</label><input placeholder="https://yourbusiness.com" value={site} onChange={e => setSite(e.target.value)} /></div>
             <button className="btn btn-p" style={{ width: "100%", marginTop: 10 }} disabled={!site.trim()} onClick={() => setStep(1)}>Continue →</button>
-            <p className="xs mut" style={{ textAlign: "center", marginTop: 12 }}>No website yet? <a style={{ cursor: "pointer" }} onClick={() => { setSite("(no website yet)"); setStep(1); }}>Skip — describe instead</a></p>
+            <p className="xs mut" style={{ textAlign: "center", marginTop: 12 }}>No website yet? <a style={{ cursor: "pointer" }} onClick={() => { setSite(""); setNoSite(true); setStep(1); }}>Skip — describe instead</a></p>
           </>
         )}
         {step >= 1 && step <= 4 && (

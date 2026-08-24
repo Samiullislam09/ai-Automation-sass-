@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
-import { discoverUrls, extractPage } from "@/lib/crawl";
+import { discoverUrls, extractPage, normalizeSiteUrl } from "@/lib/crawl";
 import { embed } from "@/lib/ai/embeddings";
 import { completeJson } from "@/lib/ai/llm";
 
@@ -19,10 +19,18 @@ export async function POST() {
   const { data: tenant } = await supabase.from("tenants").select("website_url, tone_profile").eq("id", tenantId).single();
   // Defensive: /api/onboarding/complete normalizes this at save time now, but older rows
   // (saved before that fix) may still be a bare domain with no protocol.
+  // Validated, not just prefixed. Prefixing alone turned the wizard's old "(no website yet)"
+  // placeholder into "https://(no website yet)", which then threw a bare "Invalid URL" from
+  // deep inside discoverUrls with nothing naming the field it came from.
   const raw = tenant?.website_url?.trim();
-  const site = raw ? (/^https?:\/\//i.test(raw) ? raw : `https://${raw}`) : null;
+  const site = normalizeSiteUrl(raw);
   if (!site) {
-    return NextResponse.json({ ok: false, error: "No valid website on file — crawl skipped." });
+    return NextResponse.json({
+      ok: false,
+      error: raw
+        ? `The website on file isn't a usable address: ${JSON.stringify(raw)}.`
+        : "No website on file — crawl skipped.",
+    });
   }
 
   const urls = await discoverUrls(site, PAGE_LIMIT);
