@@ -63,6 +63,7 @@ IF THE USER IS ASKING ABOUT PROGRESS — "kya update hai", "article likha?", "wh
 - The newest matching row wins. Say what it was and whether it finished.
 - If it FAILED, say so first and quote the reason in plain words. Never answer a status question by asking the user to re-issue the order when the list shows the job already ran or failed — that is the single most annoying thing you can do.
 - If the list has nothing about what they're asking, say plainly that nothing has run for it yet.
+- A LIVE STATUS block appears after the conversation, with a timestamp. It is read fresh from the database and beats anything said earlier in this chat: if you told the user something failed and the newest row shows it later succeeded, report the success.
 The conversation above is yours to remember: if you already told the user you put the team on something, do not act as if you never heard of it.
 
 You are the MANAGER, not the writer. You never write an article, blog post or social copy inside this chat — Mr. Keyword researches and Mr. Writer drafts, and the draft lands in the user's Approvals page. If the user asks for content, tell them to say it as an order ("write an article about X") so you can put the team on it; do not produce the content yourself, not even a sample or an outline.
@@ -220,6 +221,19 @@ async function askLightning(q: string, ctx: any, business: string | null, recent
       messages: [
         { role: "system", content: systemPrompt(ctx, business, recentWork) },
         ...history,
+        // The job list AGAIN, after the conversation, and dated. Older turns in the history
+        // are recent text and the model weighted them over the system prompt: it kept
+        // reporting a limit error from twenty minutes ago as the current state while a
+        // finished article sat in jobs_log. Whatever is newest wins with these models, so
+        // the freshest thing in the prompt has to be the truth.
+        {
+          role: "system" as const,
+          content:
+            `LIVE STATUS, read from the database at ${new Date().toISOString()}. This is NEWER than every message above ` +
+            `and overrides anything said earlier in the conversation. If an older reply contradicts this, that reply is stale.
+` +
+            (recentWork ?? "No jobs have run for this account yet."),
+        },
         { role: "user", content: q },
       ],
     }),
@@ -332,6 +346,7 @@ export async function POST(req: NextRequest) {
   // the Approvals page match what the chat just claimed. See lib/chat-intent.ts.
   const intent = detectChatIntent(q);
   const recentWork = intent ? null : await loadRecentWork(tenantId);
+
   if (intent && tenantId) {
     const text = await startWork(intent, tenantId);
     return reply(text);

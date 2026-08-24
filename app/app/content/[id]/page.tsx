@@ -185,7 +185,11 @@ export default function ArticleReview({ params }: { params: { id: string } }) {
 
           {tab === "read" ? (
             // The article as a reader gets it. See useMarkdown() for why raw HTML is neutered.
-            <article className="prose" dangerouslySetInnerHTML={{ __html: html }} />
+            body.trim()
+              ? <article className="prose" dangerouslySetInnerHTML={{ __html: html }} />
+              // An empty body is a real state (a job that failed mid-write leaves one), and a
+              // blank panel is indistinguishable from a broken page — say which it is.
+              : <p className="rv-empty">This item has no article text stored. Nothing was written, or the draft was cleared.</p>
           ) : (
             <div className="rv-edit">
               <label className="rv-lbl">Title</label>
@@ -280,6 +284,7 @@ export default function ArticleReview({ params }: { params: { id: string } }) {
         .rv-edit textarea { min-height: 62vh; line-height: 1.7; resize: vertical;
                             font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
         .rv-hint { font-size: 10.5px; color: var(--mut2); margin: 7px 0 0; }
+        .rv-empty { padding: 40px 24px; text-align: center; color: var(--mut); font-size: 13px; margin: 0; }
 
         .rv-side { background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
                    padding: 15px 16px; position: sticky; top: 12px; }
@@ -307,27 +312,6 @@ export default function ArticleReview({ params }: { params: { id: string } }) {
         .rv-rej:hover { color: #ff6b6b; border-color: #ff6b6b; }
       `}</style>
 
-      {/* Reading typography. Global (not styled-jsx) because the markup is injected as raw
-          HTML, which scoped styles can't reach. */}
-      <style jsx global>{`
-        .prose { padding: 26px clamp(18px, 4vw, 46px) 44px; max-width: 74ch; margin: 0 auto;
-                 color: var(--ink); font-size: 16px; line-height: 1.75; }
-        .prose h1 { font-size: clamp(25px, 3.6vw, 34px); line-height: 1.22; margin: 6px 0 22px; font-weight: 800; }
-        .prose h2 { font-size: clamp(18px, 2.4vw, 22px); margin: 34px 0 11px; font-weight: 700; }
-        .prose h3 { font-size: 16px; margin: 24px 0 8px; font-weight: 700; }
-        .prose p { margin: 0 0 17px; }
-        .prose ul, .prose ol { margin: 0 0 17px; padding-left: 22px; }
-        .prose li { margin: 5px 0; }
-        .prose a { color: var(--ac); text-decoration: underline; text-underline-offset: 2px; }
-        .prose strong { color: var(--ink); font-weight: 700; }
-        .prose blockquote { margin: 18px 0; padding: 2px 0 2px 15px; border-left: 3px solid var(--line2);
-                            color: var(--mut); }
-        .prose code { background: var(--panel2); border-radius: 5px; padding: 1px 5px; font-size: .9em; }
-        .prose pre { background: var(--panel2); border-radius: 10px; padding: 13px 15px; overflow-x: auto; }
-        .prose hr { border: none; border-top: 1px solid var(--line); margin: 28px 0; }
-        .prose table { width: 100%; border-collapse: collapse; margin: 0 0 17px; display: block; overflow-x: auto; }
-        .prose th, .prose td { border: 1px solid var(--line); padding: 7px 10px; text-align: left; font-size: 14px; }
-      `}</style>
     </div>
   );
 }

@@ -237,3 +237,30 @@ input:focus,textarea:focus{border-color:var(--ac)}
 .chist-d{display:block;font-size:9.5px;color:var(--mut2);margin-top:2px}
 .chist-x{flex:none;color:var(--mut2);cursor:pointer;padding:0 8px;font-size:11px}
 .chist-x:hover{color:var(--red)}
+
+/* Article reading view (app/app/content/[id]). Global because the markup is injected as
+   raw HTML, which scoped styles can't reach — and styled-jsx's transform is unreliable in
+   this repo (it panics on components/kit.tsx). */
+.prose { padding: 26px clamp(18px, 4vw, 46px) 44px; max-width: 74ch; margin: 0 auto;
+                 color: var(--ink); font-size: 16px; line-height: 1.75; }
+        .prose h1 { font-size: clamp(25px, 3.6vw, 34px); line-height: 1.22; margin: 6px 0 22px; font-weight: 800; }
+        .prose h2 { font-size: clamp(18px, 2.4vw, 22px); margin: 34px 0 11px; font-weight: 700; }
+        .prose h3 { font-size: 16px; margin: 24px 0 8px; font-weight: 700; }
+        .prose p { margin: 0 0 17px; }
+        .prose ul, .prose ol { margin: 0 0 17px; padding-left: 22px; }
+        .prose li { margin: 5px 0; }
+        .prose a { color: var(--ac); text-decoration: underline; text-underline-offset: 2px; }
+        .prose strong { color: var(--ink); font-weight: 700; }
+        .prose blockquote { margin: 18px 0; padding: 2px 0 2px 15px; border-left: 3px solid var(--line2);
+                            color: var(--mut); }
+        .prose code { background: var(--panel2); border-radius: 5px; padding: 1px 5px; font-size: .9em; }
+        .prose pre { background: var(--panel2); border-radius: 10px; padding: 13px 15px; overflow-x: auto; }
+        .prose hr { border: none; border-top: 1px solid var(--line); margin: 28px 0; }
+        .prose table { width: 100%; border-collapse: collapse; margin: 0 0 17px; display: block; overflow-x: auto; }
+        .prose th, .prose td { border: 1px solid var(--line); padding: 7px 10px; text-align: left; font-size: 14px; }
+
+/* Job announcements inside the chat (components/kit.tsx BossChat). Deliberately unlike a
+   chat bubble — this is the team reporting, not Mr Lxwa talking. */
+.cm.sys{align-self:stretch;background:transparent;border:1px solid var(--line);border-left:3px solid var(--mut2);border-radius:9px;padding:8px 11px;font-size:11.5px;line-height:1.55;color:var(--mut)}
+.cm.sys.tone-done{border-left-color:var(--grn);color:var(--ink);background:color-mix(in srgb,var(--grn) 8%,transparent)}
+.cm.sys.tone-error{border-left-color:var(--red);color:var(--ink);background:color-mix(in srgb,var(--red) 8%,transparent)}

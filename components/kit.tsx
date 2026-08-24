@@ -34,7 +34,10 @@ export function Help({ k }: { k: string }) {
 export function BossChat() {
   const store = useStore();
   const [open, setOpen] = useState(false);
-  const [msgs, setMsgs] = useState<{ who: "bot" | "me"; txt: string; live?: boolean }[]>([]);
+  // "sys" is a job announcement, not a turn in the conversation: green when the team
+  // finished something, red when it failed. Never persisted — it reports what the dashboard
+  // already knows, and replaying yesterday's completions on reopen would be noise.
+  const [msgs, setMsgs] = useState<{ who: "bot" | "me" | "sys"; txt: string; live?: boolean; tone?: "done" | "error" }[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [listening, setListening] = useState(false);
@@ -53,6 +56,24 @@ export function BossChat() {
   const [convId, setConvId] = useState<string | null>(null);
   const [convs, setConvs] = useState<{ id: string; title: string | null; updated_at: string }[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const shownNotices = useRef<Set<string>>(new Set());
+
+  // Mr Lxwa confirming the work in the chat itself. LiveAgents fills the queue from the same
+  // jobs_log rows the office animates, so the confirmation can't claim work that didn't run.
+  const notices = store?.s?.chatNotices ?? [];
+  useEffect(() => {
+    const fresh = notices.filter((n: any) => !shownNotices.current.has(n.id));
+    if (!fresh.length) return;
+    fresh.forEach((n: any) => shownNotices.current.add(n.id));
+    setMsgs((m) => [
+      ...m,
+      ...fresh.map((n: any) => ({
+        who: "sys" as const,
+        txt: n.tone === "error" ? `✕ ${n.text}` : `✓ ${n.text}`,
+        tone: n.tone,
+      })),
+    ]);
+  }, [notices]);
 
   useEffect(() => { box.current?.scrollTo(0, 99999); }, [msgs, open]);
 
@@ -221,7 +242,13 @@ export function BossChat() {
           <div ref={box} style={{ flex: 1, overflowY: "auto", padding: 13, display: "flex", flexDirection: "column", gap: 9 }}>
             {/* Mr Lxwa's "I've put the team on it" replies are numbered, multi-line — without the
                 \n -> <br> the whole pipeline collapsed into one unreadable paragraph. */}
-            {msgs.map((m, i) => <div key={i} className={"cm " + m.who + (m.live ? " cursor" : "")} dangerouslySetInnerHTML={{ __html: m.txt.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br/>") }} />)}
+            {msgs.map((m, i) => (
+              <div
+                key={i}
+                className={"cm " + m.who + (m.live ? " cursor" : "") + (m.tone ? " tone-" + m.tone : "")}
+                dangerouslySetInnerHTML={{ __html: m.txt.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br/>") }}
+              />
+            ))}
           </div>
         )}
 

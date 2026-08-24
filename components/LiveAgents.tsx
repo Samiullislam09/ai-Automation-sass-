@@ -86,6 +86,14 @@ export default function LiveAgents() {
           // Opt-in, remembered per browser (lib/chime.ts). Silent unless you turned it on.
           if (j.status === "error") playError(); else playSuccess();
           api?.toast?.(`${NAME[id] ?? "Your team"}: ${j.summary.slice(0, 90)}`);
+          // Into the conversation as well. A toast lasts three seconds; "did the article get
+          // written?" gets asked long after that, and the chat is where it gets asked.
+          api?.patch?.((prev: any) => ({
+            chatNotices: [
+              ...(prev.chatNotices ?? []),
+              { id: j.id, text: `${NAME[id] ?? "Your team"} — ${j.summary}`, tone },
+            ].slice(-20),
+          }));
           api?.act?.(j.summary, NAME[id] ?? "Team");
           clearTimeout(flashTimer.current);
           flashTimer.current = setTimeout(() => storeRef.current?.patch?.({ flash: null }), 7000);
