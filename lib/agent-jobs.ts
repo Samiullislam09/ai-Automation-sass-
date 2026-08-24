@@ -21,7 +21,12 @@ export async function enqueueAgentJob(
   try {
     const res = await fetch(`${agentServerUrl}/jobs/${type}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        // Optional shared secret (agent-server/src/index.ts). Set it in both places to close
+        // the public /jobs endpoint; leaving it unset keeps today's behaviour.
+        ...(process.env.AGENT_SERVER_TOKEN ? { "x-agent-token": process.env.AGENT_SERVER_TOKEN } : {}),
+      },
       body: JSON.stringify({ tenantId, ...payload }),
       signal: AbortSignal.timeout(10000),
     });

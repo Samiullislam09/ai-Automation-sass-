@@ -17,6 +17,18 @@ app.get("/health", (_req, res) => res.send("ok"));
 // Enqueue a job — the Next.js app calls this once the real agents are wired in (Steps 9+).
 // Useful right now for smoke-testing the queue/worker/jobs_log framework itself.
 app.post("/jobs/:type", async (req, res) => {
+  // Anyone who learns this URL can otherwise queue jobs on someone else's tenant and burn
+  // their model credits — it was reachable with no key at all. When AGENT_SERVER_TOKEN is
+  // set here, the caller must send it; when it isn't, we log the exposure rather than
+  // silently pretending the endpoint is safe.
+  if (env.AGENT_SERVER_TOKEN) {
+    if (req.get("x-agent-token") !== env.AGENT_SERVER_TOKEN) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+  } else {
+    console.warn("[jobs] AGENT_SERVER_TOKEN is not set — this endpoint is open to anyone with the URL");
+  }
+
   const type = req.params.type as AgentType;
   if (!AGENT_TYPES.includes(type)) {
     return res.status(400).json({ error: `Unknown agent type. Use one of: ${AGENT_TYPES.join(", ")}` });

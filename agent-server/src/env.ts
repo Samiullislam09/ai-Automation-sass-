@@ -17,4 +17,8 @@ export const env = {
   DATAFORSEO_LOGIN: process.env.DATAFORSEO_LOGIN || "",
   DATAFORSEO_PASSWORD: process.env.DATAFORSEO_PASSWORD || "",
   NVIDIA_API_KEY: process.env.NVIDIA_API_KEY || "",
+  // Shared secret between the Next.js app and this server. Optional so an existing deploy
+  // does not break the moment this ships, but /jobs/:type is a public URL that spends real
+  // LLM + DataForSEO credits: set it in BOTH Railway and Vercel and the endpoint locks.
+  AGENT_SERVER_TOKEN: process.env.AGENT_SERVER_TOKEN || "",
 };
