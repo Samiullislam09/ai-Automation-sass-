@@ -17,6 +17,11 @@ export const env = {
   DATAFORSEO_LOGIN: process.env.DATAFORSEO_LOGIN || "",
   DATAFORSEO_PASSWORD: process.env.DATAFORSEO_PASSWORD || "",
   NVIDIA_API_KEY: process.env.NVIDIA_API_KEY || "",
+  // Requests per minute this server will send to NVIDIA. build.nvidia.com shows the account's
+  // ceiling ("Up to 40 rpm" on the free tier) and the API returns no quota headers, so the
+  // limit has to be respected on our side. Default 35 leaves headroom; raise it to match a
+  // paid tier. See src/lib/nvidia.ts.
+  NVIDIA_RPM: process.env.NVIDIA_RPM || "",
   // Shared secret between the Next.js app and this server. Optional so an existing deploy
   // does not break the moment this ships, but /jobs/:type is a public URL that spends real
   // LLM + DataForSEO credits: set it in BOTH Railway and Vercel and the endpoint locks.

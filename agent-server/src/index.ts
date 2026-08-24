@@ -10,6 +10,7 @@ import { startWorkers } from "./workers.js";
 import { startScheduler, stopScheduler } from "./scheduler.js";
 import { dailyUsage } from "./jobsLog.js";
 import { CAP_TABLE } from "./config/caps.js";
+import { nvidiaWindow } from "./lib/nvidia.js";
 
 const app = express();
 app.use(cors({ origin: env.CORS_ORIGIN.split(",").map((s) => s.trim()) }));
@@ -38,6 +39,10 @@ app.get("/version", (_req, res) => {
     // allowance ("3 of 30 runs used today") instead of letting them walk into an invisible
     // wall. null in here means that plan has no daily cap for that agent.
     caps: CAP_TABLE,
+    // How many NVIDIA requests this process has sent in the last 60s, against the ceiling it
+    // holds itself to. The provider exposes no quota of its own, so this is the only usage
+    // number that exists anywhere.
+    nvidia: nvidiaWindow(),
     tokenGate: !!env.AGENT_SERVER_TOKEN,
   });
 });

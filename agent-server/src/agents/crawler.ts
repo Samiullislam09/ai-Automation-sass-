@@ -31,11 +31,15 @@ export class CrawlerAgent extends Agent {
 
     const urls = await discoverUrls(site, PAGE_LIMIT);
     let pagesCrawled = 0;
+    let unreadable = 0;
     const titles: string[] = [];
+    // A page that couldn't be embedded or stored used to vanish into a console line, so a
+    // crawl could quietly leave holes in the knowledge base and still report success.
+    const failures: { url: string; error: string }[] = [];
 
     for (const url of urls) {
       const page = await extractPage(url);
-      if (!page) continue;
+      if (!page) { unreadable++; continue; }
       try {
         const vector = await embed(`${page.title}\n\n${page.text}`);
         const { error } = await supabase
@@ -49,10 +53,20 @@ export class CrawlerAgent extends Agent {
         titles.push(page.title);
       } catch (e: any) {
         console.error("[crawler] embed/store failed for", url, e.message);
+        if (failures.length < 20) failures.push({ url, error: String(e?.message ?? e).slice(0, 200) });
       }
     }
 
-    if (!pagesCrawled) return { pagesCrawled: 0 };
+    if (!pagesCrawled) {
+      return {
+        pagesCrawled: 0,
+        urlsFound: urls.length,
+        reason: failures.length
+          ? `Found ${urls.length} page(s) but could not index any. First error: ${failures[0].error}`
+          : `Found ${urls.length} page(s) but none could be read.`,
+        failures,
+      };
+    }
 
     // Re-summarize niche/topics from the FULL set of titles now on file, not just this
     // run's — a fuller picture than onboarding's quick pass could ever have had.
@@ -71,6 +85,12 @@ export class CrawlerAgent extends Agent {
       console.error("[crawler] niche re-summary failed:", e.message);
     }
 
-    return { pagesCrawled, urlsFound: urls.length };
+    return {
+      pagesCrawled,
+      urlsFound: urls.length,
+      skipped: failures.length + unreadable,
+      // Named, not just counted: "40 skipped" tells you nothing about whether it matters.
+      failures,
+    };
   }
 }

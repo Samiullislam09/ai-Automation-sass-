@@ -293,7 +293,18 @@ function describeJob(jobAgent: string, status: string, detail: any): { summary: 
   }
 
   if (jobAgent === "crawler") {
-    return { summary: `Crawled ${detail.pagesCrawled ?? 0} page(s).${detail.reason ? ` ${detail.reason}` : ""}`, items: [] };
+    const crawled = detail.pagesCrawled ?? 0;
+    const skipped = detail.skipped ?? 0;
+    const found = detail.urlsFound;
+    // Skipped pages are holes in the knowledge base every agent reads from, so they belong in
+    // the receipt rather than in a server log nobody opens.
+    const summary = detail.reason
+      ? String(detail.reason)
+      : `Read and indexed ${crawled} page(s)${found ? ` of ${found} found` : ""}${skipped ? ` — ${skipped} skipped` : ""}.`;
+    const items = Array.isArray(detail.failures)
+      ? detail.failures.slice(0, 6).map((f: any) => `${f.url} — ${f.error}`)
+      : [];
+    return { summary, items };
   }
 
   return { summary: "Finished.", items: [] };

@@ -1,4 +1,5 @@
 import { env } from "../env.js";
+import { nvidiaFetch } from "./nvidia.js";
 
 /** Ported from the main app's lib/ai/llm.ts, for the crawler's niche/topics summary.
  *  Includes chat_template_kwargs.thinking:false (the main app's lib didn't have this yet
@@ -9,7 +10,8 @@ export async function completeJson<T = any>(prompt: string): Promise<T> {
   const key = env.NVIDIA_API_KEY;
   if (!key) throw new Error("NVIDIA_API_KEY missing");
 
-  const res = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+  const res = await nvidiaFetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+    label: "llm",
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
     body: JSON.stringify({

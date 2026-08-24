@@ -1,4 +1,5 @@
 import { env } from "../env.js";
+import { nvidiaFetch } from "./nvidia.js";
 
 /** Provider-agnostic Writer adapter (Build Guide Step 11).
  *
@@ -91,7 +92,8 @@ async function writeWithNvidia(topic: string, blueprint?: string, context?: Writ
 
   let res: Response;
   try {
-    res = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+    res = await nvidiaFetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+    label: "writer",
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
     body: JSON.stringify({
