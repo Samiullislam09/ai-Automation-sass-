@@ -43,6 +43,13 @@ type State = {
   onboarded: boolean; plan: string; tokens: number; tokensMax: number;
   memory: Mem[]; content: ContentItem[]; reports: Report[]; activity: Activity[];
   agents: Record<string, AgentState>; busy: boolean;
+  // Live server truth, filled by components/LiveAgents.tsx (one poll shared by the whole
+  // /app shell) so the office, the stat row and the chat all read the same thing.
+  stats: Record<string, number> | null;
+  recentJobs: { id: string; agentId?: string; task: string; status: string; at: string; summary: string; items: string[] }[];
+  /** "this agent just finished/failed X" — the office shows it over that room for a moment. */
+  flash: { id: string; text: string; tone?: "done" | "error" } | null;
+  liveError: string | null;
   focusAgent: string | null; // which office room the camera should zoom to (Office.tsx reads this)
   onboardedChecked: boolean; // true once we've actually asked Supabase — see AppLayout's guard
 };
@@ -51,6 +58,7 @@ const initial: State = {
   memory: [], content: [], reports: [], activity: [],
   agents: Object.fromEntries(AGENTS.map(a => [a.id, a.live ? { st: "i", task: "Idle" } : { st: "o", task: "Coming soon" }])) as any,
   busy: false, focusAgent: null, onboardedChecked: false,
+  stats: null, recentJobs: [], flash: null, liveError: null,
 };
 
 const Ctx = createContext<any>(null);
@@ -64,7 +72,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   // persistence — TODO(backend): replace with Supabase
   useEffect(() => {
-    try { const raw = localStorage.getItem("gt-state"); if (raw) setS({ ...initial, ...JSON.parse(raw) }); } catch {}
+    try {
+      const raw = localStorage.getItem("gt-state");
+      // Live fields are server truth — never restore yesterday's copy of them from localStorage,
+      // or the office shows an agent "working" on a job that finished hours ago.
+      if (raw) setS({ ...initial, ...JSON.parse(raw), stats: null, recentJobs: [], flash: null, liveError: null });
+    } catch {}
     loaded.current = true;
   }, []);
   useEffect(() => { if (loaded.current) try { localStorage.setItem("gt-state", JSON.stringify(s)); } catch {} }, [s]);

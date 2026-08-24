@@ -122,6 +122,8 @@ export const AGENT_ID_TO_JOB: Record<string, string> = {
 
 export type AgentJobRow = {
   id: string;
+  /** office/store agent id (only set by getRecentJobs, which mixes agents together) */
+  agentId?: string;
   task: string;
   status: string;
   at: string;
@@ -246,4 +248,26 @@ function describeJob(jobAgent: string, status: string, detail: any): { summary: 
   }
 
   return { summary: "Finished.", items: [] };
+}
+
+/** The last few jobs across ALL agents, each with the same human summary the agent panel
+ *  uses. The live poll sends these so the dashboard can announce "Mr. Writer just finished X"
+ *  the moment it happens, and so the chat can show who is working without a second query. */
+export async function getRecentJobs(supabase: SupabaseClient, tenantId: string, limit = 8): Promise<AgentJobRow[]> {
+  const { data } = await supabase
+    .from("jobs_log")
+    .select("id, agent, action, status, detail, created_at")
+    .eq("tenant_id", tenantId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  return (data ?? []).map((j: any) => ({
+    id: String(j.id),
+    // office/store id, so the client can map a job straight onto a room without a second table
+    agentId: Object.keys(AGENT_ID_TO_JOB).find((k) => AGENT_ID_TO_JOB[k] === j.agent) ?? j.agent,
+    task: j.action && j.action !== j.agent ? j.action : j.agent,
+    status: j.status,
+    at: j.created_at,
+    ...describeJob(j.agent, j.status, j.detail),
+  })) as AgentJobRow[];
 }

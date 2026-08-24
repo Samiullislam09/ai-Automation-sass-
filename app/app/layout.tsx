@@ -4,6 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useStore, PLANS } from "@/lib/store";
 import { BossChat } from "@/components/kit";
+import LiveAgents from "@/components/LiveAgents";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Icon } from "@/components/app-icons";
 
@@ -135,6 +136,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         ))}
       </nav>
 
+      {/* one poll for the whole shell: office rooms, stat row and the chat all read its result */}
+      <LiveAgents />
       <BossChat />
 
       <style jsx global>{`

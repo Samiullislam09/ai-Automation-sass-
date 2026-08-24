@@ -1,7 +1,7 @@
 "use client";
 import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useStore } from "@/lib/store";
+import { AGENTS, useStore } from "@/lib/store";
 import { agentIdFromText } from "@/components/Office";
 
 /* ================= HELP: ? -> hover tooltip -> click detail ================= */
@@ -136,6 +136,10 @@ export function BossChat() {
               \n -> <br> the whole pipeline collapsed into one unreadable paragraph. */}
           {msgs.map((m, i) => <div key={i} className={"cm " + m.who + (m.live ? " cursor" : "")} dangerouslySetInnerHTML={{ __html: m.txt.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br/>") }} />)}
         </div>
+        {/* Live work strip — the same jobs the office is animating, spelled out under the
+            conversation so you always know who is busy and on what, without switching screens. */}
+        <LiveStrip />
+
         <div style={{ display: "flex", gap: 8, padding: 11, borderTop: "1px solid var(--line)" }}>
           {voiceSupported && (
             <button aria-label="Speak your message" onClick={toggleMic}
@@ -175,3 +179,47 @@ export function BossChat() {
   );
 }
 
+/** Who is working right now, straight from the shared live poll (components/LiveAgents.tsx).
+ *  Nothing is inferred: an agent shows here only while jobs_log says its job is running. */
+function LiveStrip() {
+  const store = useStore();
+  const agents = store?.s?.agents ?? {};
+  const working = AGENTS.filter((a) => agents[a.id]?.st === "w");
+  const failed = AGENTS.filter((a) => agents[a.id]?.st === "e");
+
+  if (!working.length && !failed.length) return null;
+
+  return (
+    <div className="livestrip">
+      {working.map((a) => (
+        <div key={a.id} className="ls-row">
+          <span className="ls-spin" />
+          <b>{a.name}</b>
+          <span className="ls-task">{agents[a.id].task}</span>
+        </div>
+      ))}
+      {failed.map((a) => (
+        <div key={a.id} className="ls-row is-err">
+          <span className="ls-dot" />
+          <b>{a.name}</b>
+          <span className="ls-task">{agents[a.id].task}</span>
+        </div>
+      ))}
+
+      <style jsx>{`
+        .livestrip { border-top: 1px solid var(--line); padding: 9px 12px; display: flex;
+                     flex-direction: column; gap: 6px; background: var(--bg2); flex: none; }
+        .ls-row { display: flex; align-items: center; gap: 8px; font-size: 11px; min-width: 0; }
+        .ls-row b { color: var(--ink); font-weight: 700; flex: none; }
+        .ls-task { color: var(--mut); min-width: 0; overflow: hidden; text-overflow: ellipsis;
+                   white-space: nowrap; }
+        .ls-row.is-err b { color: var(--red); }
+        .ls-spin { width: 11px; height: 11px; border-radius: 50%; flex: none;
+                   border: 2px solid color-mix(in srgb, var(--ac) 35%, transparent);
+                   border-top-color: var(--ac); animation: ls-spin .8s linear infinite; }
+        @keyframes ls-spin { to { transform: rotate(360deg); } }
+        .ls-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--red); flex: none; }
+      `}</style>
+    </div>
+  );
+}

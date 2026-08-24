@@ -139,10 +139,12 @@ function RoomTag({ name, task, st }: { name: string; task: string; st: AgentStat
  *  one that's left, so clicking Mr. Writer really does hand the whole office over to him.
  *  `onSelect` lets the dashboard own that selection (it also opens the live work panel);
  *  without it Office keeps its old standalone behaviour (camera zoom only). */
-export default function Office({ demo = false, solo = null, onSelect }: {
+export default function Office({ demo = false, solo = null, onSelect, flash = null }: {
   demo?: boolean;
   solo?: string | null;
   onSelect?: (id: string | null) => void;
+  /** "this agent just finished X" — shown as a receipt above that room for a few seconds. */
+  flash?: { id: string; text: string; tone?: "done" | "error" } | null;
 }) {
   const store = useStore();
   // Demo/landing-page state — live agents get a "working" flavor task, roadmap (non-live)
@@ -226,7 +228,7 @@ export default function Office({ demo = false, solo = null, onSelect }: {
   return (
     <div ref={stageRef} className="office2d" style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden", background: "linear-gradient(180deg, var(--bg2) 0%, var(--bg) 55%, var(--panel) 100%)", cursor: shownFocus ? "zoom-out" : "default" }} onClick={clickBackground}>
       <div ref={worldRef} style={{ position: "absolute", inset: 0, transition: "transform 1.1s cubic-bezier(.5,0,.15,1)", willChange: "transform" }}>
-        <svg viewBox={`0 0 ${VB_W} ${VB_H}`} width="100%" height="100%" style={{ display: "block", position: "absolute", inset: 0 }} preserveAspectRatio="xMidYMid slice">
+        <svg viewBox={`0 0 ${VB_W} ${VB_H}`} width="100%" height="100%" style={{ display: "block", position: "absolute", inset: 0 }} preserveAspectRatio="xMidYMid meet">
           <defs>
             <radialGradient id="bossglow" cx="50%" cy="45%" r="60%">
               <stop offset="0%" stopColor="#c7e6ff" /><stop offset="45%" stopColor="var(--blu)" /><stop offset="100%" stopColor="var(--blu)" stopOpacity="0" />
@@ -260,7 +262,13 @@ export default function Office({ demo = false, solo = null, onSelect }: {
           {AGENTS.map(a => {
             const r = ROOMS[a.id]; const st = agents[a.id] || { st: "i", task: "Idle" };
             const isBoss = a.id === "boss";
-            const dim = st.st === "o" ? 0.55 : 1;
+            // Awake = a real job is running (or just failed, which needs attention). Everyone
+            // else has the lights off and is asleep — that is the honest picture of an office
+            // where one agent is working, and it makes the working one impossible to miss.
+            const working = st.st === "w";
+            const alarm = st.st === "e";
+            const asleep = !working && !alarm;
+            const dim = asleep ? (st.st === "o" ? 0.45 : 0.6) : 1;
             // Solo mode: everyone else steps out of the room (and stops being clickable) so
             // the camera zoom lands on one desk with nothing else competing for attention.
             const hidden = !!solo && solo !== a.id;
@@ -269,10 +277,25 @@ export default function Office({ demo = false, solo = null, onSelect }: {
                  opacity={hidden ? 0 : 1}
                  style={{ cursor: "pointer", transition: "opacity .5s ease", pointerEvents: hidden ? "none" : "auto" }}>
                 <ellipse cx={r.cx} cy={r.cy + r.h / 2 + 10} rx={r.w / 2 + 14} ry="13" fill="#1c2540" opacity="0.14" />
+                {/* a lit room glows in its agent's own colour; a sleeping one gets a night wash */}
+                {working && (
+                  <rect x={r.cx - r.w / 2 - 6} y={r.cy - r.h / 2 - 6} width={r.w + 12} height={r.h + 12} rx="26"
+                    fill="none" stroke={a.c} strokeWidth="2" opacity="0.5" className="office-lit-ring" />
+                )}
                 <rect x={r.cx - r.w / 2} y={r.cy - r.h / 2} width={r.w} height={r.h} rx="22"
-                  fill={isBoss ? "var(--panel2)" : "var(--panel)"} stroke={a.c} strokeOpacity={st.st === "w" || st.st === "e" ? 0.85 : 0.4} strokeWidth="2.5"
-                  opacity={dim} style={{ transition: "opacity .4s, stroke-opacity .4s" }} />
+                  fill={isBoss ? "var(--panel2)" : "var(--panel)"} stroke={alarm ? "var(--red)" : a.c}
+                  strokeOpacity={working || alarm ? 1 : 0.35} strokeWidth={working ? 3 : 2.5}
+                  opacity={dim} style={{ transition: "opacity .5s, stroke-opacity .5s, stroke-width .5s" }} />
                 <rect x={r.cx - r.w / 2} y={r.cy - r.h / 2} width={r.w} height={r.h * 0.35} rx="22" fill="var(--line)" opacity={dim * 0.35} />
+                {working && (
+                  <rect x={r.cx - r.w / 2} y={r.cy - r.h / 2} width={r.w} height={r.h} rx="22"
+                    fill={a.c} opacity="0.09" className="office-lit-wash" />
+                )}
+                {asleep && (
+                  <rect x={r.cx - r.w / 2} y={r.cy - r.h / 2} width={r.w} height={r.h} rx="22"
+                    fill="#050a18" opacity={st.st === "o" ? 0.55 : 0.4}
+                    style={{ transition: "opacity .5s" }} />
+                )}
 
                 {isBoss ? (
                   <g transform={`translate(${r.cx},${r.cy})`}>
@@ -300,8 +323,22 @@ export default function Office({ demo = false, solo = null, onSelect }: {
                   </>
                 )}
 
-                {st.st === "o" && (
-                  <text x={r.cx + r.w / 2 - 26} y={r.cy - r.h / 2 + 24} fontSize="13" fontWeight="800" fill="#93a0bd">Z z z</text>
+                {asleep && !isBoss && (
+                  <g className="office-zzz" style={{ transformOrigin: `${r.cx + r.w / 2 - 30}px ${r.cy - r.h / 2 + 24}px` }}>
+                    <text x={r.cx + r.w / 2 - 30} y={r.cy - r.h / 2 + 24} fontSize="13" fontWeight="800" fill="#8f9dc4">z</text>
+                    <text x={r.cx + r.w / 2 - 20} y={r.cy - r.h / 2 + 16} fontSize="10" fontWeight="800" fill="#8f9dc4" opacity="0.75">z</text>
+                    <text x={r.cx + r.w / 2 - 13} y={r.cy - r.h / 2 + 10} fontSize="8" fontWeight="800" fill="#8f9dc4" opacity="0.5">z</text>
+                  </g>
+                )}
+                {/* a job that just finished pops a receipt over the room that did it */}
+                {flash && flash.id === a.id && (
+                  <foreignObject x={r.cx - 130} y={r.cy - r.h / 2 - 84} width="260" height="52">
+                    <div {...{ xmlns: "http://www.w3.org/1999/xhtml" }} style={{ display: "flex", justifyContent: "center" }}>
+                      <div className="office-flash" style={{ background: "var(--panel2)", border: `1px solid ${flash.tone === "error" ? "var(--red)" : "var(--grn)"}`, color: "var(--ink)", fontSize: 10.5, fontWeight: 700, padding: "7px 11px", borderRadius: 10, boxShadow: "0 10px 26px #00000066", textAlign: "center", lineHeight: 1.35 }}>
+                        {flash.tone === "error" ? "⚠ " : "✓ "}{flash.text}
+                      </div>
+                    </div>
+                  </foreignObject>
                 )}
 
                 <foreignObject x={r.cx - 100} y={r.cy - r.h / 2 - 34} width="200" height="30">
@@ -355,6 +392,14 @@ export default function Office({ demo = false, solo = null, onSelect }: {
         .office-cloud { animation: office-drift 90s linear infinite; }
         @keyframes office-drift { from{ transform: translate(-60px, var(--y, 0px)); } to{ transform: translate(1320px, var(--y, 0px)); } }
         .office-pulse-dot { animation: office-pulse 2s infinite; }
+        .office2d .office-lit-ring { animation: office-lit 2.2s ease-in-out infinite; }
+        @keyframes office-lit { 50%{ opacity: .16; } }
+        .office2d .office-lit-wash { animation: office-wash 2.2s ease-in-out infinite; }
+        @keyframes office-wash { 50%{ opacity: .16; } }
+        .office2d .office-zzz { animation: office-sleep 3.4s ease-in-out infinite; }
+        @keyframes office-sleep { 0%,100%{ opacity: .25; transform: translateY(2px); } 50%{ opacity: .9; transform: translateY(-4px); } }
+        .office2d .office-flash { animation: office-flash-in .35s cubic-bezier(.2,.7,.3,1); }
+        @keyframes office-flash-in { from{ opacity: 0; transform: translateY(8px) scale(.96); } to{ opacity: 1; transform: none; } }
         @keyframes office-pulse { 50%{ opacity: .4; } }
         @media (prefers-reduced-motion: reduce) {
           .office2d * { animation: none !important; transition: none !important; }
