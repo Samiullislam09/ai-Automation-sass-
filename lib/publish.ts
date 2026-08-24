@@ -30,7 +30,7 @@ export async function publishContentItem(
 
   if (wp) return publishToWordPress(wp.encrypted_credentials as any, item);
   if (webhook) return deliverWebhook(webhook.encrypted_credentials as any, item);
-  return { ok: false, error: "No connected publishing destination (WordPress or webhook) — connect one in Onboarding first." };
+  return { ok: false, error: "No connected publishing destination (WordPress or webhook) — add one in Connect (/app/connect) first." };
 }
 
 async function publishToWordPress(

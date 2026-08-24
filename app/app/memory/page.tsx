@@ -65,7 +65,7 @@ export default function Memory() {
         {loadingStatus ? (
           <p className="sm mut">Checking…</p>
         ) : !status?.integrations.length ? (
-          <p className="sm mut">Nothing connected yet. <Link href="/onboarding">Connect WordPress or a webhook →</Link></p>
+          <p className="sm mut">Nothing connected yet. <Link href="/app/connect">Connect WordPress, your site or social →</Link></p>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {status.integrations.map((i, idx) => (

@@ -40,7 +40,12 @@ export async function middleware(request: NextRequest) {
     if (!user && guarded) {
       const url = request.nextUrl.clone();
       url.pathname = "/login";
-      return NextResponse.redirect(url);
+      const redirectRes = NextResponse.redirect(url);
+      // Carry over whatever getUser() just wrote (e.g. the clearing of a dead session).
+      // Returning a bare redirect threw those away, so the stale cookie survived and the
+      // very next request repeated the same round trip.
+      response.cookies.getAll().forEach((c) => redirectRes.cookies.set(c));
+      return redirectRes;
     }
   } catch (err) {
     console.error("[middleware] auth.getUser() network error, failing open:", (err as Error).message);
@@ -54,6 +59,12 @@ export async function middleware(request: NextRequest) {
 // WordPress/webhook test-connection endpoints, ...) are deliberately NOT matched here —
 // running Supabase's auth.getUser() on every single request (including chat) was adding
 // several extra seconds of latency to routes that don't need a session check at all.
+// NOTE: /api/dashboard/** is deliberately NOT matched. The dashboard is polled every 3s
+// (components/LiveAgents.tsx), and running auth.getUser() here on each of those meant ~20
+// server-side token refreshes a minute racing the browser client's own refresh — a known
+// way to invalidate a rotating refresh token and log a live user out. Those routes already
+// authenticate themselves (createClient + getCurrentTenantId, 401 on no session) and, being
+// route handlers, can write the refreshed cookie on their own.
 export const config = {
-  matcher: ["/app/:path*", "/onboarding", "/api/onboarding/:path*", "/api/dashboard/:path*"],
+  matcher: ["/app/:path*", "/onboarding", "/api/onboarding/:path*"],
 };

@@ -7,6 +7,7 @@ import { AGENT_TYPES, enqueue, initQueues, type AgentType } from "./queues.js";
 import { boss } from "./db.js";
 import { initSocket } from "./socket.js";
 import { startWorkers } from "./workers.js";
+import { startScheduler, stopScheduler } from "./scheduler.js";
 
 const app = express();
 app.use(cors({ origin: env.CORS_ORIGIN.split(",").map((s) => s.trim()) }));
@@ -55,12 +56,16 @@ async function main() {
   const httpServer = createServer(app);
   initSocket(httpServer);
   await startWorkers();
+  // Recurring automation (/app/schedule). Safe to start even before migration 006 is
+  // applied — it logs the missing table and keeps ticking.
+  startScheduler();
 
   httpServer.listen(env.PORT, () => {
     console.log(`[agent-server] listening on :${env.PORT} — agents: ${AGENT_TYPES.join(", ")}`);
   });
 
   process.on("SIGTERM", async () => {
+    stopScheduler();
     await boss.stop();
     httpServer.close();
   });

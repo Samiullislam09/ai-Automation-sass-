@@ -18,6 +18,8 @@ const ITEMS: [string, keyof typeof Icon, string][] = [
   ["Dashboard", "dashboard", "/app"],
   ["Content", "content", "/app/content"],
   ["Approvals", "approvals", "/app/approvals"],
+  ["Connect", "connect", "/app/connect"],
+  ["Schedule", "schedule", "/app/schedule"],
   ["Reports", "reports", "/app/reports"],
   ["Memory", "memory", "/app/memory"],
   ["Billing", "billing", "/app/billing"],
@@ -29,6 +31,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   // Rail is collapsed by default, exactly like the reference build's sidebar.
   const [navOpen, setNavOpen] = useState(false);
+  const [confirmOut, setConfirmOut] = useState(false);
 
   useEffect(() => {
     // real session is enforced server-side by middleware.ts. Onboarding status comes from
@@ -95,13 +98,25 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="s-foot">
             <ThemeToggle />
             {s.user && (
-              <div className="s-user" onClick={signOut} title="Sign out">
+              <div className="s-user">
                 <span className="s-av">{initial}</span>
                 <div className="s-user-t">
                   <div className="n">{s.user.name || "Account"}</div>
                   <div className="e">{s.user.email}</div>
                 </div>
-                <span className="s-chev">{Icon.chevron}</span>
+                {/* Sign-out used to be the whole row's onClick — one stray click on your own
+                    name logged you out. It needs its own button and a confirm step. */}
+                <button
+                  className="s-out"
+                  title={confirmOut ? "Click again to sign out" : "Sign out"}
+                  onClick={() => {
+                    if (confirmOut) { signOut(); return; }
+                    setConfirmOut(true);
+                    setTimeout(() => setConfirmOut(false), 3000);
+                  }}
+                >
+                  {confirmOut ? "Sure?" : Icon.chevron}
+                </button>
               </div>
             )}
           </div>
@@ -180,7 +195,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         .appshell:not(.nav-open) .ni-l,
         .appshell:not(.nav-open) .plan,
         .appshell:not(.nav-open) .s-user-t,
-        .appshell:not(.nav-open) .s-chev { display: none; }
+        .appshell:not(.nav-open) .s-out { display: none; }
         .appshell:not(.nav-open) .s-brand,
         .appshell:not(.nav-open) .ni,
         .appshell:not(.nav-open) .s-user { justify-content: center; }
@@ -203,7 +218,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
         .s-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px;
                   padding: 9px 2px 2px; border-top: 1px solid var(--line); }
-        .s-user { display: flex; align-items: center; gap: 9px; min-width: 0; cursor: pointer; }
+        .s-user { display: flex; align-items: center; gap: 9px; min-width: 0; }
+        .s-out { background: none; border: none; cursor: pointer; color: var(--mut2); padding: 4px 6px;
+                 border-radius: 8px; font-size: 10.5px; font-weight: 700; display: grid; place-items: center; }
+        .s-out:hover { color: var(--red); background: var(--panel2); }
+        .s-out svg { width: 14px; height: 14px; }
         .s-av { width: 30px; height: 30px; border-radius: 9px; flex: none; display: grid; place-items: center;
                 background: linear-gradient(135deg,var(--ac),var(--vio)); color: #fff; font-weight: 800; font-size: 13px; }
         .s-user-t { min-width: 0; }

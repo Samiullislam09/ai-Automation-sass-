@@ -25,7 +25,8 @@
  * ---------------------------------------------------------------
  */
 "use client";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
 
 // ---------- LANDING MARKUP (converted 1:1 from index.html) ----------
 // Every base64 pixel-art asset and every inline SVG icon lives here.
@@ -243,6 +244,36 @@ document.querySelectorAll('.fcard').forEach((c,i)=>{c.style.animationDelay=(i*90
 
 
 export default function Landing(): JSX.Element {
+  // The markup is a static HTML string, so the signed-in state can't be baked into it —
+  // it's patched in after mount instead. getSession() reads the local cookie (no network
+  // round trip), so the swap happens in the same frame the page becomes interactive.
+  const [signedIn, setSignedIn] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    createClient().auth.getSession().then(({ data }) => { if (alive) setSignedIn(!!data.session); });
+    return () => { alive = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!signedIn) return;
+    // "Log in" / "Start Free Trial" are wrong for someone who is already logged in —
+    // both become one door back into the app. The hero button holds an inline SVG arrow,
+    // so only the text nodes are rewritten; blowing away innerHTML would drop the arrow.
+    document.querySelectorAll<HTMLAnchorElement>('a[href="/login"], a[href="/signup"]').forEach((a) => {
+      const label = a.classList.contains("login") ? "Dashboard" : "Go to Dashboard";
+      a.setAttribute("href", "/app");
+      let done = false;
+      a.childNodes.forEach((n) => {
+        if (n.nodeType === Node.TEXT_NODE && n.textContent?.trim()) {
+          n.textContent = done ? "" : label;
+          done = true;
+        }
+      });
+      if (!done) a.textContent = label;
+    });
+  }, [signedIn]);
+
   useEffect(() => {
     if ((window as any).__landingMounted) return;
     (window as any).__landingMounted = true;

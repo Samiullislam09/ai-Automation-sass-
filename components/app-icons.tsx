@@ -34,6 +34,19 @@ export const Icon = {
   billing: (
     <svg {...S}><path d="M9 7V3M15 7V3" /><path d="M6.5 7h11v4a5.5 5.5 0 01-11 0z" /><path d="M12 16.5V21" /></svg>
   ),
+  connect: (
+    <svg {...S}>
+      <path d="M9.5 14.5l5-5" />
+      <path d="M13 6.5l1.4-1.4a3.4 3.4 0 014.8 4.8L17.8 11.3" />
+      <path d="M11 17.5l-1.4 1.4a3.4 3.4 0 01-4.8-4.8L6.2 12.7" />
+    </svg>
+  ),
+  schedule: (
+    <svg {...S}>
+      <rect x="3.5" y="5" width="17" height="15.5" rx="3" /><path d="M3.5 9.5h17" />
+      <path d="M8 3.5V6M16 3.5V6" /><path d="M12 12.5V15l1.8 1.2" />
+    </svg>
+  ),
   analytics: (
     <svg {...S}><path d="M4 20h16" /><path d="M7 20v-6M12 20V9M17 20V4.5" /></svg>
   ),
