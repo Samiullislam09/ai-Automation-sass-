@@ -203,7 +203,21 @@ export async function getAgentDetail(
  *  Every branch reads a field the agent actually writes (agent-server/src/agents/*.ts); when a
  *  row has nothing usable we say so rather than inventing a description of the work. */
 function describeJob(jobAgent: string, status: string, detail: any): { summary: string; items: string[] } {
-  if (status === "error") return { summary: detail?.message ? String(detail.message) : "Failed.", items: [] };
+  if (status === "error") {
+    // agent-server enriches failures (agent-server/src/lib/errors.ts): a plain sentence, the
+    // raw cause, a hint, which retry it was and how long it ran. Show all of it — "proper
+    // error logs" was a fair complaint about the old single opaque line.
+    const summary = detail?.message ? String(detail.message) : "Failed.";
+    const items: string[] = [];
+    if (detail?.hint) items.push(String(detail.hint));
+    if (detail?.attempt && detail?.attempts) {
+      const secs = detail.durationMs ? ` · ran ${Math.round(Number(detail.durationMs) / 1000)}s` : "";
+      items.push(`Attempt ${detail.attempt} of ${detail.attempts}${secs}`);
+    }
+    // Only when it adds something — repeating the same sentence twice helps nobody.
+    if (detail?.cause && String(detail.cause) !== summary) items.push(`Technical: ${String(detail.cause).slice(0, 300)}`);
+    return { summary, items };
+  }
   if (status !== "success") return { summary: "Working…", items: [] };
   if (!detail || typeof detail !== "object") return { summary: "Finished.", items: [] };
 

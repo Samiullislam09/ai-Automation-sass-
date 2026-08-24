@@ -21,9 +21,25 @@ export async function logJobFinish(id: string | undefined, detail: unknown) {
   if (error) console.error("[jobsLog] update (success) failed:", error.message);
 }
 
-export async function logJobError(id: string | undefined, message: string) {
+/** Everything a failure needs to be diagnosable from the dashboard alone, without SSHing
+ *  into anything: what failed in plain words, the raw cause under it, what to do about it,
+ *  which retry this was, and how long it ran before dying. Previously this column held a
+ *  single opaque sentence and nothing else. */
+export type JobErrorDetail = {
+  message: string;
+  cause?: string;
+  hint?: string;
+  stack?: string;
+  attempt?: number;
+  attempts?: number;
+  durationMs?: number;
+  agent?: string;
+  at?: string;
+};
+
+export async function logJobError(id: string | undefined, detail: JobErrorDetail) {
   if (!id) return;
-  const { error } = await supabase.from("jobs_log").update({ status: "error", detail: { message } }).eq("id", id);
+  const { error } = await supabase.from("jobs_log").update({ status: "error", detail }).eq("id", id);
   if (error) console.error("[jobsLog] update (error) failed:", error.message);
 }
 

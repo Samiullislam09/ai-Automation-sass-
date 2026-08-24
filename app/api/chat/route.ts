@@ -87,8 +87,11 @@ async function loadRecentWork(tenantId: string | null): Promise<string | null> {
       .map((j: any) => {
         const when = new Date(j.created_at).toLocaleString();
         const what = j.action && j.action !== j.agent ? j.action : j.agent;
+        // The hint is the part that answers "so what do I do?" — without it Mr Lxwa could
+        // report a failure but never explain it.
+        const hint = j.detail?.hint ? ` (${String(j.detail.hint).slice(0, 200)})` : "";
         const outcome =
-          j.status === "error" ? `FAILED: ${String(j.detail?.message ?? "unknown error").slice(0, 160)}`
+          j.status === "error" ? `FAILED: ${String(j.detail?.message ?? "unknown error").slice(0, 200)}${hint}`
           : j.status === "success" ? "done"
           : j.status;
         return `- ${when} · ${j.agent} · ${what} — ${outcome}`;
