@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore, PLANS } from "@/lib/store";
 import { BossChat } from "@/components/kit";
 import LiveAgents from "@/components/LiveAgents";
@@ -135,7 +135,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <Link href="/app/approvals" className="tb-btn" aria-label="Approvals" title="Approvals">
               {Icon.chat}{wait ? <span className="b-cnt">{wait}</span> : null}
             </Link>
-            <span className="tb-av">{initial}</span>
+            {/* Always visible, even with the sidebar collapsed — which is the default, and is
+                why nobody could find their plan. */}
+            <Link href="/app/billing" className="tb-plan" title="Your plan">{plan.name}</Link>
+            <AccountMenu initial={initial} onSignOut={signOut} />
           </header>
 
           <main className={"appmain" + (isDashboard ? " is-dash" : "")}>{children}</main>
@@ -253,7 +256,40 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                  display: grid; place-items: center; padding: 0 3px; }
         .tb-btn.bell .b-cnt { background: var(--red); }
         .tb-av { width: 34px; height: 34px; border-radius: 10px; flex: none; display: grid; place-items: center;
-                 background: linear-gradient(135deg,var(--ac),var(--vio)); color: #fff; font-weight: 800; font-size: 14px; }
+                 background: linear-gradient(135deg,var(--ac),var(--vio)); color: #fff; font-weight: 800; font-size: 14px;
+                 border: none; cursor: pointer; }
+        .tb-plan { font-size: 11px; font-weight: 700; color: var(--mut); background: var(--panel);
+                   border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; white-space: nowrap; }
+        .tb-plan:hover { color: var(--ink); border-color: var(--line2); }
+
+        /* ---- account menu ---- */
+        .acct { position: relative; flex: none; }
+        .acct-pop { position: absolute; top: calc(100% + 8px); right: 0; z-index: 200; width: 268px;
+                    background: var(--panel); border: 1px solid var(--line2); border-radius: 14px;
+                    box-shadow: 0 18px 44px #0006; padding: 13px 14px; }
+        .acct-p { font-size: 12px; color: var(--mut); margin: 0; }
+        .acct-head { padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+        .acct-em { font-size: 12.5px; font-weight: 700; color: var(--ink); word-break: break-all; }
+        .acct-ws { font-size: 10.5px; color: var(--mut2); margin-top: 2px; word-break: break-all; }
+        .acct-lbl { font-size: 9.5px; font-weight: 700; letter-spacing: .6px; color: var(--mut2); margin-bottom: 4px; }
+        .acct-plan { display: flex; gap: 10px; align-items: flex-start; padding: 11px 0;
+                     border-bottom: 1px solid var(--line); }
+        .acct-plan b { font-size: 14px; color: var(--ink); }
+        .acct-tag { font-size: 10.5px; color: var(--mut2); margin-top: 3px; line-height: 1.4; }
+        .acct-up { margin-left: auto; flex: none; background: linear-gradient(135deg,var(--ac),var(--ac-d));
+                   color: #fff; font-size: 10.5px; font-weight: 700; padding: 4px 10px; border-radius: 8px; }
+        .acct-usage { padding: 10px 0; border-bottom: 1px solid var(--line); }
+        .acct-row { display: flex; justify-content: space-between; gap: 10px; font-size: 11.5px;
+                    color: var(--mut); padding: 2px 0; }
+        .acct-row b { color: var(--ink); font-weight: 700; }
+        .acct-row b.is-full { color: var(--amb); }
+        .acct-links { display: flex; gap: 12px; padding: 10px 0 4px; }
+        .acct-links a { font-size: 11.5px; color: var(--ac); font-weight: 600; }
+        .acct-out { width: 100%; margin-top: 8px; background: var(--panel2); border: 1px solid var(--line);
+                    border-radius: 9px; padding: 7px; font-size: 11.5px; font-weight: 600; color: var(--mut);
+                    cursor: pointer; }
+        .acct-out:hover { color: var(--red); border-color: var(--red); }
+        @media (max-width: 520px) { .tb-plan { display: none; } }
 
         /* ---- main ---- */
         .appmain { flex: 1; min-height: 0; overflow-y: auto; padding: 22px clamp(14px,2.4vw,26px) 26px; }
@@ -292,6 +328,108 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         .mni-b { position: absolute; top: 0; right: 2px; background: var(--ac); color: #fff; font-size: 8.5px;
                  font-weight: 800; min-width: 14px; height: 14px; border-radius: 7px; display: grid; place-items: center; }
       `}</style>
+    </div>
+  );
+}
+
+/** The account menu behind the topbar avatar.
+ *
+ *  "Website pe mera kaunsa plan hai?" had no answer anywhere you'd look: the plan card is in
+ *  the sidebar, which is collapsed by default, and the avatar did nothing at all. This is
+ *  always one click away, and every number in it comes from the database and from
+ *  agent-server's own cap table — the same values that decide whether a job actually runs.
+ */
+function AccountMenu({ initial, onSignOut }: { initial: string; onSignOut: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState<any>(null);
+  const [confirmOut, setConfirmOut] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+
+  // Loaded on first open, then refreshed each time — usage changes while you sit here.
+  useEffect(() => {
+    if (!open) return;
+    fetch("/api/account").then((r) => r.json()).then(setData).catch(() => setData({ ok: false }));
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => { if (!wrap.current?.contains(e.target as Node)) setOpen(false); };
+    const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onEsc);
+    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onEsc); };
+  }, [open]);
+
+  const plan = data?.plan ? PLANS[data.plan] : null;
+
+  return (
+    <div className="acct" ref={wrap}>
+      <button className="tb-av" onClick={() => setOpen((o) => !o)} aria-label="Account" title="Account">{initial}</button>
+
+      {open && (
+        <div className="acct-pop">
+          {!data && <p className="acct-p">Loading…</p>}
+
+          {data && !data.ok && <p className="acct-p">Could not load your account.</p>}
+
+          {data?.ok && (
+            <>
+              <div className="acct-head">
+                <div className="acct-em">{data.email}</div>
+                {data.workspace && <div className="acct-ws">{data.workspace}{data.website ? ` · ${data.website}` : ""}</div>}
+              </div>
+
+              <div className="acct-plan">
+                <div>
+                  <div className="acct-lbl">YOUR PLAN</div>
+                  <b>{plan?.name ?? (data.plan ?? "Unknown")}</b>
+                  {plan && <div className="acct-tag">{plan.tagline}</div>}
+                  {/* Straight from the DB. Saying "run migration 009" is more useful than
+                      quietly showing a tier that isn't stored anywhere. */}
+                  {data.plan === null && <div className="acct-tag">Not stored yet — run migration 009.</div>}
+                </div>
+                <Link href="/app/billing" className="acct-up" onClick={() => setOpen(false)}>Change</Link>
+              </div>
+
+              {data.usage?.length > 0 && (
+                <div className="acct-usage">
+                  <div className="acct-lbl">TODAY</div>
+                  {data.usage.map((u: any) => (
+                    <div key={u.agent} className="acct-row">
+                      <span>{u.label}</span>
+                      <b className={u.cap != null && u.used >= u.cap ? "is-full" : ""}>
+                        {u.cap != null ? `${u.used} / ${u.cap}` : u.known ? `${u.used} · unlimited` : u.used}
+                      </b>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="acct-usage">
+                <div className="acct-row"><span>Connected</span><b>{data.connected}</b></div>
+                <div className="acct-row"><span>Awaiting your approval</span><b>{data.awaiting}</b></div>
+              </div>
+
+              <div className="acct-links">
+                <Link href="/app/connect" onClick={() => setOpen(false)}>Connect</Link>
+                <Link href="/app/schedule" onClick={() => setOpen(false)}>Schedule</Link>
+                <Link href="/app/billing" onClick={() => setOpen(false)}>Billing</Link>
+              </div>
+            </>
+          )}
+
+          <button
+            className="acct-out"
+            onClick={() => {
+              if (confirmOut) { onSignOut(); return; }
+              setConfirmOut(true);
+              setTimeout(() => setConfirmOut(false), 3000);
+            }}
+          >
+            {confirmOut ? "Click again to sign out" : "Sign out"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
