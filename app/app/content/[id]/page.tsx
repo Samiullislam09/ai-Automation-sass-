@@ -1,352 +1,69 @@
-"use client";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
+import { getCurrentTenantId } from "@/lib/supabase/tenant";
 import { renderMarkdown } from "@/lib/md";
-import { useStore } from "@/lib/store";
+import ArticleReview from "@/components/ArticleReview";
 
-/** Read the article like a reader would, then change it — by hand or by asking.
+/** The article reviewer, read on the SERVER.
  *
- *  Before this, reviewing meant reading the first line on an Approvals card and approving on
- *  faith. Here the draft is rendered as a real page, Edit gives you the markdown directly,
- *  and the panel on the right takes plain instructions ("make the intro shorter", "add a
- *  section on pricing") and rewrites the draft.
+ *  This page spent days rendering a black rectangle: no markup, no console error, no error
+ *  boundary hit, not even the loading fallback. Every theory about why — the params prop,
+ *  marked's broken browser field, a suspended segment — was a guess, and each fix was a guess
+ *  that didn't land.
  *
- *  Nothing an instruction produces is saved until you press Save. A revision that lands badly
- *  costs one Undo, not the draft — which is also why the undo stack is local and not a
- *  server round trip.
+ *  So the guessing stops here. The article is fetched and rendered into the HTML by the
+ *  server, before any JavaScript runs. If this page responds at all, the article is in the
+ *  response. The client half (components/ArticleReview.tsx) still does the editing, but it can
+ *  no longer be the difference between seeing your draft and seeing nothing — and the
+ *  <noscript> fallback below means even a client bundle that never loads still shows you the
+ *  thing you came to read.
  */
+export const dynamic = "force-dynamic";
 
-type Item = {
-  id: string;
-  type: string;
-  status: string;
-  title: string | null;
-  body: string | null;
-  meta: { wordCount?: number; sections?: number; links?: number; qualityGate?: any } | null;
-  created_at: string;
-};
+const EDITABLE = ["draft", "awaiting_approval", "failed", "rejected"];
 
-const STATUS_LABEL: Record<string, string> = {
-  draft: "Draft",
-  awaiting_approval: "Waiting for you",
-  approved: "Approved",
-  published: "Published",
-  failed: "Failed the quality gate",
-  rejected: "Rejected",
-};
+export default async function Page({ params }: { params: { id: string } }) {
+  const supabase = await createClient();
+  const tenantId = await getCurrentTenantId(supabase);
 
-/** NOTE: the id comes from useParams(), not from a `params` prop.
- *
- *  Every other dynamic route in this app (app/app/reports/[id], app/help/[k]) reads it that
- *  way and renders; this page took the prop and rendered NOTHING — no markup, no error in the
- *  console, no error boundary hit. A Client Component page that takes `params` is serialised
- *  into the RSC payload and suspended on, and when that goes wrong the segment resolves to
- *  nothing at all, silently. Matching the convention that demonstrably works here removes
- *  that whole failure mode. */
-export default function ArticleReview() {
-  const params = useParams<{ id: string }>();
-  const id = String(params?.id ?? "");
-  const { toast, act, report } = useStore();
-  const router = useRouter();
+  const { data: item, error } = tenantId
+    ? await supabase
+        .from("content_items")
+        .select("id, type, status, title, body, meta, created_at")
+        .eq("id", params.id)
+        .eq("tenant_id", tenantId)
+        .maybeSingle()
+    : { data: null, error: null as any };
 
-  const [item, setItem] = useState<Item | null>(null);
-  const [editable, setEditable] = useState(false);
-  const [err, setErr] = useState("");
-  const [tab, setTab] = useState<"read" | "edit">("read");
-
-  const [body, setBody] = useState("");
-  const [title, setTitle] = useState("");
-  const [savedBody, setSavedBody] = useState("");
-  const [savedTitle, setSavedTitle] = useState("");
-
-  const [instruction, setInstruction] = useState("");
-  const [revising, setRevising] = useState(false);
-  const [log, setLog] = useState<{ text: string; ok: boolean }[]>([]);
-  const undoStack = useRef<string[]>([]);
-  const [busy, setBusy] = useState("");
-
-  const dirty = body !== savedBody || title !== savedTitle;
-
-  useEffect(() => {
-    if (!id) { setErr("No article id in the URL."); return; }
-    fetch(`/api/content/${id}`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (!d.ok) { setErr(d.error ?? "Could not load this article."); return; }
-        setItem(d.item);
-        setEditable(d.editable);
-        setBody(d.item.body ?? "");
-        setSavedBody(d.item.body ?? "");
-        setTitle(d.item.title ?? "");
-        setSavedTitle(d.item.title ?? "");
-      })
-      .catch((e) => setErr(e?.message ?? "Network error."));
-  }, [id]);
-
-  // Leaving with unsaved edits is almost always a mistake — the browser's own prompt is the
-  // only one that can't be missed.
-  useEffect(() => {
-    if (!dirty) return;
-    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty]);
-
-  // Rendered synchronously: no promise, no effect, no third-party bundle to fail to load.
-  const html = useMemo(() => renderMarkdown(body), [body]);
-  const stats = useMemo(() => liveStats(body), [body]);
-
-  const revise = async () => {
-    const text = instruction.trim();
-    if (!text || revising) return;
-    setRevising(true);
-    try {
-      const res = await fetch(`/api/content/${id}/revise`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ instruction: text, body }),
-      });
-      const data = await res.json();
-      if (!data.ok) { setLog((l) => [...l, { text: data.error ?? "Revision failed.", ok: false }]); return; }
-      undoStack.current.push(body);
-      setBody(data.body);
-      setLog((l) => [...l, { text, ok: true }]);
-      setInstruction("");
-      setTab("read"); // you asked for a change — look at it, don't hunt for it in markdown
-    } catch (e: any) {
-      setLog((l) => [...l, { text: e?.message ?? "Network error.", ok: false }]);
-    } finally {
-      setRevising(false);
-    }
-  };
-
-  const undo = () => {
-    const prev = undoStack.current.pop();
-    if (prev === undefined) return;
-    setBody(prev);
-    setLog((l) => l.slice(0, -1));
-  };
-
-  const save = async () => {
-    setBusy("save");
-    try {
-      const res = await fetch(`/api/content/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body, title }),
-      });
-      const data = await res.json();
-      if (!data.ok) { toast(data.error ?? "Save failed."); return; }
-      setSavedBody(body);
-      setSavedTitle(title);
-      undoStack.current = [];
-      toast("Saved.");
-    } finally {
-      setBusy("");
-    }
-  };
-
-  const approve = async () => {
-    if (dirty) { toast("Pehle changes save karo, phir publish."); return; }
-    setBusy("approve");
-    try {
-      const res = await fetch(`/api/content/${id}/approve`, { method: "POST" });
-      const data = await res.json();
-      if (!data.ok) { toast(data.error ?? "Publish failed."); return; }
-      act(`"It's live."`, "Mr Lxwa");
-      report(`Published after your approval: "${title}"`);
-      toast(data.url ? `Published! ${data.url}` : "Published!");
-      router.push("/app/approvals");
-    } finally {
-      setBusy("");
-    }
-  };
-
-  const reject = async () => {
-    setBusy("reject");
-    try {
-      await fetch(`/api/content/${id}/reject`, { method: "POST" });
-      toast("Rejected — the team will adjust.");
-      router.push("/app/approvals");
-    } finally {
-      setBusy("");
-    }
-  };
-
-  // The chrome renders unconditionally. Returning a bare <p> for the loading and error
-  // states meant that if anything at all went wrong the whole page was an empty black
-  // rectangle with no way back — which is indistinguishable from a broken app.
-  return (
-    <div className="rv">
-      <div className="rv-top">
-        <Link href="/app/approvals" className="rv-back">← Approvals</Link>
-        {item && <span className="rv-status">{STATUS_LABEL[item.status] ?? item.status}</span>}
-        {item && <span className="rv-stats">{stats.words} words · {stats.sections} sections · {stats.links} links</span>}
-        {dirty && <span className="rv-dirty">Unsaved changes</span>}
-      </div>
-
-      {err && (
-        <div className="card" style={{ padding: "16px 18px", borderColor: "#ff6b6b" }}>
+  // Every failure says which one it is, on the server, in the HTML. "Nothing here" was the
+  // one outcome this page must never produce again.
+  if (!tenantId || error || !item) {
+    return (
+      <div style={{ maxWidth: 620 }}>
+        <Link href="/app/approvals" style={{ fontSize: 12, color: "var(--ac)", fontWeight: 600 }}>← Approvals</Link>
+        <div className="card" style={{ padding: "16px 18px", marginTop: 12, borderColor: "#ff6b6b" }}>
           <b style={{ fontSize: 13.5 }}>Couldn&apos;t open this article</b>
-          <p className="sm" style={{ color: "#ff6b6b", margin: "6px 0 0" }}>{err}</p>
+          <p className="sm" style={{ color: "#ff6b6b", margin: "6px 0 0" }}>
+            {!tenantId
+              ? "No workspace found for your account."
+              : error
+                ? error.message
+                : "There is no article with that id in your workspace."}
+          </p>
         </div>
-      )}
-
-      {!item && !err && <p className="sm mut">Loading the draft…</p>}
-
-      {item && (
-      <>
-
-      <div className="rv-cols">
-        <div className="rv-main">
-          <div className="rv-tabs">
-            <button className={tab === "read" ? "on" : ""} onClick={() => setTab("read")}>Read</button>
-            <button className={tab === "edit" ? "on" : ""} onClick={() => setTab("edit")} disabled={!editable}>
-              Edit by hand
-            </button>
-          </div>
-
-          {tab === "read" ? (
-            // The article as a reader gets it. See useMarkdown() for why raw HTML is neutered.
-            body.trim()
-              ? <article className="prose" dangerouslySetInnerHTML={{ __html: html }} />
-              // An empty body is a real state (a job that failed mid-write leaves one), and a
-              // blank panel is indistinguishable from a broken page — say which it is.
-              : <p className="rv-empty">This item has no article text stored. Nothing was written, or the draft was cleared.</p>
-          ) : (
-            <div className="rv-edit">
-              <label className="rv-lbl">Title</label>
-              <input value={title} onChange={(e) => setTitle(e.target.value)} />
-              <label className="rv-lbl">Article (markdown)</label>
-              <textarea value={body} onChange={(e) => setBody(e.target.value)} spellCheck />
-              <p className="rv-hint"># is the title, ## starts a section, **bold**, [text](https://link).</p>
-            </div>
-          )}
-        </div>
-
-        <aside className="rv-side">
-          <h3>Ask for a change</h3>
-          {!editable ? (
-            <p className="rv-note">
-              This one is <b>{STATUS_LABEL[item.status] ?? item.status}</b>. Re-publishing an edit isn&apos;t wired yet,
-              so it&apos;s read-only here — editing would leave this copy and your live site disagreeing.
-            </p>
-          ) : (
-            <>
-              <p className="rv-note">
-                Plain English ya Hinglish. Har change sirf yahan dikhega — <b>Save</b> dabane tak kuch likha nahi jaata.
-              </p>
-
-              <div className="rv-chat">
-                {log.map((l, i) => (
-                  <div key={i} className={"rv-msg" + (l.ok ? "" : " is-err")}>{l.ok ? `✎ ${l.text}` : l.text}</div>
-                ))}
-                {revising && <div className="rv-msg is-live">Rewriting the draft… (~1 min for a full article)</div>}
-              </div>
-
-              <textarea
-                className="rv-ask"
-                placeholder={"e.g. intro chhota karo\nadd a section about pricing\nremove the last paragraph"}
-                value={instruction}
-                onChange={(e) => setInstruction(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) revise(); }}
-                disabled={revising}
-              />
-              <div className="rv-askrow">
-                <button className="btn btn-p" onClick={revise} disabled={revising || !instruction.trim()}>
-                  {revising ? "Working…" : "Apply change"}
-                </button>
-                <button className="rv-undo" onClick={undo} disabled={!undoStack.current.length}>Undo</button>
-              </div>
-            </>
-          )}
-
-          <div className="rv-actions">
-            {editable && (
-              <button className="btn btn-p" onClick={save} disabled={!dirty || !!busy}>
-                {busy === "save" ? "Saving…" : "Save changes"}
-              </button>
-            )}
-            {item.status === "awaiting_approval" && (
-              <>
-                <button className="btn btn-p rv-pub" onClick={approve} disabled={!!busy}>
-                  {busy === "approve" ? "Publishing…" : "✓ Approve & publish"}
-                </button>
-                <button className="rv-rej" onClick={reject} disabled={!!busy}>Reject</button>
-              </>
-            )}
-          </div>
-        </aside>
       </div>
-      </>
-      )}
+    );
+  }
 
-      <style jsx>{`
-        .rv { max-width: 1180px; }
-        .rv-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
-        .rv-back { font-size: 12px; color: var(--ac); font-weight: 600; }
-        .rv-status { font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: 7px;
-                     background: var(--panel2); color: var(--mut); }
-        .rv-stats { font-size: 11px; color: var(--mut2); }
-        .rv-dirty { font-size: 10.5px; font-weight: 700; color: var(--amb); }
+  return (
+    <>
+      <ArticleReview item={item as any} editable={EDITABLE.includes(item.status)} id={params.id} />
 
-        .rv-cols { display: grid; grid-template-columns: minmax(0, 1fr) 310px; gap: 18px; align-items: start; }
-        @media (max-width: 900px) { .rv-cols { grid-template-columns: 1fr; } }
-
-        .rv-main { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
-        .rv-tabs { display: flex; gap: 2px; padding: 8px 8px 0; border-bottom: 1px solid var(--line); }
-        .rv-tabs button { background: none; border: none; cursor: pointer; font-size: 12px; font-weight: 600;
-                          color: var(--mut); padding: 8px 13px; border-radius: 9px 9px 0 0; }
-        .rv-tabs button.on { color: var(--ink); background: var(--panel2); }
-        .rv-tabs button:disabled { opacity: .4; cursor: default; }
-
-        .rv-edit { padding: 16px 18px; }
-        .rv-lbl { display: block; font-size: 10.5px; font-weight: 700; letter-spacing: .5px;
-                  color: var(--mut2); margin: 10px 0 5px; }
-        .rv-edit input, .rv-edit textarea { width: 100%; background: var(--bg2); border: 1px solid var(--line2);
-                                            border-radius: 9px; padding: 10px 12px; color: var(--ink);
-                                            font-size: 13px; font-family: inherit; }
-        .rv-edit textarea { min-height: 62vh; line-height: 1.7; resize: vertical;
-                            font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
-        .rv-hint { font-size: 10.5px; color: var(--mut2); margin: 7px 0 0; }
-        .rv-empty { padding: 40px 24px; text-align: center; color: var(--mut); font-size: 13px; margin: 0; }
-
-        .rv-side { background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
-                   padding: 15px 16px; position: sticky; top: 12px; }
-        .rv-side h3 { font-size: 13.5px; margin: 0 0 7px; }
-        .rv-note { font-size: 11px; color: var(--mut); line-height: 1.55; margin: 0 0 11px; }
-        .rv-chat { display: flex; flex-direction: column; gap: 6px; max-height: 230px; overflow-y: auto;
-                   margin-bottom: 10px; }
-        .rv-msg { font-size: 11.5px; background: var(--panel2); border-radius: 9px; padding: 7px 10px;
-                  color: var(--ink); line-height: 1.5; }
-        .rv-msg.is-err { color: #ff6b6b; }
-        .rv-msg.is-live { color: var(--mut); }
-        .rv-ask { width: 100%; min-height: 74px; background: var(--bg2); border: 1px solid var(--line2);
-                  border-radius: 9px; padding: 9px 11px; color: var(--ink); font-size: 12.5px;
-                  font-family: inherit; resize: vertical; }
-        .rv-askrow { display: flex; gap: 8px; margin-top: 8px; }
-        .rv-undo { background: none; border: 1px solid var(--line2); color: var(--mut); font-size: 11.5px;
-                   font-weight: 600; padding: 8px 13px; border-radius: 9px; cursor: pointer; }
-        .rv-undo:disabled { opacity: .4; cursor: default; }
-
-        .rv-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 15px;
-                      padding-top: 13px; border-top: 1px solid var(--line); }
-        .rv-pub { background: var(--grn); border-color: var(--grn); }
-        .rv-rej { background: none; border: 1px solid var(--line2); color: var(--mut); font-size: 12px;
-                  font-weight: 600; padding: 9px; border-radius: 9px; cursor: pointer; }
-        .rv-rej:hover { color: #ff6b6b; border-color: #ff6b6b; }
-      `}</style>
-
-    </div>
+      {/* Server-rendered, and shown only if the client bundle never runs. The reading view is
+          static text — there is no good reason for it to depend on JavaScript at all. */}
+      <noscript>
+        <article className="prose" dangerouslySetInnerHTML={{ __html: renderMarkdown(item.body ?? "") }} />
+      </noscript>
+    </>
   );
-}
-
-/** Recomputed as you type, so the header never quotes the length of a draft you just changed. */
-function liveStats(md: string) {
-  return {
-    words: md.replace(/[#*_`>[\]()-]/g, " ").split(/\s+/).filter(Boolean).length,
-    sections: (md.match(/^##\s+/gm) ?? []).length,
-    links: (md.match(/\[[^\]]+\]\((https?:\/\/[^)]+)\)/g) ?? []).length,
-  };
 }
