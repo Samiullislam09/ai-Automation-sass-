@@ -178,7 +178,14 @@ async function startWork(intent: NonNullable<ReturnType<typeof detectChatIntent>
     : await enqueueAgentJob("boss", tenantId, { count: intent.kind === "plan" ? 3 : 1 });
 
   if (!res.ok) {
-    return `I couldn't put the team to work: **${res.error}** — so I'm not going to pretend it's running. Nothing was started, and no tokens were used. Try again once the agent server is reachable.`;
+    // 429 is the daily cap, which is a completely different situation from "the server is
+    // down" — telling someone to wait for the agent server to come back when it is up and
+    // simply refusing on budget grounds sends them chasing the wrong problem.
+    const next =
+      res.status === 429
+        ? `That's the daily budget guard, not a fault — the agent server is fine. Raise the cap on agent-server (DAILY_CAP_*) or try again tomorrow.`
+        : `Try again once the agent server is reachable.`;
+    return `I couldn't put the team to work: **${res.error}** — so I'm not going to pretend it's running. Nothing was started, and no credits were used. ${next}`;
   }
 
   const head = topic

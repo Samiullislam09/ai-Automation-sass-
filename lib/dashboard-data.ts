@@ -85,6 +85,9 @@ export async function getAgentRoomStates(supabase: SupabaseClient, tenantId: str
     const label = j.action && j.action !== j.agent ? j.action : (TASKS[room] ?? "Working…");
     if (j.status === "running" || j.status === "queued") rooms[room] = { state: "working", task: label };
     else if (j.status === "error" && ageMs < 10 * 60 * 1000) rooms[room] = { state: "error", task: "Needs a restart" };
+    // Refused by the daily cap. Amber, not red: nothing is broken, but the room must not sit
+    // there looking peacefully asleep when the user just asked it to do something.
+    else if (j.status === "skipped" && ageMs < 30 * 60 * 1000) rooms[room] = { state: "waiting", task: "Daily cap reached — nothing ran" };
     // status === "success" (or an old error) → stays "off" until the next real job
   }
 
@@ -173,7 +176,10 @@ export async function getAgentDetail(
     for (const j of jobs) {
       counts.total++;
       if (j.status === "success") counts.success++;
-      else if (j.status === "error") counts.error++;
+      // A capped job is not a failure of the agent, but it isn't work either — counting it
+      // as "running" (the old catch-all) would leave the panel claiming a job is in flight
+      // forever.
+      else if (j.status === "error" || j.status === "skipped") counts.error++;
       else counts.running++;
     }
   }
@@ -203,11 +209,11 @@ export async function getAgentDetail(
  *  Every branch reads a field the agent actually writes (agent-server/src/agents/*.ts); when a
  *  row has nothing usable we say so rather than inventing a description of the work. */
 function describeJob(jobAgent: string, status: string, detail: any): { summary: string; items: string[] } {
-  if (status === "error") {
+  if (status === "error" || status === "skipped") {
     // agent-server enriches failures (agent-server/src/lib/errors.ts): a plain sentence, the
     // raw cause, a hint, which retry it was and how long it ran. Show all of it — "proper
     // error logs" was a fair complaint about the old single opaque line.
-    const summary = detail?.message ? String(detail.message) : "Failed.";
+    const summary = detail?.message ? String(detail.message) : status === "skipped" ? "Refused before it started." : "Failed.";
     const items: string[] = [];
     if (detail?.hint) items.push(String(detail.hint));
     if (detail?.attempt && detail?.attempts) {

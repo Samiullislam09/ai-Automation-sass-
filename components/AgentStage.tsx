@@ -197,6 +197,7 @@ export default function AgentStage({ id, onClose }: { id: string; onClose: () =>
                   padding: 9px 11px; background: var(--panel); }
         .st-job.is-success { border-left-color: var(--grn); }
         .st-job.is-error { border-left-color: var(--red); }
+        .st-job.is-skipped { border-left-color: var(--amb); }
         .st-job.is-running, .st-job.is-queued { border-left-color: var(--blu); }
         .st-job-top { display: flex; align-items: center; gap: 8px; }
         .st-badge { font-size: 9px; font-weight: 800; text-transform: uppercase; color: var(--mut); }

@@ -8,6 +8,7 @@ import { boss } from "./db.js";
 import { initSocket } from "./socket.js";
 import { startWorkers } from "./workers.js";
 import { startScheduler, stopScheduler } from "./scheduler.js";
+import { dailyUsage } from "./jobsLog.js";
 
 const app = express();
 app.use(cors({ origin: env.CORS_ORIGIN.split(",").map((s) => s.trim()) }));
@@ -57,6 +58,23 @@ app.post("/jobs/:type", async (req, res) => {
   }
   const { tenantId, ...rest } = req.body ?? {};
   if (!tenantId) return res.status(400).json({ error: "tenantId is required" });
+
+  // Refuse here rather than accepting the job and dropping it in the worker. Handing back a
+  // job id for work that will never run is how "Mr Lxwa says On it, then nothing happens,
+  // and there is no error anywhere" happened: the caller has to be able to tell the user.
+  try {
+    const usage = await dailyUsage(tenantId, type);
+    if (usage.over) {
+      return res.status(429).json({
+        error: `Daily cap reached — the ${type} agent has already run ${usage.used} time(s) today (limit ${usage.cap}). Nothing was started, and no credits were used. Raise DAILY_CAP_${type.toUpperCase()} on agent-server, or try again tomorrow.`,
+        used: usage.used,
+        cap: usage.cap,
+      });
+    }
+  } catch (e: any) {
+    // Budget guard, not a gate: never block real work because the count query failed.
+    console.error("[jobs] cap pre-check failed, allowing:", e?.message);
+  }
 
   try {
     // If Postgres is unreachable, fail loudly within 8s instead of hanging the request forever.

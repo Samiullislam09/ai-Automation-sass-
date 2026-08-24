@@ -9,12 +9,23 @@ import { SeoAgent } from "./agents/seo.js";
 import { LeadsAgent } from "./agents/leads.js";
 import { CrawlerAgent } from "./agents/crawler.js";
 import type { Agent, AgentJobData } from "./agents/base.js";
-import { isOverDailyCap, logJobStart, logJobFinish, logJobError } from "./jobsLog.js";
+import { dailyUsage, logJobStart, logJobFinish, logJobError, logJobSkipped } from "./jobsLog.js";
 import { emitAgentStatus } from "./socket.js";
 import { explainAgentError } from "./lib/errors.js";
 
 // queues.ts sets retryLimit: 2, i.e. the first run plus two retries.
 const MAX_ATTEMPTS = 3;
+
+const AGENT_LABEL: Record<string, string> = {
+  boss: "Mr Lxwa", keyword: "Mr. Keyword", writer: "Mr. Writer",
+  crawler: "the site crawler", social: "Miss Social", seo: "Mr. SEO", leads: "the leads agent",
+};
+
+/** The human task text whoever enqueued the job passed, falling back to the queue name. */
+function rawLabelOf(job: JobWithMetadata<AgentJobData>): string {
+  const label = (job.data as any)?.taskLabel;
+  return typeof label === "string" && label.trim() ? label.trim() : job.name;
+}
 
 const AGENTS: Record<AgentType, Agent> = {
   boss: new BossAgent(),
@@ -29,28 +40,36 @@ const AGENTS: Record<AgentType, Agent> = {
 async function process(type: AgentType, job: JobWithMetadata<AgentJobData>) {
   const { tenantId } = job.data;
 
-  if (await isOverDailyCap(tenantId, type)) {
-    emitAgentStatus({ agent: type, tenant: tenantId, status: "idle", task: "Daily cap reached — skipped" });
-    // Not an error — a cap hit is expected/normal, so don't burn a retry on it.
-    return { skipped: true, reason: "daily cap exceeded" };
+  const attempt = (job.retryCount ?? 0) + 1;
+
+  // Retries are not new work: the first attempt already paid for this job's slot, and
+  // re-checking here meant three failed tries could lock the agent out for the rest of the day.
+  if (attempt === 1) {
+    const usage = await dailyUsage(tenantId, type);
+    if (usage.over) {
+      const reason = `Daily cap reached — ${AGENT_LABEL[type] ?? type} has already run ${usage.used} time(s) today (limit ${usage.cap}). Nothing was started.`;
+      const hint = `The cap protects your AI budget. Raise it with DAILY_CAP_${type.toUpperCase()} in agent-server's environment, or wait until tomorrow.`;
+      await logJobSkipped(tenantId, type, rawLabelOf(job), reason, hint);
+      emitAgentStatus({ agent: type, tenant: tenantId, status: "idle", task: reason });
+      console.warn(`[${type}] ${reason}`);
+      // Not an error — a cap hit is expected/normal, so don't burn a retry on it.
+      return { skipped: true, reason };
+    }
   }
 
   // jobs_log.action used to be job.name, which is just the queue name again ("writer"),
   // so the dashboard had no real task text to show and had to fall back to a generic
   // per-agent label. Whoever enqueues the job can now pass a human one.
-  const rawLabel = typeof (job.data as any).taskLabel === "string" && (job.data as any).taskLabel.trim()
-    ? ((job.data as any).taskLabel as string).trim()
-    : job.name;
+  const rawLabel = rawLabelOf(job);
 
   // pg-boss retries a failed job twice (queues.ts). Those retries used to be logged as if
   // they were three unrelated jobs, so the dashboard looked like it was failing and
   // restarting at random. Say which attempt this is, right in the task text.
-  const attempt = (job.retryCount ?? 0) + 1;
   const attempts = MAX_ATTEMPTS;
   const taskLabel = attempt > 1 ? `${rawLabel} (retry ${attempt}/${attempts})` : rawLabel;
 
   emitAgentStatus({ agent: type, tenant: tenantId, status: "running", task: taskLabel });
-  const logId = await logJobStart(tenantId, type, taskLabel);
+  const logId = await logJobStart(tenantId, type, taskLabel, attempt);
   const startedAt = Date.now();
 
   try {
