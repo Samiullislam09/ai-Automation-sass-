@@ -51,17 +51,50 @@ async function loadRealBusinessContext(): Promise<{ tenantId: string | null; bus
   }
 }
 
-function systemPrompt(ctx: any, business: string | null): string {
+function systemPrompt(ctx: any, business: string | null, recentWork: string | null): string {
   return `You are Mr Lxwa, running a small AI marketing team (Mr. Keyword, Mr. Writer, Mr. Story, Miss Social, Mr. SEO) inside the GrowthTeam AI (MrLxwa) dashboard. Reply in 1-2 short sentences, warm and confident. **Bold** is fine.
 
 Account: ${ctx.tokens ?? "?"}/${ctx.tokensMax ?? "?"} tokens (${ctx.plan ?? "free"} plan) · ${ctx.awaiting ?? 0} awaiting approval · latest report: ${ctx.report ?? "nothing yet today"} · business: ${business ?? "not onboarded yet"}
 
+WHAT THE TEAM ACTUALLY DID (real jobs_log rows — the only work you may claim happened):
+${recentWork ?? "nothing yet — no jobs have run for this account."}
+
 You are the MANAGER, not the writer. You never write an article, blog post or social copy inside this chat — Mr. Keyword researches and Mr. Writer drafts, and the draft lands in the user's Approvals page. If the user asks for content, tell them to say it as an order ("write an article about X") so you can put the team on it; do not produce the content yourself, not even a sample or an outline.
 
-Real actions you CAN start: planning topics and writing articles (the request is enqueued for the real team). Everything else — publishing, social scheduling, email — is not built yet; say so plainly. Never invent numbers not given above. Match the user's language (English or Hinglish).`;
+Real actions you CAN start: planning topics and writing articles. BUT NOT IN THIS REPLY — if you are answering, the order was not recognised, so NOTHING has been queued. Never say "queued", "enqueued", "I've started it" or "Mr. Writer is on it" here; instead ask the user to type it as a plain order, exactly like: write an article about <topic>. Everything else — publishing, social scheduling, email — is not built yet; say so plainly. Never invent numbers or work not listed above. Match the user's language (English or Hinglish).`;
 }
 
-async function askLightning(q: string, ctx: any, business: string | null): Promise<string> {
+/** The last few real jobs, in one line each. Without this Mr Lxwa could not answer "what did
+ *  the team do?" with anything but invention — and invention is the one thing he must not do. */
+async function loadRecentWork(tenantId: string | null): Promise<string | null> {
+  if (!tenantId) return null;
+  try {
+    const supabase = await createClient();
+    const { data } = await supabase
+      .from("jobs_log")
+      .select("agent, action, status, detail, created_at")
+      .eq("tenant_id", tenantId)
+      .order("created_at", { ascending: false })
+      .limit(8);
+    if (!data?.length) return null;
+    return data
+      .map((j: any) => {
+        const when = new Date(j.created_at).toLocaleString();
+        const what = j.action && j.action !== j.agent ? j.action : j.agent;
+        const outcome =
+          j.status === "error" ? `FAILED: ${String(j.detail?.message ?? "unknown error").slice(0, 160)}`
+          : j.status === "success" ? "done"
+          : j.status;
+        return `- ${when} · ${j.agent} · ${what} — ${outcome}`;
+      })
+      .join("\n");
+  } catch (e: any) {
+    console.error("[chat] failed to load recent work:", e.message);
+    return null;
+  }
+}
+
+async function askLightning(q: string, ctx: any, business: string | null, recentWork: string | null): Promise<string> {
   const key = process.env.NVIDIA_API_KEY;
   if (!key) throw new Error("NVIDIA_API_KEY missing");
 
@@ -81,7 +114,7 @@ async function askLightning(q: string, ctx: any, business: string | null): Promi
       chat_template_kwargs: { thinking: false },
       max_tokens: 1024,
       messages: [
-        { role: "system", content: systemPrompt(ctx, business) },
+        { role: "system", content: systemPrompt(ctx, business, recentWork) },
         { role: "user", content: q },
       ],
     }),
@@ -167,6 +200,7 @@ export async function POST(req: NextRequest) {
   // it to the real queue and answer with what actually started — so the office animation and
   // the Approvals page match what the chat just claimed. See lib/chat-intent.ts.
   const intent = detectChatIntent(q);
+  const recentWork = intent ? null : await loadRecentWork(tenantId);
   if (intent && tenantId) {
     const text = await startWork(intent, tenantId);
     return new Response(wordStream(text), { headers: { "Content-Type": "text/plain; charset=utf-8" } });
@@ -177,7 +211,7 @@ export async function POST(req: NextRequest) {
   // nothing on the (now common) happy path, catches the rare remaining transient failure.
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      const text = await askLightning(q, ctx || {}, business);
+      const text = await askLightning(q, ctx || {}, business, recentWork);
       return new Response(wordStream(text), { headers: { "Content-Type": "text/plain; charset=utf-8" } });
     } catch (e: any) {
       console.error(`[chat] Lightning call failed (attempt ${attempt}/2):`, e.message);

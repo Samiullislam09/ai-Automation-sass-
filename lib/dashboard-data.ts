@@ -105,3 +105,145 @@ const TASKS: Record<string, string> = {
   seo: "Analyzing SEO",
   social: "Scheduling posts",
 };
+
+/* ============================ ONE AGENT, IN DETAIL ============================
+ * Powers the "click a room and watch that agent work" view (app/app/page.tsx →
+ * components/AgentPanel.tsx). Everything here is read back out of jobs_log/content_items —
+ * the same rows the agent-server wrote — so the panel shows what an agent ACTUALLY did and
+ * what came out of it, not a scripted animation.
+ */
+
+// Office/store agent id (lib/agents-data.ts) -> the jobs_log.agent value its queue writes.
+// Agents missing from this map have no queue of their own yet: Mr. QA and Mr. Publish are
+// stages inside the writer job (quality gate / publish), so their panel reads content_items.
+export const AGENT_ID_TO_JOB: Record<string, string> = {
+  boss: "boss", kw: "keyword", writer: "writer", seo: "seo", social: "social",
+};
+
+export type AgentJobRow = {
+  id: string;
+  task: string;
+  status: string;
+  at: string;
+  summary: string;
+  /** Real sub-items produced by the job (topics planned, keywords found) — for the list view. */
+  items: string[];
+};
+
+export type AgentDetail = {
+  jobAgent: string | null;
+  state: RoomState;
+  jobs: AgentJobRow[];
+  content: { id: string; title: string; status: string; words: number | null; at: string }[];
+  counts: { total: number; success: number; error: number; running: number };
+};
+
+export async function getAgentDetail(
+  supabase: SupabaseClient,
+  tenantId: string,
+  agentId: string
+): Promise<AgentDetail> {
+  const jobAgent = AGENT_ID_TO_JOB[agentId] ?? null;
+  const rooms = await getAgentRoomStates(supabase, tenantId);
+  // getAgentRoomStates keys rooms by ROOM id ("keyword"), the UI by store id ("kw").
+  const state = rooms[jobAgent ?? agentId] ?? rooms[agentId] ?? { state: "off" as const, task: "—" };
+
+  let jobs: AgentJobRow[] = [];
+  const counts = { total: 0, success: 0, error: 0, running: 0 };
+
+  if (jobAgent) {
+    const { data } = await supabase
+      .from("jobs_log")
+      .select("id, action, status, detail, created_at")
+      .eq("tenant_id", tenantId)
+      .eq("agent", jobAgent)
+      .order("created_at", { ascending: false })
+      .limit(12);
+
+    jobs = (data ?? []).map((j: any) => ({
+      id: String(j.id),
+      task: j.action && j.action !== jobAgent ? j.action : jobAgent,
+      status: j.status,
+      at: j.created_at,
+      ...describeJob(jobAgent, j.status, j.detail),
+    }));
+
+    for (const j of jobs) {
+      counts.total++;
+      if (j.status === "success") counts.success++;
+      else if (j.status === "error") counts.error++;
+      else counts.running++;
+    }
+  }
+
+  // Mr. Writer / Mr. QA / Mr. Publish all end at the same place: a content_items row.
+  let content: AgentDetail["content"] = [];
+  if (["writer", "qa", "publish"].includes(agentId)) {
+    const { data } = await supabase
+      .from("content_items")
+      .select("id, title, status, meta, created_at")
+      .eq("tenant_id", tenantId)
+      .order("created_at", { ascending: false })
+      .limit(8);
+    content = (data ?? []).map((c: any) => ({
+      id: String(c.id),
+      title: c.title ?? "(untitled)",
+      status: c.status,
+      words: c.meta?.wordCount ?? null,
+      at: c.created_at,
+    }));
+  }
+
+  return { jobAgent, state, jobs, content, counts };
+}
+
+/** Turns one jobs_log row's `detail` jsonb into a human sentence + the real items it produced.
+ *  Every branch reads a field the agent actually writes (agent-server/src/agents/*.ts); when a
+ *  row has nothing usable we say so rather than inventing a description of the work. */
+function describeJob(jobAgent: string, status: string, detail: any): { summary: string; items: string[] } {
+  if (status === "error") return { summary: detail?.message ? String(detail.message) : "Failed.", items: [] };
+  if (status !== "success") return { summary: "Working…", items: [] };
+  if (!detail || typeof detail !== "object") return { summary: "Finished.", items: [] };
+
+  if (jobAgent === "boss") {
+    const topics = Array.isArray(detail.topics) ? detail.topics : [];
+    if (!topics.length) return { summary: detail.reason ? String(detail.reason) : "Planned nothing this run.", items: [] };
+    return {
+      summary: `Planned ${topics.length} topic${topics.length > 1 ? "s" : ""} from your niche and crawled pages, and sent each to Mr. Keyword.`,
+      items: topics.map((t: any) => (t?.why ? `${t.topic} — ${t.why}` : String(t?.topic ?? ""))).filter(Boolean),
+    };
+  }
+
+  if (jobAgent === "keyword") {
+    const related = Array.isArray(detail.relatedKeywords) ? detail.relatedKeywords : [];
+    const items = related.map((r: any) =>
+      r?.searchVolume != null ? `${r.keyword} — ${r.searchVolume}/mo` : String(r?.keyword ?? "")
+    ).filter(Boolean);
+
+    if (detail.searchDataAvailable === false) {
+      return {
+        summary: `Live keyword data was unavailable (${detail.searchDataError ?? "provider error"}), so the topic went to Mr. Writer grounded in your site profile instead.`,
+        items,
+      };
+    }
+    if (detail.chained === false) return { summary: String(detail.reason ?? "Stopped here."), items };
+    const vol = detail.seedSearchVolume != null ? `${detail.seedSearchVolume}/mo for the main keyword, ` : "";
+    return { summary: `Found ${vol}${items.length} related quer${items.length === 1 ? "y" : "ies"} — blueprint handed to Mr. Writer.`, items };
+  }
+
+  if (jobAgent === "writer") {
+    const gate = detail.qualityGate ?? {};
+    const title = detail.title ?? detail.topic ?? "the draft";
+    const words = detail.wordCount ?? gate.wordCount;
+    const verdict = gate.passed === false
+      ? `did NOT pass the quality gate (${(gate.reasons ?? []).join("; ") || "unknown reason"})`
+      : "passed the quality gate and is waiting for your approval";
+    return { summary: `Wrote “${title}”${words ? ` — ${words} words` : ""}; it ${verdict}.`, items: [] };
+  }
+
+  if (jobAgent === "crawler") {
+    return { summary: `Crawled ${detail.pagesCrawled ?? 0} page(s).${detail.reason ? ` ${detail.reason}` : ""}`, items: [] };
+  }
+
+  return { summary: "Finished.", items: [] };
+}

@@ -17,7 +17,10 @@ export type ChatIntent =
 const QUESTION = /^(how|what|why|when|who|which|can you|could you|do you|does|is |are |kya|kaise|kyun|kyu|kaun|batao|explain|tell me)\b|\?\s*$/i;
 
 const WRITE_VERB = /\b(write|writing|draft|create|make|generate|publish|likh|likho|likhna|likhkar|likhe|banao|banado|bana|chahiye|chaiye)\b/i;
-const ARTICLE_NOUN = /\b(article|artical|articles|blog|blogs|post|posts|content|piece)\b/i;
+// Typo-tolerant on purpose: real users type "artical", "articla", "artcile". Missing one of
+// those meant the message fell through to the chat model, which then cheerfully announced a
+// queued draft when in fact nothing had been queued at all.
+const ARTICLE_NOUN = /\b(artic\w*|artcile|artikel|blogs?|posts?|content|piece)\b/i;
 const PLAN_ORDER = /\b(run the team|start the team|start team|team ko chalao|kaam shuru|start working|plan (this week|the week|content|topics)|get to work)\b/i;
 
 export function detectChatIntent(raw: string): ChatIntent {
@@ -54,7 +57,7 @@ function extractTopic(q: string): string | null {
 function clean(s: string): string {
   const t = s
     .replace(/\b(an?|the|ek|mere liye|mere liya|for me|please|plz)\b/gi, " ")
-    .replace(/\b(article|artical|blog|post|content|likho|likhna|banao|chahiye|write|karo)\b/gi, " ")
+    .replace(/\b(artic\w*|artcile|artikel|blogs?|posts?|content|likho|likhna|banao|chahiye|write|karo)\b/gi, " ")
     .replace(/[.,!?;:]+$/g, "")
     .replace(/\s+/g, " ")
     .trim();

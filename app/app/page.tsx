@@ -18,6 +18,7 @@
  *  return in app/app/layout.tsx, since it supplies its own sidebar/topbar/chat shell. */
 import { useCallback, useEffect, useRef, useState } from "react";
 import Office from "@/components/Office";
+import AgentPanel from "@/components/AgentPanel";
 import { AGENTS, useStore, type AgentState } from "@/lib/store";
 
 type Stats = {
@@ -64,6 +65,9 @@ export default function Dashboard() {
   const [liveErr, setLiveErr] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [runMsg, setRunMsg] = useState<string | null>(null);
+  // Which room the user clicked: the office fades everyone else out and this agent's real
+  // job history opens beside it. null = the whole office.
+  const [selected, setSelected] = useState<string | null>(null);
 
   // Poll the one real endpoint. A single in-flight request at a time (a slow reply must not
   // stack up behind the interval), and we stop entirely on 401 — an unauthenticated tab
@@ -148,7 +152,8 @@ export default function Dashboard() {
       </div>
 
       <div className="dash-office">
-        <Office />
+        <Office solo={selected} onSelect={setSelected} />
+        {selected && <AgentPanel id={selected} onClose={() => setSelected(null)} />}
       </div>
 
       <div className="dash-stats">

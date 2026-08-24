@@ -1,6 +1,6 @@
 import type { Job } from "pg-boss";
 import { Agent, type AgentJobData } from "./base.js";
-import { writeArticle } from "../lib/writer.js";
+import { writeArticle, type WriterContext } from "../lib/writer.js";
 import { gateArticle, extractTitle } from "../lib/qualityGate.js";
 import { supabase } from "../supabase.js";
 
@@ -16,7 +16,12 @@ export class WriterAgent extends Agent {
     const blueprint = (job.data as any).blueprint as string | undefined;
     if (!topic?.trim()) throw new Error("writer job needs a 'topic' string");
 
-    const body = await writeArticle(topic.trim(), blueprint);
+    // Ground the draft in THIS business: its niche, audience, tone and its own crawled
+    // pages (for real internal links). Without this the model wrote generic filler that
+    // could have belonged to any company.
+    const context = await loadWriterContext(tenantId);
+
+    const body = await writeArticle(topic.trim(), blueprint, context);
     const gate = gateArticle(body);
     const title = extractTitle(body, topic.trim());
 
@@ -32,12 +37,56 @@ export class WriterAgent extends Agent {
         title,
         body,
         blueprint: blueprint ? { text: blueprint } : {},
-        meta: { wordCount: gate.wordCount, sections: gate.sections, links: gate.links, qualityGate: gate },
+        meta: {
+          wordCount: gate.wordCount,
+          sections: gate.sections,
+          links: gate.links,
+          qualityGate: gate,
+          // What the draft was actually grounded in — so "why did it write this?" is answerable.
+          contextUsed: {
+            niche: !!context.niche,
+            audience: !!context.audience,
+            tone: !!context.tone,
+            pages: context.pages?.length ?? 0,
+          },
+        },
       })
       .select("id")
       .single();
     if (error) console.error("[writer] failed to save content_items row:", error.message);
 
-    return { topic, blueprint: blueprint ?? null, body, wordCount: gate.wordCount, contentItemId: item?.id, qualityGate: gate };
+    return {
+      topic,
+      title,
+      blueprint: blueprint ?? null,
+      body,
+      wordCount: gate.wordCount,
+      contentItemId: item?.id,
+      qualityGate: gate,
+    };
+  }
+}
+
+async function loadWriterContext(tenantId: string): Promise<WriterContext> {
+  try {
+    const [{ data: tenant }, { data: pages }] = await Promise.all([
+      supabase.from("tenants").select("name, website_url, niche, tone_profile, icp_profile").eq("id", tenantId).single(),
+      supabase.from("site_pages").select("title, url").eq("tenant_id", tenantId).limit(12),
+    ]);
+    const tone = (tenant?.tone_profile as any) ?? {};
+    const icp = (tenant?.icp_profile as any) ?? {};
+    return {
+      businessName: tenant?.name ?? null,
+      websiteUrl: tenant?.website_url ?? null,
+      niche: tenant?.niche ?? null,
+      audience: tone.audience ?? icp.businessType ?? null,
+      tone: tone.tone ?? null,
+      pages: (pages ?? []).filter((p: any) => p.title && p.url).map((p: any) => ({ title: p.title, url: p.url })),
+    };
+  } catch (e: any) {
+    // Context is an improvement, not a prerequisite — a lookup failure must not cost the
+    // user their article. The draft is simply less specific, and meta.contextUsed says so.
+    console.error("[writer] could not load business context:", e?.message);
+    return {};
   }
 }

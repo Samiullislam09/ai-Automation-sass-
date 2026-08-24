@@ -135,7 +135,15 @@ function RoomTag({ name, task, st }: { name: string; task: string; st: AgentStat
   );
 }
 
-export default function Office({ demo = false }: { demo?: boolean }) {
+/** `solo` = "show only this agent": every other room fades out and the camera flies to the
+ *  one that's left, so clicking Mr. Writer really does hand the whole office over to him.
+ *  `onSelect` lets the dashboard own that selection (it also opens the live work panel);
+ *  without it Office keeps its old standalone behaviour (camera zoom only). */
+export default function Office({ demo = false, solo = null, onSelect }: {
+  demo?: boolean;
+  solo?: string | null;
+  onSelect?: (id: string | null) => void;
+}) {
   const store = useStore();
   // Demo/landing-page state — live agents get a "working" flavor task, roadmap (non-live)
   // agents show "Coming soon" so the demo doesn't pretend an unbuilt agent is running.
@@ -153,7 +161,7 @@ export default function Office({ demo = false }: { demo?: boolean }) {
   const active = demo ? null : store?.s.focusAgent ?? null;
 
   const [localFocus, setLocalFocus] = useState<string | null>(null);
-  const shownFocus = demo ? localFocus : active;
+  const shownFocus = demo ? localFocus : (solo ?? active);
 
   const [bubble, setBubble] = useState(BOSS_LINES[0]);
   const [showBub, setShowBub] = useState(false);
@@ -205,11 +213,13 @@ export default function Office({ demo = false }: { demo?: boolean }) {
 
   const clickRoom = (id: string) => {
     if (demo) { setLocalFocus(f => (f === id ? null : id)); return; }
+    if (onSelect) { onSelect(solo === id ? null : id); return; }
     if (!store) return;
     store.focusOn(store.s.focusAgent === id ? null : id, 0); // 0 = pinned until clicked again
   };
   const clickBackground = () => {
     if (demo) { setLocalFocus(null); return; }
+    if (onSelect) { onSelect(null); return; }
     store?.focusOn(null);
   };
 
@@ -235,7 +245,7 @@ export default function Office({ demo = false }: { demo?: boolean }) {
             const mx = (b.cx + r.cx) / 2, my = (b.cy + r.cy) / 2 - 30;
             const d = `M ${b.cx} ${b.cy} Q ${mx} ${my} ${r.cx} ${r.cy}`;
             return (
-              <g key={a.id}>
+              <g key={a.id} opacity={solo ? 0 : 1} style={{ transition: "opacity .5s ease" }}>
                 <path d={d} fill="none" stroke="#5fb3e0" strokeWidth="3" opacity="0.35" />
                 {/* Speed varies per tube so the dots don't march in lockstep — derived from the
                     index, NOT Math.random(): this renders on the server too, and a random value
@@ -251,8 +261,13 @@ export default function Office({ demo = false }: { demo?: boolean }) {
             const r = ROOMS[a.id]; const st = agents[a.id] || { st: "i", task: "Idle" };
             const isBoss = a.id === "boss";
             const dim = st.st === "o" ? 0.55 : 1;
+            // Solo mode: everyone else steps out of the room (and stops being clickable) so
+            // the camera zoom lands on one desk with nothing else competing for attention.
+            const hidden = !!solo && solo !== a.id;
             return (
-              <g key={a.id} onClick={e => { e.stopPropagation(); clickRoom(a.id); }} style={{ cursor: "pointer" }}>
+              <g key={a.id} onClick={e => { e.stopPropagation(); clickRoom(a.id); }}
+                 opacity={hidden ? 0 : 1}
+                 style={{ cursor: "pointer", transition: "opacity .5s ease", pointerEvents: hidden ? "none" : "auto" }}>
                 <ellipse cx={r.cx} cy={r.cy + r.h / 2 + 10} rx={r.w / 2 + 14} ry="13" fill="#1c2540" opacity="0.14" />
                 <rect x={r.cx - r.w / 2} y={r.cy - r.h / 2} width={r.w} height={r.h} rx="22"
                   fill={isBoss ? "var(--panel2)" : "var(--panel)"} stroke={a.c} strokeOpacity={st.st === "w" || st.st === "e" ? 0.85 : 0.4} strokeWidth="2.5"
@@ -296,14 +311,15 @@ export default function Office({ demo = false }: { demo?: boolean }) {
             );
           })}
 
-          {/* chai stall + walking character */}
-          <g>
+          {/* chai stall + walking character — hidden in solo mode: one agent's desk should
+              not have a chai-walla strolling through it. */}
+          <g opacity={solo ? 0 : 1} style={{ transition: "opacity .5s ease" }}>
             <ellipse cx={STALL.cx} cy={STALL.cy + 50} rx="70" ry="12" fill="#1c2540" opacity="0.12" />
             <rect x={STALL.cx - 66} y={STALL.cy - 40} width="132" height="88" rx="16" fill="#fff7ec" stroke="#e08a3c" strokeOpacity="0.5" strokeWidth="2" />
             <text x={STALL.cx} y={STALL.cy - 48} textAnchor="middle" fontSize="12" fontWeight="800" fill="#a4611c">☕ Chacha&apos;s Chai</text>
             <text x={STALL.cx} y={STALL.cy + 14} textAnchor="middle" fontSize="24">🫖</text>
           </g>
-          <g style={{ transition: "transform 1.6s cubic-bezier(.45,.05,.55,.95)", transform: `translate(${chai.cx}px,${chai.cy}px)` }}>
+          <g opacity={solo ? 0 : 1} style={{ transition: "transform 1.6s cubic-bezier(.45,.05,.55,.95), opacity .5s ease", transform: `translate(${chai.cx}px,${chai.cy}px)` }}>
             <ellipse cx="0" cy="20" rx="11" ry="3.5" fill="#1c2540" opacity="0.18" />
             <rect x="-9" y="0" width="18" height="18" rx="7" fill="#e08a3c" />
             <circle cx="0" cy="-9" r="10" fill="#f0c090" />
@@ -323,7 +339,7 @@ export default function Office({ demo = false }: { demo?: boolean }) {
           <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--grn)", boxShadow: "0 0 8px var(--grn)" }} className="office-pulse-dot" />
           Your office — live
         </div>
-        <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 2 }}>{shownFocus ? "Click anywhere to zoom out" : "Click a room to zoom · ask Mr Lxwa about anyone"}</div>
+        <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 2 }}>{shownFocus ? "Click anywhere to come back" : "Click a room to watch that agent work"}</div>
       </div>
 
       <style jsx global>{`

@@ -20,7 +20,21 @@ export class KeywordAgent extends Agent {
     const chain = (job.data as any).chain === true;
     if (!topic?.trim()) throw new Error("keyword job needs a 'topic' string");
 
-    const ideas = await keywordSuggestions(topic.trim(), 15);
+    // A DataForSEO outage (or an unverified/expired account) used to kill the whole run:
+    // the keyword job failed, so the writer was never queued and the user got nothing but
+    // a red room. For a chained run we degrade instead — write the article from the
+    // business's own profile and say plainly that search data was unavailable. A manual
+    // /jobs/keyword lookup still fails loudly, because research IS the whole point there.
+    let ideas: Awaited<ReturnType<typeof keywordSuggestions>> = [];
+    let searchDataError: string | null = null;
+    try {
+      ideas = await keywordSuggestions(topic.trim(), 15);
+    } catch (e: any) {
+      if (!chain) throw e;
+      searchDataError = e?.message ?? "Keyword provider unavailable";
+      console.error("[keyword] search data unavailable, continuing without it:", searchDataError);
+    }
+
     const seed = ideas.find((i) => i.keyword.toLowerCase() === topic.trim().toLowerCase());
     const related = ideas
       .filter((i) => i.keyword.toLowerCase() !== topic.trim().toLowerCase())
@@ -30,6 +44,8 @@ export class KeywordAgent extends Agent {
     const worthWriting = (seed?.searchVolume ?? 0) > 0 || related.length > 0;
     const base = {
       topic,
+      searchDataAvailable: !searchDataError,
+      searchDataError,
       seedSearchVolume: seed?.searchVolume ?? null,
       seedCompetition: seed?.competitionLevel ?? null,
       relatedKeywords: related,
@@ -38,11 +54,13 @@ export class KeywordAgent extends Agent {
 
     if (!chain) return base;
 
-    // A topic nobody searches for is where the chain stops. Saying so is more useful than
-    // spending a writer call on it, and it shows up in the activity feed as a real outcome.
-    if (!worthWriting) return { ...base, chained: false, reason: "No search demand found — not passed to the writer." };
+    // A topic nobody searches for is where the chain stops — but only when we actually have
+    // the data to say that. "No data at all" is not the same as "no demand".
+    if (!searchDataError && !worthWriting) {
+      return { ...base, chained: false, reason: "No search demand found — not passed to the writer." };
+    }
 
-    const blueprint = buildBlueprint(topic.trim(), seed?.searchVolume ?? null, related);
+    const blueprint = buildBlueprint(topic.trim(), seed?.searchVolume ?? null, related, searchDataError);
     await enqueue("writer", {
       tenantId,
       topic: topic.trim(),
@@ -61,9 +79,18 @@ export class KeywordAgent extends Agent {
 function buildBlueprint(
   topic: string,
   seedVolume: number | null,
-  related: { keyword: string; searchVolume?: number | null }[]
+  related: { keyword: string; searchVolume?: number | null }[],
+  searchDataError: string | null
 ): string {
   const lines = [`Primary keyword: ${topic}`];
+  if (searchDataError) {
+    lines.push(
+      "",
+      "NOTE: live keyword data was unavailable for this run, so there are no verified search",
+      "volumes below. Do not invent any. Cover the questions a real customer would ask about",
+      "this topic instead, and stay strictly inside what the business context says is true."
+    );
+  }
   if (seedVolume != null) lines.push(`Monthly search volume: ${seedVolume}`);
   if (related.length) {
     lines.push(
