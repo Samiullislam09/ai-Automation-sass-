@@ -10,14 +10,22 @@
  *  day — see isOverDailyCap() in jobsLog.ts.
  *
  *  Every cap can be raised without a code change: DAILY_CAP_BOSS=12 etc. in the environment. */
+// Raised from the originals (boss 6 / writer 10 / keyword 50), which were set for a quiet
+// production day and turned out to be far too tight for anyone actually using the product:
+// six planning runs is an afternoon of testing, and one bad afternoon of retries could burn
+// the writer's whole allowance without producing a single article.
+//
+// The writer is the only genuinely expensive agent here — every run is ~90s of a 30B model —
+// so it stays the tightest of the useful ones, and the crawler (up to ~300 embedding calls a
+// run) stays low on purpose.
 const DEFAULTS: Record<string, number> = {
-  boss: 6, // each run fans out into keyword+writer jobs, so it is capped well below them
-  keyword: 50,
-  writer: 10,
-  social: 20,
-  seo: 10,
-  leads: 20,
-  crawler: 2, // expensive (up to ~300 embed calls each) — a full re-crawl rarely needs to run more than once or twice a day
+  boss: 25, // each run fans out into keyword+writer jobs, so it stays capped below them
+  keyword: 150,
+  writer: 40,
+  social: 60,
+  seo: 40,
+  leads: 60,
+  crawler: 5, // expensive (up to ~300 embed calls each) — a full re-crawl rarely needs to run more than a few times a day
 };
 
 export const DAILY_CAPS: Record<string, number> = Object.fromEntries(

@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
 import { getAgentDetail } from "@/lib/dashboard-data";
 import { AGENTS } from "@/lib/agents-data";
+import { getDailyUsage } from "@/lib/agent-caps";
 
 /** GET /api/dashboard/agent/kw — everything one agent has really done: its live state, its
  *  last dozen jobs with what each produced, and (for the writing side) the content rows those
@@ -16,10 +17,14 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   if (!tenantId) return NextResponse.json({ ok: false, error: "Not signed in." }, { status: 401 });
 
   const detail = await getAgentDetail(supabase, tenantId, agent.id);
+  // Today's allowance. Only meaningful for agents that own a queue — Mr. QA and Mr. Publish
+  // are stages inside the writer job and have no cap of their own.
+  const usage = detail.jobAgent ? await getDailyUsage(supabase, tenantId, detail.jobAgent) : null;
 
   return NextResponse.json({
     ok: true,
     agent: { id: agent.id, name: agent.name, role: agent.role, ico: agent.ico, color: agent.c, live: agent.live },
+    usage,
     ...detail,
   });
 }

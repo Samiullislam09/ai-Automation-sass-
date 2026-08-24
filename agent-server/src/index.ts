@@ -9,6 +9,7 @@ import { initSocket } from "./socket.js";
 import { startWorkers } from "./workers.js";
 import { startScheduler, stopScheduler } from "./scheduler.js";
 import { dailyUsage } from "./jobsLog.js";
+import { DAILY_CAPS } from "./config/caps.js";
 
 const app = express();
 app.use(cors({ origin: env.CORS_ORIGIN.split(",").map((s) => s.trim()) }));
@@ -33,6 +34,10 @@ app.get("/version", (_req, res) => {
     // Cheap, honest capability flags — each one is a feature whose absence has previously
     // been mistaken for a bug in the web app rather than a stale deploy.
     features: { scheduler: true, keywordAiFallback: true, writerThinkingDisabled: true },
+    // The caps actually in force, including any DAILY_CAP_* overrides. The dashboard reads
+    // these so it can show "3 of 25 runs used today" instead of letting a tenant walk into
+    // an invisible wall.
+    dailyCaps: DAILY_CAPS,
     tokenGate: !!env.AGENT_SERVER_TOKEN,
   });
 });

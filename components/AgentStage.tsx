@@ -22,6 +22,7 @@ type Detail = {
   jobs: Job[];
   content: Content[];
   counts: { total: number; success: number; error: number; running: number };
+  usage?: { used: number; cap: number | null } | null;
 };
 
 const STATE_LABEL: Record<string, string> = {
@@ -107,6 +108,18 @@ export default function AgentStage({ id, onClose }: { id: string; onClose: () =>
           {err && <div className="st-err">{err}</div>}
 
           <h4>What it actually did{d?.counts?.total ? <span>{d.counts.success} ok · {d.counts.error} failed</span> : null}</h4>
+
+          {/* The daily cap used to be invisible until you hit it, at which point jobs simply
+              stopped happening with no explanation anywhere. Show it before that. */}
+          {d?.usage && (
+            <div className={"st-cap" + (d.usage.cap != null && d.usage.used >= d.usage.cap ? " is-full" : "")}>
+              {d.usage.cap != null
+                ? d.usage.used >= d.usage.cap
+                  ? `Daily limit reached — ${d.usage.used} of ${d.usage.cap} runs used today. Nothing new will start until tomorrow.`
+                  : `Today: ${d.usage.used} of ${d.usage.cap} runs used`
+                : `Today: ${d.usage.used} run(s)`}
+            </div>
+          )}
 
           {!d && !err && <p className="st-p">Loading…</p>}
           {d && !d.jobAgent && <p className="st-p">No queue of its own yet — this one is a stage inside the writing job, so its work shows below as content.</p>}
@@ -198,6 +211,9 @@ export default function AgentStage({ id, onClose }: { id: string; onClose: () =>
         .st-job.is-success { border-left-color: var(--grn); }
         .st-job.is-error { border-left-color: var(--red); }
         .st-job.is-skipped { border-left-color: var(--amb); }
+        .st-cap { font-size: 11px; color: var(--mut2); background: var(--panel2); border-radius: 8px;
+                  padding: 6px 9px; margin-bottom: 9px; line-height: 1.45; }
+        .st-cap.is-full { color: var(--amb); }
         .st-job.is-running, .st-job.is-queued { border-left-color: var(--blu); }
         .st-job-top { display: flex; align-items: center; gap: 8px; }
         .st-badge { font-size: 9px; font-weight: 800; text-transform: uppercase; color: var(--mut); }
