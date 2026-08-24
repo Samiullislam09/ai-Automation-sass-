@@ -47,8 +47,13 @@ async function process(type: AgentType, job: JobWithMetadata<AgentJobData>) {
   if (attempt === 1) {
     const usage = await dailyUsage(tenantId, type);
     if (usage.over) {
-      const reason = `Daily cap reached — ${AGENT_LABEL[type] ?? type} has already run ${usage.used} time(s) today (limit ${usage.cap}). Nothing was started.`;
-      const hint = `The cap protects your AI budget. Raise it with DAILY_CAP_${type.toUpperCase()} in agent-server's environment, or wait until tomorrow.`;
+      const who = AGENT_LABEL[type] ?? type;
+      const reason = usage.runaway
+        ? `Safety guard tripped — ${who} started ${usage.runaway.usedThisHour} jobs in the last hour (limit ${usage.runaway.limit}). Nothing was started.`
+        : `Daily limit reached on the ${usage.plan} plan — ${who} has already run ${usage.used} time(s) today (limit ${usage.cap}). Nothing was started.`;
+      const hint = usage.runaway
+        ? `Nobody runs this much by hand, so this is almost certainly a loop somewhere. It clears by itself within the hour; check what is enqueueing jobs before then.`
+        : `Your plan's daily allowance. Upgrade the plan, or set this tenant's daily_cap_overrides in Supabase (e.g. {"${type}": null} for no limit at all).`;
       await logJobSkipped(tenantId, type, rawLabelOf(job), reason, hint);
       emitAgentStatus({ agent: type, tenant: tenantId, status: "idle", task: reason });
       console.warn(`[${type}] ${reason}`);

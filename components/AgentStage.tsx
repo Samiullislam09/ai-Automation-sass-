@@ -22,7 +22,7 @@ type Detail = {
   jobs: Job[];
   content: Content[];
   counts: { total: number; success: number; error: number; running: number };
-  usage?: { used: number; cap: number | null } | null;
+  usage?: { used: number; cap: number | null; plan?: string; known?: boolean } | null;
 };
 
 const STATE_LABEL: Record<string, string> = {
@@ -117,7 +117,11 @@ export default function AgentStage({ id, onClose }: { id: string; onClose: () =>
                 ? d.usage.used >= d.usage.cap
                   ? `Daily limit reached — ${d.usage.used} of ${d.usage.cap} runs used today. Nothing new will start until tomorrow.`
                   : `Today: ${d.usage.used} of ${d.usage.cap} runs used`
-                : `Today: ${d.usage.used} run(s)`}
+                : d.usage.known
+                  // The top plan (or a custom contract): no rationing at all. Say it, so
+                  // nobody wonders whether they're about to hit something.
+                  ? `Today: ${d.usage.used} run(s) · no daily limit on your plan`
+                  : `Today: ${d.usage.used} run(s)`}
             </div>
           )}
 

@@ -102,6 +102,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           .maybeSingle();
         const onboarded = !!(data as any)?.tenants?.onboarded;
         setS(prev => ({ ...prev, onboarded, onboardedChecked: true }));
+
+        // The plan is fetched separately, NOT added to the select above: `plan` only exists
+        // after migration 009, and asking for a missing column fails the whole row read —
+        // which would read as "not onboarded" and bounce a real user back into the wizard.
+        // The DB is still the source of truth here, so a fresh browser doesn't show "Free"
+        // to someone who is paying (and being rationed accordingly by agent-server).
+        fetch("/api/plan")
+          .then((r) => r.json())
+          .then((d) => {
+            if (d?.ok && d.plan && PLANS[d.plan]) {
+              setS(prev => ({ ...prev, plan: d.plan, tokensMax: PLANS[d.plan].tokens }));
+            }
+          })
+          .catch(() => {});
       } catch {
         // transient network hiccup — keep whatever local state already had rather than
         // wrongly bouncing an already-onboarded user back into the wizard. Also don't mark
@@ -186,6 +200,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return { content: prev.content.map(x => x.id === id ? { ...x, status: "rejected" } : x) };
   });
   const applyPlan = (plan: string) => { // TODO(backend): Paddle/LemonSqueezy webhook drives this
+    // The plan has to reach the DB, not just this browser: agent-server reads tenants.plan to
+    // decide the tenant's daily allowance, so a plan that only lived in localStorage meant a
+    // paying customer was rationed exactly like a free trial. Fire-and-forget — the UI below
+    // is unchanged either way, and /api/plan reports its own failure.
+    fetch("/api/plan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plan }) })
+      .then((r) => r.json())
+      .then((d) => { if (!d?.ok) console.error("[store] plan not saved server-side:", d?.error); })
+      .catch((e) => console.error("[store] plan not saved server-side:", e?.message));
+
     patch({ plan, tokensMax: PLANS[plan].tokens, tokens: PLANS[plan].tokens });
     act(`"We're on the <b>${PLANS[plan].name}</b> plan now — capacity increased. Let's grow. 🚀"`, "Mr Lxwa");
     report(`Plan changed to ${PLANS[plan].name} — token allowance now ${PLANS[plan].tokens}/month`);

@@ -9,7 +9,7 @@ import { initSocket } from "./socket.js";
 import { startWorkers } from "./workers.js";
 import { startScheduler, stopScheduler } from "./scheduler.js";
 import { dailyUsage } from "./jobsLog.js";
-import { DAILY_CAPS } from "./config/caps.js";
+import { CAP_TABLE } from "./config/caps.js";
 
 const app = express();
 app.use(cors({ origin: env.CORS_ORIGIN.split(",").map((s) => s.trim()) }));
@@ -34,10 +34,10 @@ app.get("/version", (_req, res) => {
     // Cheap, honest capability flags — each one is a feature whose absence has previously
     // been mistaken for a bug in the web app rather than a stale deploy.
     features: { scheduler: true, keywordAiFallback: true, writerThinkingDisabled: true },
-    // The caps actually in force, including any DAILY_CAP_* overrides. The dashboard reads
-    // these so it can show "3 of 25 runs used today" instead of letting a tenant walk into
-    // an invisible wall.
-    dailyCaps: DAILY_CAPS,
+    // Per-plan caps plus the runaway guard, so the dashboard can show a tenant their real
+    // allowance ("3 of 30 runs used today") instead of letting them walk into an invisible
+    // wall. null in here means that plan has no daily cap for that agent.
+    caps: CAP_TABLE,
     tokenGate: !!env.AGENT_SERVER_TOKEN,
   });
 });
@@ -70,11 +70,12 @@ app.post("/jobs/:type", async (req, res) => {
   try {
     const usage = await dailyUsage(tenantId, type);
     if (usage.over) {
-      return res.status(429).json({
-        error: `Daily cap reached — the ${type} agent has already run ${usage.used} time(s) today (limit ${usage.cap}). Nothing was started, and no credits were used. Raise DAILY_CAP_${type.toUpperCase()} on agent-server, or try again tomorrow.`,
-        used: usage.used,
-        cap: usage.cap,
-      });
+      // Two different refusals, and conflating them would send someone chasing the wrong
+      // problem: a plan cap is commercial (upgrade, or lift it), a runaway is a bug.
+      const error = usage.runaway
+        ? `Safety guard tripped — the ${type} agent has started ${usage.runaway.usedThisHour} jobs in the last hour (limit ${usage.runaway.limit}). That is far more than anyone runs by hand, so something is looping. Nothing was started.`
+        : `Daily limit reached on the ${usage.plan} plan — the ${type} agent has already run ${usage.used} time(s) today (limit ${usage.cap}). Nothing was started, and no credits were used.`;
+      return res.status(429).json({ error, used: usage.used, cap: usage.cap, plan: usage.plan, runaway: usage.runaway ?? null });
     }
   } catch (e: any) {
     // Budget guard, not a gate: never block real work because the count query failed.
