@@ -44,8 +44,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const isDashboard = path === "/app";
   const plan = PLANS[s.plan] ?? PLANS.free;
   const initial = (s.user?.name || s.user?.email || "?").trim().charAt(0).toUpperCase();
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Welcome back" : "Good evening";
+  // Time of day is CLIENT knowledge. Computing it during render made the server (UTC) print
+  // "Welcome back" while the browser (local time) printed "Good evening" — a hydration
+  // mismatch, which is what React #418/#423/#425 in the production console were: React threw
+  // the whole server-rendered shell away and re-rendered it on the client. Set it after mount.
+  const [greeting, setGreeting] = useState("Welcome back");
+  useEffect(() => {
+    const h = new Date().getHours();
+    setGreeting(h < 12 ? "Good morning" : h < 17 ? "Welcome back" : "Good evening");
+  }, []);
 
   return (
     <div className={"appshell" + (navOpen ? " nav-open" : "")} style={{ position: "relative", zIndex: 1 }}>

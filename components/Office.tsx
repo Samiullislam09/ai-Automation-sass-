@@ -230,14 +230,18 @@ export default function Office({ demo = false }: { demo?: boolean }) {
           {CLOUDS.map((c, i) => <Cloud key={i} x={c[0]} y={c[1]} s={c[2]} i={i} />)}
 
           {/* connection tubes from Mr Lxwa to every room */}
-          {AGENTS.filter(a => a.id !== "boss").map(a => {
+          {AGENTS.filter(a => a.id !== "boss").map((a, i) => {
             const b = ROOMS.boss, r = ROOMS[a.id];
             const mx = (b.cx + r.cx) / 2, my = (b.cy + r.cy) / 2 - 30;
             const d = `M ${b.cx} ${b.cy} Q ${mx} ${my} ${r.cx} ${r.cy}`;
             return (
               <g key={a.id}>
                 <path d={d} fill="none" stroke="#5fb3e0" strokeWidth="3" opacity="0.35" />
-                <circle r="3" fill="var(--blu)" opacity="0.85"><animateMotion dur={`${3 + Math.random() * 2}s`} repeatCount="indefinite" path={d} /></circle>
+                {/* Speed varies per tube so the dots don't march in lockstep — derived from the
+                    index, NOT Math.random(): this renders on the server too, and a random value
+                    made the server and client markup differ (React hydration error #418/#425,
+                    which throws away the whole SSR tree and re-renders the dashboard). */}
+                <circle r="3" fill="var(--blu)" opacity="0.85"><animateMotion dur={`${3 + (i % 5) * 0.4}s`} repeatCount="indefinite" path={d} /></circle>
               </g>
             );
           })}
