@@ -20,10 +20,18 @@ import { env } from "../env.js";
  */
 
 const WINDOW_MS = 60_000;
-// A few below the real ceiling: the window is measured from when WE send, the provider counts
-// when it receives, and that skew is exactly what makes a limiter sitting right on the line
-// trip anyway.
-const RPM = Math.max(1, Number(env.NVIDIA_RPM) || 35);
+// Well below the account's ceiling (free tier: 40/min), for two reasons.
+//
+// One: the window is measured from when WE send and the provider counts when it receives, so
+// a limiter sitting exactly on the line trips anyway.
+//
+// Two, and the bigger one: the rate limit belongs to the API KEY, not to this process. The
+// Next.js app calls NVIDIA with the same key for chat and article revisions, and it cannot
+// share an in-process limiter with a different deployment. If this server used the whole
+// budget during a long crawl, the user chatting at the same time would be the one who got
+// the 429 — the interactive path punished for the background one. 30 leaves ~10/min for the
+// side of the product a human is actually waiting on.
+const RPM = Math.max(1, Number(env.NVIDIA_RPM) || 30);
 
 const sent: number[] = [];
 let chain: Promise<void> = Promise.resolve();
