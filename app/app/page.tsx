@@ -14,9 +14,11 @@
  *
  *  The pixel-art "AI Command Center" build that briefly lived here is still in the repo at
  *  components/dashboard/AICommandCenter.tsx; it is simply not routed. */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Office from "@/components/Office";
 import AgentStage from "@/components/AgentStage";
+import Celebration from "@/components/Celebration";
+import { setSoundEnabled, soundEnabled } from "@/lib/chime";
 import { useStore } from "@/lib/store";
 
 type Stats = {
@@ -47,6 +49,20 @@ export default function Dashboard() {
   // Which room the user clicked: the office fades everyone else out and that agent's real
   // work takes over the screen. null = the whole office.
   const [selected, setSelected] = useState<string | null>(null);
+  const celebrating = !!store?.s?.celebration;
+
+  // localStorage is browser-only, so it is read after mount — reading it during render would
+  // make the server and the client disagree about the button's state.
+  const [sound, setSound] = useState(false);
+  useEffect(() => { setSound(soundEnabled()); }, []);
+  const toggleSound = () => {
+    const next = !sound;
+    setSound(next);
+    setSoundEnabled(next);
+    // Play it once on the way ON, both as confirmation and because the first tone is what
+    // unlocks the AudioContext — browsers only allow that inside a real click.
+    if (next) import("@/lib/chime").then((m) => m.playSuccess());
+  };
 
   /** Real trigger — POST /api/agents/trigger resolves the tenant server-side and forwards to
    *  agent-server's POST /jobs/boss. The office lights up on the next poll, not here: we
@@ -79,8 +95,14 @@ export default function Dashboard() {
       {/* The office owns the first screen: nothing above it, nothing cropping it. Scroll for
           the counters and the controls. */}
       <div className="dash-office">
-        <Office solo={selected} onSelect={setSelected} flash={flash} />
-        {selected && <AgentStage id={selected} onClose={() => setSelected(null)} />}
+        {/* The office fades back rather than unmounting: it keeps the room states and the
+            camera exactly where they were, so dismissing the card returns you to the same
+            scene instead of a re-entry animation. */}
+        <div className={"dash-scene" + (celebrating ? " is-hidden" : "")}>
+          <Office solo={selected} onSelect={setSelected} flash={flash} />
+          {selected && <AgentStage id={selected} onClose={() => setSelected(null)} />}
+        </div>
+        <Celebration />
       </div>
 
       <div className="dash-stats">
@@ -98,6 +120,10 @@ export default function Dashboard() {
       <div className="dash-bar">
         <button className="runbtn" onClick={runTeam} disabled={running}>
           {running ? "Starting…" : "▶ Run the team"}
+        </button>
+        <button className={"soundbtn" + (sound ? " is-on" : "")} onClick={toggleSound}
+          title={sound ? "Sound on — an agent finishing plays a chime" : "Sound off"}>
+          {sound ? "🔊 Sound on" : "🔇 Sound off"}
         </button>
         <span className="barnote">
           {liveErr
@@ -140,6 +166,15 @@ export default function Dashboard() {
                   cursor: pointer; transition: background .18s, transform .18s, opacity .18s; }
         .runbtn:hover:not(:disabled) { background: var(--ac-d); transform: translateY(-1px); }
         .runbtn:disabled { opacity: .6; cursor: default; }
+        .dash-scene { position: absolute; inset: 0; transition: opacity .35s ease, transform .35s ease; }
+        .dash-scene.is-hidden { opacity: 0; transform: scale(.985); pointer-events: none; }
+
+        .soundbtn { flex: none; border: 1px solid var(--line2); background: var(--panel);
+                    color: var(--mut); font-size: 11.5px; font-weight: 600; padding: 8px 12px;
+                    border-radius: 9px; cursor: pointer; transition: color .18s, border-color .18s; }
+        .soundbtn:hover { color: var(--ink); border-color: var(--mut2); }
+        .soundbtn.is-on { color: var(--ac); border-color: var(--ac); }
+
         .barnote { font-size: 11px; color: var(--mut); min-width: 0; flex: 1;
                    overflow: hidden; text-overflow: ellipsis; }
         .err { color: var(--amb); }

@@ -238,10 +238,28 @@ function describeJob(jobAgent: string, status: string, detail: any): { summary: 
 
   if (jobAgent === "keyword") {
     const related = Array.isArray(detail.relatedKeywords) ? detail.relatedKeywords : [];
-    const items = related.map((r: any) =>
-      r?.searchVolume != null ? `${r.keyword} — ${r.searchVolume}/mo` : String(r?.keyword ?? "")
-    ).filter(Boolean);
+    // Each query with the evidence behind it, and never a number the source can't support:
+    // DataForSEO measures monthly volume; Search Console counts impressions for THIS site;
+    // the AI fallback has no number at all and is shown without one.
+    const items = related.map((r: any) => {
+      if (!r?.keyword) return "";
+      if (r.searchVolume != null) return `${r.keyword} — ${r.searchVolume}/mo searches`;
+      if (r.impressions != null) {
+        const pos = r.position != null ? `, currently position ${Number(r.position).toFixed(1)}` : "";
+        return `${r.keyword} — ${r.impressions} impressions on your site${pos}`;
+      }
+      return String(r.keyword);
+    }).filter(Boolean);
 
+    // Search Console — real measured data, just not market volume. This has to be checked
+    // BEFORE the searchDataAvailable test below, which is false for this source too and
+    // would otherwise credit the AI for queries Google actually reported.
+    if (detail.source === "gsc") {
+      return {
+        summary: `The keyword provider was down, so these came from your own Search Console — real searches Google already shows your site for. Blueprint handed to Mr. Writer.`,
+        items,
+      };
+    }
     if (detail.source === "ai" || detail.searchDataAvailable === false) {
       return {
         summary: `DataForSEO was unavailable (${detail.searchDataError ?? "provider error"}), so these came from the AI as customer questions — suggestions, not measured volumes — and the topic still went to Mr. Writer.`,
@@ -260,7 +278,18 @@ function describeJob(jobAgent: string, status: string, detail: any): { summary: 
     const verdict = gate.passed === false
       ? `did NOT pass the quality gate (${(gate.reasons ?? []).join("; ") || "unknown reason"})`
       : "passed the quality gate and is waiting for your approval";
-    return { summary: `Wrote “${title}”${words ? ` — ${words} words` : ""}; it ${verdict}.`, items: [] };
+    // Facts about the draft that actually exists, read off the quality gate that measured it.
+    const items: string[] = [];
+    if (words) items.push(`${words} words`);
+    if (gate.sections != null) items.push(`${gate.sections} sections`);
+    if (gate.links != null) items.push(`${gate.links} internal link${gate.links === 1 ? "" : "s"}`);
+    const used = detail.contextUsed ?? {};
+    if (used.pages) items.push(`Grounded in ${used.pages} page(s) crawled from your site`);
+    if (used.searchConsole) items.push("Used your Search Console data for links and vocabulary");
+    if (gate.passed === false && Array.isArray(gate.reasons) && gate.reasons.length) {
+      items.push(`Gate flagged: ${gate.reasons.join("; ")}`);
+    }
+    return { summary: `Wrote “${title}”${words ? ` — ${words} words` : ""}; it ${verdict}.`, items };
   }
 
   if (jobAgent === "crawler") {

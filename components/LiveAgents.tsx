@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef } from "react";
 import { AGENTS, useStore, type AgentState } from "@/lib/store";
+import { playError, playSuccess } from "@/lib/chime";
 
 /** The single live poll for the whole /app shell.
  *
@@ -76,7 +77,14 @@ export default function LiveAgents() {
           seenJobs.current.add(j.id);
           const id = j.agentId ?? "";
           const tone = j.status === "error" ? "error" : "done";
-          api?.patch?.({ flash: { id, text: j.summary, tone } });
+          api?.patch?.({
+            flash: { id, text: j.summary, tone },
+            // The office steps aside and the result fills the screen. Only the newest job
+            // survives this loop, which is why `fresh` is walked oldest-first.
+            celebration: { id: j.id, agentId: id, status: j.status, summary: j.summary, items: j.items ?? [] },
+          });
+          // Opt-in, remembered per browser (lib/chime.ts). Silent unless you turned it on.
+          if (j.status === "error") playError(); else playSuccess();
           api?.toast?.(`${NAME[id] ?? "Your team"}: ${j.summary.slice(0, 90)}`);
           api?.act?.(j.summary, NAME[id] ?? "Team");
           clearTimeout(flashTimer.current);
