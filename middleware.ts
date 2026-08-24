@@ -18,9 +18,28 @@ export async function middleware(request: NextRequest) {
           return request.cookies.getAll();
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+          // An EMPTY value means "drop this cookie", and it has to be dropped, not stored as
+          // an empty string. Supabase splits its session across numbered chunks
+          // (sb-...-auth-token.0, .1, ...); when a refreshed token needs fewer chunks than the
+          // old one, the leftovers arrive here with value "". Writing them back as empty
+          // cookies left the page reassembling a token out of one real chunk and one blank
+          // one — corrupt, so auth.getUser() found nobody.
+          //
+          // Every Server Component under /app was affected, which until now was only the
+          // layout (where a null tenant silently skipped the onboarding check, so nobody
+          // noticed) and then the article reviewer, which rendered "no workspace" over and
+          // over while the same request's Route Handlers were perfectly authenticated.
+          cookiesToSet.forEach(({ name, value }) => {
+            if (value === "") request.cookies.delete(name);
+            else request.cookies.set(name, value);
+          });
+
           response = NextResponse.next({ request });
-          cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
+
+          cookiesToSet.forEach(({ name, value, options }) => {
+            if (value === "") response.cookies.set(name, "", { ...options, maxAge: 0 });
+            else response.cookies.set(name, value, options);
+          });
         },
       },
     }
