@@ -8,7 +8,9 @@ import { AGENTS as STORE_AGENTS } from "@/lib/agents-data";
 // jobs_log.agent values that a pg-boss queue actually writes (agent-server/src/queues.ts
 // AGENT_TYPES). "leads"/"crawler" have no seat in the pixel office scene, so they're not
 // mapped to a room — they still count toward the plain stat cards below.
-const JOB_AGENT_TO_ROOM: Record<string, string> = { keyword: "keyword", writer: "writer", seo: "seo", social: "social" };
+const JOB_AGENT_TO_ROOM: Record<string, string> = {
+  boss: "boss", keyword: "keyword", writer: "writer", seo: "seo", social: "social",
+};
 
 export type RoomState = { state: "working" | "off" | "error" | "waiting"; task: string };
 
@@ -46,7 +48,9 @@ export async function getDashboardStats(supabase: SupabaseClient, tenantId: stri
  *  rest stay shuttered, same honesty rule the stat cards already follow. */
 export async function getAgentRoomStates(supabase: SupabaseClient, tenantId: string): Promise<Record<string, RoomState>> {
   const rooms: Record<string, RoomState> = {
-    boss: { state: "working", task: "Coordinating the team" },
+    // Boss is only "working" when a real orchestrator job is running (see agents/boss.ts);
+    // it used to be hardcoded to working, which made an idle office look busy.
+    boss: { state: "off", task: "—" },
     keyword: { state: "off", task: "—" },
     writer: { state: "off", task: "—" },
     seo: { state: "off", task: "—" },
@@ -63,7 +67,10 @@ export async function getAgentRoomStates(supabase: SupabaseClient, tenantId: str
 
   const { data: recentJobs } = await supabase
     .from("jobs_log")
-    .select("agent, status, created_at")
+    // `action` is the real human task label the enqueuer passed (e.g. Writing "how to ..."),
+    // see agent-server/src/workers.ts. Older rows only carry the queue name, so TASKS below
+    // is still the fallback rather than showing the word "writer" as a task.
+    .select("agent, action, status, created_at")
     .eq("tenant_id", tenantId)
     .in("agent", Object.keys(JOB_AGENT_TO_ROOM))
     .order("created_at", { ascending: false })
@@ -75,7 +82,8 @@ export async function getAgentRoomStates(supabase: SupabaseClient, tenantId: str
     if (!room || seen.has(room)) continue; // keep only the latest row per agent type
     seen.add(room);
     const ageMs = Date.now() - new Date(j.created_at).getTime();
-    if (j.status === "running" || j.status === "queued") rooms[room] = { state: "working", task: TASKS[room] ?? "Working…" };
+    const label = j.action && j.action !== j.agent ? j.action : (TASKS[room] ?? "Working…");
+    if (j.status === "running" || j.status === "queued") rooms[room] = { state: "working", task: label };
     else if (j.status === "error" && ageMs < 10 * 60 * 1000) rooms[room] = { state: "error", task: "Needs a restart" };
     // status === "success" (or an old error) → stays "off" until the next real job
   }
@@ -91,6 +99,7 @@ export async function getAgentRoomStates(supabase: SupabaseClient, tenantId: str
 }
 
 const TASKS: Record<string, string> = {
+  boss: "Planning this week’s content",
   keyword: "Researching keywords",
   writer: "Writing article",
   seo: "Analyzing SEO",

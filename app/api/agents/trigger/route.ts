@@ -6,7 +6,9 @@ import { getCurrentTenantId } from "@/lib/supabase/tenant";
  *  dashboard (chat's "new task: X" command, and any future real trigger button) enqueue a
  *  real pg-boss job without the browser ever knowing the tenant id or agent-server's URL.
  *  tenantId is resolved server-side from the session, never trusted from the request body. */
-const ALLOWED_TYPES = ["keyword", "writer", "social", "seo"];
+// "boss" is the orchestrator (agent-server/src/agents/boss.ts): it plans topics from the
+// tenant's own niche/crawled pages and starts the keyword -> writer chain itself.
+const ALLOWED_TYPES = ["boss", "keyword", "writer", "social", "seo"];
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient();

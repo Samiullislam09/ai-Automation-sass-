@@ -2,6 +2,7 @@
  *  a whole day's AI budget (or a runaway loop) in one go. Read at job-time in worker.ts —
  *  edit these numbers directly for now; move to a DB-driven per-plan config later. */
 export const DAILY_CAPS: Record<string, number> = {
+  boss: 6, // each run fans out into keyword+writer jobs, so it is capped well below them
   keyword: 50,
   writer: 10,
   social: 20,

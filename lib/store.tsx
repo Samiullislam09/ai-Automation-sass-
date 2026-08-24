@@ -31,7 +31,8 @@ const TOPICS = [
   "Why Your Website Isn't Bringing Sales (And How to Fix It)",
 ];
 
-export type AgentState = { st: "w" | "i" | "o"; task: string };
+// w = working, i = idle, o = off/not built yet, e = last real job failed (jobs_log 'error').
+export type AgentState = { st: "w" | "i" | "o" | "e"; task: string };
 export type ContentItem = { id: number; type: string; title: string; status: string; time: string; tokens: number };
 export type Report = { id: number; key: string; dateISO: string; unread: boolean; lines: { t: string; s: string }[] };
 export type Mem = { k: string; v: string };

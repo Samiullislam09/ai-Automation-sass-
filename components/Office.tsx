@@ -1,6 +1,6 @@
 "use client";
 import React, { useEffect, useRef, useState } from "react";
-import { AGENTS, useStore } from "@/lib/store";
+import { AGENTS, useStore, type AgentState } from "@/lib/store";
 
 /** Animated 2D office — SVG rooms on a light sky, camera pans/zooms to whichever
  *  agent is relevant (click a room, or mention that agent in chat — store.s.focusAgent
@@ -120,8 +120,10 @@ function Desk({ working }: { working: boolean }) {
     </g>
   );
 }
-function RoomTag({ name, task, st }: { name: string; task: string; st: "w" | "i" | "o" }) {
-  const dot = st === "w" ? "var(--grn)" : st === "i" ? "var(--amb)" : "var(--mut2)";
+function RoomTag({ name, task, st }: { name: string; task: string; st: AgentState["st"] }) {
+  // "e" = a real failed job (jobs_log status 'error'), surfaced so a broken agent does not
+  // look identical to an idle one.
+  const dot = st === "w" ? "var(--grn)" : st === "e" ? "var(--red)" : st === "i" ? "var(--amb)" : "var(--mut2)";
   return (
     <div style={{ display: "flex", justifyContent: "center" }}>
       <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 9, padding: "5px 11px", whiteSpace: "nowrap", boxShadow: "0 6px 16px #00000033" }}>
@@ -144,7 +146,7 @@ export default function Office({ demo = false }: { demo?: boolean }) {
   const FAKE = React.useMemo(() => Object.fromEntries(AGENTS.map((a) => [
     a.id,
     a.live
-      ? { st: (FAKE_TASKS[a.id] ? "w" : "i") as "w" | "i" | "o", task: FAKE_TASKS[a.id] ?? "Idle" }
+      ? { st: (FAKE_TASKS[a.id] ? "w" : "i") as AgentState["st"], task: FAKE_TASKS[a.id] ?? "Idle" }
       : { st: "o" as const, task: "Coming soon" },
   ])), []);
   const agents = demo || !store ? FAKE : store.s.agents;
@@ -249,7 +251,7 @@ export default function Office({ demo = false }: { demo?: boolean }) {
               <g key={a.id} onClick={e => { e.stopPropagation(); clickRoom(a.id); }} style={{ cursor: "pointer" }}>
                 <ellipse cx={r.cx} cy={r.cy + r.h / 2 + 10} rx={r.w / 2 + 14} ry="13" fill="#1c2540" opacity="0.14" />
                 <rect x={r.cx - r.w / 2} y={r.cy - r.h / 2} width={r.w} height={r.h} rx="22"
-                  fill={isBoss ? "var(--panel2)" : "var(--panel)"} stroke={a.c} strokeOpacity={st.st === "w" ? 0.85 : 0.4} strokeWidth="2.5"
+                  fill={isBoss ? "var(--panel2)" : "var(--panel)"} stroke={a.c} strokeOpacity={st.st === "w" || st.st === "e" ? 0.85 : 0.4} strokeWidth="2.5"
                   opacity={dim} style={{ transition: "opacity .4s, stroke-opacity .4s" }} />
                 <rect x={r.cx - r.w / 2} y={r.cy - r.h / 2} width={r.w} height={r.h * 0.35} rx="22" fill="var(--line)" opacity={dim * 0.35} />
 

@@ -1,6 +1,7 @@
 import type { Job } from "pg-boss";
 import { boss, ensureBossStarted } from "./db.js";
 import { AGENT_TYPES, type AgentType } from "./queues.js";
+import { BossAgent } from "./agents/boss.js";
 import { KeywordAgent } from "./agents/keyword.js";
 import { WriterAgent } from "./agents/writer.js";
 import { SocialAgent } from "./agents/social.js";
@@ -12,6 +13,7 @@ import { isOverDailyCap, logJobStart, logJobFinish, logJobError } from "./jobsLo
 import { emitAgentStatus } from "./socket.js";
 
 const AGENTS: Record<AgentType, Agent> = {
+  boss: new BossAgent(),
   keyword: new KeywordAgent(),
   writer: new WriterAgent(),
   social: new SocialAgent(),
@@ -29,8 +31,15 @@ async function process(type: AgentType, job: Job<AgentJobData>) {
     return { skipped: true, reason: "daily cap exceeded" };
   }
 
-  emitAgentStatus({ agent: type, tenant: tenantId, status: "running", task: "Working" });
-  const logId = await logJobStart(tenantId, type, job.name);
+  // jobs_log.action used to be job.name, which is just the queue name again ("writer"),
+  // so the dashboard had no real task text to show and had to fall back to a generic
+  // per-agent label. Whoever enqueues the job can now pass a human one.
+  const taskLabel = typeof (job.data as any).taskLabel === "string" && (job.data as any).taskLabel.trim()
+    ? ((job.data as any).taskLabel as string).trim()
+    : job.name;
+
+  emitAgentStatus({ agent: type, tenant: tenantId, status: "running", task: taskLabel });
+  const logId = await logJobStart(tenantId, type, taskLabel);
 
   try {
     const result = await AGENTS[type].run(job);

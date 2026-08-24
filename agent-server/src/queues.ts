@@ -1,7 +1,9 @@
 import { boss, ensureBossStarted } from "./db.js";
 import type { AgentJobData } from "./agents/base.js";
 
-export const AGENT_TYPES = ["keyword", "writer", "social", "seo", "leads", "crawler"] as const;
+// "boss" is the orchestrator (agents/boss.ts) — it plans topics and starts the
+// keyword -> writer chain. Listed first because it is the entry point of a real run.
+export const AGENT_TYPES = ["boss", "keyword", "writer", "social", "seo", "leads", "crawler"] as const;
 export type AgentType = (typeof AGENT_TYPES)[number];
 
 // Mirrors the old BullMQ config (attempts: 3, exponential backoff 3s/6s/12s):
