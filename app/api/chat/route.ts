@@ -1,117 +1,66 @@
 import { NextRequest } from "next/server";
+import { cookies } from "next/headers";
 import "@/lib/dns-fix";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
+import { cached, sessionKey, TTL } from "@/lib/chat-cache";
 import { detectChatIntent } from "@/lib/chat-intent";
-import { classifyIntent } from "@/lib/chat-classify";
+import { classifyIntent, mightBeAnOrder } from "@/lib/chat-classify";
 import { enqueueAgentJob } from "@/lib/agent-jobs";
+import { loadBusiness, loadRecentWork, loadSchedule, type Turn } from "@/lib/chat-context";
 
-/** /api/chat — Mr Lxwa's reply. Build Guide Step 7: real NVIDIA NIM call.
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
+/** /api/chat — Mr Lxwa's reply.
  *
- * Uses stream:false (one fetch, wait for the full answer) then fakes the
- * word-by-word reveal client-side-style, from the server, via setTimeout —
- * same wire format the client already reads (plain text chunks).
- * A true token-by-token SSE relay was tried first but its per-chunk parsing
- * loop turned out to add 15-20s of overhead on this dev machine (NVIDIA
- * itself answers in ~6s non-streaming) — simpler and it's actually faster
- * end to end, so keeping it this way rather than re-adding that complexity. */
+ *  WHY THIS WAS REWRITTEN. A 1700-word article took ninety seconds and felt fine; "hi hello"
+ *  took six or seven and felt broken. Nothing about answering a greeting is hard — the time
+ *  was all structure:
+ *
+ *    · SEVEN Supabase round trips, strictly one after another, before the model was even
+ *      asked. Two of them were the same auth.getUser() call, made twice.
+ *    · stream:false — the whole answer was generated, then the finished string was dribbled
+ *      out at 22ms per word. Time-to-first-word could never be less than time-to-last-token,
+ *      and the fake typing added another second on top.
+ *
+ *  Both are gone. The reads now run together on one client behind one auth check, and the
+ *  model's tokens are relayed as they arrive. An earlier attempt at a token relay was
+ *  reverted for being slow; measured properly the cause was the buffered call it was wrapped
+ *  around, not the parsing — first token lands in ~1.2s where the finished answer took 0.7-10s
+ *  and averaged far worse.
+ *
+ *  This also matters for the text-to-speech work: speech can start on the first sentence
+ *  instead of waiting for the last.
+ */
 
-/** Real, DB-backed business facts — same source as /api/dashboard/status. The client's
- *  ctx.memory (from lib/store.tsx) is only ever populated once, in-memory, during the
- *  onboarding wizard — it's never persisted, so on every fresh login/page load it's back
- *  to [] and Mr Lxwa had nothing real to answer "what do you know about my business?"
- *  with. This queries the tenant's actual saved profile + crawled site data instead. */
-async function loadRealBusinessContext(): Promise<{ tenantId: string | null; business: string | null }> {
-  try {
-    const supabase = await createClient();
-    const tenantId = await getCurrentTenantId(supabase);
-    if (!tenantId) return { tenantId: null, business: null };
+const NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
+const MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b";
 
-    const [{ data: tenant }, { data: samplePages }] = await Promise.all([
-      supabase.from("tenants").select("website_url, niche, tone_profile, icp_profile, onboarded").eq("id", tenantId).single(),
-      supabase.from("site_pages").select("title").eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(6),
-    ]);
-    if (!tenant || !tenant.onboarded) return { tenantId, business: null };
+function systemPrompt(ctx: any, c: { business: string | null; recentWork: string | null; schedule: string | null }): string {
+  return `You are Mr Lxwa, running a small AI marketing team (Mr. Keyword, Mr. Writer, Mr. QA, Mr. Publish) inside the MrLxwa dashboard.
 
-    const tone = (tenant.tone_profile as any) ?? {};
-    const icp = (tenant.icp_profile as any) ?? {};
-    const facts: string[] = [];
-    if (tenant.website_url) facts.push(`website=${tenant.website_url}`);
-    if (tenant.niche) facts.push(`niche=${tenant.niche}`);
-    if (icp.businessType) facts.push(`business type=${icp.businessType}`);
-    if (tone.audience) facts.push(`audience=${tone.audience}`);
-    if (tone.tone) facts.push(`brand tone=${tone.tone}`);
-    if (tone.pace) facts.push(`publishing pace=${tone.pace}`);
-    if (Array.isArray(tone.topics) && tone.topics.length) facts.push(`content topics=${tone.topics.join(", ")}`);
-    if (samplePages?.length) facts.push(`recently read pages=${samplePages.map((p) => p.title).join(", ")}`);
+Account: ${ctx.tokens ?? "?"}/${ctx.tokensMax ?? "?"} tokens (${ctx.plan ?? "free"} plan) · ${ctx.awaiting ?? 0} awaiting approval · business: ${c.business ?? "not onboarded yet"}
 
-    return { tenantId, business: facts.length ? facts.join(" · ") : null };
-  } catch (e: any) {
-    console.error("[chat] failed to load real tenant context:", e.message);
-    return { tenantId: null, business: null };
-  }
-}
+AUTOMATION SCHEDULE (the real rows from the schedules table — the only schedule you may describe):
+${c.schedule ?? "No automatic schedule has been set up yet."}
 
-function systemPrompt(ctx: any, business: string | null, recentWork: string | null): string {
-  return `You are Mr Lxwa, running a small AI marketing team (Mr. Keyword, Mr. Writer, Mr. Story, Miss Social, Mr. SEO) inside the GrowthTeam AI dashboard.
-
-Account: ${ctx.tokens ?? "?"}/${ctx.tokensMax ?? "?"} tokens (${ctx.plan ?? "free"} plan) · ${ctx.awaiting ?? 0} awaiting approval · business: ${business ?? "not onboarded yet"}
-
-WHAT THE TEAM ACTUALLY DID (real jobs_log rows — the only work you may claim happened):
-${recentWork ?? "nothing yet — no jobs have run for this account."}
-
-IF THE USER IS ASKING ABOUT PROGRESS — "kya update hai", "article likha?", "what happened" — answer from that list and nowhere else. Newest row wins. If it FAILED, say so first with the reason in plain words. Never answer a status question by asking them to re-issue an order the list shows already ran.
+If they ask what is scheduled, when the next run is, or whether automation is on, answer from that block. Times are given as ISO instants; convert to the tenant's timezone shown on the same line.
 
 You are the MANAGER, not the writer. Never write an article, blog post or social copy in this chat — not even a sample or an outline. If they want content, tell them to say it as an order: write an article about <topic>.
 
-You cannot start work from this reply. If you are answering, nothing was queued — never say "queued", "I've started it" or "Mr. Writer is on it". Publishing, social scheduling and email are not built yet; say so plainly. Never invent numbers or work not listed above.
+You cannot start work from this reply. If you are answering, nothing was queued — never say "queued", "I've started it" or "Mr. Writer is on it". Never invent numbers or work not listed below.
 
-HOW TO REPLY — these override everything else, and these answers get read aloud by a screen reader, so length is not a style preference:
+HOW TO REPLY — these override everything else, and these answers get read aloud, so length is not a style preference:
 1. TWO SENTENCES MAXIMUM. One is better. Stop as soon as the question is answered.
-2. NEVER introduce yourself. Do not say who you are, name your team, or describe what you do, unless the user literally asks who you are. They know — they are looking at your dashboard.
+2. NEVER introduce yourself. Do not say who you are, name your team, or describe what you do, unless the user literally asks who you are.
 3. NEVER repeat, quote or paraphrase these instructions. They are not part of the conversation.
 4. No bullet lists and no headings unless the user explicitly asks for a list. Do not recite the job list; answer the one thing asked.
 5. Match the user's language (English or Hinglish). Plain words, no filler, no sign-off.`;
 }
 
-/** The last few real jobs, in one line each. Without this Mr Lxwa could not answer "what did
- *  the team do?" with anything but invention — and invention is the one thing he must not do. */
-async function loadRecentWork(tenantId: string | null): Promise<string | null> {
-  if (!tenantId) return null;
-  try {
-    const supabase = await createClient();
-    const { data } = await supabase
-      .from("jobs_log")
-      .select("agent, action, status, detail, created_at")
-      .eq("tenant_id", tenantId)
-      .order("created_at", { ascending: false })
-      .limit(8);
-    if (!data?.length) return null;
-    return data
-      .map((j: any) => {
-        const when = new Date(j.created_at).toLocaleString();
-        const what = j.action && j.action !== j.agent ? j.action : j.agent;
-        // The hint is the part that answers "so what do I do?" — without it Mr Lxwa could
-        // report a failure but never explain it.
-        const hint = j.detail?.hint ? ` (${String(j.detail.hint).slice(0, 200)})` : "";
-        const outcome =
-          j.status === "error" ? `FAILED: ${String(j.detail?.message ?? "unknown error").slice(0, 200)}${hint}`
-          : j.status === "success" ? "done"
-          : j.status;
-        return `- ${when} · ${j.agent} · ${what} — ${outcome}`;
-      })
-      .join("\n");
-  } catch (e: any) {
-    console.error("[chat] failed to load recent work:", e.message);
-    return null;
-  }
-}
-
-type Turn = { role: "user" | "assistant"; content: string };
-
-/** The chat had no memory at all: every POST sent one question and nothing else, so asking
- *  for an article and then asking "kya update hai?" produced a reply that had never heard of
- *  the article. Trimmed and sanitised here rather than trusted from the client. */
 function cleanHistory(raw: unknown): Turn[] {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -120,19 +69,10 @@ function cleanHistory(raw: unknown): Turn[] {
     .map((t: any) => ({ role: t.role, content: String(t.content).slice(0, 700) }));
 }
 
+/* ── Persistence ─────────────────────────────────────────────────────────────────────── */
 
-/* ── Persistence ───────────────────────────────────────────────────────────────────────
- * Chat used to live only in React state, so a refresh threw away the whole conversation —
- * including the part where Mr Lxwa told you which job he had just started. Every turn is
- * now written to chat_messages (migration 011) and the panel reopens where you left off.
- * All of it is best-effort: if the tables aren't there yet, or a write fails, the reply
- * still streams. Losing the transcript is bad; losing the answer is worse.
- */
-
-/** The conversation this turn belongs to, creating one on the first message. */
-async function ensureConversation(tenantId: string, conversationId: string | null): Promise<string | null> {
+async function ensureConversation(supabase: SupabaseClient, tenantId: string, conversationId: string | null, userId: string | null): Promise<string | null> {
   try {
-    const supabase = await createClient();
     if (conversationId) {
       const { data } = await supabase
         .from("chat_conversations")
@@ -144,10 +84,9 @@ async function ensureConversation(tenantId: string, conversationId: string | nul
       // Unknown id (deleted in another tab, or someone else's) — start a fresh one rather
       // than writing messages into a conversation this tenant doesn't own.
     }
-    const { data: { user } } = await supabase.auth.getUser();
     const { data, error } = await supabase
       .from("chat_conversations")
-      .insert({ tenant_id: tenantId, user_id: user?.id ?? null })
+      .insert({ tenant_id: tenantId, user_id: userId })
       .select("id")
       .single();
     if (error) throw new Error(error.message);
@@ -165,18 +104,10 @@ async function saveTurn(tenantId: string, conversationId: string, question: stri
       { conversation_id: conversationId, tenant_id: tenantId, role: "user", content: question },
       { conversation_id: conversationId, tenant_id: tenantId, role: "assistant", content: answer },
     ]);
-    // The title is the first thing you asked, which is what makes the list scannable.
-    const { data: conv } = await supabase
-      .from("chat_conversations")
-      .select("title")
-      .eq("id", conversationId)
-      .maybeSingle();
+    const { data: conv } = await supabase.from("chat_conversations").select("title").eq("id", conversationId).maybeSingle();
     await supabase
       .from("chat_conversations")
-      .update({
-        updated_at: new Date().toISOString(),
-        ...(conv?.title ? {} : { title: question.trim().slice(0, 80) }),
-      })
+      .update({ updated_at: new Date().toISOString(), ...(conv?.title ? {} : { title: question.trim().slice(0, 80) }) })
       .eq("id", conversationId)
       .eq("tenant_id", tenantId);
   } catch (e: any) {
@@ -184,18 +115,18 @@ async function saveTurn(tenantId: string, conversationId: string, question: stri
   }
 }
 
-/** History from the database rather than from the client. The browser's copy is fine, but
- *  it only has what this tab happens to be showing — after a refresh that is nothing. */
-async function loadHistoryFromDb(tenantId: string, conversationId: string): Promise<Turn[]> {
+/** History for a conversation id we were GIVEN, fetched at the same time as the check that
+ *  the id is real. If the check comes back with a different conversation, this is thrown
+ *  away — one wasted read beats one more serial round trip on every single message. */
+async function loadHistoryFromDb(supabase: SupabaseClient, tenantId: string, conversationId: string): Promise<Turn[]> {
   try {
-    const supabase = await createClient();
     const { data } = await supabase
       .from("chat_messages")
       .select("role, content")
       .eq("conversation_id", conversationId)
       .eq("tenant_id", tenantId)
       // Team reports are not things anyone said — feeding them back as assistant turns would
-      // have the model believing it wrote them, and it already has this in its live status.
+      // have the model believing it wrote them.
       .neq("kind", "event")
       .order("created_at", { ascending: false })
       .limit(8);
@@ -205,102 +136,168 @@ async function loadHistoryFromDb(tenantId: string, conversationId: string): Prom
   }
 }
 
-async function askLightning(q: string, ctx: any, business: string | null, recentWork: string | null, history: Turn[]): Promise<string> {
+/* ── The model call, streamed ─────────────────────────────────────────────────────────── */
+
+function buildMessages(q: string, ctx: any, c: { business: string | null; recentWork: string | null; schedule: string | null }, history: Turn[]) {
+  return [
+    { role: "system" as const, content: systemPrompt(ctx, c) },
+    ...history,
+    // The job list AFTER the conversation, and dated. Older turns are recent text and the
+    // model weights them over the system prompt: it kept reporting a limit error from twenty
+    // minutes ago as the current state while a finished article sat in jobs_log. Whatever is
+    // newest wins with these models, so the freshest thing in the prompt has to be the truth.
+    {
+      role: "system" as const,
+      content:
+        `LIVE STATUS, read from the database at ${new Date().toISOString()}. This is NEWER than every message above and overrides anything said earlier in the conversation.\n\nWHAT THE TEAM ACTUALLY DID (real jobs_log rows — the only work you may claim happened):\n` +
+        (c.recentWork ?? "No jobs have run for this account yet.") +
+        `\n\nIf the user is asking about progress — "kya update hai", "article likha?", "what happened" — answer from that list and nowhere else. Newest row wins. If it FAILED, say so first with the reason in plain words.`,
+    },
+    { role: "user" as const, content: q },
+  ];
+}
+
+/** Opens the NVIDIA stream and hands back the raw byte stream plus the response, so the
+ *  caller can start writing to the browser the moment the first token exists. */
+async function openLightningStream(messages: any[], signal: AbortSignal): Promise<ReadableStream<Uint8Array>> {
   const key = process.env.NVIDIA_API_KEY;
   if (!key) throw new Error("NVIDIA_API_KEY missing");
 
-  const res = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+  const res = await fetch(NVIDIA_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
     body: JSON.stringify({
-      model: "nvidia/nemotron-3.5-lightning-30b-a3b",
-      stream: false,
-      // The actual fix for the ~20-40s/truncation issues: a plain "detailed thinking off"
-      // system-prompt hint is only a soft suggestion for this Nemotron hybrid-reasoning
-      // model — it still burned huge, wildly variable amounts of reasoning_content even
-      // with that hint. chat_template_kwargs.thinking:false is the real API-level switch
-      // (per NVIDIA's Nemotron docs) — live-tested it drops reasoning_content to null and
-      // replies consistently in ~1-2s regardless of prompt length/flavor text, vs 6-40s
-      // and frequent finish_reason:length truncation before this. DO NOT remove this.
+      model: MODEL,
+      stream: true,
+      // The real "reasoning off" switch for this Nemotron hybrid model — a "detailed thinking
+      // off" line in the system prompt is only a soft hint and it still burned huge, wildly
+      // variable amounts of reasoning_content. DO NOT remove this.
       chat_template_kwargs: { thinking: false },
-      // Two sentences do not need 1024 tokens, and a cap is the one length limit a model
-      // cannot talk its way past.
       max_tokens: 260,
-      messages: [
-        { role: "system", content: systemPrompt(ctx, business, recentWork) },
-        ...history,
-        // The job list AGAIN, after the conversation, and dated. Older turns in the history
-        // are recent text and the model weighted them over the system prompt: it kept
-        // reporting a limit error from twenty minutes ago as the current state while a
-        // finished article sat in jobs_log. Whatever is newest wins with these models, so
-        // the freshest thing in the prompt has to be the truth.
-        {
-          role: "system" as const,
-          content:
-            `LIVE STATUS, read from the database at ${new Date().toISOString()}. This is NEWER than every message above ` +
-            `and overrides anything said earlier in the conversation. If an older reply contradicts this, that reply is stale.
-` +
-            (recentWork ?? "No jobs have run for this account yet."),
-        },
-        { role: "user", content: q },
-      ],
+      messages,
     }),
-    signal: AbortSignal.timeout(20000),
+    signal,
   });
 
-  if (!res.ok) throw new Error(`NVIDIA NIM chat failed (${res.status}): ${(await res.text().catch(() => "")).slice(0, 300)}`);
-
-  const data = await res.json();
-  const choice = data?.choices?.[0];
-  const text: string | undefined = choice?.message?.content;
-  if (!text) throw new Error("NVIDIA NIM: no content in response");
-  // finish_reason "length" means generation got cut off — for this reasoning model that
-  // means `content` is unfinished reasoning narrative, not a real answer. Treat as a
-  // failure (caller falls back to the canned reply) rather than showing it to the user.
-  if (choice?.finish_reason === "length") throw new Error("NVIDIA NIM: response truncated mid-reasoning (finish_reason=length)");
-  return text;
+  if (!res.ok || !res.body) {
+    throw new Error(`NVIDIA NIM chat failed (${res.status}): ${(await res.text().catch(() => "")).slice(0, 300)}`);
+  }
+  return res.body;
 }
 
-/** Strips the two things this model does no matter what the prompt says: introducing itself
- *  every single time, and reciting its own instructions back at the user ("Reply 1-2 short
- *  lines mein— warm aur confident" appeared verbatim in a reply). Surgical on purpose — it
- *  removes those two pathologies and leaves everything else exactly as written. */
-function tighten(text: string): string {
-  const INTRO = /^\s*(?:main|mai|m[ae]in)\s+(?:mr\.?\s*)?lxwa\s+(?:hoon|hun|hu)|^\s*(?:i'?m|i am)\s+(?:mr\.?\s*)?lxwa/i;
-  const ECHO = /reply\s+\d\s*-\s*\d\s+short|short lines mein|warm aur confident|warm and confident|bold kar sakta|you are mr lxwa/i;
+const INTRO = /^\s*(?:main|mai|m[ae]in)\s+(?:mr\.?\s*)?lxwa\s+(?:hoon|hun|hu)|^\s*(?:i'?m|i am)\s+(?:mr\.?\s*)?lxwa/i;
+const ECHO = /reply\s+\d\s*-\s*\d\s+short|short lines mein|warm aur confident|warm and confident|bold kar sakta|you are mr lxwa|two sentences maximum/i;
 
-  const kept = text
-    .split(/\n+/)
-    .filter((line, i) => {
-      const l = line.trim();
-      if (!l) return false;
-      if (ECHO.test(l)) return false;
-      // Only the opening line can be a greeting-introduction; the same words later in a
-      // reply are probably a real answer to "who are you?".
-      if (i === 0 && INTRO.test(l)) return false;
-      return true;
-    });
+/** Relays the model's tokens to the browser, dropping the two things this model does no
+ *  matter what the prompt says: introducing itself every single time, and reciting its own
+ *  instructions back at the user.
+ *
+ *  Filtering a stream means deciding before you have the whole thing, so the filter is spent
+ *  where it is actually needed: both pathologies are OPENING-line behaviour. The first HOLD
+ *  characters are held back and judged; once a real answer has started, tokens go straight
+ *  through as they arrive. Sixty-four characters is roughly one clause — long enough to
+ *  recognise "main Mr Lxwa hoon" or a recited rule, short enough that nobody sees a pause. */
+const HOLD = 64;
 
-  return (kept.join("\n").trim() || text.trim());
+function relay(
+  upstream: ReadableStream<Uint8Array>,
+  onDone: (full: string) => void,
+  onFirstWord: () => void = () => {}
+): ReadableStream<Uint8Array> {
+  const enc = new TextEncoder();
+  const dec = new TextDecoder();
+
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      let sse = "";       // unparsed SSE bytes
+      let seg = "";       // text held back for filtering
+      let full = "";      // everything actually sent, for the transcript
+      let firstOut = true;
+
+      const release = (text: string) => {
+        const t = text.trim();
+        if (!t) return;
+        if (ECHO.test(t)) return;
+        if (firstOut && INTRO.test(t)) return;
+        const out = firstOut ? t : text;
+        if (firstOut) onFirstWord();
+        firstOut = false;
+        full += out;
+        controller.enqueue(enc.encode(out));
+      };
+
+      try {
+        const reader = upstream.getReader();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          sse += dec.decode(value, { stream: true });
+
+          let nl: number;
+          while ((nl = sse.indexOf("\n")) >= 0) {
+            const line = sse.slice(0, nl).trim();
+            sse = sse.slice(nl + 1);
+            if (!line.startsWith("data:")) continue;
+            const payload = line.slice(5).trim();
+            if (!payload || payload === "[DONE]") continue;
+            let delta: string | undefined;
+            try {
+              delta = JSON.parse(payload)?.choices?.[0]?.delta?.content;
+            } catch {
+              continue; // a partial JSON frame; the next chunk completes it
+            }
+            if (!delta) continue;
+
+            // Once the opening has been judged and let through, every later token goes out
+            // the moment it arrives — that is the whole point of streaming.
+            if (!firstOut) {
+              full += delta;
+              controller.enqueue(enc.encode(delta));
+              continue;
+            }
+
+            seg += delta;
+            let brk: number;
+            while (firstOut && (brk = seg.indexOf("\n")) >= 0) {
+              release(seg.slice(0, brk + 1));
+              seg = seg.slice(brk + 1);
+            }
+            if (firstOut && seg.length >= HOLD) {
+              release(seg);
+              seg = "";
+            }
+          }
+        }
+        release(seg);
+      } catch (e: any) {
+        console.error("[chat] stream broke mid-answer:", e?.message);
+        if (!full) controller.enqueue(enc.encode("I lost my connection mid-sentence — ask me again."));
+      } finally {
+        controller.close();
+        onDone(full.trim());
+      }
+    },
+  });
 }
 
-/** Canned fallback — only used if NVIDIA is unreachable/misconfigured, so the widget
- *  never just breaks. Also handles the client's silent "__hello__" auto-open message. */
+/** One-shot text, still as a stream so the client's reader loop is unchanged. */
+function once(text: string): ReadableStream<Uint8Array> {
+  const enc = new TextEncoder();
+  return new ReadableStream({ start(c) { c.enqueue(enc.encode(text)); c.close(); } });
+}
+
 function fallback(q: string, ctx: any): string {
   if (q === "__hello__") {
-    return `Salam! 👋 I'm **Mr Lxwa**, running your team. Ask me about your **tokens**, **today's work**, your **team**, or say **"write an article"** and I'll explain exactly what happens.`;
+    return `Salam! 👋 Ask me about your **tokens**, **today's work**, your **schedule**, or say **"write an article"** and the team starts.`;
   }
   return `I'm having trouble reaching my brain right now — try again in a moment. Meanwhile: **${ctx.awaiting ?? 0}** item(s) await your approval.`;
 }
 
-/** Enqueues the real job an order maps to and describes the pipeline that will now run.
- *  With a topic we can skip the planner and go straight to Mr. Keyword (chain: true is what
- *  makes him hand the blueprint to Mr. Writer — see agent-server/src/agents/keyword.ts).
- *  Without one, Mr Lxwa's planner picks the topics from the business's own data. */
+/* ── Orders ──────────────────────────────────────────────────────────────────────────── */
+
 async function startWork(intent: NonNullable<ReturnType<typeof detectChatIntent>>, tenantId: string): Promise<string> {
   const topic = intent.kind === "write" || intent.kind === "research" ? intent.topic : null;
 
-  // What happens AFTER research, decided by what was actually asked for:
   //   "research"  -> false    nothing gets written. This is the whole point of the mode.
   //   "write"     -> "choose" the keywords go in front of the user with a countdown first.
   //   "plan"      -> true     a batch was asked for; writing all of them is the request.
@@ -315,9 +312,6 @@ async function startWork(intent: NonNullable<ReturnType<typeof detectChatIntent>
     : await enqueueAgentJob("boss", tenantId, { count: intent.kind === "plan" ? 3 : 1, chain });
 
   if (!res.ok) {
-    // 429 is the daily cap, which is a completely different situation from "the server is
-    // down" — telling someone to wait for the agent server to come back when it is up and
-    // simply refusing on budget grounds sends them chasing the wrong problem.
     const next =
       res.status === 429
         ? `That's the daily budget guard, not a fault — the agent server is fine. Raise the cap on agent-server (DAILY_CAP_*) or try again tomorrow.`
@@ -325,87 +319,152 @@ async function startWork(intent: NonNullable<ReturnType<typeof detectChatIntent>
     return `I couldn't put the team to work: **${res.error}** — so I'm not going to pretend it's running. Nothing was started, and no credits were used. ${next}`;
   }
 
-  // Short on purpose. These are read aloud, and the three-step pipeline explanation was
-  // identical every single time — after the first article it is noise, not information.
   if (intent.kind === "research") {
     return topic
       ? `On it — **Mr. Keyword** is researching **"${topic}"**. No article will be written; I'll post the keywords here when they land.`
       : `On it — **Mr. Keyword** is finding your best keywords. No article will be written; I'll post them here when they land.`;
   }
-
   if (intent.kind === "plan") {
     return `Starting the team — picking this week's topics from your niche and the pages we crawled. Drafts land in **Approvals**.`;
   }
-
   return topic
     ? `On it — researching **"${topic}"**. You'll get the keyword options in a moment: pick one, or the recommended one starts by itself.`
     : `On it — I'll pick a topic from your niche, then show you the keyword options before anything gets written.`;
 }
 
-function wordStream(text: string): ReadableStream<Uint8Array> {
-  const encoder = new TextEncoder();
-  return new ReadableStream({
-    async start(c) {
-      for (const w of text.split(/(?<=\s)/)) { c.enqueue(encoder.encode(w)); await new Promise((r) => setTimeout(r, 22)); }
-      c.close();
-    },
+/* ── The request ─────────────────────────────────────────────────────────────────────── */
+
+/** Fills the caches while nobody is waiting, so the first real question doesn't pay for them.
+ *  Every failure here is silent by design: this is an optimisation, and a warm-up that breaks
+ *  must never break the greeting it rides on. */
+async function warm() {
+  const supabase = await createClient();
+  const sk = sessionKey((await cookies()).getAll());
+  if (!sk) return;
+  const who = await cached(sk, TTL.session, async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    return { userId: user?.id ?? null, tenantId: user ? await getCurrentTenantId(supabase) : null };
   });
+  if (!who.tenantId) return;
+  await Promise.all([
+    cached(`biz:${who.tenantId}`, TTL.business, () => loadBusiness(supabase, who.tenantId)),
+    cached(`sched:${who.tenantId}`, TTL.schedule, () => loadSchedule(supabase, who.tenantId)),
+    cached(`work:${who.tenantId}`, TTL.work, () => loadRecentWork(supabase, who.tenantId)),
+  ]);
 }
 
 export async function POST(req: NextRequest) {
+  const t0 = Date.now();
   const { q, ctx, history: rawHistory, conversationId } = await req.json();
-  let history = cleanHistory(rawHistory);
+  const clientHistory = cleanHistory(rawHistory);
+  const askedFor = typeof conversationId === "string" ? conversationId : null;
 
-  // "__hello__" is a silent UI trigger (chat auto-opens with a greeting) — always instant/canned,
-  // no need to spend a model call on a fixed message.
+  // "__hello__" is a silent UI trigger (the chat auto-opens with a greeting) — a fixed message
+  // never needed a model call, and now it doesn't need a database round trip either.
+  //
+  // It does, however, arrive several seconds before the first real question, which makes it
+  // the perfect moment to go and fetch everything that question will need. The greeting
+  // returns immediately; the warm-up runs behind it.
   if (q === "__hello__") {
-    return new Response(wordStream(fallback(q, ctx || {})), { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    void warm().catch((e) => console.error("[chat] warm-up failed (harmless):", e?.message));
+    return new Response(once(fallback(q, ctx || {})), { headers: { "Content-Type": "text/plain; charset=utf-8" } });
   }
 
-  const { tenantId, business } = await loadRealBusinessContext();
+  // Phase stopwatch. Kept in shipped code on purpose: "the chat feels slow" is unanswerable
+  // without knowing whether the time went to the database, the classifier or the model, and
+  // that question came up often enough to be worth four numbers in a log line.
+  const mark: Record<string, number> = {};
+  const lap = (name: string) => { mark[name] = Date.now() - t0; };
 
-  // Open (or reopen) the thread this turn belongs to. The id goes back on a header so the
-  // panel can keep using it for the rest of the session without waiting for the stream.
-  const convId = tenantId ? await ensureConversation(tenantId, typeof conversationId === "string" ? conversationId : null) : null;
-  if (tenantId && convId) {
-    const stored = await loadHistoryFromDb(tenantId, convId);
-    if (stored.length) history = stored;
-  }
+  // The one auth check for the whole request — it used to happen twice — and on a warm
+  // instance, not even once: the same session cookie always resolves to the same person and
+  // the same workspace, and re-proving that took 615-680ms of every single message.
+  const supabase = await createClient();
+  const sk = sessionKey((await cookies()).getAll());
+  const who = sk
+    ? await cached(sk, TTL.session, async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        return { userId: user?.id ?? null, tenantId: user ? await getCurrentTenantId(supabase) : null };
+      })
+    : { userId: null, tenantId: null };
+  const { userId, tenantId } = who;
+  lap("auth");
+
+  // Everything below starts NOW and is awaited later — the reads do not depend on each other,
+  // and each one is skipped entirely while its cache entry is still good.
+  const businessP = cached(`biz:${tenantId}`, TTL.business, () => loadBusiness(supabase, tenantId));
+  const workP = cached(`work:${tenantId}`, TTL.work, () => loadRecentWork(supabase, tenantId));
+  const scheduleP = cached(`sched:${tenantId}`, TTL.schedule, () => loadSchedule(supabase, tenantId));
+  const convP = tenantId
+    ? cached(`conv:${tenantId}:${askedFor ?? "new"}`, askedFor ? TTL.conversation : 0, () =>
+        ensureConversation(supabase, tenantId, askedFor, userId)
+      )
+    : Promise.resolve(null);
+  // The panel sends the transcript it is showing. When it has one, that IS the history — the
+  // database copy only exists for the case where it doesn't (a fresh tab on an old thread),
+  // and reading it anyway was a round trip spent confirming what we had already been told.
+  const historyP =
+    clientHistory.length >= 2 || !tenantId || !askedFor
+      ? Promise.resolve([] as Turn[])
+      : loadHistoryFromDb(supabase, tenantId, askedFor);
+
+  // Intent first, because an order needs no model call at all. The regex is instant; the
+  // classifier only runs on messages that mention the work, and it runs while the database
+  // reads above are still in flight rather than after them.
+  const fast = detectChatIntent(q);
+  const intent = fast ?? (mightBeAnOrder(q) ? await classifyIntent(q, clientHistory) : null);
+  lap("intent");
+
+  const convId = await convP;
+  lap("conversation");
 
   const reply = (text: string) => {
     if (tenantId && convId) void saveTurn(tenantId, convId, q, text);
-    return new Response(wordStream(text), {
+    return new Response(once(text), {
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
+        "X-Chat-Ms": String(Date.now() - t0),
         ...(convId ? { "X-Conversation-Id": convId } : {}),
       },
     });
   };
 
-  // ---- ORDERS BEFORE CONVERSATION ------------------------------------------------------
-  // "write me an article" is a job, not a question. Before spending a chat call on it we hand
-  // it to the real queue and answer with what actually started — so the office animation and
-  // the Approvals page match what the chat just claimed. See lib/chat-intent.ts.
-  // Fast path first: the matcher is instant and right about the obvious phrasings. When it
-  // is unsure, the model decides — that is exactly where the matcher kept being wrong, and
-  // adding a fourth list of verbs to it was never going to end.
-  const intent = detectChatIntent(q) ?? (await classifyIntent(q, history));
-  const recentWork = intent ? null : await loadRecentWork(tenantId);
+  // ---- ORDERS BEFORE CONVERSATION ----
+  if (intent && tenantId) return reply(await startWork(intent, tenantId));
 
-  if (intent && tenantId) {
-    const text = await startWork(intent, tenantId);
-    return reply(text);
-  }
+  const [business, recentWork, schedule, storedHistory] = await Promise.all([businessP, workP, scheduleP, historyP]);
+  lap("context");
+  // The stored history only counts if the conversation it came from is the one we ended up in.
+  const history = convId && convId === askedFor && storedHistory.length ? storedHistory : clientHistory;
+  const messages = buildMessages(q, ctx || {}, { business, recentWork, schedule }, history);
 
-
-  // Cheap defense-in-depth on top of chat_template_kwargs.thinking:false above — costs
-  // nothing on the (now common) happy path, catches the rare remaining transient failure.
+  // Two attempts, but only at OPENING the stream. Once tokens are flowing a retry would mean
+  // re-writing text the reader has already seen, so a mid-stream break is reported in place.
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      const text = tighten(await askLightning(q, ctx || {}, business, recentWork, history));
-      return reply(text);
+      const upstream = await openLightningStream(messages, AbortSignal.timeout(30000));
+      lap("streamOpen");
+      const body = relay(
+        upstream,
+        (full) => {
+          if (tenantId && convId && full) void saveTurn(tenantId, convId, q, full);
+          lap("lastWord");
+          console.log(`[chat] timing ${JSON.stringify(mark)}`);
+        },
+        () => lap("firstWord")
+      );
+      return new Response(body, {
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          "X-Accel-Buffering": "no", // nginx/proxies must not sit on the chunks
+          "X-Chat-Ms": String(Date.now() - t0),
+          "Server-Timing": Object.entries(mark).map(([k, v]) => `${k};dur=${v}`).join(", "),
+          ...(convId ? { "X-Conversation-Id": convId } : {}),
+        },
+      });
     } catch (e: any) {
-      console.error(`[chat] Lightning call failed (attempt ${attempt}/2):`, e.message);
+      console.error(`[chat] Lightning stream failed to open (attempt ${attempt}/2):`, e?.message);
     }
   }
   return reply(fallback(q, ctx || {}));

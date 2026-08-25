@@ -25,6 +25,16 @@ const TIMEOUT_MS = 12_000;
 const MIGHT_BE_AN_ORDER =
   /\b(keywords?|artic\w*|blogs?|posts?|content|topics?|seo|research|write|writing|draft|likh\w*|nikal\w*|dhund\w*|banao|plan|publish)\b/i;
 
+/** Exported so the chat route can decide whether an extra model call is even on the table
+ *  BEFORE it commits to awaiting one. The route now starts its database reads first and only
+ *  blocks on the classifier for messages that mention the work at all — for "hi hello" the
+ *  classifier was never going to run, and it should not be sitting in the critical path
+ *  pretending it might. */
+export function mightBeAnOrder(message: unknown): boolean {
+  const q = String(message ?? "").trim();
+  return !!q && q.length <= 600 && MIGHT_BE_AN_ORDER.test(q);
+}
+
 const RULES = [
   '"write" — they want an article written now.',
   '"research" — they want keyword or topic research, but NOT an article written. Asking for keywords FOR an article is research, unless they also ask for the article itself.',

@@ -31,6 +31,16 @@ export function Help({ k }: { k: string }) {
 }
 
 /* ================= BOSS AI CHAT — real streaming + voice, fixed dock on desktop ================= */
+/** Index just past the last sentence-ending mark in `s`, or 0 if there isn't one yet.
+ *  The Hindi/Urdu danda counts: Mr Lxwa answers in Hinglish and a full stop is not the
+ *  only thing that ends a sentence there. */
+function lastSentenceEnd(s: string): number {
+  const re = /[.!?…।](?=\s|$)|\n/g;
+  let end = 0, m: RegExpExecArray | null;
+  while ((m = re.exec(s))) end = m.index + 1;
+  return end;
+}
+
 export function BossChat() {
   const store = useStore();
   const [open, setOpen] = useState(false);
@@ -45,7 +55,8 @@ export function BossChat() {
   const [voiceSupported, setVoiceSupported] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
-  const spokenCount = useRef(0);
+  // How much of the reply being streamed right now has already been read aloud.
+  const spokenChars = useRef(0);
   const helloFired = useRef(false); // React 18 Strict Mode double-invokes mount effects in dev —
   // without this guard, two concurrent "__hello__" streams both write into the same
   // message slot and every word came out doubled ("Salam! Salam!").
@@ -131,8 +142,6 @@ export function BossChat() {
       );
       // Already on screen — don't let the live poll append them a second time.
       r.messages.filter((m: any) => m.kind === "event").forEach((m: any) => shownNotices.current.add(`stored-${m.content}`));
-      // Reopening a thread must not read every old reply out loud.
-      spokenCount.current = r.messages.length;
       setShowHistory(false);
     } catch {}
   }
@@ -140,7 +149,7 @@ export function BossChat() {
   function newChat() {
     setConvId(null);
     setMsgs([]);
-    spokenCount.current = 0;
+    spokenChars.current = 0;
     setShowHistory(false);
     // No conversation row is created until you actually say something — same as ChatGPT.
     stream("__hello__");
@@ -172,31 +181,52 @@ export function BossChat() {
     else { setListening(true); recognitionRef.current.start(); }
   };
 
-  // Speech synthesis (voice replies) — reads out each finished bot message once, if enabled.
-  const speak = (text: string) => {
-    if (!voiceOut || !("speechSynthesis" in window)) return;
-    // Markdown is for the eye. Read aloud, "**Mr. Keyword**" becomes "star star Mr Keyword
-    // star star" in some voices, and a bare URL is unlistenable.
-    const spoken = text
+  /* Speech synthesis (voice replies).
+   *
+   *  This used to wait for the whole reply, then read it. That put the audio at the END of
+   *  every other delay — first token, then the rest of the generation, and only then did
+   *  anyone hear anything. Since the answer now arrives as a stream, speech starts on the
+   *  first finished SENTENCE and the rest is queued behind it as it lands, so the voice is
+   *  talking while the words are still being written. */
+
+  // Markdown is for the eye. Read aloud, "**Mr. Keyword**" becomes "star star Mr Keyword star
+  // star" in some voices, and a bare URL is unlistenable.
+  const forSpeech = (text: string) =>
+    text
       .replace(/\*\*(.+?)\*\*/g, "$1")
-      .replace(/[*_`#>]/g, "")
       .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
       .replace(/https?:\/\/\S+/g, "the link")
+      .replace(/[*_`#>]/g, "")
       .replace(/\s+/g, " ")
       .trim();
+
+  /** Queues one more piece behind whatever is already being said — no cancel(), because
+   *  cancelling is what turns a sentence-by-sentence read into a stutter. */
+  const sayNext = (piece: string) => {
+    if (!voiceOut || !("speechSynthesis" in window)) return;
+    const spoken = forSpeech(piece);
+    if (!spoken) return;
     const utter = new SpeechSynthesisUtterance(spoken);
     utter.rate = 1.02;
-    window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utter);
   };
 
-  useEffect(() => {
-    const last = msgs[msgs.length - 1];
-    if (last && last.who === "bot" && !last.live && msgs.length > spokenCount.current) {
-      spokenCount.current = msgs.length;
-      speak(last.txt);
+  /** Speaks every complete sentence that has arrived since the last call. `flush` releases
+   *  the tail when the stream ends, sentence-ending punctuation or not. */
+  const speakSoFar = (full: string, flush = false) => {
+    if (!voiceOut || !("speechSynthesis" in window)) return;
+    const pending = full.slice(spokenChars.current);
+    if (!pending) return;
+    if (flush) {
+      sayNext(pending);
+      spokenChars.current = full.length;
+      return;
     }
-  }, [msgs]); // eslint-disable-line
+    const end = lastSentenceEnd(pending);
+    if (end <= 0) return;
+    sayNext(pending.slice(0, end));
+    spokenChars.current += end;
+  };
 
   /** Streams from /api/chat (real NVIDIA NIM, word-by-word). */
   async function stream(q: string) {
@@ -217,11 +247,25 @@ export function BossChat() {
     const returned = res.headers.get("X-Conversation-Id");
     if (returned && returned !== convId) setConvId(returned);
     const reader = res.body!.getReader(); const dec = new TextDecoder();
+    // A fresh reply cancels whatever the previous one was still saying; after this the
+    // sentences queue behind each other instead of interrupting.
+    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+    spokenChars.current = 0;
+    let full = "";
     while (true) {
       const { done, value } = await reader.read(); if (done) break;
-      const chunk = dec.decode(value);
+      // stream:true matters now that these are real model chunks rather than whole words —
+      // a multi-byte character (an emoji, an accented letter) can straddle two chunks, and
+      // decoding each one in isolation turns it into replacement squares.
+      const chunk = dec.decode(value, { stream: true });
+      full += chunk;
       setMsgs(m => { const c = [...m]; c[c.length - 1] = { ...c[c.length - 1], txt: c[c.length - 1].txt + chunk }; return c; });
+      // Say each sentence the moment it is finished, rather than banking the whole reply and
+      // starting the audio after it. This is the difference between hearing an answer at one
+      // second and hearing it at four.
+      speakSoFar(full);
     }
+    speakSoFar(full, true);
     setMsgs(m => { const c = [...m]; c[c.length - 1] = { ...c[c.length - 1], live: false }; return c; });
     setBusy(false);
     // Titles are set from the first question, so the list only becomes useful after a turn.
