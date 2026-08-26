@@ -36,6 +36,11 @@ export class KeywordAgent extends Agent {
     const topic = (job.data as any).topic as string | undefined;
     const rawChain = (job.data as any).chain;
     const mode: "none" | "write" | "choose" = rawChain === "choose" ? "choose" : rawChain === true ? "write" : "none";
+    // Carried, not interpreted. Only the writer acts on these; this agent's job is to make
+    // sure they survive the hop, including the "choose" path where the writer job is
+    // scheduled minutes ahead and there is nobody left to pass them on later.
+    const scheduleRunId = (job.data as any).scheduleRunId as string | undefined;
+    const autoPublish = (job.data as any).autoPublish === true;
     if (!topic?.trim()) throw new Error("keyword job needs a 'topic' string");
     const t = topic.trim();
 
@@ -133,7 +138,7 @@ export class KeywordAgent extends Agent {
     // ── Straight to the writer ──────────────────────────────────────────────────────────
     if (mode === "write") {
       const blueprint = buildBlueprint(t, research);
-      await enqueue("writer", { tenantId, topic: t, blueprint, taskLabel: `Writing "${t}"` });
+      await enqueue("writer", { tenantId, topic: t, blueprint, scheduleRunId, autoPublish, taskLabel: `Writing "${t}"` });
       return { ...base, chained: true, blueprint };
     }
 
@@ -160,7 +165,7 @@ export class KeywordAgent extends Agent {
       // fall back to the old behaviour and say why in the result.
       console.error("[keyword] could not open a keyword choice, writing the seed topic instead:", error?.message);
       const blueprint = buildBlueprint(t, research);
-      await enqueue("writer", { tenantId, topic: t, blueprint, taskLabel: `Writing "${t}"` });
+      await enqueue("writer", { tenantId, topic: t, blueprint, scheduleRunId, autoPublish, taskLabel: `Writing "${t}"` });
       return { ...base, chained: true, blueprint, choiceError: error?.message ?? "could not open a choice" };
     }
 
@@ -168,7 +173,7 @@ export class KeywordAgent extends Agent {
     // pg-boss holds it and the writer reads the row when it wakes.
     await enqueue(
       "writer",
-      { tenantId, choiceId: choice.id, taskLabel: `Writing the keyword you pick for "${t}"` },
+      { tenantId, choiceId: choice.id, scheduleRunId, autoPublish, taskLabel: `Writing the keyword you pick for "${t}"` },
       { startAfter: CHOICE_SECONDS }
     );
 

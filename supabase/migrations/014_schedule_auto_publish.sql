@@ -1,0 +1,24 @@
+-- 014_schedule_auto_publish.sql — let a scheduled run publish without a second approval.
+--
+-- Every article this product has ever produced ends in Approvals, and that was right while a
+-- run only happened because someone pressed a button: the button said "write it", the queue
+-- asked "ship it?". A schedule is different. Turning on "har roz 9 baje 2 article" IS the
+-- approval — it was given once, in advance, for every run. Making the customer come back each
+-- morning to press approve on work they already asked for turns automation into a chore, and
+-- an article nobody approves is an article that never ships.
+--
+-- So: opt-in, per schedule, default OFF. Existing rows keep today's behaviour exactly; nobody
+-- wakes up to find their site has been posting on its own. When it is on, the quality gate is
+-- still the last check — a draft that fails the gate is never published, and a publish attempt
+-- that FAILS falls back to Approvals with the error recorded rather than being lost
+-- (agent-server/src/agents/writer.ts).
+--
+-- Note for whoever applies this: lib/chat-context.ts deliberately reads schedules with
+-- select("*") rather than naming columns, so Mr Lxwa keeps answering "kaunsa task schedule pe
+-- hai" on a database where this migration has not been run yet. Naming auto_publish there
+-- would fail the whole query over one missing column and cost him every other schedule fact.
+-- app/api/schedule/route.ts names its columns but retries without this one and reports
+-- autoPublishAvailable:false, which is what makes /app/schedule say "run migration 014"
+-- instead of breaking.
+
+alter table schedules add column if not exists auto_publish boolean not null default false;

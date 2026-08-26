@@ -367,9 +367,17 @@ function describeJob(jobAgent: string, status: string, detail: any): { summary: 
     const gate = detail.qualityGate ?? {};
     const title = detail.title ?? detail.topic ?? "the draft";
     const words = detail.wordCount ?? gate.wordCount;
+    // A scheduled run can be set to publish without a review (schedules.auto_publish,
+    // migration 014). The receipt has to distinguish three endings, because they are three
+    // completely different things to have happened to your website — and a publish that
+    // failed must never read like one that worked.
     const verdict = gate.passed === false
       ? `did NOT pass the quality gate (${(gate.reasons ?? []).join("; ") || "unknown reason"})`
-      : "passed the quality gate and is waiting for your approval";
+      : detail.published === true
+        ? "passed the quality gate and went straight to your site — you had already approved this run, so it did not wait in Approvals"
+        : detail.attempted === true
+          ? `passed the quality gate, but publishing it failed (${detail.error ?? "unknown error"}) — it is waiting in Approvals instead, nothing was lost`
+          : "passed the quality gate and is waiting for your approval";
     // Facts about the draft that actually exists, read off the quality gate that measured it.
     const items: string[] = [];
     if (words) items.push(`${words} words`);
@@ -386,6 +394,9 @@ function describeJob(jobAgent: string, status: string, detail: any): { summary: 
     if (detail.chosenBy) {
       items.unshift(detail.chosenBy === "user" ? `Keyword you picked: ${detail.topic}` : `Keyword auto-picked (recommended): ${detail.topic}`);
     }
+    if (detail.published === true) items.unshift(detail.publishedUrl ? `Published: ${detail.publishedUrl}` : "Published to your connected destination");
+    if (detail.attempted === true && detail.published !== true) items.unshift(`Auto-publish failed, so it is in Approvals: ${detail.error ?? "unknown error"}`);
+    if (detail.blockedByGate === true) items.unshift("Auto-publish was on, but the quality gate stopped it — nothing was sent to your site.");
     return { summary: `Wrote “${title}”${words ? ` — ${words} words` : ""}; it ${verdict}.`, items };
   }
 

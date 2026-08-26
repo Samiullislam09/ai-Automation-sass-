@@ -32,6 +32,12 @@ export class BossAgent extends Agent {
     // research: write immediately (true), research only (false), or put the keywords in front
     // of the human first ("choose"). Defaults to writing, which is what "run the team" means.
     const chain = (job.data as any).chain ?? true;
+    // Set only by the scheduler (scheduler.ts). Both ride the whole chain down to the writer:
+    // `scheduleRunId` so the articles this run produced can be found again by id rather than
+    // by timestamp, `autoPublish` so the writer knows this run was approved in advance.
+    const scheduleRunId = (job.data as any).scheduleRunId as string | undefined;
+    const autoPublish = (job.data as any).autoPublish === true;
+    const source = (job.data as any).source as string | undefined;
 
     // Ask the web app to refresh Search Console / GA4 first, so a scheduled 9am run plans
     // against this week's numbers rather than whatever was last pulled by hand. Best-effort:
@@ -53,6 +59,8 @@ export class BossAgent extends Agent {
     if (!tenant?.niche && !pageTitles.length && !insights.connected) {
       return {
         planned: 0,
+        source,
+        scheduleRunId,
         reason: "No niche set and no crawled pages yet — run the site crawler (or finish onboarding) before planning content.",
       };
     }
@@ -80,7 +88,7 @@ export class BossAgent extends Agent {
       .filter((t) => t.topic.length > 3)
       .slice(0, count);
 
-    if (!topics.length) return { planned: 0, reason: "The planner returned no usable topics." };
+    if (!topics.length) return { planned: 0, source, scheduleRunId, reason: "The planner returned no usable topics." };
 
     // Hand each topic to Mr. Keyword. `chain: true` is what makes him pass it on to Mr.
     // Writer once the keyword data comes back (see keyword.ts) — a keyword job without it
@@ -90,6 +98,8 @@ export class BossAgent extends Agent {
         tenantId,
         topic: t.topic,
         chain,
+        scheduleRunId,
+        autoPublish,
         taskLabel: `Researching "${t.topic}"`,
       });
     }
@@ -98,6 +108,12 @@ export class BossAgent extends Agent {
       planned: topics.length,
       topics,
       chain,
+      // Echoed into jobs_log so /api/schedule/history can tell a scheduled run from a
+      // hand-started one, tie it to the articles it produced, and say whether THAT run was
+      // set to publish on its own — not merely what the toggle happens to say today.
+      source,
+      scheduleRunId,
+      autoPublish,
       // Recorded in jobs_log so the dashboard can say WHY these topics, not just which.
       groundedIn: insights.connected
         ? { source: "google-search-console", period: insights.period, strikingDistance: insights.strikingDistance.length }

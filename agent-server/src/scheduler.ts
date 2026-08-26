@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { supabase } from "./supabase.js";
 import { enqueue } from "./queues.js";
 
@@ -15,6 +16,10 @@ import { enqueue } from "./queues.js";
  *  Missed runs are NOT replayed. If Railway was asleep at 09:00 the run is simply skipped —
  *  waking up at noon and firing yesterday's backlog would spend the customer's model credits
  *  on articles they were no longer expecting.
+ *
+ *  Each firing gets a `scheduleRunId` that is threaded boss -> keyword -> writer and stamped
+ *  on every content_items row it produces, so /app/schedule can say exactly which articles
+ *  came out of the 9am run instead of guessing from timestamps.
  */
 
 const TICK_MS = 60_000;
@@ -39,9 +44,12 @@ export function stopScheduler() {
 }
 
 export async function tick() {
+  // select("*") rather than a column list: auto_publish arrives with migration 014, and
+  // naming it would make every tick fail — for every tenant — on a database that has not run
+  // it yet. A missing column then simply reads as undefined, which falls through to false.
   const { data: rows, error } = await supabase
     .from("schedules")
-    .select("id, tenant_id, kind, frequency, day_of_week, time_of_day, timezone, count, last_run_at")
+    .select("*")
     .eq("enabled", true);
 
   if (error) {
@@ -62,16 +70,27 @@ export async function tick() {
       // quietly start burning jobs either.
       if (row.kind !== "article") continue;
 
+      // The customer approved this run when they saved the schedule; auto_publish says they
+      // also approved what comes out of it. false whenever the column is missing or unset —
+      // publishing on its own is never something this falls back to.
+      const autoPublish = row.auto_publish === true;
+      const scheduleRunId = randomUUID();
+
       const jobId = await enqueue("boss", {
         tenantId: row.tenant_id,
         count: row.count,
         taskLabel: "Scheduled run — planning today's topics",
         source: "schedule",
+        scheduleRunId,
+        autoPublish,
       } as any);
 
       // Written before anything else can tick again, so a slow enqueue can't double-fire.
       await supabase.from("schedules").update({ last_run_at: now.toISOString() }).eq("id", row.id);
-      console.log(`[scheduler] tenant ${row.tenant_id}: enqueued boss job ${jobId} (${row.count} topics)`);
+      console.log(
+        `[scheduler] tenant ${row.tenant_id}: enqueued boss job ${jobId} (${row.count} topics,` +
+          ` run ${scheduleRunId}, ${autoPublish ? "auto-publish" : "approvals"})`
+      );
     } catch (e: any) {
       console.error(`[scheduler] tenant ${row.tenant_id} failed:`, e?.message);
     }
