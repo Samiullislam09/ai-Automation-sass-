@@ -509,6 +509,12 @@ export async function POST(req: NextRequest) {
   const intent = fast ?? (mightBeAnOrder(q) ? await classifyIntent(q, clientHistory) : null);
   lap("intent");
 
+  // Put the team to work NOW, alongside opening the conversation rather than after it. The
+  // enqueue is a network hop to the agent server and the conversation row is a Supabase
+  // round trip; neither needs the other's answer, and running them nose-to-tail put ~800ms of
+  // "does this thread exist" in front of the thing the user actually asked for.
+  const orderP = intent && tenantId ? startWork(intent, tenantId) : null;
+
   const convId = await convP;
   lap("conversation");
 
@@ -529,8 +535,8 @@ export async function POST(req: NextRequest) {
   };
 
   // ---- ORDERS BEFORE CONVERSATION ----
-  if (intent && tenantId) {
-    const order = await startWork(intent, tenantId);
+  if (orderP) {
+    const order = await orderP;
     lap("order");
     console.log(`[chat] timing ${JSON.stringify(mark)} order=${intent.kind}`);
     return reply(order.text, order);

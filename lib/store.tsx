@@ -64,7 +64,11 @@ type State = {
    *  this the office sat completely still for several seconds after "write me an article",
    *  which reads as nothing having happened. It is cleared the moment a real row for that
    *  agent arrives, so it can never survive as a claim that outlives the evidence. */
-  run: { jobId: string | null; agentId: string; label: string; at: number } | null;
+  run: {
+    jobId: string | null; agentId: string; label: string; at: number;
+    /** The id of the newest row this agent already had when the order was placed. */
+    after: string | null;
+  } | null;
   /** "this agent just finished/failed X" — the office shows it over that room for a moment. */
   flash: { id: string; text: string; tone?: "done" | "error" } | null;
   /** The full-screen "it's done" takeover (components/Celebration.tsx). Holds the real
@@ -214,7 +218,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    *  the same agent arrives (components/LiveAgents.tsx). If the worker never picks the job up,
    *  it expires by itself rather than sitting there claiming work forever. */
   const startRun = (agentId: string, label: string, jobId: string | null = null) =>
-    patch({ run: { jobId, agentId, label, at: Date.now() }, focusAgent: agentId });
+    patch((prev) => ({
+      run: {
+        jobId, agentId, label, at: Date.now(),
+        // Remember which row this agent ALREADY had, so "has the database caught up yet?" is
+        // answered by a new row appearing rather than by comparing clocks. Comparing clocks
+        // was wrong and it showed: a pg-boss worker can pick the job up and write its
+        // jobs_log row BEFORE the enqueue HTTP call returns, so the real row was older than
+        // the order that caused it and the temporary line sat there for its full ninety
+        // seconds underneath the very row that had replaced it.
+        after: prev.timeline.filter((e) => e.agentId === agentId).slice(-1)[0]?.id ?? null,
+      },
+      focusAgent: agentId,
+    }));
 
   const report = (line: string) => patch(prev => {
     const key = new Date().toDateString();

@@ -142,10 +142,8 @@ export default function LiveAgents() {
       // An accepted order stops being ours to display the moment the database can speak for
       // itself. Anything else would leave two claims about the same work on screen at once.
       const run = api?.s?.run ?? null;
-      const supersededRun =
-        run &&
-        (timeline.some((e) => e.agentId === run.agentId && new Date(e.at).getTime() >= run.at - 5000) ||
-          Date.now() - run.at > RUN_GRACE_MS);
+      const newestForRun = run ? timeline.filter((e) => e.agentId === run.agentId).slice(-1)[0]?.id ?? null : null;
+      const supersededRun = run && (newestForRun !== (run.after ?? null) || Date.now() - run.at > RUN_GRACE_MS);
 
       api?.patch?.({
         stats: data.stats ?? null,
