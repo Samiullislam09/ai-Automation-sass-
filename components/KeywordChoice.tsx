@@ -85,11 +85,13 @@ export default function KeywordChoice() {
   return (
     <div className="kc">
       <div className="kc-head">
-        <div>
+        <div className="kc-title">
           <b>Which keyword should Mr. Writer use?</b>
-          <div className="kc-sub">Researched for “{choice.topic}”</div>
+          <div className="kc-sub brk">Researched for “{choice.topic}”</div>
         </div>
-        <div className={"kc-count" + (secs <= 3 ? " is-low" : "")}>
+        {/* Announced, not just shown. A countdown that decides what gets written is the one
+            thing on this panel a screen reader must not miss. */}
+        <div className={"kc-count" + (secs <= 3 ? " is-low" : "")} role="status" aria-live="polite">
           {secs > 0 ? <>starts in <b>{secs}s</b></> : <>starting…</>}
         </div>
       </div>
@@ -106,13 +108,21 @@ export default function KeywordChoice() {
           </thead>
           <tbody>
             {candidates.map((c) => (
+              // A row here IS a control — it decides what gets written. It was a bare
+              // <tr onClick>: no keyboard, no focus ring, and nothing telling anyone it
+              // could be pressed at all.
               <tr
                 key={c.keyword}
                 className={(active === c.keyword ? "is-on " : "") + (sending === c.keyword ? "is-busy" : "")}
                 onClick={() => pick(c.keyword)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(c.keyword); } }}
+                role="button"
+                tabIndex={0}
+                aria-pressed={active === c.keyword}
+                aria-label={`Use the keyword ${c.keyword}`}
               >
                 <td>
-                  <span className="kc-kw">{c.keyword}</span>
+                  <span className="kc-kw brk">{c.keyword}</span>
                   {c.recommended && <span className="kc-badge" title={c.why ?? undefined}>Recommended</span>}
                   {active === c.keyword && <span className="kc-tick">✓</span>}
                 </td>
@@ -154,6 +164,9 @@ export default function KeywordChoice() {
 
         .kc-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px;
                    flex-wrap: wrap; }
+        /* The title needs a floor before it is allowed to wrap. Without one the countdown chip
+           squeezed it to two words a line on a phone and then dropped below it anyway. */
+        .kc-title { flex: 1 1 220px; min-width: 0; }
         .kc-head b { font-size: clamp(15px, 2.2vw, 19px); color: var(--ink); }
         .kc-sub { font-size: 11.5px; color: var(--mut2); margin-top: 3px; }
         .kc-count { margin-left: auto; flex: none; font-size: 12px; color: var(--mut);
@@ -174,6 +187,7 @@ export default function KeywordChoice() {
                        white-space: nowrap; }
         .kc-table tbody tr { cursor: pointer; transition: background .15s; }
         .kc-table tbody tr:hover td { background: var(--panel2); }
+        .kc-table tbody tr:focus-visible { outline: 2px solid var(--ac); outline-offset: -2px; }
         .kc-table tr.is-on td { background: color-mix(in srgb, var(--ac) 12%, transparent); color: var(--ink); }
         .kc-table tr.is-busy { opacity: .5; }
         .kc-kw { color: var(--ink); font-weight: 600; white-space: normal; }
@@ -185,8 +199,17 @@ export default function KeywordChoice() {
         .kc-err { font-size: 12px; color: #ff6b6b; margin: 9px 0 0; }
         .kc-foot { font-size: 11.5px; color: var(--mut); margin: 9px 0 0; }
 
-        /* Short viewports: the countdown and the table matter, the prose doesn't. */
-        @media (max-height: 480px) { .kc-why, .kc-foot { display: none; } }
+        /* These two lines used to be DELETED below 480px tall. One of them is the evidence for
+           the recommendation, the other is the only place it says that doing nothing still
+           picks one — so on a landscape phone you got a table of keywords and no explanation
+           of what was about to happen to your site. The panel already scrolls; it can carry
+           them. Tighten the spacing instead. */
+        @media (max-height: 480px) {
+          .kc { padding-top: 12px; padding-bottom: 12px; }
+          .kc-head { margin-bottom: 10px; }
+          .kc-table th { padding: 8px 10px 6px; }
+          .kc-table td { padding: 9px 10px; }
+        }
       `}</style>
     </div>
   );

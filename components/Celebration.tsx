@@ -50,41 +50,51 @@ export default function Celebration() {
 
   return (
     <div className={"celeb" + (leaving ? " is-leaving" : "") + (failed ? " is-fail" : "")}>
-      <button className="celeb-x" onClick={() => store?.patch?.({ celebration: null })} aria-label="Close">✕</button>
+      <button className="iconbtn celeb-x" onClick={() => store?.patch?.({ celebration: null })} aria-label="Close">✕</button>
 
-      <div className="celeb-mark">{failed ? "!" : "✓"}</div>
-      <div className="celeb-who">{who}</div>
-      <h2 className="celeb-head">{head}</h2>
+      {/* One scrolling column. It used to be a centred stack with no scroll and a media query
+          that DELETED the items list below 520px tall — which is a landscape phone, and the
+          items are the only place the word count, the sections and the gate's reasons appear.
+          Losing real results to make a card fit is not a layout fix. */}
+      <div className="celeb-body">
+        <div className="celeb-mark">{failed ? "!" : "✓"}</div>
+        <div className="celeb-who">{who}</div>
+        <h2 className="celeb-head">{head}</h2>
 
-      {/* The one-line result, straight from the job's own return value. */}
-      <p className="celeb-sum">{c.summary}</p>
+        {/* The one-line result, straight from the job's own return value. */}
+        <p className="celeb-sum brk">{c.summary}</p>
 
-      {c.items?.length > 0 && (
-        <ul className="celeb-items">
-          {c.items.slice(0, 8).map((it: string, i: number) => <li key={i}>{it}</li>)}
-        </ul>
-      )}
+        {c.items?.length > 0 && (
+          <ul className="celeb-items">
+            {c.items.slice(0, 8).map((it: string, i: number) => <li key={i} className="brk">{it}</li>)}
+          </ul>
+        )}
 
-      <div className="celeb-actions">
-        {c.agentId === "writer" && !failed && <Link href="/app/approvals" className="celeb-go">Review it →</Link>}
-        {failed && <Link href="/app" className="celeb-go" onClick={() => store?.patch?.({ celebration: null })}>Back to the office</Link>}
-        <button className="celeb-dismiss" onClick={() => store?.patch?.({ celebration: null })}>Dismiss</button>
+        <div className="celeb-actions btnrow">
+          {c.agentId === "writer" && !failed && <Link href="/app/approvals" className="btn btn-p btn-sm">Review it →</Link>}
+          {failed && <Link href="/app" className="btn btn-p btn-sm" onClick={() => store?.patch?.({ celebration: null })}>Back to the office</Link>}
+          <button className="btn btn-g btn-sm" onClick={() => store?.patch?.({ celebration: null })}>Dismiss</button>
+        </div>
       </div>
 
       <style jsx>{`
         .celeb { position: absolute; inset: 0; z-index: 30; display: flex; flex-direction: column;
-                 align-items: center; justify-content: center; text-align: center; gap: 5px;
-                 padding: 26px clamp(18px, 5vw, 54px);
+                 align-items: center; justify-content: center;
                  background: color-mix(in srgb, var(--bg2) 94%, transparent);
                  backdrop-filter: blur(3px);
                  animation: celeb-in .42s cubic-bezier(.2,.8,.3,1); }
+        /* The card scrolls; the backdrop does not. Eight items plus a long article title on a
+           short screen used to be clipped by the office frame with no way to reach it. */
+        .celeb-body { display: flex; flex-direction: column; align-items: center; text-align: center;
+                      gap: 5px; width: 100%; max-height: 100%; overflow-y: auto;
+                      padding: 30px clamp(16px, 5vw, 54px) 26px; }
         .celeb.is-leaving { animation: celeb-out .4s ease forwards; }
         @keyframes celeb-in { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: none; } }
         @keyframes celeb-out { to { opacity: 0; transform: scale(1.02); } }
 
-        .celeb-x { position: absolute; top: 14px; right: 16px; background: none; border: none;
-                   color: var(--mut2); font-size: 15px; cursor: pointer; }
-        .celeb-x:hover { color: var(--ink); }
+        /* Was a bare 15px glyph — a ~15px tap target on the one control that dismisses a
+           full-screen takeover. .iconbtn is the shared 34px one. */
+        .celeb-x { position: absolute; top: 12px; right: 12px; z-index: 1; }
 
         .celeb-mark { width: 62px; height: 62px; border-radius: 50%; display: grid; place-items: center;
                       font-size: 30px; font-weight: 800; color: #fff; margin-bottom: 6px;
@@ -98,6 +108,8 @@ export default function Celebration() {
                      text-transform: uppercase; }
         .celeb-head { font-size: clamp(22px, 4vw, 34px); font-weight: 800; color: var(--ink); margin: 0; }
         .celeb-sum { font-size: 13.5px; color: var(--mut); margin: 6px 0 0; max-width: 620px; line-height: 1.6; }
+        /* Article titles and a failure's "Technical: ..." line are the two longest unbroken
+           strings this card ever shows, and neither could wrap. */
 
         .celeb-items { list-style: none; margin: 14px 0 0; padding: 0; max-width: 620px;
                        display: flex; flex-direction: column; gap: 5px; width: 100%; }
@@ -105,18 +117,15 @@ export default function Celebration() {
                           border: 1px solid var(--line); border-radius: 9px; padding: 7px 11px;
                           text-align: left; }
 
-        .celeb-actions { display: flex; gap: 9px; align-items: center; margin-top: 18px; flex-wrap: wrap;
-                         justify-content: center; }
-        .celeb-go { background: var(--ac); color: #fff; font-size: 12px; font-weight: 700;
-                    padding: 9px 16px; border-radius: 9px; }
-        .celeb-dismiss { background: none; border: 1px solid var(--line2); color: var(--mut);
-                         font-size: 12px; font-weight: 600; padding: 8px 15px; border-radius: 9px;
-                         cursor: pointer; }
-        .celeb-dismiss:hover { color: var(--ink); border-color: var(--mut2); }
+        /* .btn/.btn-sm now, so these follow the app's 38px floor instead of being 31px and
+           33px tall and a different shape from every other button in the product. */
+        .celeb-actions { margin-top: 18px; justify-content: center; }
 
         @media (max-height: 520px) {
-          .celeb-mark { width: 46px; height: 46px; font-size: 22px; }
-          .celeb-items { display: none; }
+          .celeb-body { padding-top: 22px; gap: 3px; }
+          .celeb-mark { width: 44px; height: 44px; font-size: 21px; margin-bottom: 2px; }
+          .celeb-head { font-size: 20px; }
+          .celeb-items { margin-top: 10px; }
         }
       `}</style>
     </div>
