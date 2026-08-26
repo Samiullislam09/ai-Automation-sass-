@@ -41,6 +41,92 @@ function lastSentenceEnd(s: string): number {
   return end;
 }
 
+/* ─────────────── rendering a message ───────────────
+ * The transcript used to be one dangerouslySetInnerHTML per bubble: bold, newline, done. That
+ * was fine until Mr. Keyword started reporting its options, which are a table — keyword,
+ * monthly searches, competition, what your own site already gets — and a table written out as
+ * "solar panel cost · 12,000/mo · low competition", one line per row, is unreadable at chat
+ * width. It is sent as a markdown table now (components/LiveAgents.tsx) and drawn as a real
+ * one, which also means the stored transcript keeps a table rather than a paragraph.
+ *
+ * Going through React nodes instead of innerHTML escapes everything on the way as a
+ * side-effect. The old path handed raw job text — including article titles the model wrote —
+ * to the browser as markup.
+ */
+const CELL = /^\s*\|(.+)\|\s*$/;
+const RULE = /^\s*\|[\s:|-]+\|\s*$/;
+
+function cells(line: string): string[] {
+  return (CELL.exec(line)?.[1] ?? "").split("|").map((c) => c.trim());
+}
+
+/** **bold** becomes <b>; everything else is text. */
+function inline(text: string, key: string): React.ReactNode[] {
+  const out: React.ReactNode[] = [];
+  const re = /\*\*(.+?)\*\*/g;
+  let i = 0, n = 0, m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    if (m.index > i) out.push(text.slice(i, m.index));
+    out.push(<b key={`${key}-b${n++}`}>{m[1]}</b>);
+    i = m.index + m[0].length;
+  }
+  if (i < text.length) out.push(text.slice(i));
+  return out;
+}
+
+function renderMessage(txt: string): React.ReactNode {
+  const lines = txt.split("\n");
+  const out: React.ReactNode[] = [];
+  let para: string[] = [];
+
+  const flush = () => {
+    if (!para.length) return;
+    const block = para;
+    const at = out.length;
+    para = [];
+    out.push(
+      <span key={`p${at}`}>
+        {block.map((l, i) => (
+          <React.Fragment key={i}>
+            {i > 0 && <br />}
+            {inline(l, `p${at}-${i}`)}
+          </React.Fragment>
+        ))}
+      </span>
+    );
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    // A table is a header row, a separator row, then its body. Anything short of that is
+    // ordinary text that happens to contain a pipe.
+    if (CELL.test(lines[i]) && i + 1 < lines.length && RULE.test(lines[i + 1])) {
+      flush();
+      const head = cells(lines[i]);
+      const body: string[][] = [];
+      let j = i + 2;
+      while (j < lines.length && CELL.test(lines[j]) && !RULE.test(lines[j])) body.push(cells(lines[j++]));
+      i = j - 1;
+      out.push(
+        <div className="cmtable-wrap" key={`t${out.length}`}>
+          <table className="cmtable">
+            <thead><tr>{head.map((h, k) => <th key={k}>{h}</th>)}</tr></thead>
+            <tbody>
+              {body.map((row, r) => (
+                <tr key={r}>{row.map((c, k) => <td key={k}>{inline(c, `t${r}-${k}`)}</td>)}</tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      continue;
+    }
+    if (!lines[i].trim() && !para.length) continue;
+    para.push(lines[i]);
+  }
+  flush();
+  return out;
+}
+
 export function BossChat() {
   const store = useStore();
   const [open, setOpen] = useState(false);
@@ -246,6 +332,17 @@ export function BossChat() {
     // session keeps writing into the same one without waiting for the stream to finish.
     const returned = res.headers.get("X-Conversation-Id");
     if (returned && returned !== convId) setConvId(returned);
+
+    // An order that was actually accepted (the enqueue returned a job id) — see the
+    // OrderResult type in app/api/chat/route.ts. Handing it to the store here is what closes
+    // the gap the whole complaint was about: it used to take up to four seconds for the
+    // office to react to "write me an article", because nothing moved until the next poll
+    // found a jobs_log row. Now the room lights the moment the reply does.
+    const runAgent = res.headers.get("X-Run-Agent");
+    if (runAgent) {
+      const label = res.headers.get("X-Run-Label");
+      store?.startRun?.(runAgent, label ? decodeURIComponent(label) : "Order accepted", res.headers.get("X-Run-Job"));
+    }
     const reader = res.body!.getReader(); const dec = new TextDecoder();
     // A fresh reply cancels whatever the previous one was still saying; after this the
     // sentences queue behind each other instead of interrupting.
@@ -320,11 +417,9 @@ export function BossChat() {
             {/* Mr Lxwa's "I've put the team on it" replies are numbered, multi-line — without the
                 \n -> <br> the whole pipeline collapsed into one unreadable paragraph. */}
             {msgs.map((m, i) => (
-              <div
-                key={i}
-                className={"cm " + m.who + (m.live ? " cursor" : "") + (m.tone ? " tone-" + m.tone : "")}
-                dangerouslySetInnerHTML={{ __html: m.txt.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br/>") }}
-              />
+              <div key={i} className={"cm " + m.who + (m.live ? " cursor" : "") + (m.tone ? " tone-" + m.tone : "")}>
+                {renderMessage(m.txt)}
+              </div>
             ))}
           </div>
         )}
@@ -346,6 +441,22 @@ export function BossChat() {
       </div>
 
       <style jsx global>{`
+        /* Mr. Keyword's options, at chat width. Four columns will not fit in a 288px dock, so
+           the table scrolls inside its own box rather than widening the panel — the numbers
+           are the point of the table and truncating them would defeat it. */
+        .cmtable-wrap { overflow-x: auto; margin: 7px 0 2px; border: 1px solid var(--line);
+                        border-radius: 9px; background: var(--panel2); }
+        .cmtable { border-collapse: collapse; font-size: 10.5px; width: 100%; min-width: 300px; }
+        .cmtable th { text-align: left; font-size: 8.5px; letter-spacing: .4px; text-transform: uppercase;
+                      color: var(--mut2); font-weight: 800; padding: 7px 8px 5px; white-space: nowrap;
+                      border-bottom: 1px solid var(--line); }
+        .cmtable td { padding: 6px 8px; border-top: 1px solid var(--line); color: var(--mut);
+                      white-space: nowrap; vertical-align: top; }
+        .cmtable td:nth-child(2) { white-space: normal; min-width: 108px; }
+        .cmtable td b { color: var(--ink); }
+        .cmtable tbody tr:first-child td { border-top: none; }
+        .cmtable tbody tr:hover td { background: color-mix(in srgb, var(--ac) 8%, transparent); }
+
         /* mobile / narrow: floating card opened by the bubble */
         .bosschat-panel {
           display: none; position: fixed; bottom: 88px; right: 22px; z-index: 150;

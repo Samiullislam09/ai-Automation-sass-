@@ -47,6 +47,24 @@ type State = {
   // /app shell) so the office, the stat row and the chat all read the same thing.
   stats: Record<string, number> | null;
   recentJobs: { id: string; agentId?: string; task: string; status: string; at: string; summary: string; items: string[] }[];
+  /** The office's running log — one entry per real jobs_log row, oldest first.
+   *  See lib/office-timeline.ts: nothing in here is a timer, everything is a row. */
+  timeline: { id: string; agentId: string; name: string; at: string; status: string; task: string; summary: string; from: string | null }[];
+  /** Which room handed work to which, along the chain agent-server actually runs. */
+  handoffs: { from: string; to: string; at: string }[];
+  /** The automation clock on the office wall — when the team next starts by itself. */
+  nextRun: {
+    kind: string; at: string | null; timezone: string; timeOfDay: string;
+    frequency: string; count: number; enabled: boolean; autoPublish: boolean; lastRunAt: string | null;
+  } | null;
+  /** An order that was accepted a second ago and has not shown up in jobs_log yet.
+   *
+   *  The gap is real: enqueueing returns a job id immediately, but the row only appears once
+   *  a pg-boss worker picks the job up, and the dashboard then has to poll for it. Without
+   *  this the office sat completely still for several seconds after "write me an article",
+   *  which reads as nothing having happened. It is cleared the moment a real row for that
+   *  agent arrives, so it can never survive as a claim that outlives the evidence. */
+  run: { jobId: string | null; agentId: string; label: string; at: number } | null;
   /** "this agent just finished/failed X" — the office shows it over that room for a moment. */
   flash: { id: string; text: string; tone?: "done" | "error" } | null;
   /** The full-screen "it's done" takeover (components/Celebration.tsx). Holds the real
@@ -72,7 +90,8 @@ const initial: State = {
   memory: [], content: [], reports: [], activity: [],
   agents: Object.fromEntries(AGENTS.map(a => [a.id, a.live ? { st: "i", task: "Idle" } : { st: "o", task: "Coming soon" }])) as any,
   busy: false, focusAgent: null, onboardedChecked: false,
-  stats: null, recentJobs: [], flash: null, celebration: null, crawl: null, chatNotices: [], keywordChoice: null, liveError: null,
+  stats: null, recentJobs: [], timeline: [], handoffs: [], nextRun: null, run: null,
+  flash: null, celebration: null, crawl: null, chatNotices: [], keywordChoice: null, liveError: null,
 };
 
 const Ctx = createContext<any>(null);
@@ -90,7 +109,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const raw = localStorage.getItem("gt-state");
       // Live fields are server truth — never restore yesterday's copy of them from localStorage,
       // or the office shows an agent "working" on a job that finished hours ago.
-      if (raw) setS({ ...initial, ...JSON.parse(raw), stats: null, recentJobs: [], flash: null, celebration: null, crawl: null, chatNotices: [], keywordChoice: null, liveError: null });
+      if (raw) setS({
+        ...initial, ...JSON.parse(raw),
+        stats: null, recentJobs: [], timeline: [], handoffs: [], nextRun: null, run: null,
+        flash: null, celebration: null, crawl: null, chatNotices: [], keywordChoice: null, liveError: null,
+      });
     } catch {}
     loaded.current = true;
   }, []);
@@ -182,6 +205,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setTimeout(() => { if (focusTokenRef.current === myToken) patch({ focusAgent: null }); }, holdMs);
     }
   };
+
+  /** "The order was accepted, this second."
+   *
+   *  Called only after the enqueue has actually returned a job id — so this is a fact, not
+   *  optimism, and a refused order never reaches it. The office shows it as the first line of
+   *  the run log and lights that room, and drops it again as soon as a real jobs_log row for
+   *  the same agent arrives (components/LiveAgents.tsx). If the worker never picks the job up,
+   *  it expires by itself rather than sitting there claiming work forever. */
+  const startRun = (agentId: string, label: string, jobId: string | null = null) =>
+    patch({ run: { jobId, agentId, label, at: Date.now() }, focusAgent: agentId });
 
   const report = (line: string) => patch(prev => {
     const key = new Date().toDateString();
@@ -284,7 +317,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     location.href = "/login";
   };
 
-  const api = { s, patch, toast, act, setAgent, focusOn, report, generate, approve, reject, applyPlan, saveMemory, pushChatNotice, signOut };
+  const api = { s, patch, toast, act, setAgent, focusOn, startRun, report, generate, approve, reject, applyPlan, saveMemory, pushChatNotice, signOut };
   return (
     <Ctx.Provider value={api}>
       {children}

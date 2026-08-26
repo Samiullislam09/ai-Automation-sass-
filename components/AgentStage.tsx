@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PIPELINE, WRITING_RULES, QUALITY_GATE } from "@/lib/pipeline";
+import { AGENT_PROFILES } from "@/lib/agents-data";
 
 /** The "TV": click a room in the office and the whole scene hands over to one agent.
  *
@@ -62,6 +63,7 @@ export default function AgentStage({ id, onClose }: { id: string; onClose: () =>
   }, [onClose]);
 
   const stage = PIPELINE.find((p) => p.id === id);
+  const profile = AGENT_PROFILES[id];
   const state = d?.state?.state ?? "off";
   const working = state === "working";
   const latest = d?.jobs?.[0] ?? null;
@@ -74,7 +76,9 @@ export default function AgentStage({ id, onClose }: { id: string; onClose: () =>
         </span>
         <div style={{ minWidth: 0 }}>
           <div className="st-name">{d?.agent.name ?? "…"}</div>
-          <div className="st-role">{d?.agent.role ?? ""}</div>
+          {/* The job title, not the queue name. "Keyword Research" describes a queue; "Search
+              Analyst" describes who is answerable for it, which is what a team roster is for. */}
+          <div className="st-role">{profile?.title ?? d?.agent.role ?? ""}</div>
         </div>
         <span className="st-chip" style={{ color: STATE_COLOR[state], borderColor: STATE_COLOR[state] }}>
           <i style={{ background: STATE_COLOR[state] }} className={working ? "beat" : ""} />
@@ -96,10 +100,10 @@ export default function AgentStage({ id, onClose }: { id: string; onClose: () =>
             </div>
           </div>
 
-          {stage && (
+          {(profile || stage) && (
             <div className="st-note">
-              <b>{stage.name}.</b> {stage.what}
-              <div className="st-from">Works from: {stage.from}</div>
+              {profile && <><b>{profile.title}.</b> {profile.brief}<br /></>}
+              {stage && <>{stage.what}<div className="st-from">Works from: {stage.from}</div></>}
             </div>
           )}
         </section>

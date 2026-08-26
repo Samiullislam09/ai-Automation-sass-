@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AGENTS, useStore, type AgentState } from "@/lib/store";
 import { playError, playSuccess } from "@/lib/chime";
 
@@ -31,7 +31,63 @@ function toAgentState(agentId: string, r: RoomState): AgentState {
   return LIVE.has(agentId) ? { st: "i", task: "Idle" } : { st: "o", task: "Coming soon" };
 }
 
+/** The resting cadence. */
 export const POLL_MS = 4000;
+/** While a run is in flight.
+ *
+ *  Four seconds is fine for an idle office and far too slow for one that was just given an
+ *  order: the whole complaint was that nothing appeared to happen for several seconds after
+ *  asking for an article. A run is minutes of real work, so a second-by-second poll for its
+ *  duration is a handful of extra requests, not a load problem — and it is what makes the
+ *  handoff from one room to the next land while you are still looking at it. */
+const BUSY_POLL_MS = 1200;
+/** How long an accepted-but-not-yet-visible order is allowed to stand on its own.
+ *
+ *  pg-boss normally picks a job up in well under a second. If ninety seconds pass with no
+ *  jobs_log row at all, the worker is not running — and the office must stop saying the team
+ *  is on it, because at that point nobody is. */
+const RUN_GRACE_MS = 90_000;
+
+/** Rows sorted the way the question is asked: the biggest real audience first.
+ *
+ *  "Ranking" here means measured demand, and the sources do not measure the same thing —
+ *  DataForSEO gives monthly search volume for the market, Search Console gives impressions
+ *  for THIS site, and the AI fallback gives neither. So they sort in that order of evidence
+ *  and a row with no number sinks to the bottom rather than being given an invented one. */
+function byRanking(a: any, b: any) {
+  const rank = (c: any) => (c.searchVolume != null ? 2 : c.impressions != null ? 1 : 0);
+  if (rank(a) !== rank(b)) return rank(b) - rank(a);
+  if (a.searchVolume != null && b.searchVolume != null) return b.searchVolume - a.searchVolume;
+  if (a.impressions != null && b.impressions != null) return b.impressions - a.impressions;
+  return String(a.keyword).localeCompare(String(b.keyword));
+}
+
+/** The keyword options as a table the chat can actually render.
+ *
+ *  This used to be one green paragraph of "keyword · 12000/mo · low competition · ←
+ *  recommended" per line, which is a table written out longhand and unreadable at chat width.
+ *  A markdown table is stored as-is in the transcript (migration 013 keeps the text), stays
+ *  legible if anything ever shows it raw, and components/kit.tsx turns it into a real one.
+ *
+ *  A dash is the honest cell for a source that does not measure that column. */
+function keywordTable(topic: string, candidates: any[]): string {
+  const rows = candidates.slice().sort(byRanking).slice(0, 8);
+  const cell = (c: any) => [
+    c.recommended ? `**${c.keyword}**` : c.keyword,
+    c.searchVolume != null ? Number(c.searchVolume).toLocaleString() : "—",
+    c.competitionLevel ? String(c.competitionLevel).toLowerCase() : "—",
+    c.impressions != null ? `${c.impressions}${c.position != null ? ` · pos ${Number(c.position).toFixed(1)}` : ""}` : "—",
+  ];
+  return [
+    `Mr. Keyword's options for “${topic}” — best first:`,
+    "",
+    "| # | Keyword | Searches/mo | Competition | On your site |",
+    "|---|---|---|---|---|",
+    ...rows.map((c, i) => `| ${i + 1} | ${cell(c).join(" | ")} |`),
+    "",
+    "Pick one on the dashboard, or the recommended one (bold) starts automatically.",
+  ].join("\n");
+}
 
 export default function LiveAgents() {
   const store = useStore();
@@ -44,6 +100,8 @@ export default function LiveAgents() {
   const primed = useRef(false); // first poll only records history, it never announces it
   const flashTimer = useRef<any>(null);
   const announcedChoice = useRef<string | null>(null);
+  // Drives the interval below. Not a ref: changing the cadence has to re-run the effect.
+  const [busy, setBusy] = useState(false);
 
   const poll = useCallback(async () => {
     if (stopped.current || inFlight.current) return;
@@ -70,28 +128,45 @@ export default function LiveAgents() {
       const choice = data.keywordChoice;
       if (choice?.id && announcedChoice.current !== choice.id) {
         announcedChoice.current = choice.id;
-        const rows = (choice.candidates ?? []).slice(0, 5).map((c: any, i: number) => {
-          const bits = [`${i + 1}. ${c.keyword}`];
-          if (c.searchVolume != null) bits.push(`${c.searchVolume}/mo`);
-          if (c.competitionLevel) bits.push(`${String(c.competitionLevel).toLowerCase()} competition`);
-          if (c.impressions != null) bits.push(`${c.impressions} impressions on your site`);
-          if (c.recommended) bits.push("← recommended");
-          return bits.join(" · ");
-        });
         api?.patch?.((prev: any) => ({
           chatNotices: [
             ...(prev.chatNotices ?? []),
-            {
-              id: `choice-${choice.id}`,
-              tone: "done" as const,
-              text: [`Mr. Keyword's options for "${choice.topic}":`, ...rows, "", "Pick one on the dashboard, or the recommended one starts automatically."].join("\n"),
-            },
+            { id: `choice-${choice.id}`, tone: "done" as const, text: keywordTable(choice.topic, choice.candidates ?? []) },
           ].slice(-20),
         }));
       }
 
       const jobs: Job[] = data.recentJobs ?? [];
-      api?.patch?.({ stats: data.stats ?? null, recentJobs: jobs, crawl: data.crawl ?? null, keywordChoice: data.keywordChoice ?? null, liveError: null });
+      const timeline: any[] = data.timeline ?? [];
+
+      // An accepted order stops being ours to display the moment the database can speak for
+      // itself. Anything else would leave two claims about the same work on screen at once.
+      const run = api?.s?.run ?? null;
+      const supersededRun =
+        run &&
+        (timeline.some((e) => e.agentId === run.agentId && new Date(e.at).getTime() >= run.at - 5000) ||
+          Date.now() - run.at > RUN_GRACE_MS);
+
+      api?.patch?.({
+        stats: data.stats ?? null,
+        recentJobs: jobs,
+        timeline,
+        handoffs: data.handoffs ?? [],
+        nextRun: data.nextRun ?? null,
+        crawl: data.crawl ?? null,
+        keywordChoice: data.keywordChoice ?? null,
+        liveError: null,
+        ...(supersededRun ? { run: null } : {}),
+      });
+
+      // Poll hard while there is something to watch: a job running, a keyword countdown, a
+      // crawl in progress, or an order we have just accepted.
+      const anythingLive =
+        timeline.some((e) => e.status === "running" || e.status === "queued") ||
+        !!data.keywordChoice ||
+        !!data.crawl ||
+        (!!run && !supersededRun);
+      setBusy(anythingLive);
 
       const finished = jobs.filter((j) => j.status === "success" || j.status === "error");
       if (!primed.current) {
@@ -136,9 +211,9 @@ export default function LiveAgents() {
   useEffect(() => {
     stopped.current = false;
     poll();
-    const t = setInterval(poll, POLL_MS);
+    const t = setInterval(poll, busy ? BUSY_POLL_MS : POLL_MS);
     return () => { stopped.current = true; clearInterval(t); clearTimeout(flashTimer.current); };
-  }, [poll]);
+  }, [poll, busy]);
 
   return null;
 }

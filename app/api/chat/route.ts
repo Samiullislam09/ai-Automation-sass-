@@ -371,7 +371,15 @@ function fallback(q: string, ctx: any): string {
 
 /* ── Orders ──────────────────────────────────────────────────────────────────────────── */
 
-async function startWork(intent: NonNullable<ReturnType<typeof detectChatIntent>>, tenantId: string): Promise<string> {
+/** What the chat tells the browser after accepting an order.
+ *
+ *  `agentId` and `jobId` exist so the office can light the right room the moment the reply
+ *  lands, instead of standing still until the next poll finds a jobs_log row. It is only ever
+ *  set when the enqueue really returned — a refused order carries neither, and the office is
+ *  therefore never able to animate work that was not started. */
+type OrderResult = { text: string; agentId: string | null; jobId: string | null; label: string | null };
+
+async function startWork(intent: NonNullable<ReturnType<typeof detectChatIntent>>, tenantId: string): Promise<OrderResult> {
   const topic = intent.kind === "write" || intent.kind === "research" ? intent.topic : null;
 
   //   "research"  -> false    nothing gets written. This is the whole point of the mode.
@@ -392,20 +400,28 @@ async function startWork(intent: NonNullable<ReturnType<typeof detectChatIntent>
       res.status === 429
         ? `That's the daily budget guard, not a fault — the agent server is fine. Raise the cap on agent-server (DAILY_CAP_*) or try again tomorrow.`
         : `Try again once the agent server is reachable.`;
-    return `I couldn't put the team to work: **${res.error}** — so I'm not going to pretend it's running. Nothing was started, and no credits were used. ${next}`;
+    return {
+      text: `I couldn't put the team to work: **${res.error}** — so I'm not going to pretend it's running. Nothing was started, and no credits were used. ${next}`,
+      agentId: null, jobId: null, label: null,
+    };
   }
+
+  // The room that has the work right now: a topic goes straight to Mr. Keyword, everything
+  // else starts with Mr Lxwa choosing what to work on.
+  const agentId = topic ? "kw" : "boss";
+  const accepted = (text: string, label: string): OrderResult => ({ text, agentId, jobId: res.jobId ?? null, label });
 
   if (intent.kind === "research") {
     return topic
-      ? `On it — **Mr. Keyword** is researching **"${topic}"**. No article will be written; I'll post the keywords here when they land.`
-      : `On it — **Mr. Keyword** is finding your best keywords. No article will be written; I'll post them here when they land.`;
+      ? accepted(`On it — **Mr. Keyword** is researching **"${topic}"**. No article will be written; I'll post the keywords here when they land.`, `Researching "${topic}" — no article`)
+      : accepted(`On it — **Mr. Keyword** is finding your best keywords. No article will be written; I'll post them here when they land.`, "Finding your best keywords");
   }
   if (intent.kind === "plan") {
-    return `Starting the team — picking this week's topics from your niche and the pages we crawled. Drafts land in **Approvals**.`;
+    return accepted(`Starting the team — picking this week's topics from your niche and the pages we crawled. Drafts land in **Approvals**.`, "Planning this week's topics");
   }
   return topic
-    ? `On it — researching **"${topic}"**. You'll get the keyword options in a moment: pick one, or the recommended one starts by itself.`
-    : `On it — I'll pick a topic from your niche, then show you the keyword options before anything gets written.`;
+    ? accepted(`On it — researching **"${topic}"**. You'll get the keyword options in a moment: pick one, or the recommended one starts by itself.`, `Researching "${topic}"`)
+    : accepted(`On it — I'll pick a topic from your niche, then show you the keyword options before anything gets written.`, "Choosing a topic from your niche");
 }
 
 /* ── The request ─────────────────────────────────────────────────────────────────────── */
@@ -496,19 +512,29 @@ export async function POST(req: NextRequest) {
   const convId = await convP;
   lap("conversation");
 
-  const reply = (text: string) => {
+  const reply = (text: string, order?: OrderResult) => {
     if (tenantId && convId) void saveTurn(tenantId, convId, q, text);
     return new Response(once(text), {
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
         "X-Chat-Ms": String(Date.now() - t0),
         ...(convId ? { "X-Conversation-Id": convId } : {}),
+        // Only present when a job was genuinely accepted. The office reads these to start
+        // animating the right room now rather than on the next four-second poll.
+        ...(order?.agentId ? { "X-Run-Agent": order.agentId } : {}),
+        ...(order?.jobId ? { "X-Run-Job": order.jobId } : {}),
+        ...(order?.label ? { "X-Run-Label": encodeURIComponent(order.label) } : {}),
       },
     });
   };
 
   // ---- ORDERS BEFORE CONVERSATION ----
-  if (intent && tenantId) return reply(await startWork(intent, tenantId));
+  if (intent && tenantId) {
+    const order = await startWork(intent, tenantId);
+    lap("order");
+    console.log(`[chat] timing ${JSON.stringify(mark)} order=${intent.kind}`);
+    return reply(order.text, order);
+  }
 
   const [business, recentWork, schedule, counts, storedHistory] = await Promise.all([businessP, workP, scheduleP, countsP, historyP]);
   lap("context");

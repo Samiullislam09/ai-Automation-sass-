@@ -83,6 +83,11 @@ export default function Dashboard() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.ok) throw new Error(data?.error ?? `Trigger failed (status ${res.status})`);
+      // The job really was accepted — it came back with an id. Telling the store now is what
+      // lights Mr Lxwa's room and writes the first line of the run log immediately, instead
+      // of the office standing still until the next poll finds a jobs_log row. It is dropped
+      // again the moment that row arrives (components/LiveAgents.tsx).
+      store?.startRun?.("boss", "Planning this week's topics", data.jobId ?? null);
       setRunMsg("Mr Lxwa is planning topics — watch the office.");
       store?.toast?.("Team started — Mr Lxwa is planning topics.");
     } catch (e: any) {
@@ -150,12 +155,18 @@ export default function Dashboard() {
                        border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
                        background: var(--bg2); }
 
-        .dash-stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px;
-                      padding: 14px clamp(12px, 2.2vw, 24px) 0; flex: none; }
+        /* Seven cards in a five-column grid left two of them stretched across a second row at
+           double width — the "random, misaligned" thing you could not stop looking at. auto-fill
+           keeps every card on the same track width at every viewport, so a partial last row
+           still lines up with the one above it. */
+        .dash-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+                      gap: 10px; padding: 14px clamp(12px, 2.2vw, 24px) 0; flex: none;
+                      align-items: stretch; }
         .dstat { background: var(--panel); border: 1px solid var(--line); border-radius: 11px;
                  padding: 11px 12px; display: flex; align-items: center; gap: 10px; min-width: 0;
                  transition: transform .2s, border-color .2s;
                  opacity: 0; animation: dstat-rise .55s cubic-bezier(.2,.7,.3,1) forwards; }
+        @media (prefers-reduced-motion: reduce) { .dstat { opacity: 1; animation: none; } }
         .dstat:hover { transform: translateY(-3px); border-color: var(--line2); }
         .dstat-ic { width: 33px; height: 33px; border-radius: 9px; flex: none;
                     display: grid; place-items: center; font-size: 15px; }
@@ -184,9 +195,11 @@ export default function Dashboard() {
                    overflow: hidden; text-overflow: ellipsis; }
         .err { color: var(--amb); }
 
-        @media (max-width: 1100px) { .dash-stats { grid-template-columns: repeat(3, 1fr); } }
         @media (max-width: 720px) {
-          .dash-stats { grid-template-columns: repeat(2, 1fr); padding: 12px 12px 0; }
+          .dash-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px 12px 0; gap: 8px; }
+          .dstat { padding: 10px; gap: 8px; }
+          .dstat-ic { width: 29px; height: 29px; font-size: 13px; }
+          .v { font-size: 16px; }
           .dash-office { height: calc(100dvh - var(--topbar, 56px) - 24px); min-height: 320px;
                          margin: 12px 12px 0; }
           .dash-bar { padding: 12px; }

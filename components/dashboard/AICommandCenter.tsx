@@ -1255,7 +1255,10 @@ export default function AICommandCenter(): JSX.Element {
     const itemSeen = new Map<string, string>();    // content_items id -> last status this tab has shown
 
     async function fetchLive() {
-      const res = await fetch(`/api/dashboard/live?since=${encodeURIComponent(cursor)}`);
+      // full=1: this screen is the only consumer of the jobs/contentEvents cursors, the
+      // pending list, the donut and the feed, so the route stopped serving them by default —
+      // see the comment at the top of app/api/dashboard/live/route.ts.
+      const res = await fetch(`/api/dashboard/live?full=1&since=${encodeURIComponent(cursor)}`);
       // A dev-mode hot-recompile (or any non-JSON error page) can return an empty/HTML body —
       // read as text first so a bad response logs something readable instead of a bare
       // "Unexpected end of JSON input" that gives no clue what actually happened.

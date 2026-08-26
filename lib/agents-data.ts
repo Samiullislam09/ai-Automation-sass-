@@ -33,3 +33,73 @@ export const ROADMAP = [
   { id: "story",     name: "Mr. Story",      role: "Web Stories" },
   { id: "backup",    name: "Mr. Backup",     role: "Backups" },
 ];
+
+/* ============================= WHO EACH ONE IS =============================
+ * Five identical stick figures in five different shirt colours is not a team — you cannot
+ * tell at a glance which room you are looking at, and a zoomed-in desk looked exactly like
+ * every other zoomed-in desk. Each agent now has a face you can recognise and a job title
+ * that says what it is actually responsible for.
+ *
+ * `job` is the jobs_log.agent value this character's work is read from, so nothing here is
+ * decoration hanging off nothing: an agent with no `job` (Mr. QA, Mr. Publish) is a stage
+ * inside the writer job and its screen reads content_items instead. See lib/dashboard-data.ts.
+ */
+export type AgentLook = {
+  /** Face + hair, so the five are distinguishable at a glance and at any zoom. */
+  skin: string;
+  hair: string;
+  hairStyle: "short" | "quiff" | "bun" | "cap" | "buzz";
+  shirt: string;
+  /** One accessory each — the fastest way to tell two characters apart in silhouette. */
+  wears: "glasses" | "headset" | "tie" | "visor" | "none";
+  /** What sits on the desk next to the monitor. */
+  prop: "magnifier" | "notebook" | "clipboard" | "outbox" | "none";
+};
+
+export type AgentProfile = {
+  /** The job title on the door — what this agent is answerable for. */
+  title: string;
+  /** One sentence, present tense, describing the work it really does. No marketing. */
+  brief: string;
+  /** jobs_log.agent, or null when this agent is a stage inside another agent's job. */
+  job: string | null;
+  look: AgentLook;
+};
+
+export const AGENT_PROFILES: Record<string, AgentProfile> = {
+  boss: {
+    title: "Chief of Staff",
+    brief: "Picks what the team works on, from your niche and the pages we crawled, and hands each topic to the right specialist.",
+    job: "boss",
+    look: { skin: "#f0c8a0", hair: "#2b2320", hairStyle: "quiff", shirt: "#7c5cff", wears: "headset", prop: "clipboard" },
+  },
+  kw: {
+    title: "Search Analyst",
+    brief: "Measures what people actually search for — real monthly volume, competition, and what your own site already ranks for.",
+    job: "keyword",
+    look: { skin: "#8d5a3b", hair: "#171310", hairStyle: "buzz", shirt: "#6ea8ff", wears: "glasses", prop: "magnifier" },
+  },
+  writer: {
+    title: "Staff Writer",
+    brief: "Writes the draft against the blueprint, in your tone, with real internal links to your own pages.",
+    job: "writer",
+    look: { skin: "#f5cba0", hair: "#5a3a22", hairStyle: "bun", shirt: "#b48bff", wears: "none", prop: "notebook" },
+  },
+  qa: {
+    title: "Quality Editor",
+    brief: "Runs the quality gate on every draft — length, structure, keyword use, internal links — before you ever see it.",
+    job: null,
+    look: { skin: "#e8b98a", hair: "#3a2c22", hairStyle: "short", shirt: "#e08a3c", wears: "glasses", prop: "clipboard" },
+  },
+  publish: {
+    title: "Publishing Manager",
+    brief: "Puts an approved article on your site through WordPress or your webhook, and reports back the live URL.",
+    job: null,
+    look: { skin: "#c98f63", hair: "#241b16", hairStyle: "cap", shirt: "#a78bfa", wears: "visor", prop: "outbox" },
+  },
+};
+
+/** The chain the code actually runs (agent-server: boss.ts enqueues keyword, keyword.ts
+ *  enqueues writer). The office draws a handoff along this map — so an arrow between two
+ *  rooms is the real pipeline, never a guess about who probably passed what to whom. */
+export const HANDOFF_FROM: Record<string, string> = { kw: "boss", writer: "kw", qa: "writer", publish: "qa" };
