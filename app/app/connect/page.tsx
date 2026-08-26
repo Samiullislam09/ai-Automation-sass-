@@ -166,23 +166,23 @@ export default function Connect() {
 
   return (
     <>
-      <h1 style={{ fontSize: 21, margin: "0 0 6px" }}>Connect</h1>
-      <p className="sm mut" style={{ marginBottom: 20, maxWidth: 640 }}>
+      <h1 className="pg-h1">Connect</h1>
+      <p className="pg-sub">
         Jahan-jahan team ko publish karna hai, wo yahan jodo. Har connection save hone se pehle live test hota hai —
         &ldquo;Connected&rdquo; tabhi likha jaata hai jab sach me connect ho gaya ho.
       </p>
 
       {secret && (
-        <div className="card" style={{ padding: "14px 16px", marginBottom: 18, borderColor: "var(--ac)" }}>
-          <b style={{ fontSize: 13 }}>Signing secret — ye sirf ek baar dikhega</b>
+        <div className="card" style={{ marginBottom: 18, borderColor: "var(--ac)" }}>
+          <b style={{ fontSize: 13.5 }}>Signing secret — ye sirf ek baar dikhega</b>
           <p className="sm mut" style={{ margin: "6px 0 8px" }}>
             Apni site/automation me ise save karo aur har request ka <code>X-MrLxwa-Signature</code> header verify karo.
             Yahan se close karne ke baad ye dobara nahi milega (naya banana pade to dobara connect karna hoga).
           </p>
-          <code style={{ display: "block", padding: "9px 11px", background: "var(--panel2)", borderRadius: 9, fontSize: 12, wordBreak: "break-all" }}>
+          <code style={{ display: "block", padding: "9px 11px", background: "var(--panel2)", border: "1px solid var(--line)", borderRadius: 9, fontSize: 12 }}>
             {secret.value}
           </code>
-          <button className="btn btn-g" style={{ marginTop: 10 }} onClick={() => setSecret(null)}>
+          <button className="btn btn-g btn-sm" style={{ marginTop: 10 }} onClick={() => setSecret(null)}>
             Copy kar liya — close
           </button>
         </div>
@@ -195,10 +195,12 @@ export default function Connect() {
           return (
             <div key={card.type} className="card conn-card">
               <div className="conn-head">
-                <span className="conn-mark">{card.mark}</span>
+                <span className="lead-ic conn-mark">{card.mark}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="conn-name">{card.name}</div>
-                  <span className={"pill " + (live ? "st-pub" : "st-draft")}>
+                  {/* Was a locally-defined .pill with its own size and radius, sitting two
+                      cards away from the .pillst used everywhere else. */}
+                  <span className={"pillst " + (live ? "st-pub" : "st-draft")}>
                     {live ? "Connected" : "Not connected"}
                   </span>
                 </div>
@@ -214,7 +216,7 @@ export default function Connect() {
               )}
 
               {live?.label && (
-                <p className="sm mut" style={{ margin: "0 0 10px", wordBreak: "break-all" }}>
+                <p className="sm mut brk" style={{ margin: "0 0 10px" }}>
                   {live.label}{live.username ? ` · ${live.username}` : ""}
                 </p>
               )}
@@ -238,25 +240,25 @@ export default function Connect() {
                       Route banana nahi aata? <Link href="/connect/nextjs" target="_blank" className="acc">Poora setup guide →</Link>
                     </p>
                   )}
-                  {err[card.type] && <p className="sm" style={{ color: "#ff6b6b", marginBottom: 8 }}>{err[card.type]}</p>}
+                  {err[card.type] && <p className="sm brk" style={{ color: "var(--red)", marginBottom: 8 }}>{err[card.type]}</p>}
                 </div>
               )}
 
-              <div className="conn-actions">
+              <div className="btnrow conn-actions">
                 {isOpen ? (
                   <>
-                    <button className="btn btn-p" disabled={busy === card.type} onClick={() => connect(card)}>
+                    <button className="btn btn-p btn-sm" disabled={busy === card.type} onClick={() => connect(card)}>
                       {busy === card.type ? "Testing…" : "Test & save"}
                     </button>
-                    <button className="btn btn-g" onClick={() => { setOpen(null); setErr({}); }}>Cancel</button>
+                    <button className="btn btn-g btn-sm" onClick={() => { setOpen(null); setErr({}); }}>Cancel</button>
                   </>
                 ) : (
                   <>
-                    <button className="btn btn-p" onClick={() => { setOpen(card.type); setForm({}); setErr({}); }}>
+                    <button className="btn btn-p btn-sm" onClick={() => { setOpen(card.type); setForm({}); setErr({}); }}>
                       {live ? "Reconnect" : "Connect"}
                     </button>
                     {live && (
-                      <button className="btn btn-g" disabled={busy === card.type} onClick={() => disconnect(card)}>
+                      <button className="btn btn-g btn-sm" disabled={busy === card.type} onClick={() => disconnect(card)}>
                         Disconnect
                       </button>
                     )}
@@ -275,17 +277,22 @@ export default function Connect() {
       </p>
 
       <style jsx>{`
-        .conn-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 14px; }
-        .conn-card { padding: 15px 16px; display: flex; flex-direction: column; }
+        /* auto-fit + min(): auto-fill left a phantom empty column on a wide screen, and a bare
+           minmax(290px, 1fr) is wider than a 360px phone's content box, which pushed the whole
+           page sideways. */
+        .conn-grid { display: grid; gap: 14px;
+                     grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr)); }
+        .conn-card { display: flex; flex-direction: column; }
         .conn-head { display: flex; gap: 11px; align-items: center; margin-bottom: 10px; }
-        .conn-mark { width: 38px; height: 38px; border-radius: 11px; flex: none; display: grid; place-items: center;
-                     background: var(--panel2); border: 1px solid var(--line); font-weight: 800; font-size: 15px; }
-        .conn-name { font-size: 14.5px; font-weight: 700; margin-bottom: 4px; }
+        /* Sizing comes from .lead-ic now — only the wordmark's weight is local. */
+        .conn-mark { font-weight: 800; font-size: 15px; }
+        .conn-name { font-size: 14.5px; font-weight: 700; margin-bottom: 5px; overflow-wrap: anywhere; }
         .conn-blurb { margin: 0 0 10px; line-height: 1.5; }
         .conn-note { font-size: 11px; line-height: 1.5; color: var(--mut2); background: var(--panel2);
-                     border-radius: 9px; padding: 8px 10px; margin: 0 0 10px; }
-        .conn-actions { display: flex; gap: 8px; margin-top: auto; flex-wrap: wrap; }
-        .pill { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 7px; }
+                     border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; margin: 0 0 10px; }
+        /* margin-top:auto keeps the buttons on one baseline across a row whose cards have
+           different amounts of text above them. */
+        .conn-actions { margin-top: auto; }
       `}</style>
     </>
   );
@@ -375,10 +382,10 @@ function GoogleSection({ onToast }: { onToast: (m: string) => void }) {
 
   return (
     <>
-      <h2 style={{ fontSize: 15, margin: "26px 0 8px" }}>Google — Search Console, Analytics, Business Profile</h2>
+      <h2 className="pg-h2" style={{ margin: "26px 0 10px" }}>Google — Search Console, Analytics, Business Profile</h2>
 
-      <div className="card" style={{ padding: "16px 17px" }}>
-        {msg && <p className="sm" style={{ color: "#ff6b6b", marginTop: 0 }}>{msg}</p>}
+      <div className="card">
+        {msg && <p className="sm" style={{ color: "var(--red)", marginTop: 0 }}>{msg}</p>}
 
         {!g.configured ? (
           <>
@@ -401,9 +408,9 @@ function GoogleSection({ onToast }: { onToast: (m: string) => void }) {
               kaunse keyword page 2 pe atke hain, aur kaunse page traffic la rahe hain. Mr Lxwa phir wahi topics chunta hai
               jinke liye site pehle se dikh rahi hai — guess ke bajaye evidence.
             </p>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <a className="btn btn-p" href="/api/integrations/google/start">Connect Google</a>
-              <a className="btn btn-g" href="/api/integrations/google/start?gbp=1">Business Profile bhi jodo</a>
+            <div className="btnrow">
+              <a className="btn btn-p btn-sm" href="/api/integrations/google/start">Connect Google</a>
+              <a className="btn btn-g btn-sm" href="/api/integrations/google/start?gbp=1">Business Profile bhi jodo</a>
             </div>
             <p className="sm mut" style={{ marginTop: 10, fontSize: 11 }}>
               Sirf read-only access maanga jaata hai. Kuch post ya change nahi hota.
@@ -412,13 +419,15 @@ function GoogleSection({ onToast }: { onToast: (m: string) => void }) {
         ) : (
           <>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
-              <span className="st-pub" style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 7 }}>Connected</span>
-              {g.email && <span className="sm mut">{g.email}</span>}
+              {/* Same pill primitive as every other status chip in /app — this one had its
+                  own font size, padding and radius. */}
+              <span className="pillst st-pub">Connected</span>
+              {g.email && <span className="sm mut brk">{g.email}</span>}
               {g.lastSync && <span className="sm mut">· last sync {new Date(g.lastSync).toLocaleString()}</span>}
             </div>
 
             {g.tokenError && (
-              <p className="sm" style={{ color: "#ff6b6b" }}>
+              <p className="sm" style={{ color: "var(--red)" }}>
                 {g.tokenError} — <a className="acc" href="/api/integrations/google/start">dobara connect karo</a>
               </p>
             )}
@@ -429,7 +438,7 @@ function GoogleSection({ onToast }: { onToast: (m: string) => void }) {
                 <option value="">— select —</option>
                 {sites.map((s) => <option key={s.siteUrl} value={s.siteUrl}>{s.siteUrl}</option>)}
               </select>
-              {errorOf(g.sites) && <p className="sm" style={{ color: "#ff6b6b", fontSize: 11 }}>{errorOf(g.sites)}</p>}
+              {errorOf(g.sites) && <p className="sm" style={{ color: "var(--red)", fontSize: 11 }}>{errorOf(g.sites)}</p>}
               {!errorOf(g.sites) && !sites.length && (
                 <p className="sm mut" style={{ fontSize: 11 }}>Is Google account pe koi verified Search Console property nahi mili.</p>
               )}
@@ -443,7 +452,7 @@ function GoogleSection({ onToast }: { onToast: (m: string) => void }) {
                   <option key={p.property} value={p.property}>{p.displayName} ({p.account})</option>
                 ))}
               </select>
-              {errorOf(g.properties) && <p className="sm" style={{ color: "#ff6b6b", fontSize: 11 }}>{errorOf(g.properties)}</p>}
+              {errorOf(g.properties) && <p className="sm" style={{ color: "var(--red)", fontSize: 11 }}>{errorOf(g.properties)}</p>}
             </div>
 
             {hasGbpScope ? (
@@ -462,14 +471,14 @@ function GoogleSection({ onToast }: { onToast: (m: string) => void }) {
               </p>
             )}
 
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
-              <button className="btn btn-p" disabled={!!busy} onClick={saveSelection}>
+            <div className="btnrow" style={{ marginTop: 4 }}>
+              <button className="btn btn-p btn-sm" disabled={!!busy} onClick={saveSelection}>
                 {busy === "save" ? "Saving…" : "Save & sync"}
               </button>
-              <button className="btn btn-g" disabled={!!busy} onClick={() => syncNow()}>
+              <button className="btn btn-g btn-sm" disabled={!!busy} onClick={() => syncNow()}>
                 {busy === "sync" ? "Google se data la rahe hain…" : "Refresh data now"}
               </button>
-              <button className="btn btn-g" disabled={!!busy} onClick={disconnect}>Disconnect</button>
+              <button className="btn btn-g btn-sm" disabled={!!busy} onClick={disconnect}>Disconnect</button>
             </div>
 
             {syncResult && (
@@ -483,11 +492,11 @@ function GoogleSection({ onToast }: { onToast: (m: string) => void }) {
                     </p>
                     {syncResult.note && <p className="sm mut" style={{ margin: "4px 0 0" }}>{syncResult.note}</p>}
                     {syncResult.errors && Object.entries(syncResult.errors).map(([k, v]) => (
-                      <p key={k} className="sm" style={{ color: "#ff6b6b", margin: "4px 0 0" }}>{k}: {String(v)}</p>
+                      <p key={k} className="sm brk" style={{ color: "var(--red)", margin: "4px 0 0" }}>{k}: {String(v)}</p>
                     ))}
                   </>
                 ) : (
-                  <p className="sm" style={{ color: "#ff6b6b", margin: 0 }}>{syncResult.error}</p>
+                  <p className="sm brk" style={{ color: "var(--red)", margin: 0 }}>{syncResult.error}</p>
                 )}
               </div>
             )}

@@ -31,19 +31,25 @@ export default function AppError({ error, reset }: { error: Error & { digest?: s
       </div>
 
       <style jsx>{`
-        .errwrap { max-width: 560px; margin: 8vh auto 0; text-align: center; padding: 0 20px; }
+        .errwrap { max-width: 560px; margin: clamp(24px, 8vh, 90px) auto 0; text-align: center;
+                   padding: 0 4px; }
         .errmark { width: 52px; height: 52px; border-radius: 50%; margin: 0 auto 16px;
                    display: grid; place-items: center; font-size: 26px; font-weight: 800;
                    color: #fff; background: var(--red); }
-        h2 { font-size: 20px; margin: 0 0 8px; color: var(--ink); }
+        h2 { font-size: 20px; line-height: 1.25; margin: 0 0 8px; color: var(--ink); }
+        /* A raw error message is the one string on any /app page with no guaranteed spaces
+           in it — a stack fragment or a URL will run straight off a phone without this. */
         .errmsg { font-size: 13px; color: var(--mut); line-height: 1.6; margin: 0;
-                  word-break: break-word; }
-        .errdig { font-size: 10.5px; color: var(--mut2); margin: 10px 0 0; }
+                  overflow-wrap: anywhere; word-break: break-word; }
+        .errdig { font-size: 10.5px; color: var(--mut2); margin: 10px 0 0; overflow-wrap: anywhere; }
         .errrow { display: flex; gap: 9px; justify-content: center; margin-top: 20px; flex-wrap: wrap; }
-        .errrow button { background: var(--ac); border: none; color: #fff; font-size: 12px;
-                         font-weight: 700; padding: 9px 16px; border-radius: 9px; cursor: pointer; }
-        .errrow a { border: 1px solid var(--line2); color: var(--mut); font-size: 12px;
-                    font-weight: 600; padding: 9px 16px; border-radius: 9px; }
+        /* Both are real tap targets now — they were ~31px tall. */
+        .errrow button, .errrow a { display: inline-flex; align-items: center; justify-content: center;
+                                    min-height: 40px; font-size: 13px; padding: 9px 18px;
+                                    border-radius: 10px; }
+        .errrow button { background: var(--ac); border: none; color: #fff; font-weight: 700; cursor: pointer; }
+        .errrow a { border: 1px solid var(--line2); color: var(--mut); font-weight: 600; }
+        .errrow a:hover { color: var(--ink); border-color: var(--ac); }
       `}</style>
     </div>
   );

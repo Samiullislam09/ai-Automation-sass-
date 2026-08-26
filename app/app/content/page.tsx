@@ -50,9 +50,9 @@ export default function Content() {
 
   return (
     <>
-      <div style={{ display: "flex", alignItems: "center", marginBottom: 14, gap: 12, flexWrap: "wrap" }}>
-        <h1 style={{ fontSize: 21, margin: 0 }}>Content</h1>
-        <div style={{ flex: 1 }} />
+      <div className="pg-head">
+        <h1 className="pg-h1">Content</h1>
+        <div className="sp" />
         <Link className="btn btn-p btn-sm" href="/app">+ Create new</Link>
       </div>
 
@@ -62,19 +62,19 @@ export default function Content() {
         ))}
       </div>
 
-      {err && <p className="sm" style={{ color: "#ff6b6b" }}>{err}</p>}
+      {err && <p className="sm" style={{ color: "var(--red)" }}>{err}</p>}
 
-      <div style={{ display: "grid", gap: 10 }}>
+      <div className="listgrid">
         {items === null ? (
-          <div className="card" style={{ textAlign: "center", padding: 40 }}><p className="mut sm">Loading…</p></div>
+          <div className="card emptycard"><p className="mut sm">Loading…</p></div>
         ) : items.length ? items.map((c) => {
           const st = STATUS[c.status] ?? { label: c.status.toUpperCase(), cls: "st-draft" };
           const m = c.meta ?? {};
           return (
             <Link key={c.id} href={`/app/content/${c.id}`} className="card crow">
-              <div className="crow-ic">{ICO[c.type] ?? "📄"}</div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <b style={{ fontSize: 14 }}>{c.title || "Untitled"}</b>
+              <div className="lead-ic">{ICO[c.type] ?? "📄"}</div>
+              <div className="crow-t">
+                <b className="brk" style={{ fontSize: 14, display: "block" }}>{c.title || "Untitled"}</b>
                 <div className="xs mut" style={{ marginTop: 2 }}>
                   {c.type}
                   {m.wordCount ? ` · ${m.wordCount} words` : ""}
@@ -86,9 +86,9 @@ export default function Content() {
             </Link>
           );
         }) : (
-          <div className="card" style={{ textAlign: "center", padding: 40 }}>
-            <div style={{ fontSize: 30 }}>📭</div>
-            <p className="mut sm" style={{ marginTop: 8 }}>
+          <div className="card emptycard">
+            <div className="ic">📭</div>
+            <p className="mut sm">
               {filter === "all" ? "Nothing written yet — start the team from the dashboard." : "Nothing in this state."}
             </p>
           </div>
@@ -96,15 +96,26 @@ export default function Content() {
       </div>
 
       <style jsx>{`
-        .cfilters { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+        .cfilters { display: flex; gap: 7px; margin-bottom: 14px; flex-wrap: wrap; }
         .cfilters button { background: var(--panel); border: 1px solid var(--line); color: var(--mut);
-                           font-size: 11.5px; font-weight: 600; padding: 6px 12px; border-radius: 999px;
-                           cursor: pointer; }
+                           font-size: 12px; font-weight: 600; padding: 8px 14px; min-height: 36px;
+                           border-radius: 999px; cursor: pointer; transition: color .18s, background .18s,
+                           border-color .18s; }
+        .cfilters button:hover { color: var(--ink); border-color: var(--line2); }
         .cfilters button.on { color: #fff; background: var(--ac); border-color: var(--ac); }
-        .crow { display: flex; gap: 14px; align-items: center; transition: border-color .18s, transform .18s; }
+
+        /* Grid, not flex: the pill is a fixed third track, so every row's title starts and
+           ends at the same x whatever the pill says. */
+        .crow { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 13px;
+                align-items: center; transition: border-color .18s, transform .18s; }
         .crow:hover { border-color: var(--ac); transform: translateY(-1px); }
-        .crow-ic { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center;
-                   background: var(--panel2); font-size: 16px; flex: none; }
+        .crow-t { min-width: 0; }
+        /* "NEEDS APPROVAL" next to a title in ~130px of remaining width shredded both. Below
+           480px the pill drops to its own line under the meta, aligned with the title. */
+        @media (max-width: 480px) {
+          .crow { grid-template-columns: auto minmax(0, 1fr); row-gap: 9px; }
+          .crow :global(.pillst) { grid-column: 2; justify-self: start; }
+        }
       `}</style>
     </>
   );

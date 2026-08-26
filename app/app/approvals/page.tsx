@@ -79,27 +79,35 @@ export default function Approvals() {
 
   return (
     <>
-      <h1 style={{ fontSize: 21, margin: "0 0 20px" }}>Approvals <Help k="approval" /></h1>
-      <div style={{ display: "grid", gap: 12 }}>
+      <div className="pg-head"><h1 className="pg-h1">Approvals <Help k="approval" /></h1></div>
+      <div className="listgrid">
         {loading ? (
-          <div className="card" style={{ textAlign: "center", padding: 40 }}><p className="mut sm">Loading…</p></div>
+          <div className="card emptycard"><p className="mut sm">Loading…</p></div>
         ) : items.length ? items.map((c) => (
           <div key={c.id} className="card">
-            <div style={{ display: "flex", gap: 13, alignItems: "center", marginBottom: 12 }}>
-              <div style={{ width: 38, height: 38, borderRadius: 11, display: "grid", placeItems: "center", background: "var(--panel2)", fontSize: 16 }}>{ICO[c.type] ?? "📄"}</div>
-              <div style={{ flex: 1 }}><b>{c.title || "Untitled"}</b><div className="xs mut">{c.type} · quality gate ✓ passed · {new Date(c.created_at).toLocaleString()}</div></div>
+            <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
+              <div className="lead-ic">{ICO[c.type] ?? "📄"}</div>
+              {/* min-width:0 or a long unbroken headline pushes the whole card past the
+                  viewport on a phone — flex items default to min-width:auto. */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <b className="brk" style={{ fontSize: 14, display: "block" }}>{c.title || "Untitled"}</b>
+                <div className="xs mut" style={{ marginTop: 2 }}>{c.type} · quality gate ✓ passed · {new Date(c.created_at).toLocaleString()}</div>
+              </div>
             </div>
             <p className="sm mut" style={{ background: "var(--panel2)", borderRadius: 10, padding: 12, border: "1px solid var(--line)", margin: 0 }}>{qcSummary(c)}</p>
-            <div style={{ display: "flex", gap: 9, marginTop: 13, flexWrap: "wrap" }}>
+            <div className="btnrow" style={{ marginTop: 13 }}>
               {/* Approving from a two-line summary was approving on faith. This opens the
                   draft as a real page, with hand-editing and an AI editor beside it. */}
               <Link href={`/app/content/${c.id}`} className="btn btn-p btn-sm">Read &amp; edit</Link>
-              <button className="btn btn-g btn-sm" disabled={busy === c.id} onClick={() => approve(c)}>✓ Approve & publish</button>
+              <button className="btn btn-g btn-sm" disabled={busy === c.id} onClick={() => approve(c)}>✓ Approve &amp; publish</button>
               <button className="btn btn-red btn-sm" disabled={busy === c.id} onClick={() => reject(c)}>Reject</button>
             </div>
           </div>
         )) : (
-          <div className="card" style={{ textAlign: "center", padding: 40 }}><div style={{ fontSize: 30 }}>✨</div><p className="mut sm" style={{ marginTop: 8 }}>All clear — nothing waiting. Your team will notify you when new work is ready.</p></div>
+          <div className="card emptycard">
+            <div className="ic">✨</div>
+            <p className="mut sm">All clear — nothing waiting. Your team will notify you when new work is ready.</p>
+          </div>
         )}
       </div>
     </>

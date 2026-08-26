@@ -10,7 +10,7 @@
  *  invisible. */
 export default function AppLoading() {
   return (
-    <div style={{ padding: "26px 4px", display: "flex", alignItems: "center", gap: 10 }}>
+    <div style={{ padding: "24px 0", display: "flex", alignItems: "center", gap: 10 }}>
       <span
         style={{
           width: 14,

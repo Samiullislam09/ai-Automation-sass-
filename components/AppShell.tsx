@@ -50,9 +50,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     setGreeting(h < 12 ? "Good morning" : h < 17 ? "Welcome back" : "Good evening");
   }, []);
 
+  // Below 860px the sidebar is a slide-over drawer, so following a link inside it has to
+  // close it. On desktop the same flag is the rail's expanded state and must survive
+  // navigation, hence the width test rather than an unconditional reset.
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.matchMedia("(max-width: 860px)").matches) setNavOpen(false);
+  }, [path]);
+
   return (
     <div className={"appshell" + (navOpen ? " nav-open" : "")} style={{ position: "relative", zIndex: 1 }}>
       <div className="shell">
+        {/* Mobile only: tapping outside the drawer closes it. Rendered unconditionally and
+            hidden by CSS so it can fade rather than pop. */}
+        <button className="nav-scrim" aria-label="Close menu" tabIndex={navOpen ? 0 : -1} onClick={() => setNavOpen(false)} />
+
         <aside className="sidedesk">
           <Link href="/" className="s-brand">
             <span className="s-mark">⚡</span>
@@ -160,16 +171,23 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
            10% is ~100px on a 1024px laptop — unreadable for a conversation — so it's 10vw
            with a 272px floor and a 340px ceiling: the office keeps ~75-85% of the width and
            the chat text still wraps sanely. */
-        .appshell { --sbw: 72px; --chatw: clamp(272px, 10vw, 340px); --topbar: 60px; }
+        /* --mnav is the height of the fixed bottom bar including the home-indicator inset. The
+           main scroller's bottom padding and the chat bubble's offset both read it, so the
+           three can never drift apart again. */
+        .appshell { --sbw: 72px; --chatw: clamp(272px, 10vw, 340px); --topbar: 60px;
+                    --mnav: calc(53px + env(safe-area-inset-bottom)); }
         .appshell.nav-open { --sbw: 244px; }
         .shell { display: grid; grid-template-columns: var(--sbw) 1fr; height: 100vh;
                  transition: grid-template-columns .45s cubic-bezier(.55,.06,.25,1); }
         .col { display: flex; flex-direction: column; min-width: 0; height: 100vh; }
 
         /* ---- sidebar ---- */
+        /* This said "gap: 3" with no unit, which is silently invalid — the column's spacing
+           was coming entirely from its children's own margins. */
         .sidedesk { background: var(--bg2); border-right: 1px solid var(--line); padding: 16px 12px;
-                    display: flex; flex-direction: column; gap: 3; position: sticky; top: 0; height: 100vh;
+                    display: flex; flex-direction: column; gap: 3px; position: sticky; top: 0; height: 100vh;
                     overflow: hidden; }
+        .nav-scrim { display: none; }
         .s-brand { display: flex; align-items: center; gap: 10px; padding: 2px 4px 16px; }
         .s-mark { width: 34px; height: 34px; border-radius: 10px; flex: none; display: grid; place-items: center;
                   background: linear-gradient(135deg,var(--ac),var(--ac-d)); color: #fff; font-size: 16px;
@@ -189,17 +207,21 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         .cnt { margin-left: auto; background: var(--ac); color: #fff; font-size: 10px; font-weight: 800;
                min-width: 18px; height: 18px; border-radius: 9px; display: grid; place-items: center; padding: 0 5px; }
 
-        /* collapsed rail: icons only, labels + plan card hidden */
-        .appshell:not(.nav-open) .s-brand-t,
-        .appshell:not(.nav-open) .ni-l,
-        .appshell:not(.nav-open) .plan,
-        .appshell:not(.nav-open) .s-user-t,
-        .appshell:not(.nav-open) .s-out { display: none; }
-        .appshell:not(.nav-open) .s-brand,
-        .appshell:not(.nav-open) .ni,
-        .appshell:not(.nav-open) .s-user { justify-content: center; }
-        .appshell:not(.nav-open) .cnt { position: absolute; top: 3px; right: 3px; margin: 0;
-                                        min-width: 15px; height: 15px; font-size: 9px; padding: 0 3px; }
+        /* collapsed rail: icons only, labels + plan card hidden.
+           Scoped to desktop — below 860px the same .nav-open flag drives a full-width drawer,
+           where hiding every label would leave eight unlabelled icons. */
+        @media (min-width: 861px) {
+          .appshell:not(.nav-open) .s-brand-t,
+          .appshell:not(.nav-open) .ni-l,
+          .appshell:not(.nav-open) .plan,
+          .appshell:not(.nav-open) .s-user-t,
+          .appshell:not(.nav-open) .s-out { display: none; }
+          .appshell:not(.nav-open) .s-brand,
+          .appshell:not(.nav-open) .ni,
+          .appshell:not(.nav-open) .s-user { justify-content: center; }
+          .appshell:not(.nav-open) .cnt { position: absolute; top: 3px; right: 3px; margin: 0;
+                                          min-width: 15px; height: 15px; font-size: 9px; padding: 0 3px; }
+        }
 
         .plan { background: var(--panel); border: 1px solid var(--line); border-radius: 13px;
                 padding: 12px 13px; margin-bottom: 12px; }
@@ -241,9 +263,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         .sb-t:hover, .tb-btn:hover { color: var(--ink); border-color: var(--line2); }
         .sb-t svg, .tb-btn svg { width: 17px; height: 17px; }
         .tb-t { flex: 1; min-width: 0; }
-        .hello { font-size: 17px; font-weight: 800; color: var(--ink); line-height: 1.2; }
+        /* The greeting is "Good evening, <their name>! 👋" — an arbitrary-length string in a
+           row that also has to hold four 34px buttons. On a 360px phone it wrapped the topbar
+           to two lines and shoved the avatar off the edge. */
+        .hello { font-size: 17px; font-weight: 800; color: var(--ink); line-height: 1.2;
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .status { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--grn);
-                  font-weight: 600; margin-top: 2px; }
+                  font-weight: 600; margin-top: 2px; white-space: nowrap; }
         .status .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--grn);
                        box-shadow: 0 0 7px var(--grn); animation: tbping 1.8s infinite; }
         @keyframes tbping { 50% { opacity: .35; } }
@@ -285,6 +311,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     border-radius: 9px; padding: 7px; font-size: 11.5px; font-weight: 600; color: var(--mut);
                     cursor: pointer; }
         .acct-out:hover { color: var(--red); border-color: var(--red); }
+        /* 268px anchored to the right edge of a 360px viewport still clears the padding, but
+           only just — cap it so it can never be the thing that widens the page. */
+        .acct-pop { max-width: calc(100vw - 24px); }
+        /* The plan chip is the first thing to go when the row runs out of room; it stays one
+           tap away in the drawer and in this menu. */
         @media (max-width: 520px) { .tb-plan { display: none; } }
 
         /* ---- main ---- */
@@ -305,24 +336,58 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         /* ---- mobile ---- */
         @media (max-width: 860px) {
           .shell { grid-template-columns: 1fr !important; height: auto !important; }
-          .sidedesk { display: none !important; }
-          .col { height: auto; min-height: 100vh; }
-          .appmain { padding: 16px 14px 96px !important; height: auto !important; }
-          .appmain.is-dash { padding: 0 0 76px !important; overflow-y: auto; height: auto; }
-          .topbar { padding: 11px 14px 10px; }
+          .col { height: auto; min-height: 100vh; min-width: 0; }
+          /* Clears the bottom bar AND the 54px chat bubble floating above it, so the last card
+             on a page is never half-hidden behind either. */
+          .appmain { padding: 16px 14px calc(var(--mnav) + 76px) !important; height: auto !important; }
+          .appmain.is-dash { padding: 0 0 calc(var(--mnav) + 10px) !important; overflow-y: auto; height: auto; }
+          .topbar { padding: 10px 12px; gap: 8px; }
           .appshell { --topbar: 56px; }
           .hello { font-size: 15px; }
-          .mnavbar { display: flex !important; }
+          /* 34px is below every thumb-target guideline, and these four are the only controls
+             in the topbar on a phone. */
+          .sb-t, .tb-btn, .tb-av { width: 38px; height: 38px; }
+          .mnavbar { display: grid !important; }
+
+          /* The sidebar was display:none on mobile, which left the hamburger next to it
+             toggling a class nothing responded to — a dead control — and left Reports, Memory
+             and Billing unreachable, since the bottom bar only holds five of the eight routes.
+             Same element, same .nav-open flag, now a slide-over drawer. */
+          .sidedesk { display: flex !important; position: fixed !important; top: 0; left: 0; bottom: 0;
+                      width: min(276px, 84vw); height: 100dvh; z-index: 220; overflow-y: auto;
+                      border-right: 1px solid var(--line2); box-shadow: 8px 0 32px #0006;
+                      transform: translateX(-101%); transition: transform .28s cubic-bezier(.4,0,.2,1);
+                      padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+          .appshell.nav-open .sidedesk { transform: none; }
+          .nav-scrim { display: block; position: fixed; inset: 0; z-index: 215; border: none; padding: 0;
+                       background: #060a14a8; backdrop-filter: blur(2px); cursor: pointer;
+                       opacity: 0; pointer-events: none; transition: opacity .28s; }
+          .appshell.nav-open .nav-scrim { opacity: 1; pointer-events: auto; }
+          /* Drawer rows are tap targets, not hover targets. */
+          .ni { padding: 12px 11px; font-size: 14px; }
+          .s-foot { padding-top: 12px; }
+
+          /* The chat bubble is fixed at bottom:22 / right:22 with 54px of height, which put it
+             squarely on top of the bottom bar's last two tabs. It sits above the bar instead.
+             Inline styles in components/kit.tsx set these, so !important is what it takes. */
+          .bosschat-bubble { bottom: calc(var(--mnav) + 12px) !important; right: 14px !important; }
+          .bosschat-panel { bottom: calc(var(--mnav) + 76px) !important; right: 14px !important;
+                            max-width: calc(100vw - 28px) !important; }
         }
         .mnavbar { display: none; position: fixed; bottom: 0; left: 0; right: 0; z-index: 140;
                    background: var(--panel); border-top: 1px solid var(--line); backdrop-filter: blur(12px);
-                   justify-content: space-around; padding: 8px 4px calc(8px + env(safe-area-inset-bottom)); }
-        .mni { display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 9.5px;
-               color: var(--mut); padding: 5px 10px; position: relative; font-weight: 600; }
+                   grid-template-columns: repeat(5, 1fr); padding: 6px 2px calc(6px + env(safe-area-inset-bottom)); }
+        /* Was space-around, which gave five differently-sized tabs uneven gutters. Five equal
+           columns keeps the icons on a grid. */
+        .mni { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+               font-size: 9.5px; color: var(--mut); padding: 5px 2px; min-height: 46px; min-width: 0;
+               position: relative; font-weight: 600; text-align: center; white-space: nowrap; }
         .mni.active { color: var(--ac); }
+        .mni-ico { display: grid; place-items: center; }
         .mni-ico svg { width: 19px; height: 19px; }
-        .mni-b { position: absolute; top: 0; right: 2px; background: var(--ac); color: #fff; font-size: 8.5px;
-                 font-weight: 800; min-width: 14px; height: 14px; border-radius: 7px; display: grid; place-items: center; }
+        .mni-b { position: absolute; top: 1px; right: calc(50% - 18px); background: var(--ac); color: #fff;
+                 font-size: 8.5px; font-weight: 800; min-width: 14px; height: 14px; border-radius: 7px;
+                 display: grid; place-items: center; }
       `}</style>
     </div>
   );

@@ -72,22 +72,22 @@ export default function Memory() {
 
   return (
     <>
-      <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
-        <h1 style={{ fontSize: 21, margin: 0 }}>AI Memory <Help k="memory" /></h1>
-      </div>
-      <p className="sm mut" style={{ marginBottom: 20 }}>What your team actually knows and has connected — pulled live from your account, not just guessed.</p>
+      <h1 className="pg-h1">AI Memory <Help k="memory" /></h1>
+      <p className="pg-sub">What your team actually knows and has connected — pulled live from your account, not just guessed.</p>
 
       {/* What we've connected */}
-      <div className="card" style={{ padding: "15px 17px", marginBottom: 20 }}>
-        <h2 style={{ fontSize: 14, margin: "0 0 12px" }}>What we&apos;ve connected</h2>
+      <div className="card" style={{ marginBottom: 18 }}>
+        <h2 className="pg-h3">What we&apos;ve connected</h2>
         {loadingStatus ? (
-          <p className="sm mut">Checking…</p>
+          <p className="sm mut" style={{ margin: 0 }}>Checking…</p>
         ) : !status?.integrations.length ? (
-          <p className="sm mut">Nothing connected yet. <Link href="/app/connect">Connect WordPress, your site or social →</Link></p>
+          <p className="sm mut" style={{ margin: 0 }}>Nothing connected yet. <Link href="/app/connect">Connect WordPress, your site or social →</Link></p>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div>
+            {/* .kv stacks label over pill below 520px — "Google (Search Console + Analytics)"
+                next to a CONNECTED pill left about six characters per line on a phone. */}
             {status.integrations.map((i, idx) => (
-              <div key={idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div key={idx} className="kv">
                 <span className="sm">{INTEGRATION_LABEL[i.type] ?? i.type}</span>
                 <span className={"pillst " + pillClass(i.status)}>{i.status.toUpperCase()}</span>
               </div>
@@ -97,8 +97,8 @@ export default function Memory() {
       </div>
 
       {/* What Google measured — the evidence the agents plan from */}
-      <div className="card" style={{ padding: "15px 17px", marginBottom: 20 }}>
-        <h2 style={{ fontSize: 14, margin: "0 0 4px" }}>What Google says about your site</h2>
+      <div className="card" style={{ marginBottom: 18 }}>
+        <h2 className="pg-h3" style={{ marginBottom: 4 }}>What Google says about your site</h2>
         <p className="xs mut" style={{ margin: "0 0 12px" }}>
           Real Search Console + Analytics numbers. Mr Lxwa picks topics from this, Mr. Keyword falls back to it,
           and Mr. Writer uses it to link to the pages that already work.
@@ -168,7 +168,7 @@ export default function Memory() {
                 <div style={{ marginTop: 8 }}>
                   {insights.topPages.map((p: any) => (
                     <div key={p.url} className="ins-row">
-                      <span className="ins-q" style={{ wordBreak: "break-all" }}>{p.url}</span>
+                      <span className="ins-q">{p.url}</span>
                       <span className="xs mut">{p.clicks} clicks</span>
                     </div>
                   ))}
@@ -190,17 +190,11 @@ export default function Memory() {
           </>
         )}
 
-        <style jsx>{`
-          .ins-row { display: flex; justify-content: space-between; gap: 12px; align-items: baseline;
-                     padding: 4px 0; border-bottom: 1px solid var(--line); }
-          .ins-row:last-child { border-bottom: none; }
-          .ins-q { font-size: 12.5px; color: var(--ink); min-width: 0; }
-        `}</style>
       </div>
 
       {/* What we've learned from the site crawl */}
-      <div className="card" style={{ padding: "15px 17px", marginBottom: 20 }}>
-        <h2 style={{ fontSize: 14, margin: "0 0 12px" }}>What we&apos;ve learned from your site</h2>
+      <div className="card" style={{ marginBottom: 18 }}>
+        <h2 className="pg-h3">What we&apos;ve learned from your site</h2>
         {loadingStatus ? (
           <p className="sm mut">Checking…</p>
         ) : !status?.crawl.pagesIndexed ? (
@@ -208,14 +202,14 @@ export default function Memory() {
         ) : (
           <>
             <p className="sm" style={{ marginBottom: 10 }}>{status.tenant.niche}</p>
-            <p className="xs mut" style={{ marginBottom: 10 }}>
+            <p className="xs mut brk" style={{ marginBottom: 10 }}>
               <b style={{ color: "var(--ink)" }}>{status.crawl.pagesIndexed}</b> page{status.crawl.pagesIndexed === 1 ? "" : "s"} read from{" "}
               <span style={{ color: "var(--ink)" }}>{status.tenant.websiteUrl}</span>
             </p>
             {status.tenant.topics.length > 0 && (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+              <div className="topicwrap">
                 {status.tenant.topics.map((t, i) => (
-                  <span key={i} style={{ fontSize: 11.5, padding: "4px 10px", borderRadius: 999, background: "var(--panel2)", border: "1px solid var(--line2)", color: "var(--mut)" }}>{t}</span>
+                  <span key={i} className="topic">{t}</span>
                 ))}
               </div>
             )}
@@ -224,7 +218,7 @@ export default function Memory() {
                 <summary className="xs mut" style={{ cursor: "pointer" }}>See pages read</summary>
                 <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
                   {status.crawl.samplePages.map((p, i) => (
-                    <li key={i} className="xs mut" style={{ marginBottom: 4 }}>{p.title}</li>
+                    <li key={i} className="xs mut brk" style={{ marginBottom: 4 }}>{p.title}</li>
                   ))}
                 </ul>
               </details>
@@ -233,26 +227,37 @@ export default function Memory() {
         )}
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
-        <h2 style={{ fontSize: 15, margin: 0 }}>Business facts</h2>
-        <div style={{ flex: 1 }} />
+      <div className="pg-head" style={{ marginBottom: 6 }}>
+        <h2 className="pg-h2" style={{ margin: 0 }}>Business facts</h2>
+        <div className="sp" />
         <button className="btn btn-g btn-sm" onClick={() => setAdding(true)}>+ Add fact</button>
       </div>
-      <p className="sm mut" style={{ marginBottom: 16 }}>From your onboarding answers. Click ✎ to edit — every agent adjusts instantly.</p>
-      {s.memory.map((m: any, i: number) => (
-        <div key={i} className="card" style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "13px 15px", marginBottom: 9 }}>
-          <span className="xs mut" style={{ textTransform: "uppercase", letterSpacing: 0.6, width: 110, flex: "none", paddingTop: 3, fontWeight: 700 }}>{m.k}</span>
-          {edit === i
-            ? <input autoFocus value={val} onChange={e => setVal(e.target.value)} onKeyDown={e => e.key === "Enter" && save(i)} style={{ flex: 1 }} />
-            : <span style={{ flex: 1, fontSize: 13.5 }}>{m.v}</span>}
-          {edit === i
-            ? <button className="btn btn-p btn-sm" onClick={() => save(i)}>Save</button>
-            : <><button style={{ background: "none", border: "none", color: "var(--mut)", cursor: "pointer" }} onClick={() => { setEdit(i); setVal(m.v); }}>✎</button>
-              <button style={{ background: "none", border: "none", color: "var(--mut)", cursor: "pointer" }} onClick={() => del(i)}>🗑</button></>}
-        </div>
-      ))}
+      <p className="sm mut" style={{ margin: "0 0 14px" }}>From your onboarding answers. Click ✎ to edit — every agent adjusts instantly.</p>
+
+      {/* Was a single flex row: a fixed 110px label, the value, and two bare <button>s with no
+          box at all. On a 360px phone that left ~120px for the fact and gave the edit/delete
+          controls a ~16px hit area. Grid now, stacking the label above the value on a phone. */}
+      <div className="listgrid" style={{ gap: 9 }}>
+        {s.memory.map((m: any, i: number) => (
+          <div key={i} className="card card-tight fact">
+            <span className="fact-k">{m.k}</span>
+            {edit === i
+              ? <input autoFocus value={val} onChange={e => setVal(e.target.value)} onKeyDown={e => e.key === "Enter" && save(i)} />
+              : <span className="fact-v brk">{m.v}</span>}
+            <div className="fact-a">
+              {edit === i
+                ? <button className="btn btn-p btn-sm" onClick={() => save(i)}>Save</button>
+                : <>
+                    <button className="iconbtn" aria-label={`Edit ${m.k}`} title="Edit" onClick={() => { setEdit(i); setVal(m.v); }}>✎</button>
+                    <button className="iconbtn is-danger" aria-label={`Delete ${m.k}`} title="Delete" onClick={() => del(i)}>🗑</button>
+                  </>}
+            </div>
+          </div>
+        ))}
+      </div>
+
       <div className="card" style={{ marginTop: 16, display: "flex", gap: 12, alignItems: "center" }}>
-        <div className="corb" /><div className="sm"><b>Who am I?</b> — <Link href="/whoami">Read Mr Lxwa&apos;s current understanding of your business →</Link></div>
+        <div className="corb" /><div className="sm" style={{ minWidth: 0 }}><b>Who am I?</b> — <Link href="/whoami">Read Mr Lxwa&apos;s current understanding of your business →</Link></div>
       </div>
       {adding && (
         <div className="modalwrap" onClick={() => setAdding(false)}>
@@ -260,13 +265,49 @@ export default function Memory() {
             <h3 style={{ marginTop: 0 }}>Add to memory</h3>
             <div className="field"><label>Label</label><input placeholder="e.g. Products, USP, Do not mention…" value={nk} onChange={e => setNk(e.target.value)} /></div>
             <div className="field"><label>Fact</label><textarea rows={3} placeholder="What should your team know?" value={nv} onChange={e => setNv(e.target.value)} /></div>
-            <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+            <div className="btnrow" style={{ marginTop: 10 }}>
               <button className="btn btn-g" onClick={() => setAdding(false)}>Cancel</button>
-              <button className="btn btn-p" style={{ flex: 1 }} onClick={add}>Save to memory</button>
+              <button className="btn btn-p" style={{ flex: "1 1 auto" }} onClick={add}>Save to memory</button>
             </div>
           </div>
         </div>
       )}
+
+      {/* One styled-jsx block per component, at the component root. Two of them in the same
+          component crashes the SWC styled-jsx transform outright (visitor.rs unwrap on None),
+          which shows up as a build failure with no TypeScript error to point at. */}
+      <style jsx>{`
+        /* A search query and its "pos 8.4 · 210 impressions · 3 clicks" tail on one 328px line
+           left roughly two words each. Below 560px the numbers move under the query. */
+        .ins-row { display: flex; justify-content: space-between; gap: 12px; align-items: baseline;
+                   padding: 6px 0; border-bottom: 1px solid var(--line); }
+        .ins-row:last-child { border-bottom: none; }
+        .ins-q { font-size: 12.5px; color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
+        .ins-row > :last-child { flex: none; white-space: nowrap; }
+        @media (max-width: 560px) {
+          .ins-row { flex-direction: column; gap: 2px; align-items: stretch; }
+          .ins-row > :last-child { white-space: normal; }
+        }
+
+        .topicwrap { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+        .topic { font-size: 11.5px; line-height: 1.5; padding: 4px 10px; border-radius: 999px;
+                 background: var(--panel2); border: 1px solid var(--line2); color: var(--mut);
+                 overflow-wrap: anywhere; }
+
+        .fact { display: grid; grid-template-columns: 110px minmax(0, 1fr) auto; gap: 10px;
+                align-items: center; }
+        .fact-k { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px;
+                  color: var(--mut); overflow-wrap: anywhere; }
+        .fact-v { font-size: 13.5px; }
+        .fact-a { display: flex; gap: 4px; align-items: center; justify-self: end; }
+        /* Below 560px the fixed label column is more than a third of the screen, so the label
+           becomes a caption above its value and the controls sit on the label's row. */
+        @media (max-width: 560px) {
+          .fact { grid-template-columns: minmax(0, 1fr) auto; row-gap: 6px; align-items: start; }
+          .fact-k { align-self: center; }
+          .fact-v, .fact :global(input) { grid-column: 1 / -1; }
+        }
+      `}</style>
     </>
   );
 }

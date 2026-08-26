@@ -40,10 +40,10 @@ export default async function Page({ params }: { params: { id: string } }) {
   if (!tenantId || error || !item) {
     return (
       <div style={{ maxWidth: 620 }}>
-        <Link href="/app/approvals" style={{ fontSize: 12, color: "var(--ac)", fontWeight: 600 }}>← Approvals</Link>
-        <div className="card" style={{ padding: "16px 18px", marginTop: 12, borderColor: "#ff6b6b" }}>
+        <Link href="/app/approvals" style={{ display: "inline-block", padding: "6px 0", fontSize: 12, color: "var(--ac)", fontWeight: 600 }}>← Approvals</Link>
+        <div className="card" style={{ marginTop: 8, borderColor: "var(--red)" }}>
           <b style={{ fontSize: 13.5 }}>Couldn&apos;t open this article</b>
-          <p className="sm" style={{ color: "#ff6b6b", margin: "6px 0 0" }}>
+          <p className="sm brk" style={{ color: "var(--red)", margin: "6px 0 0" }}>
             {!tenantId
               ? "No workspace found for your account."
               : error

@@ -15,24 +15,35 @@ export default function ReportDetail() {
   const d = new Date(r.dateISO);
   return (
     <>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
-        <Link className="btn btn-g btn-sm" href="/app/reports">←</Link>
-        <h1 style={{ fontSize: 21, margin: 0 }}>Report · {d.toLocaleDateString([], { day: "numeric", month: "long" })}</h1>
+      <div className="pg-head">
+        <Link className="btn btn-g btn-sm" href="/app/reports" aria-label="Back to reports">←</Link>
+        <h1 className="pg-h1">Report · {d.toLocaleDateString([], { day: "numeric", month: "long" })}</h1>
       </div>
       <div className="card">
         <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14 }}>
           <div className="corb" />
-          <div><b>Mr Lxwa — end of day summary</b><div className="xs mut">{r.lines.length} activities · ⚡{s.tokensMax - s.tokens} tokens used this cycle</div></div>
+          <div style={{ minWidth: 0 }}>
+            <b style={{ fontSize: 14 }}>Mr Lxwa — end of day summary</b>
+            <div className="xs mut">{r.lines.length} activities · ⚡{s.tokensMax - s.tokens} tokens used this cycle</div>
+          </div>
         </div>
         {r.lines.map((l: any, i: number) => (
-          <div key={i} style={{ display: "flex", gap: 10, padding: "8px 0", borderBottom: "1px solid #1a2440", fontSize: 13.5, alignItems: "baseline" }}>
-            <span className="acc" style={{ fontWeight: 700, minWidth: 26 }}>{String(i + 1).padStart(2, "0")}</span>
-            <span style={{ flex: 1 }}>{l.s}</span>
-            <span className="xs mut">{l.t}</span>
+          <div key={i} className="rline">
+            <span className="acc" style={{ fontWeight: 700, minWidth: 24, flex: "none" }}>{String(i + 1).padStart(2, "0")}</span>
+            <span className="brk" style={{ flex: 1 }}>{l.s}</span>
+            <span className="xs mut" style={{ flex: "none" }}>{l.t}</span>
           </div>
         ))}
         <p className="sm mut" style={{ marginTop: 14, marginBottom: 0 }}>— Tomorrow the team continues on your publishing schedule. Anything you approve tonight goes out first. 🌙</p>
       </div>
+
+      <style jsx>{`
+        /* The divider was a hardcoded #1a2440 — invisible in the light theme, and it was drawn
+           under the last row too, so it collided with the closing paragraph. */
+        .rline { display: flex; gap: 10px; padding: 9px 0; align-items: baseline; font-size: 13.5px;
+                 border-bottom: 1px solid var(--line); }
+        .rline:last-of-type { border-bottom: none; }
+      `}</style>
     </>
   );
 }
