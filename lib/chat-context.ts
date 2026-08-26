@@ -60,15 +60,20 @@ export async function loadRecentWork(supabase: SupabaseClient, tenantId: string 
       .select("agent, action, status, detail, created_at")
       .eq("tenant_id", tenantId)
       .order("created_at", { ascending: false })
-      .limit(8);
+      // Five, not eight. Eight rows of raw log line is more text than the rest of the prompt
+      // put together, and the model answered "kya update hai" by pasting all of it back.
+      .limit(5);
     if (!data?.length) return null;
     return data
       .map((j: any) => {
         const when = new Date(j.created_at).toLocaleString();
-        const what = j.action && j.action !== j.agent ? j.action : j.agent;
-        const hint = j.detail?.hint ? ` (${String(j.detail.hint).slice(0, 200)})` : "";
+        // Job labels carry the full article title, which can run past a hundred characters
+        // and drowns the outcome that actually answers the question.
+        const raw = j.action && j.action !== j.agent ? j.action : j.agent;
+        const what = raw.length > 70 ? raw.slice(0, 70).trimEnd() + "…" : raw;
+        const hint = j.detail?.hint ? ` (${String(j.detail.hint).slice(0, 120)})` : "";
         const outcome =
-          j.status === "error" ? `FAILED: ${String(j.detail?.message ?? "unknown error").slice(0, 200)}${hint}`
+          j.status === "error" ? `FAILED: ${String(j.detail?.message ?? "unknown error").slice(0, 120)}${hint}`
           : j.status === "success" ? "done"
           : j.status;
         return `- ${when} · ${j.agent} · ${what} — ${outcome}`;
@@ -104,8 +109,12 @@ export async function loadSchedule(supabase: SupabaseClient, tenantId: string | 
         return [
           `- ${s.kind}: ON, ${when} at ${s.time_of_day} ${s.timezone}, ${s.count} per run`,
           s.auto_publish ? "publishes straight to the site with no review" : "lands in Approvals for review",
-          next ? `next run ${next.toISOString()}` : null,
-          s.last_run_at ? `last ran ${new Date(s.last_run_at).toISOString()}` : "has not run yet",
+          // Written out in the tenant's own timezone rather than as an ISO instant. Asked
+          // "schedule kab chalta hai", the model answered "2026-08-26T03:30:00.833Z" — it had
+          // been told to convert and simply pasted. A time nobody can read is not a fact the
+          // model should be trusted to reformat; it is a fact this function should format.
+          next ? `next run ${humanTime(next, s.timezone)} (${untilPhrase(next)})` : null,
+          s.last_run_at ? `last ran ${humanTime(new Date(s.last_run_at), s.timezone)}` : "has not run yet",
         ].filter(Boolean).join(" · ");
       })
       .join("\n");
@@ -118,6 +127,72 @@ export async function loadSchedule(supabase: SupabaseClient, tenantId: string | 
 }
 
 export const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+/** "Wednesday 26 August, 09:00 Asia/Calcutta" — a time a person can repeat out loud. */
+export function humanTime(at: Date, timeZone: string): string {
+  try {
+    const s = new Intl.DateTimeFormat("en-GB", {
+      timeZone, weekday: "long", day: "numeric", month: "long",
+      hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+    }).format(at);
+    return `${s} ${timeZone}`;
+  } catch {
+    return at.toISOString();
+  }
+}
+
+/** "in 16 hours", "in 12 minutes" — the part people actually want when they ask "kab". */
+export function untilPhrase(at: Date, from: Date = new Date()): string {
+  const mins = Math.round((at.getTime() - from.getTime()) / 60000);
+  if (mins < 1) return "any moment now";
+  if (mins < 60) return `in ${mins} minute${mins === 1 ? "" : "s"}`;
+  const hours = Math.round(mins / 60);
+  if (hours < 48) return `in ${hours} hour${hours === 1 ? "" : "s"}`;
+  return `in ${Math.round(hours / 24)} days`;
+}
+
+/** How much has actually been produced, counted rather than estimated.
+ *
+ *  "kitne article ban chuke hain" was being answered off the last five job-log rows, which
+ *  cannot possibly know the total — it replied "3" from a window that held two. A count is a
+ *  count; it should come from a COUNT. */
+export type Counts = { lines: string; awaiting: number; total: number };
+
+export async function loadCounts(supabase: SupabaseClient, tenantId: string | null): Promise<Counts | null> {
+  if (!tenantId) return null;
+  try {
+    const head = (status: string) =>
+      supabase
+        .from("content_items")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .eq("type", "article")
+        .eq("status", status);
+
+    const [published, awaiting, failed, draft] = await Promise.all([
+      head("published"), head("awaiting_approval"), head("failed"), head("draft"),
+    ]);
+    const total = (published.count ?? 0) + (awaiting.count ?? 0) + (failed.count ?? 0) + (draft.count ?? 0);
+    // One number per line, as key = value. Written as a sentence with the figures in
+    // parentheses, the model read "total 8 (published 1, awaiting 6, failed 1)" and answered
+    // "3 articles completed". A 30B model with reasoning off parses a table; it does not
+    // reliably parse prose full of digits.
+    return {
+      total,
+      awaiting: awaiting.count ?? 0,
+      lines: [
+        `TOTAL ARTICLES WRITTEN = ${total}`,
+        `PUBLISHED = ${published.count ?? 0}`,
+        `AWAITING YOUR APPROVAL = ${awaiting.count ?? 0}`,
+        `FAILED = ${failed.count ?? 0}`,
+        `STILL DRAFT = ${draft.count ?? 0}`,
+      ].join("\n"),
+    };
+  } catch (e: any) {
+    console.error("[chat] counts failed:", e?.message);
+    return null;
+  }
+}
 
 /** THE one implementation of "when does this fire next".
  *
