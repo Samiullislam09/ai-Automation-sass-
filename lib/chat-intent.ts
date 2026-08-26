@@ -1,3 +1,5 @@
+import { parseScheduleCommand, type SchedulePatch } from "@/lib/chat-schedule";
+
 /** Chat -> real work. Mr Lxwa is a manager, not a ghostwriter: when the user says
  *  "write me an article", the chat must START THE TEAM (boss/keyword -> writer -> approvals),
  *  not type an article into the chat bubble. This file decides when a message is an order
@@ -21,6 +23,15 @@ export type ChatIntent =
   // for it in the chat and got a fabricated confirmation instead of either the action or an
   // honest refusal.
   | { kind: "publish" }
+  // Change the RECURRING timetable — "roz subah 9 baje 3 article banao", "automation band kar
+  // do". The patch is parsed by lib/chat-schedule.ts and applied ON TOP of the saved row, so a
+  // message that changes one field cannot silently reset the other four.
+  | { kind: "schedule"; patch: SchedulePatch }
+  // Call off something already booked. `which` is "all" only when they said so — cancelling
+  // more than was asked for is the same class of mistake as publishing more than was asked for.
+  | { kind: "cancel"; which: "next" | "all" }
+  // Throw a draft away instead of publishing it.
+  | { kind: "reject" }
   | null;
 
 // "how does X work", "kya", "kaise", "?" — these are questions ABOUT the work, not orders.
@@ -43,6 +54,22 @@ const STATUS_QUESTION = /\b(update|status|progress|kya hua|kya huwa|kiya hua|kiy
 const PUBLISH_VERB = /\b(publish\w*|publsh\w*|pubish\w*|live kar\w*|upload\w*|post kar\w*)\b/i;
 const POINTS_AT_EXISTING = /\b(isko|ise|iss?e|usko|use ?ko|wo wala|ye wala|yeh wala|this one|that one|it|the last one|last wala|pichhla|pichla)\b/i;
 const MAKES_A_NEW_ONE = /\b(write|writing|draft|likh\w*|banao|banado|bana|naya|new|ek aur|another)\b/i;
+
+// Calling off something already booked. Both halves are required: "cancel" on its own is what
+// someone types about a subscription, an order on a shop, or a meeting — none of which this
+// chat has any business touching.
+//
+// "mat karna" and "mat chalana" were in here and are now not. "publish mat karna" is "don't
+// publish", said about something that has not happened — and it was cancelling the customer's
+// next booked order, which there is no undo for. Calling something off needs a word that means
+// calling something off, not a word that means "no".
+const CANCEL_VERB = /\b(cancel|canncel|cancle|rad+\s*kar\w*|hata\s*do|hatado|rok\s*do|rokdo|band\s*kar\w*)\b/i;
+const CANCEL_TARGET = /\b(schedule\w*|schudule\w*|booking|book\s*kiya|order|task|wo\s*wala|ye\s*wala|jo\s*book|countdown|publish\w*|artic\w*)\b/i;
+const CANCEL_ALL = /\b(sab|sabhi|saare|sara|all|everything|har\s*ek)\b/i;
+
+// Throwing a draft away. Deliberately narrow — there is no undo, and "reject" is a word people
+// also use about ideas and suggestions in ordinary conversation.
+const REJECT_VERB = /\b(reject|rejct|thukra\w*|delete\s*kar\w*|hata\s*do|discard|bin\s*it|scrap)\b/i;
 
 // "keyword research karke do", "sirf keyword nikalo", "find me some keywords".
 const RESEARCH_NOUN = /\b(keywords?|key ?word|kw)\b/i;
@@ -73,6 +100,27 @@ export function detectChatIntent(raw: string): ChatIntent {
   if (!q || q === "__hello__") return null;
 
   if (PLAN_ORDER.test(q)) return { kind: "plan" };
+
+  // ---- Settings changes, checked BEFORE the question guard ----
+  //
+  // These three are polite by nature — "kya automation band kar sakte ho?", "ye cancel kar
+  // doge?" — and QUESTION below drops anything ending in a question mark. Left after it, the
+  // most natural way to ask for them was also the one way that never worked.
+  //
+  // Each parser carries its own proof that an instruction was actually given, so a genuine
+  // question about the same subject still falls through: parseScheduleCommand needs an on/off
+  // word or a setting verb and returns null for "mera schedule kya hai", and the two below
+  // need an explicit cancel/reject verb.
+  const schedulePatch = parseScheduleCommand(q);
+  if (schedulePatch) return { kind: "schedule", patch: schedulePatch };
+
+  if (CANCEL_VERB.test(q) && CANCEL_TARGET.test(q) && !MAKES_A_NEW_ONE.test(q)) {
+    return { kind: "cancel", which: CANCEL_ALL.test(q) ? "all" : "next" };
+  }
+
+  if (REJECT_VERB.test(q) && (POINTS_AT_EXISTING.test(q) || ARTICLE_NOUN.test(q))) {
+    return { kind: "reject" };
+  }
 
   // A question about articles ("how do you write an article?") must stay a conversation.
   if (QUESTION.test(q)) return null;

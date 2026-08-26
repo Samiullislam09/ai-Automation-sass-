@@ -4,10 +4,11 @@ import "@/lib/dns-fix";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
-import { cached, sessionKey, TTL } from "@/lib/chat-cache";
+import { cached, invalidate, sessionKey, TTL } from "@/lib/chat-cache";
 import { detectChatIntent, wantsAutoPublish } from "@/lib/chat-intent";
 import { parseWhen, describeWhen } from "@/lib/when";
-import { placeOrder, findPublishable, MIGRATION_HINT } from "@/lib/scheduled-orders";
+import { applySchedule, describeSchedule } from "@/lib/chat-schedule";
+import { placeOrder, findPublishable, listPending, cancelOrder, MIGRATION_HINT, type OrderKind } from "@/lib/scheduled-orders";
 import { approveAndPublish } from "@/lib/publish";
 import { classifyIntent, mightBeAnOrder } from "@/lib/chat-classify";
 import { enqueueAgentJob } from "@/lib/agent-jobs";
@@ -453,6 +454,11 @@ async function startWork(
   message: string,
   supabase: SupabaseClient
 ): Promise<OrderResult> {
+  // ---- Settings, not work. None of these enqueue anything, so none of them animate a room ----
+  if (intent.kind === "schedule") return changeSchedule(supabase, tenantId, intent.patch);
+  if (intent.kind === "cancel") return cancelBooked(supabase, tenantId, intent.which);
+  if (intent.kind === "reject") return rejectDraft(supabase, tenantId);
+
   const tz = await cached(`tz:${tenantId}`, TTL.schedule, () => tenantTimezone(supabase, tenantId));
   const when = parseWhen(message, tz);
   const alsoPublish = wantsAutoPublish(message);
@@ -522,6 +528,99 @@ async function startWork(
     : accepted(`On it — I'll pick a topic from your niche, then show you the keyword options before anything gets written.${lands}`, "Choosing a topic from your niche");
 }
 
+/* ── Settings the chat can change ─────────────────────────────────────────────────────── */
+
+/** "roz subah 9 baje 3 article banao", "automation band kar do".
+ *
+ *  The confirmation is built from the row that was SAVED, not from the patch that was asked
+ *  for — so a count clamped to five, or an auto-publish flag that could not be stored because
+ *  migration 014 is missing, shows up here instead of being discovered next week. */
+async function changeSchedule(
+  supabase: SupabaseClient,
+  tenantId: string,
+  patch: import("@/lib/chat-schedule").SchedulePatch
+): Promise<OrderResult> {
+  const res = await applySchedule(supabase, tenantId, patch);
+  if (!res.ok || !res.row) {
+    return nothingStarted(`I couldn't save that: **${res.error}**. Your schedule is unchanged — check it on the **Schedule** page.`);
+  }
+
+  // The cached copies are now wrong, and Mr Lxwa reads them to answer "kab chalta hai".
+  // Answering the very next message with the old timetable is how a change that worked gets
+  // reported as a change that did not.
+  invalidate(`sched:${tenantId}`);
+  invalidate(`tz:${tenantId}`);
+
+  const note =
+    res.autoPublishAvailable === false && patch.autoPublish === true
+      ? `\n\nAuto-publish did **not** save — that column isn't in your database yet (run \`supabase/migrations/014_schedule_auto_publish.sql\`). Everything else did.`
+      : "";
+
+  return nothingStarted(`Saved — ${describeSchedule(res.row)}.${note}`);
+}
+
+/** "wo booking cancel kar do."
+ *
+ *  Defaults to the NEXT one, not all of them. Someone with three things booked who says
+ *  "cancel kar do" means the one they are thinking about, and there is no undo for the other
+ *  two. "sab cancel" is the only thing that cancels everything, and the reply names what went. */
+async function cancelBooked(
+  supabase: SupabaseClient,
+  tenantId: string,
+  which: "next" | "all"
+): Promise<OrderResult> {
+  const pending = await listPending(supabase, tenantId, 20);
+  if (!pending.length) {
+    return nothingStarted(`There's nothing booked to cancel. The **Schedule** page lists anything that is waiting.`);
+  }
+
+  const targets = which === "all" ? pending : [pending[0]];
+  const done: string[] = [];
+  const failed: string[] = [];
+
+  for (const o of targets) {
+    const r = await cancelOrder(supabase, tenantId, o.id);
+    (r.ok ? done : failed).push(describeOrder(o));
+  }
+
+  if (!done.length) {
+    return nothingStarted(`I couldn't cancel that — it may already have started. Check the **Schedule** page; nothing was changed.`);
+  }
+
+  const left = pending.length - done.length;
+  return nothingStarted(
+    `Cancelled: ${done.map((d) => `**${d}**`).join(", ")}.` +
+      (failed.length ? ` I could not cancel ${failed.length} of them — they had already started.` : "") +
+      (left > 0 && which !== "all" ? ` You still have **${left}** other booking(s) — say "sab cancel kar do" for all of them.` : "")
+  );
+}
+
+function describeOrder(o: { kind: string; topic: string | null }): string {
+  if (o.kind === "publish") return "publish the latest article";
+  if (o.kind === "research") return `research${o.topic ? ` "${o.topic}"` : " keywords"}`;
+  if (o.kind === "plan") return "pick this week's topics";
+  return o.topic ? `write "${o.topic}"` : "write an article";
+}
+
+/** "isko reject kar do" — throw the draft away rather than publish it. */
+async function rejectDraft(supabase: SupabaseClient, tenantId: string): Promise<OrderResult> {
+  const item = await findPublishable(supabase, tenantId);
+  if (!item) return nothingStarted(`There's no draft waiting — nothing to reject.`);
+
+  const { error } = await supabase
+    .from("content_items")
+    .update({ status: "rejected" })
+    .eq("id", item.id)
+    .eq("tenant_id", tenantId);
+
+  if (error) {
+    return nothingStarted(`I couldn't reject that: **${error.message}**. It is still in **Approvals**, untouched.`);
+  }
+  return nothingStarted(
+    `Rejected — **${item.title ?? "that draft"}** is out of Approvals and will not be published. It stays in your content list if you want to look at it again.`
+  );
+}
+
 /* ── Orders with a time on them ───────────────────────────────────────────────────────── */
 
 /** "30 min baad ek article likh ke publish kar do."
@@ -536,11 +635,14 @@ async function scheduleOrder(
   message: string,
   tz: string,
   when: NonNullable<ReturnType<typeof parseWhen>>,
-  intent: NonNullable<ReturnType<typeof detectChatIntent>>,
+  // Only the four kinds that describe WORK. schedule/cancel/reject are settings changes: they
+  // are answered before this is reached, and there is nothing about them to postpone — asking
+  // for the timetable to change "in 30 minutes" is not a thing anyone means.
+  intent: { kind: OrderKind } & Record<string, any>,
   alsoPublish: boolean
 ): Promise<OrderResult> {
-  const topic = intent.kind === "write" || intent.kind === "research" ? intent.topic : null;
-  const kind = intent.kind === "publish" ? "publish" : intent.kind;
+  const topic = intent.kind === "write" || intent.kind === "research" ? intent.topic ?? null : null;
+  const kind: OrderKind = intent.kind;
 
   const res = await placeOrder(supabase, tenantId, userId, {
     kind,

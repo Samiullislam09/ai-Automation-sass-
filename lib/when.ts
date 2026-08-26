@@ -212,6 +212,47 @@ function guard(w: When, now: Date): When | null {
   return w;
 }
 
+/* ── A time of day, not an instant ────────────────────────────────────────────────────── */
+
+/** "roz subah 9 baje" -> "09:00". For the RECURRING schedule, which repeats forever and so has
+ *  no date attached — `schedules.time_of_day` is a bare HH:MM in the tenant's own zone.
+ *
+ *  Deliberately not parseWhen(): that resolves to one instant and rolls a time that has already
+ *  gone today forward to tomorrow, which is right for "publish at 5pm" and wrong for "every day
+ *  at 9am" — asked at 4pm, the roll would silently store tomorrow's date's worth of nothing and
+ *  the customer's daily time would be off by a day's reasoning. Same clock patterns, no rolling. */
+export function parseTimeOfDay(raw: string): string | null {
+  const q = String(raw ?? "").toLowerCase();
+  if (!q.trim()) return null;
+
+  const clockM = q.match(CLOCK);
+  const partM = q.match(PART_WORD);
+
+  let hh: number | null = null;
+  let mi = 0;
+
+  if (clockM) {
+    hh = Number(clockM[1]);
+    mi = clockM[2] ? Number(clockM[2]) : 0;
+    if (hh > 23 || mi > 59) return null;
+    const suffix = clockM[3].toLowerCase();
+    if (suffix.startsWith("p") && hh < 12) hh += 12;
+    if (suffix.startsWith("a") && hh === 12) hh = 0;
+    if (!suffix.startsWith("a") && !suffix.startsWith("p")) {
+      // "shaam 6 baje" is 18:00. With no part of the day named, a bare hour is taken at face
+      // value — there is no "now" to lean on here, and inventing one would make the same
+      // sentence mean different things depending on when it was typed.
+      const part = partM ? partOf(partM[1]) : null;
+      if (part != null && part >= 12 && hh < 12) hh += 12;
+    }
+  } else if (partM) {
+    hh = partOf(partM[1]);
+  }
+
+  if (hh == null) return null;
+  return `${String(hh).padStart(2, "0")}:${String(mi).padStart(2, "0")}`;
+}
+
 /* ── Saying it back ───────────────────────────────────────────────────────────────────── */
 
 /** "in 30 minutes (4:32 PM)" — both halves on purpose. The relative half is what they asked

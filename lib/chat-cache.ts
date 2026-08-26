@@ -49,6 +49,21 @@ function evictIfNeeded() {
   }
 }
 
+/** Drop an entry the moment the thing behind it changes.
+ *
+ *  Every TTL here is a bet that the underlying fact did not change, and the bet is sound right
+ *  up until the chat itself changes it. Someone who says "roz 9 baje kar do" and then asks
+ *  "kab chalta hai?" ten seconds later would be told the OLD time — by the same conversation
+ *  that just changed it — for the rest of the schedule TTL. A stale answer to a question the
+ *  user is asking precisely to check your work is worse than no cache at all.
+ *
+ *  Any in-flight load is dropped too: it was started against the old state and would otherwise
+ *  land afterwards and reinstate it. */
+export function invalidate(key: string) {
+  store.delete(key);
+  inFlight.delete(key);
+}
+
 /** Read through the cache, collapsing concurrent misses onto one load. */
 export async function cached<T>(key: string, ttlMs: number, load: () => Promise<T>): Promise<T> {
   const hit = store.get(key);
