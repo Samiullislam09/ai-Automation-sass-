@@ -1,5 +1,6 @@
 import "@/lib/dns-fix";
 import { isRealTopic, type ChatIntent } from "@/lib/chat-intent";
+import { NVIDIA_URL, chatModelsInOrder, modelParams } from "@/lib/chat-model";
 
 /** What the user actually asked for, decided by the model instead of by a regex.
  *
@@ -95,25 +96,32 @@ export async function classifyIntent(message: string, history: { role: string; c
   ].filter(Boolean).join("\n");
 
   try {
-    const res = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-      body: JSON.stringify({
-        model: "nvidia/nemotron-3.5-lightning-30b-a3b",
-        stream: false,
-        chat_template_kwargs: { thinking: false },
-        // Classification, not prose. A low temperature keeps the same sentence classified the
-        // same way twice, which matters when the answer spends money.
-        temperature: 0,
-        max_tokens: 120,
-        messages: [{ role: "user", content: prompt }],
-      }),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-    if (!res.ok) return null;
-
-    const data = await res.json();
-    const raw: string = data?.choices?.[0]?.message?.content ?? "";
+    // Same model order as the conversation (lib/chat-model.ts): gpt-oss-120b read all seven
+    // test orders correctly including "publish mat karna", which Nemotron turned into an
+    // article. The fallback only runs if the primary call itself fails.
+    let raw = "";
+    for (const model of chatModelsInOrder()) {
+      const res = await fetch(NVIDIA_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+        body: JSON.stringify({
+          model,
+          stream: false,
+          ...modelParams(model),
+          // Classification, not prose. A low temperature keeps the same sentence classified
+          // the same way twice, which matters when the answer spends money.
+          temperature: 0,
+          max_tokens: 200,
+          messages: [{ role: "user", content: prompt }],
+        }),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      }).catch((e) => { console.error(`[chat-classify] ${model} unreachable:`, e?.message); return null; });
+      if (!res?.ok) continue;
+      const data = await res.json();
+      raw = data?.choices?.[0]?.message?.content ?? "";
+      if (raw.trim()) break;
+    }
+    if (!raw.trim()) return null;
     const json = raw.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
     const parsed = JSON.parse(json.slice(json.indexOf("{"), json.lastIndexOf("}") + 1));
 

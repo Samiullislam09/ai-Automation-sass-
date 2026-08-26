@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
 import { cached, invalidate, sessionKey, TTL } from "@/lib/chat-cache";
+import { NVIDIA_URL, chatModelsInOrder, modelParams } from "@/lib/chat-model";
 import { detectChatIntent, wantsAutoPublish } from "@/lib/chat-intent";
 import { parseWhen, describeWhen } from "@/lib/when";
 import { applySchedule, describeSchedule } from "@/lib/chat-schedule";
@@ -45,8 +46,8 @@ export const maxDuration = 60;
  *  cost several rounds of arguing with a stale build. */
 let lastSections = "none";
 
-const NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
-const MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b";
+// Model choice and its per-model switches live in lib/chat-model.ts, with the measurements
+// that picked them. Nothing in this file should name a model.
 
 function systemPrompt(ctx: any, business: string | null, awaiting: number | null): string {
   // `awaiting` is counted server-side, not taken from ctx. The client sends
@@ -236,7 +237,7 @@ function buildMessages(
 
 /** Opens the NVIDIA stream and hands back the raw byte stream plus the response, so the
  *  caller can start writing to the browser the moment the first token exists. */
-async function openLightningStream(messages: any[], signal: AbortSignal): Promise<ReadableStream<Uint8Array>> {
+async function openLightningStream(model: string, messages: any[], signal: AbortSignal): Promise<ReadableStream<Uint8Array>> {
   const key = process.env.NVIDIA_API_KEY;
   if (!key) throw new Error("NVIDIA_API_KEY missing");
 
@@ -244,12 +245,12 @@ async function openLightningStream(messages: any[], signal: AbortSignal): Promis
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
     body: JSON.stringify({
-      model: MODEL,
+      model,
       stream: true,
-      // The real "reasoning off" switch for this Nemotron hybrid model — a "detailed thinking
-      // off" line in the system prompt is only a soft hint and it still burned huge, wildly
-      // variable amounts of reasoning_content. DO NOT remove this.
-      chat_template_kwargs: { thinking: false },
+      // The real "reasoning off" switch, per model (reasoning_effort for gpt-oss,
+      // chat_template_kwargs.thinking for Nemotron). A system-prompt hint is not enough for
+      // either — see lib/chat-model.ts. DO NOT remove this.
+      ...modelParams(model),
       // No temperature was set here, so this ran at the API default — and it showed. Asked
       // what plan the account was on, with "growth · 390 of 400 tokens" sitting in the
       // prompt, it answered "gold plan ke 400 token aur 3 articles per day": the tier
@@ -264,7 +265,7 @@ async function openLightningStream(messages: any[], signal: AbortSignal): Promis
   });
 
   if (!res.ok || !res.body) {
-    throw new Error(`NVIDIA NIM chat failed (${res.status}): ${(await res.text().catch(() => "")).slice(0, 300)}`);
+    throw new Error(`NVIDIA NIM chat failed (${model}, ${res.status}): ${(await res.text().catch(() => "")).slice(0, 300)}`);
   }
   return res.body;
 }
@@ -856,11 +857,13 @@ export async function POST(req: NextRequest) {
   const history = convId && convId === askedFor && storedHistory.length ? storedHistory : clientHistory;
   const messages = buildMessages(q, ctx || {}, { business, recentWork, schedule, counts }, history);
 
-  // Two attempts, but only at OPENING the stream. Once tokens are flowing a retry would mean
-  // re-writing text the reader has already seen, so a mid-stream break is reported in place.
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  // Primary model, then the fallback model — but only at OPENING the stream. Once tokens are
+  // flowing a retry would mean re-writing text the reader has already seen, so a mid-stream
+  // break is reported in place.
+  for (const model of chatModelsInOrder()) {
     try {
-      const upstream = await openLightningStream(messages, AbortSignal.timeout(30000));
+      const upstream = await openLightningStream(model, messages, AbortSignal.timeout(30000));
+      mark.model = chatModelsInOrder().indexOf(model);
       lap("streamOpen");
       const sections = lastSections;
       const body = relay(
@@ -883,7 +886,7 @@ export async function POST(req: NextRequest) {
         },
       });
     } catch (e: any) {
-      console.error(`[chat] Lightning stream failed to open (attempt ${attempt}/2):`, e?.message);
+      console.error(`[chat] stream failed to open on ${model}, trying next:`, e?.message);
     }
   }
   return reply(fallback(q, ctx || {}));
