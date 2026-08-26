@@ -95,10 +95,18 @@ export async function loadSchedule(supabase: SupabaseClient, tenantId: string | 
     // select("*") on purpose: auto_publish arrives with migration 014, and naming it in the
     // column list would make this whole block fail on a database that hasn't run it yet —
     // costing Mr Lxwa every other schedule fact over one missing column.
-    const { data } = await supabase.from("schedules").select("*").eq("tenant_id", tenantId);
-    if (!data?.length) return "No automatic schedule has been set up yet.";
+    // Both halves, read together. The recurring timetable and the one-off orders placed in the
+    // chat live in two different tables, and answering from only one of them is how "kya
+    // schedule pe hai" came back missing the thing the customer had booked ninety seconds ago.
+    const [{ data }, oneOffs] = await Promise.all([
+      supabase.from("schedules").select("*").eq("tenant_id", tenantId),
+      loadPendingOrders(supabase, tenantId),
+    ]);
+    if (!data?.length) {
+      return [oneOffs, "No recurring automatic schedule has been set up yet."].filter(Boolean).join("\n");
+    }
 
-    return data
+    const recurring = data
       .map((s: any) => {
         if (!s.enabled) return `- ${s.kind}: automation is OFF.`;
         const next = nextRunAt(s);
@@ -118,12 +126,51 @@ export async function loadSchedule(supabase: SupabaseClient, tenantId: string | 
         ].filter(Boolean).join(" · ");
       })
       .join("\n");
+
+    return [recurring, oneOffs].filter(Boolean).join("\n");
   } catch (e: any) {
     // Before migration 014 the auto_publish column doesn't exist. Say nothing rather than
     // making the model guess.
     console.error("[chat] schedule context failed:", e?.message);
     return null;
   }
+}
+
+/** One-off orders placed in the chat that have not fired yet — "30 min baad publish kar do".
+ *
+ *  Read from the ROW, never from the sentence that created it. The row is what the scheduler
+ *  will act on, so if the two ever disagree the row is the one that is true — and this is the
+ *  reference Mr Lxwa answers "kya schedule pe hai" from.
+ *
+ *  Returns null rather than throwing when migration 015 has not been run, so the rest of the
+ *  schedule answer survives a database that is one file behind. */
+export async function loadPendingOrders(supabase: SupabaseClient, tenantId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("scheduled_orders")
+    .select("kind, topic, auto_publish, run_at")
+    .eq("tenant_id", tenantId)
+    .eq("status", "pending")
+    .order("run_at", { ascending: true })
+    .limit(10);
+  if (error || !data?.length) return null;
+
+  const tzRow = await supabase.from("schedules").select("timezone").eq("tenant_id", tenantId).limit(1);
+  const tz = tzRow.data?.[0]?.timezone ?? "UTC";
+
+  const lines = (data as any[]).map((o) => {
+    const what =
+      o.kind === "publish" ? "publish an article that is already written"
+      : o.kind === "research" ? `research keywords${o.topic ? ` for "${o.topic}"` : ""}`
+      : o.kind === "plan" ? "pick this week's topics and write them"
+      : `write an article${o.topic ? ` about "${o.topic}"` : ""}`;
+    const lands =
+      o.kind === "research" ? "nothing published"
+      : o.auto_publish ? "publishes straight to the site" : "lands in Approvals";
+    const at = new Date(o.run_at);
+    return `- ONE-OFF: ${what} at ${humanTime(at, tz)} (${untilPhrase(at)}) · ${lands}`;
+  });
+
+  return `One-off orders the user booked in this chat, not yet fired (${lines.length}):\n${lines.join("\n")}`;
 }
 
 export const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];

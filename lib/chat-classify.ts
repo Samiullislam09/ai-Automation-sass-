@@ -1,5 +1,5 @@
 import "@/lib/dns-fix";
-import type { ChatIntent } from "@/lib/chat-intent";
+import { isRealTopic, type ChatIntent } from "@/lib/chat-intent";
 
 /** What the user actually asked for, decided by the model instead of by a regex.
  *
@@ -39,7 +39,8 @@ const RULES = [
   '"write" — they want an article written now.',
   '"research" — they want keyword or topic research, but NOT an article written. Asking for keywords FOR an article is research, unless they also ask for the article itself.',
   '"plan" — they want the team to start on this week\'s content in general, with no specific topic.',
-  '"none" — anything else: a question, a status check ("kya update hai"), small talk, publishing or approving an article that already exists, or an instruction you are not sure about.',
+  '"publish" — they want an article that ALREADY EXISTS pushed live ("isko publish kar do", "publish the last one"). Nothing new is written.',
+  '"none" — anything else: a question, a status check ("kya update hai"), small talk, or an instruction you are not sure about.',
 ];
 
 // Generic words that describe the REQUEST rather than the subject. A model asked for "the
@@ -50,6 +51,12 @@ const FILLER = /\b(?:best|good|top|new|next|some|any|my|our|the|an?|for|about|on
 function cleanTopic(raw: unknown): string | null {
   const v = String(raw ?? "").trim();
   if (v.length < 3) return null;
+  // A model told to "use null" writes the WORD null about as often as it emits the JSON value,
+  // and `String("null")` is four perfectly valid characters. This is not hypothetical: it
+  // shipped, Mr. Keyword was handed "null" as a seed, and the customer watched their team
+  // research it and come back with eight keywords for nothing. isRealTopic also throws out the
+  // other shape of the same mistake — the model echoing the request back as the subject.
+  if (!isRealTopic(v)) return null;
   // If nothing but filler is left, they never actually named a subject — say so with null
   // rather than seeding research with the sentence they typed.
   const residue = v.replace(FILLER, " ").replace(/[^\p{L}\p{N}\s-]/gu, " ").replace(/\s+/g, " ").trim();
@@ -80,10 +87,11 @@ export async function classifyIntent(message: string, history: { role: string; c
     "- Negation decides everything. \"article nahi likhna\", \"don't write it\", \"mat likho\" is never \"write\".",
     "- The message may be English, Hinglish or Roman Urdu.",
     "- topic: ONLY the subject matter, e.g. \"ISO 9001 certification\" or \"local SEO\". Never the whole sentence, and never words like article, blog, post, keyword or content. If they named no subject, use null.",
-    "- Publishing or approving an article that already exists is \"none\" — that happens on the Approvals page, not by starting new work.",
+    "- Asking to publish something that already exists is \"publish\", not \"write\" and not \"none\". Writing a NEW article and publishing it is \"write\".",
+    "- A time in the message (\"30 min baad\", \"kal 9 baje\") does NOT change the action. It is read separately. Classify what they want done, not when.",
     "- When unsure, answer \"none\". Starting work nobody asked for costs the customer money.",
     "",
-    'Reply with ONLY JSON: {"action":"write"|"research"|"plan"|"none","topic":"..."|null}',
+    'Reply with ONLY JSON: {"action":"write"|"research"|"plan"|"publish"|"none","topic":"..."|null}. For topic use the JSON value null, never the text "null".',
   ].filter(Boolean).join("\n");
 
   try {
@@ -114,6 +122,7 @@ export async function classifyIntent(message: string, history: { role: string; c
       case "write": return { kind: "write", topic };
       case "research": return { kind: "research", topic };
       case "plan": return { kind: "plan" };
+      case "publish": return { kind: "publish" };
       default: return null; // includes "none" and anything unexpected
     }
   } catch (e: any) {

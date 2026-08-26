@@ -10,6 +10,12 @@ import { AGENTS as STORE_AGENTS } from "@/lib/agents-data";
 // mapped to a room — they still count toward the plain stat cards below.
 const JOB_AGENT_TO_ROOM: Record<string, string> = {
   boss: "boss", keyword: "keyword", writer: "writer", seo: "seo", social: "social",
+  // Mr. Publish became a real agent when the chat learned to schedule a publish
+  // (agent-server/src/scheduler.ts, tickOrders). Before that his room was decoration: the
+  // office drew him, the log never mentioned him, and the count of jobs he had ever run was
+  // zero — which is exactly what made a fabricated "Mr. Publish — queued for immediate
+  // publish" impossible for anyone to catch.
+  publish: "publish",
 };
 
 export type RoomState = { state: "working" | "off" | "error" | "waiting"; task: string };
@@ -180,7 +186,7 @@ const TASKS: Record<string, string> = {
 // Agents missing from this map have no queue of their own yet: Mr. QA and Mr. Publish are
 // stages inside the writer job (quality gate / publish), so their panel reads content_items.
 export const AGENT_ID_TO_JOB: Record<string, string> = {
-  boss: "boss", kw: "keyword", writer: "writer", seo: "seo", social: "social",
+  boss: "boss", kw: "keyword", writer: "writer", seo: "seo", social: "social", publish: "publish",
 };
 
 export type AgentJobRow = {
@@ -413,6 +419,23 @@ function describeJob(jobAgent: string, status: string, detail: any): { summary: 
       ? detail.failures.slice(0, 6).map((f: any) => `${f.url} — ${f.error}`)
       : [];
     return { summary, items };
+  }
+
+  if (jobAgent === "publish") {
+    // Written from the result, never from the attempt. This agent exists because the chat can
+    // now be told "kal 9 baje isko publish kar do", and the one thing that must never happen
+    // again on this path is a success message for a publish that did not happen.
+    const title = detail.title ? String(detail.title) : "the article";
+    if (detail.published === true) {
+      return {
+        summary: `Published “${title}” to your site.`,
+        items: detail.url ? [String(detail.url)] : [],
+      };
+    }
+    return {
+      summary: `Could not publish “${title}”: ${detail.error ?? "unknown error"}. It is NOT live.`,
+      items: detail.hint ? [String(detail.hint)] : [],
+    };
   }
 
   return { summary: "Finished.", items: [] };

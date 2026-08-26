@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { supabase } from "./supabase.js";
 import { enqueue } from "./queues.js";
+import { publishContentItem } from "./lib/publish.js";
+import { logJobStart, logJobFinish } from "./jobsLog.js";
 
 /** The thing that makes this product actually automatic.
  *
@@ -33,9 +35,15 @@ let timer: NodeJS.Timeout | null = null;
 export function startScheduler() {
   if (timer) return;
   // First sweep shortly after boot, then every minute.
-  setTimeout(() => void tick(), 5_000);
-  timer = setInterval(() => void tick(), TICK_MS);
-  console.log("[scheduler] running — checking schedules every 60s");
+  setTimeout(() => void sweep(), 5_000);
+  timer = setInterval(() => void sweep(), TICK_MS);
+  console.log("[scheduler] running — checking schedules and one-off orders every 60s");
+}
+
+/** Both timetables, one tick. Independent on purpose: a broken recurring schedule must not
+ *  stop a customer's one-off order from firing, and vice versa. */
+async function sweep() {
+  await Promise.allSettled([tick(), tickOrders()]);
 }
 
 export function stopScheduler() {
@@ -95,6 +103,172 @@ export async function tick() {
       console.error(`[scheduler] tenant ${row.tenant_id} failed:`, e?.message);
     }
   }
+}
+
+/* ── One-off orders placed in the chat ────────────────────────────────────────────────── */
+
+/** "30 min baad ek article publish kar do" — supabase/migrations/015_scheduled_orders.sql.
+ *
+ *  The other half of the same product promise as `tick()` above, and the half that was
+ *  missing. The chat could start work now, but a message with a time in it had nowhere to go:
+ *  the time was dropped, the writer started immediately, and when the customer objected the
+ *  model replied "Mr. Publish — queued for immediate publish (30 minutes from now)". No row,
+ *  no job, and Mr. Publish had never run once.
+ *
+ *  Unlike the recurring schedule, missed orders ARE run late. The arguments differ: skipping a
+ *  daily article costs one article out of hundreds, but skipping "publish this at 5pm" silently
+ *  drops a specific thing a specific person asked for, and they will not find out until they
+ *  check their site. Anything older than the grace window below is failed with a reason
+ *  instead — publishing six hours late is its own kind of wrong.
+ */
+const ORDER_GRACE_MS = 60 * 60 * 1000;
+
+export async function tickOrders() {
+  const nowIso = new Date().toISOString();
+
+  const { data: rows, error } = await supabase
+    .from("scheduled_orders")
+    .select("*")
+    .eq("status", "pending")
+    .lte("run_at", nowIso)
+    .order("run_at", { ascending: true })
+    .limit(25);
+
+  if (error) {
+    // Table missing = migration 015 not applied. Same treatment as a missing `schedules`:
+    // say so once a minute, and let every other part of the server carry on.
+    console.error("[scheduler] could not read scheduled_orders:", error.message);
+    return;
+  }
+  if (!rows?.length) return;
+
+  for (const row of rows) {
+    // Claimed BEFORE the work starts. Two ticks can overlap if an enqueue is slow, and this
+    // is a customer's live website — "fired twice" is not a recoverable kind of wrong.
+    const claimed = await claim(row.id);
+    if (!claimed) continue;
+
+    const late = Date.now() - new Date(row.run_at).getTime();
+    if (late > ORDER_GRACE_MS) {
+      const mins = Math.round(late / 60000);
+      await finishOrder(row.id, "failed", null, `Missed by ${mins} minutes — not run. Nothing was published.`);
+      console.warn(`[scheduler] order ${row.id} was ${mins}m late; refused`);
+      continue;
+    }
+
+    try {
+      const jobId = await runOrder(row);
+      await finishOrder(row.id, "done", jobId, null);
+      console.log(`[scheduler] order ${row.id} (${row.kind}) fired -> ${jobId ?? "done inline"}`);
+    } catch (e: any) {
+      await finishOrder(row.id, "failed", null, e?.message ?? "Unknown error");
+      console.error(`[scheduler] order ${row.id} failed:`, e?.message);
+    }
+  }
+}
+
+/** Moves one row out of `pending`, and reports whether THIS caller is the one that did it.
+ *  The `.eq("status", "pending")` is the lock: the second writer matches nothing. */
+async function claim(id: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("scheduled_orders")
+    .update({ status: "running", fired_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("status", "pending")
+    .select("id");
+  return !error && !!data?.length;
+}
+
+async function finishOrder(id: string, status: "done" | "failed", jobId: string | null, error: string | null) {
+  await supabase.from("scheduled_orders").update({ status, job_id: jobId, error }).eq("id", id);
+}
+
+/** Does the thing. Returns the agent job id when it queued one, or null when it finished on
+ *  the spot (publishing is not a queue — see below). Throws on failure, so the row is marked
+ *  failed with the real reason rather than quietly marked done. */
+async function runOrder(row: any): Promise<string | null> {
+  const tenantId = row.tenant_id as string;
+
+  if (row.kind === "publish") {
+    if (!row.content_item_id) throw new Error("No article was attached to this order.");
+    return await publishOne(tenantId, String(row.content_item_id));
+  }
+
+  const chain = row.kind === "research" ? false : row.kind === "write" ? true : true;
+  const autoPublish = row.auto_publish === true;
+  // A scheduled write does NOT stop to ask which keyword. The customer already made the one
+  // decision this run needed — when it should happen — and a countdown nobody is watching at
+  // 3am resolves to the recommended keyword anyway, one hour later than it should have.
+  const topic = typeof row.topic === "string" && row.topic.trim() ? row.topic.trim() : null;
+
+  if (topic) {
+    return (await enqueue("keyword", {
+      tenantId, topic, chain, autoPublish,
+      source: "scheduled-order",
+      taskLabel: row.kind === "research" ? `Keyword research: "${topic}"` : `Researching "${topic}"`,
+    } as any)) as string;
+  }
+
+  return (await enqueue("boss", {
+    tenantId,
+    count: row.kind === "plan" ? 3 : 1,
+    chain, autoPublish,
+    source: "scheduled-order",
+    taskLabel: "Scheduled order — picking a topic",
+  } as any)) as string;
+}
+
+/** Publishing has no queue: it is one HTTP call to the customer's site and there is nothing to
+ *  chain afterwards. It is still logged as a `publish` job so it shows up in the office, the
+ *  run log and the chat exactly like every other piece of work — which is the whole point.
+ *  Mr. Publish having never appeared in jobs_log is what made a fabricated confirmation about
+ *  him impossible to notice. */
+async function publishOne(tenantId: string, itemId: string): Promise<string | null> {
+  const { data: item, error } = await supabase
+    .from("content_items")
+    .select("id, title, body, type, status, meta")
+    .eq("id", itemId)
+    .eq("tenant_id", tenantId)
+    .single();
+
+  const title = item?.title ?? "the article";
+  const logId = await logJobStart(tenantId, "publish", `Publishing "${title}"`);
+
+  if (error || !item) {
+    await logJobFinish(logId, { published: false, title, error: "The article no longer exists." });
+    throw new Error("The article no longer exists.");
+  }
+  if (item.status === "published") {
+    await logJobFinish(logId, { published: false, title, error: "It was already live." });
+    return null;
+  }
+  if (!item.body) {
+    await logJobFinish(logId, { published: false, title, error: "It has no body — it was never finished." });
+    throw new Error("The article has no body.");
+  }
+
+  const result = await publishContentItem(tenantId, {
+    id: String(item.id), title: item.title, body: item.body, type: item.type,
+  });
+  const prevMeta = (item.meta as Record<string, unknown>) ?? {};
+
+  if (result.ok) {
+    await supabase
+      .from("content_items")
+      .update({ status: "published", meta: { ...prevMeta, publishedUrl: result.url ?? null, scheduledPublish: true } })
+      .eq("id", itemId);
+    await logJobFinish(logId, { published: true, title, url: result.url ?? null });
+    return null;
+  }
+
+  // The article is NOT marked failed. It is still a perfectly good draft waiting in Approvals,
+  // and burning its status because a WordPress password expired would lose the writer's work
+  // over someone else's problem.
+  await logJobFinish(logId, {
+    published: false, title, error: result.error,
+    hint: "Check the site connection on the Connect page. The article is untouched and still in Approvals.",
+  });
+  throw new Error(result.error ?? "Publishing failed.");
 }
 
 type Row = {

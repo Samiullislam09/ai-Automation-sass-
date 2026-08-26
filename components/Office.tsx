@@ -334,6 +334,10 @@ export default function Office({ demo = false, solo = null, onSelect, flash = nu
   const timeline: any[] = demo ? [] : store?.s?.timeline ?? [];
   const handoffs: any[] = demo ? [] : store?.s?.handoffs ?? [];
   const nextRun = demo ? null : store?.s?.nextRun ?? null;
+  // Booked in the chat, not yet fired. Empty in demo mode for the same reason nextRun is null
+  // there: the marketing office is a drawing, and a countdown on it would be counting to
+  // nothing.
+  const orders: any[] = demo ? [] : store?.s?.orders ?? [];
   const run = demo ? null : store?.s?.run ?? null;
 
   // One ticking clock for the whole scene, rather than one per countdown. Started after mount
@@ -558,10 +562,38 @@ export default function Office({ demo = false, solo = null, onSelect, flash = nu
 
       {/* The clock on the office wall. Reads the tenant's own schedules row — when automation
           is off it says so rather than showing a countdown to nothing. */}
-      {!demo && nextRun && (
+      {!demo && (nextRun || orders.length > 0) && (
         <div className="office-board">
-          <div className="ob-h">Next automatic run</div>
-          {nextRun.enabled && nextAt ? (
+          {/* Booked in the chat, counting down on the wall. This is the half the customer
+              could not see: they said "30 min baad publish kar do", were told it was queued,
+              and had nowhere to go and check. Soonest first, and each line says where it
+              lands — a countdown that does not say "publishes straight to your site" is
+              hiding the only part that cannot be undone. */}
+          {orders.length > 0 && (
+            <div className="ob-orders">
+              <div className="ob-h">You booked in chat</div>
+              {orders.slice(0, 2).map((o) => {
+                const at = new Date(o.run_at).getTime();
+                return (
+                  <div key={o.id} className="ob-order">
+                    <div className="ob-t ob-t-sm">{now == null ? "…" : gap(at - now)}</div>
+                    <div className="ob-s">
+                      {o.kind === "publish" ? "publish your latest article"
+                        : o.kind === "research" ? `research${o.topic ? ` “${o.topic}”` : " keywords"}`
+                        : o.topic ? `write “${o.topic}”` : "write an article"}
+                      {" · "}
+                      {o.kind === "research" ? "nothing published"
+                        : o.auto_publish || o.kind === "publish" ? "goes straight to your site" : "lands in Approvals"}
+                    </div>
+                  </div>
+                );
+              })}
+              {orders.length > 2 && <div className="ob-s">+{orders.length - 2} more on the Schedule page</div>}
+            </div>
+          )}
+
+          {nextRun && <div className="ob-h">Next automatic run</div>}
+          {nextRun && nextRun.enabled && nextAt ? (
             <>
               <div className="ob-t">{now == null ? "…" : gap(nextAt - now)}</div>
               <div className="ob-s">
@@ -571,9 +603,9 @@ export default function Office({ demo = false, solo = null, onSelect, flash = nu
                 {nextRun.count} article{nextRun.count === 1 ? "" : "s"} · {nextRun.autoPublish ? "publishes straight to your site" : "lands in Approvals"}
               </div>
             </>
-          ) : (
+          ) : nextRun ? (
             <div className="ob-s">Automation is off — nothing runs by itself.</div>
-          )}
+          ) : null}
         </div>
       )}
 
@@ -654,6 +686,15 @@ export default function Office({ demo = false, solo = null, onSelect, flash = nu
                 font-variant-numeric: tabular-nums; line-height: 1.1; }
         .ob-s { font-size: 10.5px; color: var(--mut); margin-top: 3px; line-height: 1.4; }
 
+        /* What the customer booked in the chat, above the recurring clock. Above on purpose:
+           it is the nearer event and the one they are actually waiting on, and it is the one
+           they had no way to verify before this existed. The accent bar is the same colour the
+           chat uses to confirm an order, so the two read as the same thing in two places. */
+        .ob-orders { margin-bottom: 9px; padding-bottom: 8px;
+                     border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+        .ob-order { border-left: 2px solid var(--ac); padding-left: 8px; margin-top: 5px; }
+        .ob-t-sm { font-size: 15px; }
+
         /* Docked to the bottom of the office frame, never over the rooms' name tags. It has
            its own scroll so a long run cannot push the office out of the viewport. */
         .office-log { position: absolute; left: 0; right: 0; bottom: 0; z-index: 4;
@@ -687,8 +728,15 @@ export default function Office({ demo = false, solo = null, onSelect, flash = nu
           .office-hud { max-width: 48%; }
           .office-board { padding: 7px 10px; min-width: 0; max-width: 44%; border-radius: 10px; }
           .ob-t { font-size: 15px; }
+          .ob-t-sm { font-size: 13px; }
           .ob-s { font-size: 9.5px; }
           .ob-s + .ob-s { display: none; }
+          /* Booked orders TIGHTEN on a phone; they are never dropped. Hiding the second one
+             would have made the "+N more" line below it wrong — it counts from two — and a
+             board that quietly loses a booking is the exact failure this whole feature exists
+             to fix. */
+          .ob-orders { margin-bottom: 7px; padding-bottom: 6px; }
+          .ob-order { margin-top: 4px; padding-left: 6px; }
           .office-log { max-height: 46%; }
           .ol-body { padding: 0 11px 8px; }
           .ol-row { grid-template-columns: 50px 1fr; column-gap: 8px; row-gap: 0; font-size: 10.5px; }

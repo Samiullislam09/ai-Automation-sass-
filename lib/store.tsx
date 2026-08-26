@@ -57,6 +57,13 @@ type State = {
     kind: string; at: string | null; timezone: string; timeOfDay: string;
     frequency: string; count: number; enabled: boolean; autoPublish: boolean; lastRunAt: string | null;
   } | null;
+  /** One-off orders booked in the chat that have not fired yet — "30 min baad publish kar do"
+   *  (supabase/migrations/015_scheduled_orders.sql). Read straight from the row, so the
+   *  countdown on the office wall and the Schedule page are the same fact, not two guesses. */
+  orders: {
+    id: string; kind: string; topic: string | null; auto_publish: boolean;
+    run_at: string; status: string; request: string | null;
+  }[];
   /** An order that was accepted a second ago and has not shown up in jobs_log yet.
    *
    *  The gap is real: enqueueing returns a job id immediately, but the row only appears once
@@ -94,7 +101,7 @@ const initial: State = {
   memory: [], content: [], reports: [], activity: [],
   agents: Object.fromEntries(AGENTS.map(a => [a.id, a.live ? { st: "i", task: "Idle" } : { st: "o", task: "Coming soon" }])) as any,
   busy: false, focusAgent: null, onboardedChecked: false,
-  stats: null, recentJobs: [], timeline: [], handoffs: [], nextRun: null, run: null,
+  stats: null, recentJobs: [], timeline: [], handoffs: [], nextRun: null, orders: [], run: null,
   flash: null, celebration: null, crawl: null, chatNotices: [], keywordChoice: null, liveError: null,
 };
 
@@ -115,7 +122,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       // or the office shows an agent "working" on a job that finished hours ago.
       if (raw) setS({
         ...initial, ...JSON.parse(raw),
-        stats: null, recentJobs: [], timeline: [], handoffs: [], nextRun: null, run: null,
+        stats: null, recentJobs: [], timeline: [], handoffs: [], nextRun: null, orders: [], run: null,
         flash: null, celebration: null, crawl: null, chatNotices: [], keywordChoice: null, liveError: null,
       });
     } catch {}

@@ -5,7 +5,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
 import { cached, sessionKey, TTL } from "@/lib/chat-cache";
-import { detectChatIntent } from "@/lib/chat-intent";
+import { detectChatIntent, wantsAutoPublish } from "@/lib/chat-intent";
+import { parseWhen, describeWhen } from "@/lib/when";
+import { placeOrder, findPublishable, MIGRATION_HINT } from "@/lib/scheduled-orders";
+import { approveAndPublish } from "@/lib/publish";
 import { classifyIntent, mightBeAnOrder } from "@/lib/chat-classify";
 import { enqueueAgentJob } from "@/lib/agent-jobs";
 import { loadBusiness, loadCounts, loadRecentWork, loadSchedule, type Counts, type Turn } from "@/lib/chat-context";
@@ -57,7 +60,11 @@ Business: ${business ?? "not onboarded yet"}
 
 You are the MANAGER, not the writer. Never write an article, blog post or social copy in this chat — not even a sample or an outline. If they want content, tell them to say it as an order: write an article about <topic>.
 
-You cannot start work from this reply. If you are answering, nothing was queued — never say "queued", "I've started it" or "Mr. Writer is on it". Never invent numbers or work not listed in the reference below.
+YOU CANNOT START, SCHEDULE OR PUBLISH ANYTHING FROM THIS REPLY. Real orders are carried out before you are ever asked, and answered without you. So if you are writing, nothing was queued, nothing was scheduled, and nothing was published — saying otherwise is telling the customer their website will change when it will not.
+· Never write "queued", "scheduled for", "I've started it", "Mr. Writer is on it", "it will go live".
+· Never begin a line with ✓ or ✕. Those marks belong to the system and mean the work really happened.
+· Asked to do something at a later time and unsure whether it was booked, say you are not sure and point at the Schedule page. That is always better than a confirmation.
+Never invent numbers or work not listed in the reference below.
 
 WORD SENSE — "plan" on its own means their SUBSCRIPTION PLAN (the tier and tokens on the line above). It only means the automation timetable if they say schedule, automation, timing, kab, or kitne baje.
 
@@ -275,6 +282,38 @@ const ECHO = /reply\s+\d\s*-\s*\d\s+short|short lines mein|warm aur confident|wa
  *  recognise "main Mr Lxwa hoon" or a recited rule, short enough that nobody sees a pause. */
 const HOLD = 64;
 
+/** A ✓ or ✕ at the start of a line means "the system saw this happen".
+ *
+ *  components/kit.tsx puts those marks on, and only on, messages built from real jobs_log rows
+ *  (see the notice effect there). The model has no way to earn one — so when it opens a reply
+ *  with a tick it is wearing a uniform it was not issued, and the user has no way to tell.
+ *  Stripped rather than argued about in the prompt, because a rule the model can ignore is not
+ *  a rule. */
+const IMPERSONATES_SYSTEM = /^\s*[✓✔✅✕✖❌]\s*/;
+
+/** The model announcing work that this reply did not and cannot start.
+ *
+ *  This is the bug that produced "Mr. Publish — queued for immediate publish (30 minutes from
+ *  now). It will go live on your site after the run completes." Nothing was queued. There was
+ *  no row, no job, and the publish agent had never run once — the customer was told their
+ *  website would update, and planned around it.
+ *
+ *  A real order never reaches this function at all: startWork answers those directly and
+ *  returns before the model is called. So an opening that claims work started is, by
+ *  construction, always false here. */
+const FABRICATED_ORDER = new RegExp(
+  [
+    // "Mr. Publish — queued ...", "Mr. Writer is writing ..."
+    "^mr\\.?\\s*(?:lxwa|keyword|writer|qa|publish)\\b[^.!?\\n]{0,48}?\\b(?:queued|scheduled|started|starting|writing|publishing|will publish|will write|is on it)",
+    // "I've queued it", "main ne schedule kar diya"
+    "^i(?:'ve| have)\\s+(?:queued|scheduled|started|published|set (?:that|it) up)",
+    "^(?:main|maine|mainne)\\b[^.!?\\n]{0,40}?\\b(?:queue|schedule|shuru|start)\\w*\\s*(?:kar\\s*)?(?:diya|di|dia)",
+    // "Queued for ...", "Scheduled for Thursday ..."
+    "^(?:queued|scheduled)\\b[^.!?\\n]{0,10}\\bfor\\b",
+  ].join("|"),
+  "i"
+);
+
 function relay(
   upstream: ReadableStream<Uint8Array>,
   onDone: (full: string) => void,
@@ -291,11 +330,14 @@ function relay(
       let firstOut = true;
 
       const release = (text: string) => {
-        const t = text.trim();
+        // The tick comes off before anything is judged, so "✓ Mr. Publish — queued…" is tested
+        // as the claim it is rather than sailing past a pattern anchored at ^.
+        const t = text.replace(IMPERSONATES_SYSTEM, "").trim();
         if (!t) return;
         if (ECHO.test(t)) return;
         if (firstOut && INTRO.test(t)) return;
-        const out = firstOut ? t : text;
+        if (firstOut && FABRICATED_ORDER.test(t)) return;
+        const out = firstOut ? t : text.replace(IMPERSONATES_SYSTEM, "");
         if (firstOut) onFirstWord();
         firstOut = false;
         full += out;
@@ -379,7 +421,52 @@ function fallback(q: string, ctx: any): string {
  *  therefore never able to animate work that was not started. */
 type OrderResult = { text: string; agentId: string | null; jobId: string | null; label: string | null };
 
-async function startWork(intent: NonNullable<ReturnType<typeof detectChatIntent>>, tenantId: string): Promise<OrderResult> {
+/** Said back to the user with no job and no row behind it. Kept as its own constructor so the
+ *  three null fields are a decision rather than an oversight: nothing animates, because
+ *  nothing started. */
+const nothingStarted = (text: string): OrderResult => ({ text, agentId: null, jobId: null, label: null });
+
+/** The tenant's own wall clock. "9 baje" is a different instant in Karachi than in London and
+ *  the customer means theirs; UTC is the honest fallback when they have never set a schedule,
+ *  and every confirmation names the zone so a wrong one is visible rather than silent. */
+async function tenantTimezone(supabase: SupabaseClient, tenantId: string): Promise<string> {
+  try {
+    const { data } = await supabase.from("schedules").select("timezone").eq("tenant_id", tenantId).limit(1);
+    const tz = data?.[0]?.timezone;
+    if (typeof tz === "string" && tz.trim()) {
+      // Prove it before handing it to Intl, which throws on a bad zone — and would take the
+      // whole reply down with it over a typo in a settings row.
+      new Intl.DateTimeFormat("en-GB", { timeZone: tz });
+      return tz;
+    }
+  } catch { /* unreadable or invalid — UTC below */ }
+  return "UTC";
+}
+
+async function startWork(
+  intent: NonNullable<ReturnType<typeof detectChatIntent>>,
+  tenantId: string,
+  userId: string | null,
+  /** The user's own sentence. The WHEN is read from here rather than from the intent: the
+   *  classifier is asked what to do, not when, because a time is a fact this can measure and
+   *  a model can only guess at. */
+  message: string,
+  supabase: SupabaseClient
+): Promise<OrderResult> {
+  const tz = await cached(`tz:${tenantId}`, TTL.schedule, () => tenantTimezone(supabase, tenantId));
+  const when = parseWhen(message, tz);
+  const alsoPublish = wantsAutoPublish(message);
+
+  // ---- "isko publish kar do" — something that already exists ----
+  if (intent.kind === "publish") {
+    return publishOrder(supabase, tenantId, userId, message, tz, when);
+  }
+
+  // ---- a time was named: this is a booking, not a start ----
+  if (when) {
+    return scheduleOrder(supabase, tenantId, userId, message, tz, when, intent, alsoPublish);
+  }
+
   const topic = intent.kind === "write" || intent.kind === "research" ? intent.topic : null;
 
   //   "research"  -> false    nothing gets written. This is the whole point of the mode.
@@ -387,13 +474,17 @@ async function startWork(intent: NonNullable<ReturnType<typeof detectChatIntent>
   //   "plan"      -> true     a batch was asked for; writing all of them is the request.
   const chain = intent.kind === "research" ? false : intent.kind === "write" ? "choose" : true;
 
+  // "ek article likh ke publish kar do" is ONE instruction with two halves. It threads
+  // boss -> keyword -> writer (agent-server/src/agents/writer.ts reads it), and the writer
+  // still refuses to publish anything the quality gate failed.
   const res = topic
     ? await enqueueAgentJob("keyword", tenantId, {
         topic,
         chain,
+        autoPublish: alsoPublish,
         taskLabel: intent.kind === "research" ? `Keyword research: "${topic}"` : `Researching "${topic}"`,
       })
-    : await enqueueAgentJob("boss", tenantId, { count: intent.kind === "plan" ? 3 : 1, chain });
+    : await enqueueAgentJob("boss", tenantId, { count: intent.kind === "plan" ? 3 : 1, chain, autoPublish: alsoPublish });
 
   if (!res.ok) {
     const next =
@@ -419,9 +510,124 @@ async function startWork(intent: NonNullable<ReturnType<typeof detectChatIntent>
   if (intent.kind === "plan") {
     return accepted(`Starting the team — picking this week's topics from your niche and the pages we crawled. Drafts land in **Approvals**.`, "Planning this week's topics");
   }
+  // Where it lands is the customer's decision and they made it in the same sentence — so it is
+  // said back to them, every time, before anything is written. Publishing to a live site is
+  // the one thing here that cannot be undone by clicking something else.
+  const lands = alsoPublish
+    ? " It goes **straight to your site** once it passes the quality gate — no approval step."
+    : " It lands in **Approvals** for you to review.";
+
   return topic
-    ? accepted(`On it — researching **"${topic}"**. You'll get the keyword options in a moment: pick one, or the recommended one starts by itself.`, `Researching "${topic}"`)
-    : accepted(`On it — I'll pick a topic from your niche, then show you the keyword options before anything gets written.`, "Choosing a topic from your niche");
+    ? accepted(`On it — researching **"${topic}"**. You'll get the keyword options in a moment: pick one, or the recommended one starts by itself.${lands}`, `Researching "${topic}"`)
+    : accepted(`On it — I'll pick a topic from your niche, then show you the keyword options before anything gets written.${lands}`, "Choosing a topic from your niche");
+}
+
+/* ── Orders with a time on them ───────────────────────────────────────────────────────── */
+
+/** "30 min baad ek article likh ke publish kar do."
+ *
+ *  Writes a row and says what the row says. Nothing is enqueued now — the whole point is that
+ *  it happens later — so no agent lights up and the reply carries no jobId. That the office
+ *  stays still is correct: nothing is running yet. */
+async function scheduleOrder(
+  supabase: SupabaseClient,
+  tenantId: string,
+  userId: string | null,
+  message: string,
+  tz: string,
+  when: NonNullable<ReturnType<typeof parseWhen>>,
+  intent: NonNullable<ReturnType<typeof detectChatIntent>>,
+  alsoPublish: boolean
+): Promise<OrderResult> {
+  const topic = intent.kind === "write" || intent.kind === "research" ? intent.topic : null;
+  const kind = intent.kind === "publish" ? "publish" : intent.kind;
+
+  const res = await placeOrder(supabase, tenantId, userId, {
+    kind,
+    runAt: when.at,
+    topic,
+    autoPublish: alsoPublish,
+    request: message,
+  });
+
+  if (!res.ok) {
+    return nothingStarted(
+      res.needsMigration
+        ? `I can't schedule that yet. ${MIGRATION_HINT}`
+        : `I couldn't save that schedule: **${res.error}** — so I'm not going to tell you it's booked. Nothing was scheduled and nothing will fire.`
+    );
+  }
+
+  const at = describeWhen(when.at, tz, new Date());
+  const what =
+    kind === "research" ? `**Mr. Keyword** researches${topic ? ` **"${topic}"**` : " your best keywords"}`
+    : kind === "plan" ? "the team picks this week's topics and writes them"
+    : topic ? `**Mr. Writer** writes about **"${topic}"**`
+    : "the team picks a topic from your niche and writes it";
+
+  const lands =
+    kind === "research" ? "Nothing gets written."
+    : alsoPublish ? "It goes **straight to your site** — no approval step."
+    : "It lands in **Approvals** for you to review.";
+
+  return nothingStarted(
+    `Booked — ${what} **${at}** (${tz}). ${lands}\n\n` +
+      `Nothing is running right now; I'll start it at that time. You can cancel it on the **Schedule** page.`
+  );
+}
+
+/** "isko publish kar do" / "kal 9 baje publish karna".
+ *
+ *  The message that produced the worst bug in this product: asked to publish later, the model
+ *  answered "Mr. Publish — queued for immediate publish (30 minutes from now)". There was no
+ *  queue, no row, and no publish agent had ever run. Everything below either does the thing or
+ *  says plainly that it did not. */
+async function publishOrder(
+  supabase: SupabaseClient,
+  tenantId: string,
+  userId: string | null,
+  message: string,
+  tz: string,
+  when: ReturnType<typeof parseWhen>
+): Promise<OrderResult> {
+  const item = await findPublishable(supabase, tenantId);
+  if (!item) {
+    return nothingStarted(
+      `I can't see an article to publish — nothing is written and waiting. Say **"write an article about ..."** first, or name the one you mean and I'll look it up.`
+    );
+  }
+  const name = item.title ? `**"${item.title}"**` : "your latest article";
+
+  if (when) {
+    const res = await placeOrder(supabase, tenantId, userId, {
+      kind: "publish",
+      runAt: when.at,
+      contentItemId: item.id,
+      request: message,
+    });
+    if (!res.ok) {
+      return nothingStarted(
+        res.needsMigration
+          ? `I can't schedule that yet. ${MIGRATION_HINT}`
+          : `I couldn't save that: **${res.error}**. Nothing was scheduled — ${name} is still unpublished.`
+      );
+    }
+    return nothingStarted(
+      `Booked — ${name} goes live **${describeWhen(when.at, tz, new Date())}** (${tz}). ` +
+        `It is still unpublished until then, and you can cancel it on the **Schedule** page.`
+    );
+  }
+
+  // Now. This really does publish to their live website, so the reply is written from the
+  // result and never from the intention.
+  const result = await approveAndPublish(supabase, tenantId, item.id);
+  if (result.ok) {
+    return nothingStarted(`Published — ${name} is live${result.url ? `: ${result.url}` : ""}.`);
+  }
+  return nothingStarted(
+    `I couldn't publish ${name}: **${result.error}**. It is **not** live. ` +
+      `If nothing is connected yet, add your site on the **Connect** page first.`
+  );
 }
 
 /* ── The request ─────────────────────────────────────────────────────────────────────── */
@@ -513,7 +719,7 @@ export async function POST(req: NextRequest) {
   // enqueue is a network hop to the agent server and the conversation row is a Supabase
   // round trip; neither needs the other's answer, and running them nose-to-tail put ~800ms of
   // "does this thread exist" in front of the thing the user actually asked for.
-  const orderP = intent && tenantId ? startWork(intent, tenantId) : null;
+  const orderP = intent && tenantId ? startWork(intent, tenantId, userId, q, supabase) : null;
 
   const convId = await convP;
   lap("conversation");

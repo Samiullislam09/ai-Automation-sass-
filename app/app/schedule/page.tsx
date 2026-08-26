@@ -85,6 +85,11 @@ export default function Schedule() {
   const [runs, setRuns] = useState<Run[] | null>(null);
   const [historyError, setHistoryError] = useState("");
   const [now, setNow] = useState<number | null>(null);
+  // One-off orders booked in the chat — "30 min baad ek article publish kar do". They belong
+  // on this page and not only in the conversation: a booking you can only find by scrolling
+  // back through a chat is barely more checkable than the fabricated confirmation it replaced.
+  const [orders, setOrders] = useState<any[] | null>(null);
+  const [cancelling, setCancelling] = useState("");
 
   // The browser's clock can be minutes off the server's. Every instant on this page comes
   // from the server, so the countdown is measured against the server's idea of "now" —
@@ -144,9 +149,37 @@ export default function Schedule() {
     }
   }, []);
 
+  const loadOrders = useCallback(async () => {
+    try {
+      const d = await fetch("/api/scheduled-orders", { cache: "no-store" }).then((r) => r.json());
+      // An empty list on failure, never a stale one. This list is the answer to "is my article
+      // still going to be published?", and showing yesterday's answer to that is worse than
+      // showing none.
+      setOrders(d.ok ? [...(d.pending ?? []), ...(d.recent ?? [])] : []);
+    } catch {
+      setOrders([]);
+    }
+  }, []);
+
+  const cancel = async (id: string) => {
+    setCancelling(id);
+    try {
+      const d = await fetch(`/api/scheduled-orders?id=${encodeURIComponent(id)}`, { method: "DELETE" }).then((r) => r.json());
+      // Re-read either way. On success it proves the row really says cancelled; on failure it
+      // shows why — usually because the scheduler already picked it up.
+      await loadOrders();
+      toast(d.ok ? "Cancel ho gaya — ab ye nahi chalega." : d.error ?? "Cancel nahi ho paya.");
+    } catch (e: any) {
+      toast(e?.message ?? "Network error.");
+    } finally {
+      setCancelling("");
+    }
+  };
+
   useEffect(() => {
     void loadSchedule();
     void loadHistory();
+    void loadOrders();
 
     // Publishing needs somewhere to publish TO. Without a connected WordPress or webhook the
     // auto-publish switch is a promise nothing can keep, so it is disabled and says why.
@@ -179,6 +212,14 @@ export default function Schedule() {
     const t = setInterval(() => void loadHistory(), anyRunning ? 20_000 : 120_000);
     return () => clearInterval(t);
   }, [anyRunning, loadHistory]);
+
+  // A booked order can fire at any minute, and when it does this list has to stop saying it is
+  // pending. Faster than the run history above because the countdown here is often measured in
+  // minutes, not hours.
+  useEffect(() => {
+    const t = setInterval(() => void loadOrders(), 30_000);
+    return () => clearInterval(t);
+  }, [loadOrders]);
 
   const set = (patch: Partial<Sched>) => setSched((s) => (s ? { ...s, ...patch } : s));
 
@@ -373,6 +414,72 @@ export default function Schedule() {
         </div>
       </div>
 
+      {/* ── One-off orders booked in the chat ─────────────────────────────────────────────
+          The recurring schedule above is a timetable. This is everything the customer asked
+          for once, by name, in the conversation — and until it existed, "30 min baad publish
+          kar do" had nowhere to go and got answered with a confirmation that referred to no
+          row at all. Every line here is a row, and every one of them can be called off. */}
+      <div className="card" style={{ padding: "17px 18px", maxWidth: 720, marginTop: 14 }}>
+        <div className="lbl" style={{ marginBottom: 10 }}>Chat me jo aapne bola</div>
+
+        {orders === null && <p className="sm mut" style={{ margin: 0 }}>Loading…</p>}
+        {orders?.length === 0 && (
+          <p className="sm mut" style={{ margin: 0 }}>
+            Abhi kuch book nahi hai. Chat me bolo — <b>“30 min baad ek article publish kar do”</b> ya{" "}
+            <b>“kal 9 baje isko publish karna”</b> — aur wo yahan countdown ke saath dikhega.
+          </p>
+        )}
+
+        {orders?.map((o) => {
+          const at = new Date(o.run_at).getTime();
+          const left = now != null ? at - now : null;
+          const pending = o.status === "pending";
+          const what =
+            o.kind === "publish" ? "Publish an article that is already written"
+            : o.kind === "research" ? `Research keywords${o.topic ? ` for “${o.topic}”` : ""}`
+            : o.kind === "plan" ? "Pick this week's topics and write them"
+            : `Write an article${o.topic ? ` about “${o.topic}”` : ""}`;
+
+          return (
+            <div key={o.id} className="ord">
+              <div style={{ minWidth: 0, flex: "1 1 260px" }}>
+                <div style={{ fontSize: 13.5, fontWeight: 700, overflowWrap: "anywhere" }}>{what}</div>
+                <div className="sm mut" style={{ marginTop: 3, overflowWrap: "anywhere" }}>
+                  {new Intl.DateTimeFormat("en-GB", {
+                    timeZone: sched.timezone, weekday: "short", day: "numeric", month: "short",
+                    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+                  }).format(new Date(at))} · {sched.timezone}
+                  {" · "}
+                  {o.kind === "research" ? "kuch publish nahi hoga"
+                    : o.auto_publish || o.kind === "publish" ? "seedha site pe jayega" : "Approvals me aayega"}
+                </div>
+                {/* The customer's own sentence. Kept so they can see WHY a row exists — the
+                    row is what fires, but the sentence is what they remember typing. */}
+                {o.request && <div className="sm mut ord-q">“{o.request}”</div>}
+                {o.error && <div className="sm ord-e">{o.error}</div>}
+              </div>
+
+              <div className="ord-r">
+                {pending ? (
+                  <>
+                    {/* Same formatter as the big countdown above, so the two clocks on this
+                        page never disagree about what "2h 05m" means. */}
+                    <div className="ord-t">{left == null ? "…" : left > 0 ? countdown(left) : "ab chalega"}</div>
+                    <button className="btn btn-g btn-sm" disabled={cancelling === o.id} onClick={() => cancel(o.id)}>
+                      {cancelling === o.id ? "…" : "Cancel"}
+                    </button>
+                  </>
+                ) : (
+                  <div className={"ord-b " + (o.status === "done" ? "is-ok" : o.status === "cancelled" ? "is-off" : "is-bad")}>
+                    {o.status === "done" ? "Ho gaya" : o.status === "cancelled" ? "Cancel kiya" : o.status === "running" ? "Chal raha hai" : "Fail hua"}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
       {/* ── Run history ───────────────────────────────────────────────────────────────── */}
       <div className="card" style={{ padding: "17px 18px", maxWidth: 720, marginTop: 14 }}>
         <div className="lbl" style={{ marginBottom: 10 }}>Pichhle automatic run</div>
@@ -410,6 +517,24 @@ export default function Schedule() {
         .cd { font-size: clamp(26px, 8vw, 38px); font-weight: 800; letter-spacing: -.02em; line-height: 1.1;
               margin-top: 8px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
         .warn { padding: 13px 16px; border-color: var(--red); }
+
+        /* Booked-in-chat rows. Wraps to a stack on a phone rather than squeezing the countdown
+           and the Cancel button into a column too narrow to hit. */
+        .ord { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start;
+               padding: 11px 0; border-top: 1px solid var(--line); }
+        .ord:first-of-type { border-top: none; padding-top: 2px; }
+        .ord-r { display: flex; align-items: center; gap: 9px; margin-left: auto; flex: none; }
+        .ord-t { font-size: 15px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--ac); }
+        .ord-q { margin-top: 4px; font-size: 11px; font-style: italic; opacity: .75; }
+        .ord-e { margin-top: 4px; color: var(--red); }
+        .ord-b { font-size: 10.5px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase;
+                 border-radius: 999px; padding: 4px 10px; border: 1px solid var(--line); color: var(--mut); }
+        .ord-b.is-ok { color: var(--grn); border-color: color-mix(in srgb, var(--grn) 45%, transparent); }
+        .ord-b.is-bad { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, transparent); }
+        .ord-b.is-off { opacity: .7; }
+        @media (max-width: 520px) {
+          .ord-r { margin-left: 0; width: 100%; justify-content: space-between; }
+        }
         .ap { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 14px; }
         .sw { width: 48px; height: 27px; border-radius: 14px; border: 1px solid var(--line); background: var(--panel2);
               position: relative; cursor: pointer; flex: none; transition: background .2s, border-color .2s; }

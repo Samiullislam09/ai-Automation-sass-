@@ -151,6 +151,7 @@ export default function LiveAgents() {
         timeline,
         handoffs: data.handoffs ?? [],
         nextRun: data.nextRun ?? null,
+        orders: data.orders ?? [],
         crawl: data.crawl ?? null,
         keywordChoice: data.keywordChoice ?? null,
         liveError: null,

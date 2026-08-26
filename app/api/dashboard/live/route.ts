@@ -5,6 +5,7 @@ import { cached, sessionKey, TTL } from "@/lib/chat-cache";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
 import { getDashboardStats, getAgentRoomStates, getRecentJobs, getRunningCrawl, getPendingKeywordChoice } from "@/lib/dashboard-data";
 import { buildTimeline, getNextRun } from "@/lib/office-timeline";
+import { listPending } from "@/lib/scheduled-orders";
 import { AGENTS as STORE_AGENTS } from "@/lib/agents-data";
 
 /** The office's live feed — the ONLY source of truth for what animates in the pixel scene.
@@ -53,7 +54,7 @@ export async function GET(req: NextRequest) {
   // five seconds stale is indistinguishable from a live one, and re-running four COUNT queries
   // and a schedules read every 1.2s to prove that is the difference between a feed that
   // answers in under a second and one that piles up behind itself.
-  const [rooms, stats, allJobs, crawl, keywordChoice, nextRun] = await Promise.all([
+  const [rooms, stats, allJobs, crawl, keywordChoice, nextRun, orders] = await Promise.all([
     getAgentRoomStates(supabase, tenantId),
     cached(`live-stats:${tenantId}`, 5_000, () => getDashboardStats(supabase, tenantId)),
     // each with a human summary of what it produced — powers the "just finished" popup on the
@@ -72,6 +73,11 @@ export async function GET(req: NextRequest) {
     // Thirty seconds: the countdown on the office wall ticks in the browser from the instant
     // this returns, and the Schedule page reloads its own copy the moment you change it.
     cached(`live-next:${tenantId}`, 30_000, () => getNextRun(supabase, tenantId)),
+    // One-off orders booked in the chat ("30 min baad publish kar do"). On the same board as
+    // the recurring run, because from where the customer is standing they are the same
+    // question — "what is my team about to do without me?" — and answering it from two
+    // screens is how the chat came to be the only place that knew.
+    cached(`live-orders:${tenantId}`, 15_000, () => listPending(supabase, tenantId, 5)),
   ]);
 
   lap("reads");
@@ -90,6 +96,7 @@ export async function GET(req: NextRequest) {
     timeline: events,
     handoffs,
     nextRun,
+    orders,
     crawl,
     keywordChoice,
     stats,

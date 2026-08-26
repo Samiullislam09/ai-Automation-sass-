@@ -71,3 +71,48 @@ async function deliverWebhook(
     return { ok: false, error: `Webhook delivery error: ${e.message}` };
   }
 }
+
+/** Fetch, publish, and record the outcome — the whole of "Approve & publish" in one call.
+ *
+ *  Extracted so the chat can do exactly what the Approvals button does. It was inline in
+ *  app/api/content/[id]/approve/route.ts, and "publish it from the chat" would otherwise have
+ *  meant a second copy of the status transitions. Two copies of a rule about publishing to a
+ *  customer's live website is one copy too many: they drift, and the one that drifts is the
+ *  one nobody is looking at.
+ */
+export async function approveAndPublish(
+  supabase: SupabaseClient,
+  tenantId: string,
+  id: string
+): Promise<PublishResult & { title?: string | null }> {
+  const { data: item, error } = await supabase
+    .from("content_items")
+    .select("id, tenant_id, type, title, body, status, meta")
+    .eq("id", id)
+    .eq("tenant_id", tenantId)
+    .single();
+
+  if (error || !item) return { ok: false, error: "Content item not found." };
+  if (item.status === "published") return { ok: false, error: "That one is already live.", title: item.title };
+  // 'draft' is not refused here the way the button refuses it: an article the writer finished
+  // seconds ago can still be a draft when the customer says "publish it", and telling them to
+  // wait for a status they cannot see is not an answer. The quality gate has already run by
+  // the time a body exists.
+  if (!item.body) return { ok: false, error: "That article has no body yet — it is still being written.", title: item.title };
+
+  const result = await publishContentItem(supabase, tenantId, item);
+  const prevMeta = (item.meta as Record<string, unknown>) ?? {};
+
+  if (result.ok) {
+    await supabase
+      .from("content_items")
+      .update({ status: "published", meta: { ...prevMeta, publishedUrl: result.url ?? null } })
+      .eq("id", id);
+  } else {
+    await supabase
+      .from("content_items")
+      .update({ status: "failed", meta: { ...prevMeta, publishError: result.error } })
+      .eq("id", id);
+  }
+  return { ...result, title: item.title };
+}

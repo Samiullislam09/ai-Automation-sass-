@@ -8,10 +8,19 @@
  *  conversational reply — a missed order just means the user rephrases, but a false positive
  *  would spend real LLM/DataForSEO credits on a job nobody asked for. */
 
+/** WHAT was asked for. WHEN is deliberately not in here: it is read from the raw message by
+ *  lib/when.ts inside startWork, which is already async and already knows the tenant's
+ *  timezone. "9 baje" is a different instant in Karachi than in London, so a time resolved
+ *  without the zone is worse than no time at all. */
 export type ChatIntent =
   | { kind: "write"; topic: string | null }    // write ONE article (topic optional)
   | { kind: "research"; topic: string | null } // keywords only — explicitly NOT an article
   | { kind: "plan" }                           // "run the team" — Mr Lxwa picks the topics himself
+  // Push something that ALREADY EXISTS live. This used to be deliberately classified as "none"
+  // — "that happens on the Approvals page" — which was true right up until a customer asked
+  // for it in the chat and got a fabricated confirmation instead of either the action or an
+  // honest refusal.
+  | { kind: "publish" }
   | null;
 
 // "how does X work", "kya", "kaise", "?" — these are questions ABOUT the work, not orders.
@@ -28,6 +37,13 @@ const PLAN_ORDER = /\b(run the team|start the team|start team|team ko chalao|kaa
 // duplicate drafts every time the user asked how it was going.
 const STATUS_QUESTION = /\b(update|status|progress|kya hua|kya huwa|kiya hua|kiya huwa|ho gaya|hogaya|likha|likh diya|done|finished|ready|kahan tak|kitna hua)\b/i;
 
+// Pushing something that already exists, as opposed to making a new one. The tell is a word
+// pointing AT an existing thing — "isko", "ise", "this one", "it" — with no writing verb
+// anywhere near it. "ek article publish karo" makes one; "isko publish kardo" does not.
+const PUBLISH_VERB = /\b(publish\w*|publsh\w*|pubish\w*|live kar\w*|upload\w*|post kar\w*)\b/i;
+const POINTS_AT_EXISTING = /\b(isko|ise|iss?e|usko|use ?ko|wo wala|ye wala|yeh wala|this one|that one|it|the last one|last wala|pichhla|pichla)\b/i;
+const MAKES_A_NEW_ONE = /\b(write|writing|draft|likh\w*|banao|banado|bana|naya|new|ek aur|another)\b/i;
+
 // "keyword research karke do", "sirf keyword nikalo", "find me some keywords".
 const RESEARCH_NOUN = /\b(keywords?|key ?word|kw)\b/i;
 const RESEARCH_VERB = /\b(research|find|nikal\w*|dhund\w*|dedo|de do|karke do|karo|do|suggest|give)\b/i;
@@ -41,7 +57,12 @@ const RESEARCH_VERB = /\b(research|find|nikal\w*|dhund\w*|dedo|de do|karke do|ka
 const NO_WRITE = new RegExp(
   [
     "\\b(?:nahi|nahin|mat|bina)\\b[^.!?]{0,40}?\\b(?:likh\\w*|banao|banana|write|writing)\\b",
-    "\\b(?:don'?t|do not|no|without|never|skip)\\b[^.!?]{0,40}?\\b(?:write|writing|draft|publish)\\b",
+    // `publish` used to be in this list and `no` used to open it, which made two different
+    // instructions the same instruction. "ek article likho, no need to publish" asks for an
+    // article and asks for it NOT to go live — and it came out as no article at all. Refusing
+    // to publish is NO_PUBLISH's job; this pattern is only about refusing to WRITE.
+    "\\b(?:don'?t|do not|without|never|skip)\\b[^.!?]{0,40}?\\b(?:write|writing|draft)\\b",
+    "\\bno\\s+(?:need\\s+to\\s+)?(?:write|draft)\\b",
     "\\b(?:artic\\w*|blogs?|posts?)\\b[^.!?]{0,20}?\\b(?:nahi|nahin|mat)\\b",
   ].join("|"),
   "i"
@@ -62,6 +83,15 @@ export function detectChatIntent(raw: string): ChatIntent {
   // written; requiring only ARTICLE_NOUN made that fall through to conversation, and Mr Lxwa
   // answered "main team ko order nahi de sakta" to a perfectly clear instruction.
   const refusesWriting = NO_WRITE.test(q);
+
+  // Publish-what-exists is checked BEFORE writing, because "isko publish kar do" satisfies the
+  // writing test on its own: WRITE_VERB lists "publish". That is how "no mujhe 30 min bad
+  // published karna ha isko" — a plain instruction about the article that had just been
+  // written — came through as an order to write another one.
+  if (PUBLISH_VERB.test(q) && POINTS_AT_EXISTING.test(q) && !MAKES_A_NEW_ONE.test(q)) {
+    return { kind: "publish" };
+  }
+
   const wantsWriting = !refusesWriting && WRITE_VERB.test(q) && ARTICLE_NOUN.test(q);
   const asksForKeywords = RESEARCH_NOUN.test(q) && RESEARCH_VERB.test(q);
 
@@ -98,5 +128,61 @@ function clean(s: string): string {
     .replace(/[.,!?;:]+$/g, "")
     .replace(/\s+/g, " ")
     .trim();
-  return t.length >= 3 ? t : "";
+  return isRealTopic(t) ? t : "";
 }
+
+/** A subject the keyword agent can actually research.
+ *
+ *  Guards two separate ways of ending up with nonsense. The literal string "null" is what a
+ *  language model writes when it means the JSON value — it went straight through a length
+ *  check, was handed to Mr. Keyword as a seed, and the customer watched their team spend real
+ *  DataForSEO credits "Researching "null"" and offer eight keywords for it. The rest is the
+ *  sentence-fragment case: "mujhe 30mmin bad ko apne webiset" is what survives cleaning a
+ *  message that never named a subject, and researching it is no better.
+ *
+ *  Null is the honest answer to "what is this about?" when the answer is nothing. The boss
+ *  agent picks a topic from the tenant's own niche in exactly that case. */
+export function isRealTopic(t: string): boolean {
+  const v = t.trim();
+  if (v.length < 3 || v.length > 120) return false;
+  if (/^(?:null|none|undefined|nil|nan|n\/?a|-+|\?+)$/i.test(v)) return false;
+  // A subject is nouns. A message with a clock in it and pronouns around it is the request,
+  // not the subject — and seeding research with the request is the bug this catches.
+  if (/\d{1,4}\s*(?:m+in\w*|hours?|hrs?|ghant\w*|din|days?)\b/i.test(v)) return false;
+  if (/\b(?:mujhe|mereko|mujhko|tum|aap|main|hume|humein|i|me|you|we)\b/i.test(v)) return false;
+  // Needs at least one word of three letters or more that isn't a number.
+  return /[\p{L}]{3,}/u.test(v);
+}
+
+/** Did the same sentence also ask for it to go live?
+ *
+ *  Separate from the intent because it is an ADJECTIVE on the order, not a different order:
+ *  "ek article likh ke publish kar do" is one instruction with two halves, and reading it as
+ *  either half alone loses the customer's actual meaning. Kept here, next to the patterns it
+ *  shares, so there is one place where "publish" is defined. */
+export function wantsAutoPublish(raw: string): boolean {
+  const q = (raw ?? "").trim();
+  if (!q) return false;
+  if (NO_PUBLISH.test(q)) return false;
+  return PUBLISH_VERB.test(q);
+}
+
+// "publish mat karna", "don't publish it", "sirf draft banao" — the opposite instruction, and
+// it has to win. Publishing to a live website is the one action in this product that cannot be
+// taken back, so an unclear sentence must never resolve towards doing it.
+const NO_PUBLISH = new RegExp(
+  [
+    "\\b(?:nahi|nahin|mat|bina)\\b[^.!?]{0,40}?\\b(?:publish\\w*|live)\\b",
+    "\\b(?:publish\\w*|live)\\b[^.!?]{0,20}?\\b(?:nahi|nahin|mat)\\b",
+    // "no" is NOT in this list, and that is the whole point of the note. A user correcting
+    // themselves opens with it — "no mujhe 30 min bad published karna ha isko" is "no, I meant
+    // thirty minutes later", not "do not publish". Reading it as a refusal made the one message
+    // in the transcript that most clearly asked to publish come out as asking not to. The
+    // explicit "no publish" / "no need to publish" forms are matched on the next line instead.
+    "\\b(?:don'?t|do not|without|never|skip|not)\\b[^.!?]{0,40}?\\bpublish\\w*",
+    "\\bno\\s+(?:need\\s+to\\s+)?publish\\w*",
+    "\\b(?:sirf|only|just)\\b[^.!?]{0,20}?\\b(?:draft|likh\\w*|write)\\b",
+    "\\b(?:approval|approve|review)\\b[^.!?]{0,20}?\\b(?:ke liye|for|me|mein)\\b",
+  ].join("|"),
+  "i"
+);
