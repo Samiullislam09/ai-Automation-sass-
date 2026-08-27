@@ -25,7 +25,16 @@ function withEnv(vars: Record<string, string | undefined>, run: () => Promise<vo
   })();
 }
 
-const ALL_KEYS = Object.fromEntries(FAST_PROVIDERS.flatMap((p) => [[p.apiKeyEnv, undefined], [p.modelEnv, undefined]]));
+// Clears the numbered variants too (GROQ_API_KEY_2..5) — otherwise a real GROQ_API_KEY_2 left in
+// the environment by a previous test run (or a developer's own .env) would silently change which
+// test cases are actually exercising "no key configured".
+const ALL_KEYS = Object.fromEntries(
+  FAST_PROVIDERS.flatMap((p) => [
+    [p.apiKeyEnv, undefined],
+    ...[2, 3, 4, 5].map((n) => [`${p.apiKeyEnv}_${n}`, undefined]),
+    [p.modelEnv, undefined],
+  ])
+);
 
 function fakeStream(): ReadableStream<Uint8Array> {
   return new ReadableStream({ start(c) { c.close(); } });
@@ -82,6 +91,37 @@ test("the first provider refusing (rate limit, bad model) falls through to the s
     const result = await openFastChatStream([], { fetchImpl });
     assert.equal(result!.provider, "cerebras");
     assert.equal(seen.length, 2, "both were tried, in order");
+  });
+});
+
+test("a second key on the SAME provider is tried before the next provider gets a turn", async () => {
+  await withEnv({ ...ALL_KEYS, GROQ_API_KEY: "gk_first", GROQ_API_KEY_2: "gk_second", CEREBRAS_API_KEY: "ck_test" }, async () => {
+    assert.deepEqual(activeFastProviders(), ["groq", "cerebras"], "still one provider id, not two");
+    const seen: string[] = [];
+    const fetchImpl = (async (url: string, init: any) => {
+      seen.push(init.headers.Authorization);
+      if (init.headers.Authorization === "Bearer gk_first") return new Response("rate limited", { status: 429 });
+      return new Response(fakeStream() as any, { status: 200 });
+    }) as any;
+
+    const result = await openFastChatStream([], { fetchImpl });
+    assert.equal(result!.provider, "groq", "the second Groq key still counts as groq, not cerebras");
+    assert.deepEqual(seen, ["Bearer gk_first", "Bearer gk_second"], "cerebras was never even called");
+  });
+});
+
+test("both Groq keys exhausted still falls through to the next provider", async () => {
+  await withEnv({ ...ALL_KEYS, GROQ_API_KEY: "gk_first", GROQ_API_KEY_2: "gk_second", CEREBRAS_API_KEY: "ck_test" }, async () => {
+    const seen: string[] = [];
+    const fetchImpl = (async (url: string, init: any) => {
+      seen.push(init.headers.Authorization);
+      if (/groq\.com/.test(url)) return new Response("rate limited", { status: 429 });
+      return new Response(fakeStream() as any, { status: 200 });
+    }) as any;
+
+    const result = await openFastChatStream([], { fetchImpl });
+    assert.equal(result!.provider, "cerebras");
+    assert.deepEqual(seen, ["Bearer gk_first", "Bearer gk_second", "Bearer ck_test"]);
   });
 });
 

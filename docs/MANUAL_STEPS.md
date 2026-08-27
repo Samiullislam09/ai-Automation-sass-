@@ -106,6 +106,11 @@ Bas itna — code khud detect karke Groq try karega, aur agar wo kabhi fail ho (
 chupke se NIM pe wapas chala jaata hai, koi user "error" nahi dekhega.
 **Note:** Cerebras bhi wired hai (`CEREBRAS_API_KEY`) par unke free tier pe abhi 402 (no quota) mila
 tha jab maine test kiya — Groq pehle try karo.
+**Doosri Groq key (optional):** ek free account ka daily/per-minute cap khatam ho jaaye to
+`GROQ_API_KEY_2` set kar do (dusra free Groq account, koi bhi email se) — code pehli key try karta
+hai, khatam/fail ho to khud dusri try karta hai, dono fail ho to Cerebras/NIM pe jaata hai jaisa
+pehle se. 5 keys tak yahi tareeqa chalta hai (`GROQ_API_KEY_3`, `_4`, `_5`) — koi code change nahi
+chahiye, bas naya env var.
 
 ---
 

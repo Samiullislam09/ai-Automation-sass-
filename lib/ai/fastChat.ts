@@ -35,13 +35,26 @@
 export type FastProvider = {
   id: string;
   baseUrl: string;
+  /** The FIRST key env var. A second, third, ... account's key on the SAME provider is read
+   *  from `${apiKeyEnv}_2`, `_3`, ... (see keyEnvsFor) — for the day one free-tier account's
+   *  daily/per-minute cap runs out before the other configured providers even get a turn. This
+   *  is a second account on the SAME service, not a different provider: it does nothing for a
+   *  Groq outage (every key on Groq fails alike), only for a Groq QUOTA running out — an
+   *  outage is what the next PROVIDER (Cerebras, then NIM) in FAST_PROVIDERS is for. */
   apiKeyEnv: string;
   /** Model catalogues on free tiers change monthly (the plan's own words: "NIM ne kal 2
    *  models hataye, kal aur hata sakta hai") — override with the matching env var below
-   *  rather than editing this file when a provider retires one. */
+   *  rather than editing this file when a provider retires one. Shared by every key on this
+   *  provider: two accounts on the same service run the same model. */
   modelEnv: string;
   defaultModel: string;
 };
+
+/** How many numbered keys (`_2`, `_3`, ...) are checked per provider before giving up on it.
+ *  A cap, not a promise anyone needs that many — reading five unset env vars costs nothing, and
+ *  a fixed number here means adding a third key later is a docs/MANUAL_STEPS.md + env var
+ *  change, never a code change. */
+const MAX_KEYS_PER_PROVIDER = 5;
 
 /** Cerebras is listed second, not first, on purpose: §18.4b measured the account that tested
  *  this plan getting HTTP 402 (no free quota) from Cerebras on 2026-08-27. It may work on a
@@ -64,16 +77,28 @@ export const FAST_PROVIDERS: FastProvider[] = [
   },
 ];
 
-function configured(p: FastProvider): { key: string; model: string } | null {
-  const key = process.env[p.apiKeyEnv];
-  if (!key) return null;
-  return { key, model: process.env[p.modelEnv] || p.defaultModel };
+/** `apiKeyEnv`, `apiKeyEnv_2`, `apiKeyEnv_3`, ... up to MAX_KEYS_PER_PROVIDER — see the field
+ *  comment on FastProvider for why a provider can have more than one. */
+function keyEnvsFor(p: FastProvider): string[] {
+  const envs = [p.apiKeyEnv];
+  for (let i = 2; i <= MAX_KEYS_PER_PROVIDER; i++) envs.push(`${p.apiKeyEnv}_${i}`);
+  return envs;
 }
 
-/** Which providers have a key set, in try-order. Exported so a status page or a log line can
- *  say plainly "chat is running on Groq today" instead of the guess being invisible. */
+/** Every account configured for this provider, in try-order, each with the one model this
+ *  provider uses (env override or default — same for every key, since it is the same service). */
+function configuredKeys(p: FastProvider): { key: string; model: string; envVar: string }[] {
+  const model = process.env[p.modelEnv] || p.defaultModel;
+  return keyEnvsFor(p)
+    .map((envVar) => ({ envVar, key: process.env[envVar] }))
+    .filter((x): x is { envVar: string; key: string } => !!x.key)
+    .map((x) => ({ ...x, model }));
+}
+
+/** Which providers have at least one key set, in try-order. Exported so a status page or a log
+ *  line can say plainly "chat is running on Groq today" instead of the guess being invisible. */
 export function activeFastProviders(): string[] {
-  return FAST_PROVIDERS.filter((p) => configured(p)).map((p) => p.id);
+  return FAST_PROVIDERS.filter((p) => configuredKeys(p).length > 0).map((p) => p.id);
 }
 
 export type FastChatResult = { stream: ReadableStream<Uint8Array>; provider: string; model: string };
@@ -91,31 +116,38 @@ export async function openFastChatStream(
   const fetchImpl = opts.fetchImpl ?? fetch;
 
   for (const p of FAST_PROVIDERS) {
-    const c = configured(p);
-    if (!c) continue;
+    // Every configured key on THIS provider first — a second Groq account is only worth having
+    // if it is tried before falling all the way through to Cerebras or NIM, which are slower
+    // (Cerebras) or much slower under load (NIM, §18.1). Only once every key on this provider
+    // is exhausted does the next provider get a turn.
+    for (const c of configuredKeys(p)) {
+      try {
+        const res = await fetchImpl(p.baseUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${c.key}` },
+          body: JSON.stringify({
+            model: c.model,
+            stream: true,
+            temperature: opts.temperature ?? 0.2,
+            max_tokens: opts.max_tokens ?? 260,
+            messages,
+          }),
+          signal: opts.signal,
+        });
 
-    try {
-      const res = await fetchImpl(p.baseUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${c.key}` },
-        body: JSON.stringify({
-          model: c.model,
-          stream: true,
-          temperature: opts.temperature ?? 0.2,
-          max_tokens: opts.max_tokens ?? 260,
-          messages,
-        }),
-        signal: opts.signal,
-      });
+        if (res.ok && res.body) return { stream: res.body, provider: p.id, model: c.model };
 
-      if (res.ok && res.body) return { stream: res.body, provider: p.id, model: c.model };
-
-      // A non-2xx here is the provider's own answer (rate limit, bad model id, billing) — log
-      // it so a wrong GROQ_CHAT_MODEL is diagnosable, but never let it reach the customer:
-      // the next provider (or NIM) gets the request instead.
-      console.warn(`[fastChat] ${p.id} refused (${res.status}) — falling through`, (await res.text().catch(() => "")).slice(0, 200));
-    } catch (e: any) {
-      console.warn(`[fastChat] ${p.id} unreachable — falling through:`, e?.message);
+        // A non-2xx here is the provider's own answer (rate limit, bad model id, billing) — log
+        // it, with WHICH key so a rate-limited first key vs. a genuinely misconfigured second one
+        // are distinguishable, but never let it reach the customer: the next key (or provider,
+        // or NIM) gets the request instead.
+        console.warn(
+          `[fastChat] ${p.id} (${c.envVar}) refused (${res.status}) — falling through`,
+          (await res.text().catch(() => "")).slice(0, 200)
+        );
+      } catch (e: any) {
+        console.warn(`[fastChat] ${p.id} (${c.envVar}) unreachable — falling through:`, e?.message);
+      }
     }
   }
 
