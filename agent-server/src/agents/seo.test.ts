@@ -110,8 +110,7 @@ test("seo is no longer registered as a stub", () => {
   // The one-line change that lets the planner offer this tool at all. Without it, "article
   // likh ke publish karo" is refused before a credit is spent (brain/adapter.ts).
   assert.equal(STUB_AGENTS.has("seo"), false);
-  assert.equal(STUB_AGENTS.has("social"), true, "the other stubs are untouched");
-  assert.equal(STUB_AGENTS.has("leads"), true);
+  assert.equal(STUB_AGENTS.has("social"), true, "the other stub is untouched");
 });
 
 /* ---------------------------------------------------------------- behaviour ------------- */

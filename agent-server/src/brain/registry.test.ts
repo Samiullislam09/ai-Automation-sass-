@@ -167,12 +167,13 @@ test("enabledActions never offers a tool whose agent would answer 'stub'", () =>
     "check_seo",
     "crawl_site",
     "find_keywords",
+    "find_leads",
     "plan_topics",
     "publish_article",
     "research_brief",
     "write_article",
   ]);
-  for (const hidden of ["draft_social", "find_leads"]) {
+  for (const hidden of ["draft_social"]) {
     assert.ok(!offered.includes(hidden), `${hidden} must not be offered to the model`);
     assert.ok(reg.actions.has(hidden), `${hidden} must still be in the graph so the planner can explain it`);
   }

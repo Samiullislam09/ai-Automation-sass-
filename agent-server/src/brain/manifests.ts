@@ -226,7 +226,7 @@ export const MANIFESTS: Manifest[] = [
   {
     id: "leads",
     name: "Mr. Lead",
-    version: "0.1.0", // stub — Phase 3
+    version: "1.0.0",
     description: "Finds businesses that match the customer's ICP and drafts the first outreach line.",
     actions: [
       {
@@ -248,7 +248,7 @@ export const MANIFESTS: Manifest[] = [
 /** Which of the above are real today. Everything else is registered but disabled, so the intent
  *  engine is never offered a tool whose agent would answer "stub — Phase N wires in…".
  *  Move an id out of here the day its agent stops being a stub. */
-export const STUB_AGENTS = new Set(["social", "leads"]);
+export const STUB_AGENTS = new Set(["social"]);
 
 /** Agents with a manifest but no code behind them yet. Registered so the planner can reason
  *  about what they would provide, but never offered to a user.

@@ -306,9 +306,11 @@ test("slots the intent engine already flagged as missing are carried through", (
 });
 
 test("a target whose own agent is a stub → agent_unhealthy, named", () => {
-  const res = failed(plan(intent("find_leads", { query: "dubai restaurants" }), TODAY));
-  assert.deepEqual(res.failure, { kind: "agent_unhealthy", agent_id: "leads", required: true });
-  assert.match(res.message, /^Mr\. Lead abhi available nahi hai/);
+  // Mr. Social is the stub that is left. What the test is really about is the shape of the
+  // refusal: the agent is named, so the user hears which one, not "something went wrong".
+  const res = failed(plan(intent("draft_social", { article: {} }), TODAY));
+  assert.deepEqual(res.failure, { kind: "agent_unhealthy", agent_id: "social", required: true });
+  assert.match(res.message, /^Mr\. Social abhi available nahi hai/);
 });
 
 test("an OPTIONAL step whose agent is down is skipped with a note, and the plan still runs", () => {

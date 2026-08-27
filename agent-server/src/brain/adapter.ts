@@ -88,6 +88,14 @@ function translate(agentId: string, action: string, input: Record<string, unknow
         },
       };
 
+    case "leads.find_leads":
+      // The agent takes `query` but the phrase the user typed often arrives as `topic` (the
+      // intent engine's generic slot), so both are passed and the agent prefers `query`.
+      return {
+        queue: "leads",
+        data: { query: t(input.query) ?? t(input.topic), count: input.count ?? null, taskLabel: `Finding leads: "${t(input.query) ?? t(input.topic)}"` },
+      };
+
     case "publish.publish_article":
       return {
         queue: "publish",
