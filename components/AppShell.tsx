@@ -17,6 +17,10 @@ import { Icon } from "@/components/app-icons";
 
 const ITEMS: [string, keyof typeof Icon, string][] = [
   ["Dashboard", "dashboard", "/app"],
+  // The Agent Workspace (MASTER_PLAN §24.4b) — where you watch the team work. Second in the
+  // rail on purpose: it is the screen a customer opens after giving an order, and the first
+  // five entries are the ones the phone's bottom bar shows.
+  ["Workspace", "activity", "/app/workspace"],
   ["Content", "content", "/app/content"],
   ["Approvals", "approvals", "/app/approvals"],
   ["Connect", "connect", "/app/connect"],
