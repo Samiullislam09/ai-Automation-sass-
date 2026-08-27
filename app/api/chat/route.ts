@@ -14,6 +14,7 @@ import { approveAndPublish } from "@/lib/publish";
 import { classifyIntent, mightBeAnOrder } from "@/lib/chat-classify";
 import { enqueueAgentJob } from "@/lib/agent-jobs";
 import { loadBusiness, loadCounts, loadRecentWork, loadSchedule, type Counts, type Turn } from "@/lib/chat-context";
+import type { SystemEventPayload } from "@/lib/chat-events";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -421,12 +422,27 @@ function fallback(q: string, ctx: any): string {
  *  lands, instead of standing still until the next poll finds a jobs_log row. It is only ever
  *  set when the enqueue really returned — a refused order carries neither, and the office is
  *  therefore never able to animate work that was not started. */
-type OrderResult = { text: string; agentId: string | null; jobId: string | null; label: string | null };
+type OrderResult = {
+  text: string;
+  agentId: string | null;
+  jobId: string | null;
+  label: string | null;
+  /** The SYSTEM channel's half of the answer (docs/MASTER_PLAN.html §10 rule 1).
+   *
+   *  `text` is prose and is drawn as a bubble. `event` is the fact — booked, published,
+   *  stopped — and is drawn as a card, from data. It is set only where the row was written or
+   *  the publish returned ok, so a card cannot exist for something that did not happen; the
+   *  shape is shared with the browser through lib/chat-events.ts, and in Phase 1 the brain
+   *  emits exactly this. */
+  event?: SystemEventPayload;
+};
 
 /** Said back to the user with no job and no row behind it. Kept as its own constructor so the
  *  three null fields are a decision rather than an oversight: nothing animates, because
- *  nothing started. */
-const nothingStarted = (text: string): OrderResult => ({ text, agentId: null, jobId: null, label: null });
+ *  nothing started. An `event` may still ride along — "Cancelled", "Published" and "I could
+ *  not" are facts about work that is over, not about work that is running. */
+const nothingStarted = (text: string, event?: SystemEventPayload): OrderResult =>
+  ({ text, agentId: null, jobId: null, label: null, event });
 
 /** The tenant's own wall clock. "9 baje" is a different instant in Karachi than in London and
  *  the customer means theirs; UTC is the honest fallback when they have never set a schedule,
@@ -498,10 +514,10 @@ async function startWork(
       res.status === 429
         ? `That's the daily budget guard, not a fault — the agent server is fine. Raise the cap on agent-server (DAILY_CAP_*) or try again tomorrow.`
         : `Try again once the agent server is reachable.`;
-    return {
-      text: `I couldn't put the team to work: **${res.error}** — so I'm not going to pretend it's running. Nothing was started, and no credits were used. ${next}`,
-      agentId: null, jobId: null, label: null,
-    };
+    return nothingStarted(
+      `I couldn't put the team to work: **${res.error}** — so I'm not going to pretend it's running. Nothing was started, and no credits were used. ${next}`,
+      { kind: "failed", title: "Nothing was started", detail: res.error }
+    );
   }
 
   // The room that has the work right now: a topic goes straight to Mr. Keyword, everything
@@ -592,7 +608,12 @@ async function cancelBooked(
   return nothingStarted(
     `Cancelled: ${done.map((d) => `**${d}**`).join(", ")}.` +
       (failed.length ? ` I could not cancel ${failed.length} of them — they had already started.` : "") +
-      (left > 0 && which !== "all" ? ` You still have **${left}** other booking(s) — say "sab cancel kar do" for all of them.` : "")
+      (left > 0 && which !== "all" ? ` You still have **${left}** other booking(s) — say "sab cancel kar do" for all of them.` : ""),
+    {
+      kind: "info",
+      title: done.length > 1 ? `Cancelled ${done.length} bookings` : "Cancelled",
+      detail: done.join(", ") + (left > 0 ? ` · ${left} still booked` : ""),
+    }
   );
 }
 
@@ -675,7 +696,16 @@ async function scheduleOrder(
 
   return nothingStarted(
     `Booked — ${what} **${at}** (${tz}). ${lands}\n\n` +
-      `Nothing is running right now; I'll start it at that time. You can cancel it on the **Schedule** page.`
+      `Nothing is running right now; I'll start it at that time. You can cancel it on the **Schedule** page.`,
+    // The receipt (§10 rule 5): what, when, where it lands, and the way back out — built from
+    // the row that was saved, never from the request that asked for it.
+    {
+      kind: "booked",
+      title: `Booked · ${at}`,
+      detail: `${what} — ${tz}. ${lands}`,
+      task_id: res.order?.id ?? undefined,
+      actions: [{ label: "Cancel", action: "cancel", payload: { text: "cancel this booking" } }],
+    }
   );
 }
 
@@ -717,7 +747,14 @@ async function publishOrder(
     }
     return nothingStarted(
       `Booked — ${name} goes live **${describeWhen(when.at, tz, new Date())}** (${tz}). ` +
-        `It is still unpublished until then, and you can cancel it on the **Schedule** page.`
+        `It is still unpublished until then, and you can cancel it on the **Schedule** page.`,
+      {
+        kind: "booked",
+        title: `Booked · ${describeWhen(when.at, tz, new Date())}`,
+        detail: `${name} goes live then (${tz}). Until then it stays unpublished.`,
+        task_id: res.order?.id ?? undefined,
+        actions: [{ label: "Cancel", action: "cancel", payload: { text: "cancel this booking" } }],
+      }
     );
   }
 
@@ -725,11 +762,24 @@ async function publishOrder(
   // result and never from the intention.
   const result = await approveAndPublish(supabase, tenantId, item.id);
   if (result.ok) {
-    return nothingStarted(`Published — ${name} is live${result.url ? `: ${result.url}` : ""}.`);
+    return nothingStarted(
+      `Published — ${name} is live${result.url ? `: ${result.url}` : ""}.`,
+      {
+        kind: "done",
+        title: "Published",
+        detail: item.title ?? undefined,
+        agent: "publish",
+        task_id: item.id,
+        // The link is the proof. It is on the card because the card is the thing that is
+        // allowed to say "live" — a URL in a sentence is still a sentence.
+        ...(result.url ? { href: { label: "Open the live page", url: result.url } } : {}),
+      }
+    );
   }
   return nothingStarted(
     `I couldn't publish ${name}: **${result.error}**. It is **not** live. ` +
-      `If nothing is connected yet, add your site on the **Connect** page first.`
+      `If nothing is connected yet, add your site on the **Connect** page first.`,
+    { kind: "failed", title: "Not published", detail: result.error, agent: "publish", task_id: item.id }
   );
 }
 
@@ -839,6 +889,10 @@ export async function POST(req: NextRequest) {
         ...(order?.agentId ? { "X-Run-Agent": order.agentId } : {}),
         ...(order?.jobId ? { "X-Run-Job": order.jobId } : {}),
         ...(order?.label ? { "X-Run-Label": encodeURIComponent(order.label) } : {}),
+        // The system channel, as data. The browser draws a card from this and never from the
+        // sentence above it (lib/chat-events.ts → components/kit.tsx SystemCardView).
+        // encodeURIComponent because a header must be Latin-1 and titles are not.
+        ...(order?.event ? { "X-Run-Event": encodeURIComponent(JSON.stringify(order.event)) } : {}),
       },
     });
   };

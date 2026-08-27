@@ -192,7 +192,9 @@ export default function LiveAgents() {
           api?.patch?.((prev: any) => ({
             chatNotices: [
               ...(prev.chatNotices ?? []),
-              { id: j.id, text: `${NAME[id] ?? "Your team"} — ${j.summary}`, tone },
+              // agentId travels with the notice so the chat can draw the name as a chip on the
+              // system card instead of repeating it inside the sentence (lib/chat-events.ts).
+              { id: j.id, text: `${NAME[id] ?? "Your team"} — ${j.summary}`, tone, agentId: id || undefined },
             ].slice(-20),
           }));
           api?.act?.(j.summary, NAME[id] ?? "Team");

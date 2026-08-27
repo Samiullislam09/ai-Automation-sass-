@@ -3,6 +3,11 @@ import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AGENTS, useStore } from "@/lib/store";
 import { agentIdFromText } from "@/components/Office";
+import {
+  channelOf, isLiveKind, iconOf, toneOf, elapsedLabel,
+  cardFromResponse, cardFromNotice, cardFromStoredEvent, cardFromStreamFailure,
+  type SystemAction, type SystemCard,
+} from "@/lib/chat-events";
 
 /* ================= HELP: ? -> hover tooltip -> click detail ================= */
 export const HELP: Record<string, { t: string; s: string; d: string }> = {
@@ -127,14 +132,31 @@ function renderMessage(txt: string): React.ReactNode {
   return out;
 }
 
+/** One line in the transcript.
+ *
+ *  TWO CHANNELS, NEVER MIXED (docs/MASTER_PLAN.html §10 rule 1):
+ *   · `who: "bot" | "me"` + `txt` — what was SAID. Model prose and the user's own words.
+ *     A bubble is drawn from text and may claim nothing.
+ *   · `card` — what HAPPENED. A System card, built only from evidence (a job id the enqueue
+ *     returned, a finished jobs_log row, a saved order). lib/chat-events.ts is the only door
+ *     into this channel, and `channelOf()` — not `who`, not the words — decides which one a
+ *     message is drawn on.
+ *
+ *  `failed` marks a bot bubble whose reply was cut off; the reason and the Retry live on the
+ *  system card that lands beside it, because "the connection dropped" is a fact about this
+ *  app, not a sentence Mr Lxwa should be made to say. */
+type ChatMsg = {
+  who: "bot" | "me" | "sys";
+  txt: string;
+  live?: boolean;
+  failed?: boolean;
+  card?: SystemCard;
+};
+
 export function BossChat() {
   const store = useStore();
   const [open, setOpen] = useState(false);
-  // "sys" is a job announcement, not a turn in the conversation: green when the team
-  // finished something, red when it failed. Never persisted — it reports what the dashboard
-  // already knows, and replaying yesterday's completions on reopen would be noise.
-  // `failed` marks a bot bubble whose reply never arrived; `retryOf` is the user text to re-send.
-  const [msgs, setMsgs] = useState<{ who: "bot" | "me" | "sys"; txt: string; live?: boolean; tone?: "done" | "error"; failed?: boolean; retryOf?: string }[]>([]);
+  const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   // Desktop only: the dock can be closed and stays closed across reloads (localStorage). On
   // narrow screens `open` is the floating card's own state and this flag is ignored.
   const [collapsed, setCollapsed] = useState(false);
@@ -169,21 +191,22 @@ export function BossChat() {
     const fresh = notices.filter((n: any) => !shownNotices.current.has(n.id));
     if (!fresh.length) return;
     fresh.forEach((n: any) => shownNotices.current.add(n.id));
-    const lines = fresh.map((n: any) => ({
-      who: "sys" as const,
-      txt: n.tone === "error" ? `✕ ${n.text}` : `✓ ${n.text}`,
-      tone: n.tone,
-    }));
+    // The ✓ / ✕ used to be glued onto the front of a string here. They are a status now — the
+    // card's own icon and colour — so the text stops carrying meaning that only the layout
+    // should carry, and there is no mark left for a reply to imitate.
+    const lines: ChatMsg[] = fresh.map((n: any) => ({ who: "sys" as const, txt: "", card: cardFromNotice(n) }));
     setMsgs((m) => [...m, ...lines]);
 
     // Into the transcript too (migration 013). These used to be React state only, so the
     // keyword table with its measured volumes — the thing most worth looking back at —
     // disappeared on the next refresh.
-    for (const line of lines) {
+    // Stored as the notice itself — the ✓/✕ that used to be baked into this string is the
+    // card's business now, so the transcript keeps the fact and not its decoration.
+    for (const n of fresh as any[]) {
       fetch("/api/chat/events", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversationId: convIdRef.current, text: line.txt, tone: line.tone }),
+        body: JSON.stringify({ conversationId: convIdRef.current, text: n.text, tone: n.tone }),
       })
         .then((r) => r.json())
         .then((d) => { if (d?.ok && d.conversationId && !convIdRef.current) setConvId(d.conversationId); })
@@ -244,10 +267,13 @@ export function BossChat() {
       if (!r?.ok) return;
       setConvId(id);
       setMsgs(
-        r.messages.map((m: any) =>
+        r.messages.map((m: any): ChatMsg =>
+          // A stored `event` row is a fact that was written down, so it comes back on the
+          // system channel. A stored assistant turn is prose and comes back as a bubble —
+          // whatever it happens to say about publishing or booking.
           m.kind === "event"
-            ? { who: "sys" as const, txt: m.content, tone: (m.tone === "error" ? "error" : "done") as "done" | "error" }
-            : { who: (m.role === "user" ? "me" : "bot") as "me" | "bot", txt: m.content }
+            ? { who: "sys", txt: "", card: cardFromStoredEvent({ id: m.id, content: m.content, tone: m.tone, at: m.created_at ? Date.parse(m.created_at) || undefined : undefined }) }
+            : { who: m.role === "user" ? "me" : "bot", txt: m.content }
         )
       );
       // Already on screen — don't let the live poll append them a second time.
@@ -360,8 +386,23 @@ export function BossChat() {
     // this reply streams, and "the last bubble" would then be the wrong one.
     let slot = -1;
     setMsgs(m => { slot = m.length - 1; return m; });
-    const patchSlot = (fn: (b: (typeof msgs)[number]) => (typeof msgs)[number]) =>
+    const patchSlot = (fn: (b: ChatMsg) => ChatMsg) =>
       setMsgs(m => { const i = slot >= 0 && slot < m.length ? slot : m.length - 1; const c = [...m]; c[i] = fn(c[i]); return c; });
+    /** Onto the SYSTEM channel, at the end — for a fact that is only known once the reply is
+     *  over (it never arrived, it was cut off). Never inside the bubble. */
+    const pushCard = (card: SystemCard | null) => { if (card) setMsgs(m => [...m, { who: "sys", txt: "", card }]); };
+    /** Onto the SYSTEM channel ABOVE the reply being streamed.
+     *
+     *  An accepted order is known from the response headers, before the first token — and
+     *  that is the order it belongs in: the receipt first, the model's "theek hai" under it
+     *  (§10 rule 1, and the instant-acknowledgement row in §24). The streaming bubble shifts
+     *  down by one, so the slot this reply is writing into shifts with it. */
+    const pushCardBefore = (card: SystemCard | null) => {
+      if (!card) return;
+      const at = slot >= 0 ? slot : 0;
+      setMsgs(m => { const c = [...m]; c.splice(Math.min(at, c.length), 0, { who: "sys", txt: "", card }); return c; });
+      if (slot >= 0) slot += 1;
+    };
     const ctx = store ? { tokens: store.s.tokens, tokensMax: store.s.tokensMax, plan: store.s.plan, memory: store.s.memory, awaiting: store.s.content.filter((c: any) => c.status === "awaiting").length, report: store.s.reports[0]?.lines?.slice(-1)[0]?.s } : {};
     // The conversation so far. Without this every message was a cold start: ask for an
     // article, then ask "kya update hai?" one message later and Mr Lxwa had no idea he had
@@ -392,6 +433,10 @@ export function BossChat() {
         const label = res.headers.get("X-Run-Label");
         store?.startRun?.(runAgent, label ? decodeURIComponent(label) : "Order accepted", res.headers.get("X-Run-Job"));
       }
+      // ...and the same fact, in the conversation, as a card rather than as a sentence. One
+      // adapter reads the response (lib/chat-events.ts): today that means the X-Run-* headers
+      // and X-Run-Event; in Phase 1 it means the brain's event stream, and nothing here moves.
+      pushCardBefore(cardFromResponse(res.headers));
       const reader = res.body.getReader(); const dec = new TextDecoder();
       // A fresh reply cancels whatever the previous one was still saying; after this the
       // sentences queue behind each other instead of interrupting.
@@ -415,23 +460,43 @@ export function BossChat() {
       // Titles are set from the first question, so the list only becomes useful after a turn.
       if (q !== "__hello__") void refreshConvs();
     } catch (e: any) {
-      // The bubble stays, but as a failure with a Retry — an empty bubble with a blinking
-      // cursor forever was the old behaviour, with the send button stuck disabled behind it.
+      // Whatever arrived stays on screen — an empty bubble with a blinking cursor forever was
+      // the old behaviour, with the send button stuck disabled behind it. What did NOT arrive
+      // is reported on the system channel: the reason and the Retry go on a card, so the
+      // failure is not written in Mr Lxwa's voice as if he had noticed it himself.
       const partial = full.trim();
-      patchSlot(b => ({
-        ...b, live: false, failed: true, retryOf: q,
-        txt: partial ? `${partial}\n\n**Reply cut off** (${e?.message ?? "network error"})` : `**Reply failed** (${e?.message ?? "network error"})`,
-      }));
+      if (partial) patchSlot(b => ({ ...b, live: false, failed: true, txt: partial }));
+      else setMsgs(m => m.filter((_, j) => j !== (slot >= 0 && slot < m.length ? slot : m.length - 1)));
+      pushCard(cardFromStreamFailure(e?.message ?? "network error", q));
     } finally {
       setBusy(false);
     }
   }
-  /** Re-sends the message a failed bubble belonged to, replacing that bubble. */
-  const retry = (i: number) => {
-    if (busy) return;
-    const q = msgs[i]?.retryOf; if (!q) return;
+  /** Re-send the message a failed card belongs to, and drop the card. Same path as before
+   *  (commit 9bb2055) — it just hangs off the card now instead of off the bubble. */
+  const retry = (i: number, text: string) => {
+    if (busy || !text) return;
     setMsgs(m => m.filter((_, j) => j !== i));
-    stream(q);
+    stream(text);
+  };
+  /** Answering a card (Confirm / Cancel) is an ordinary message: it goes through the same
+   *  intent pipeline as typing "haan" would, so there is no second, hidden way to order work.
+   *  The buttons come off that card first — an answer given twice is an order placed twice. */
+  const answerCard = (i: number, text: string) => {
+    if (busy || !text) return;
+    setMsgs(m => [
+      ...m.map((x, j) => (j === i && x.card ? { ...x, card: { ...x.card, actions: undefined } } : x)),
+      { who: "me" as const, txt: text },
+    ]);
+    stream(text);
+  };
+  const onCardAction = (i: number, card: SystemCard, a: SystemAction) => {
+    if (a.action === "retry") return retry(i, a.payload?.text ?? "");
+    if (a.action === "confirm" || a.action === "cancel") return answerCard(i, a.payload?.text ?? "");
+    if (a.action === "open") {
+      const url = a.payload?.url ?? card.href?.url;
+      if (url) window.open(String(url), "_blank", "noopener,noreferrer");
+    }
   };
   const send = () => {
     const v = input.trim(); if (!v || busy) return;
@@ -441,6 +506,13 @@ export function BossChat() {
     const agentId = agentIdFromText(v);
     if (agentId) store?.focusOn(agentId, 5000);
   };
+
+  // What the live region below says: the newest system fact, one line of it. Recomputed from
+  // the transcript rather than stored, so it can never disagree with what is on screen.
+  const lastCard = [...msgs].reverse().find((m) => channelOf(m) === "system")?.card;
+  const announcement = lastCard
+    ? [lastCard.title, lastCard.detail?.split("\n")[0]].filter(Boolean).join(" — ")
+    : "";
 
   return (
     <>
@@ -481,14 +553,24 @@ export function BossChat() {
           <div ref={box} onScroll={onBoxScroll} style={{ flex: 1, overflowY: "auto", padding: 13, display: "flex", flexDirection: "column", gap: 9 }}>
             {/* Mr Lxwa's "I've put the team on it" replies are numbered, multi-line — without the
                 \n -> <br> the whole pipeline collapsed into one unreadable paragraph. */}
-            {msgs.map((m, i) => (
-              <div key={i} className={"cm " + m.who + (m.live ? " cursor" : "") + (m.tone ? " tone-" + m.tone : "") + (m.failed ? " is-failed" : "")}>
-                {renderMessage(m.txt)}
-                {m.failed && m.retryOf && (
-                  <button type="button" className="btn btn-g btn-sm cm-retry" disabled={busy} onClick={() => retry(i)}>Retry</button>
-                )}
-              </div>
-            ))}
+            {msgs.map((m, i) =>
+              // The one place the channel is decided, and it is decided on structure: a
+              // message is a System card only if it carries one. No string is ever inspected
+              // to promote prose into a status — which is why the model cannot claim an
+              // action however it words it (lib/chat-events.test.ts).
+              channelOf(m) === "system" ? (
+                <SystemCardView key={i} card={m.card!} busy={busy} onAction={(a) => onCardAction(i, m.card!, a)} />
+              ) : (
+                <div key={i} className={"cm " + m.who + (m.live ? " cursor" : "") + (m.failed ? " is-failed" : "")}>
+                  {renderMessage(m.txt)}
+                </div>
+              )
+            )}
+            {/* The system channel, for screen readers. One region that already exists when a
+                card lands — a live region inserted at the same moment as its own content is
+                announced inconsistently — carrying only the newest fact, never the model's
+                stream (which would read every token aloud twice). */}
+            <div className="sysc-sr" aria-live="polite" aria-atomic="true">{announcement}</div>
           </div>
         )}
 
@@ -535,10 +617,10 @@ export function BossChat() {
         }
         .bosschat-panel.is-open { display: flex; }
 
-        /* A reply that never arrived. Red edge, and the Retry button re-sends the same text. */
+        /* A reply that was cut off mid-sentence. Red edge on what did arrive; the reason and
+           the Retry are on the system card below it, not written in Mr Lxwa's voice. */
         .cm.bot.is-failed { border-color: color-mix(in srgb, var(--red) 45%, transparent);
                             background: color-mix(in srgb, var(--red) 8%, transparent); }
-        .cm-retry { display: inline-flex; margin-top: 8px; min-height: 30px; padding: 4px 11px; font-size: 12px; }
 
         /* desktop: a real full-height column docked to the right edge. The width is the same
            --chatw app/app/layout.tsx reserves for it, so it never covers the office again.
@@ -557,6 +639,87 @@ export function BossChat() {
         }
       `}</style>
     </>
+  );
+}
+
+/** CHANNEL 2 — the system speaking.
+ *
+ *  Every pixel of this comes from the `SystemCard` it is handed. Nothing is parsed out of any
+ *  message text, and the component has no way to invent a status: no card, no card on screen.
+ *  Deliberately unlike a chat bubble (full width, left rail, status colour, agent chip) so
+ *  nobody ever has to work out whether a line is a fact or a sentence — §10 rule 1.
+ *
+ *  What is live is checked against the store, not assumed: the spinner and the timer only run
+ *  while the accepted order is still ours to show or jobs_log says that agent is working. A
+ *  card whose agent has gone quiet freezes at its final elapsed time instead of animating
+ *  forever, because the alternative is an animation that lies (§24.5). */
+function SystemCardView({
+  card, busy, onAction,
+}: { card: SystemCard; busy: boolean; onAction: (a: SystemAction) => void }) {
+  const store = useStore();
+  const agents = store?.s?.agents ?? {};
+  const run = store?.s?.run ?? null;
+  const agentName = card.agent ? AGENTS.find((a) => a.id === card.agent)?.name ?? card.agent : null;
+
+  const live =
+    isLiveKind(card.kind) &&
+    (card.agent ? agents[card.agent]?.st === "w" || run?.agentId === card.agent : true);
+
+  // Ticks once a second while the work is live, then stops — leaving the last value, which is
+  // how long it ran for.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!live) return;
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [live]);
+
+  // The live line is the agent's real current task from the poll, not a description of it.
+  const liveLine = live && card.agent ? agents[card.agent]?.task : null;
+
+  return (
+    <div className={"cm sys sysc tone-" + toneOf(card.kind)} role="group" aria-label={"Status: " + card.title}>
+      <div className="sysc-top">
+        {isLiveKind(card.kind)
+          ? <span className={"sysc-spin" + (live ? "" : " is-stopped")} aria-hidden="true" />
+          : <span className="sysc-ic" aria-hidden="true">{iconOf(card.kind)}</span>}
+        <b className="sysc-title">{card.title}</b>
+        {agentName && <span className="sysc-chip">{agentName}</span>}
+        {/* Fixed width + tabular figures: the timer changes every second and must not be able
+            to move anything else on the card while it does. */}
+        {isLiveKind(card.kind) && (
+          <span className="sysc-time" title={live ? "Running for" : "Ran for"}>{elapsedLabel(now - card.at)}</span>
+        )}
+      </div>
+
+      {card.detail && <div className="sysc-detail">{renderMessage(card.detail)}</div>}
+      {/* Reserved whether or not there is a line to put in it, so a card doesn't jump when the
+          next poll changes what the agent is doing. */}
+      {isLiveKind(card.kind) && <div className="sysc-live">{liveLine || (live ? "Working…" : "")}</div>}
+
+      {card.href && (
+        <a className="sysc-link" href={card.href.url} target="_blank" rel="noopener noreferrer">
+          {card.href.label} ↗
+        </a>
+      )}
+
+      {!!card.actions?.length && (
+        <div className="sysc-acts">
+          {card.actions.map((a, k) => (
+            <button
+              key={k}
+              type="button"
+              className={"btn btn-sm " + (a.action === "confirm" ? "btn-p" : a.action === "cancel" ? "btn-red" : "btn-g")}
+              disabled={busy}
+              onClick={() => onAction(a)}
+            >
+              {a.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

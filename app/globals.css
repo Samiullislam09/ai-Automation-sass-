@@ -362,8 +362,45 @@ code{overflow-wrap:anywhere;word-break:break-word}
         .prose table { width: 100%; border-collapse: collapse; margin: 0 0 17px; display: block; overflow-x: auto; }
         .prose th, .prose td { border: 1px solid var(--line); padding: 7px 10px; text-align: left; font-size: 14px; }
 
-/* Job announcements inside the chat (components/kit.tsx BossChat). Deliberately unlike a
-   chat bubble — this is the team reporting, not Mr Lxwa talking. */
-.cm.sys{align-self:stretch;background:transparent;border:1px solid var(--line);border-left:3px solid var(--mut2);border-radius:9px;padding:8px 11px;font-size:11.5px;line-height:1.55;color:var(--mut)}
-.cm.sys.tone-done{border-left-color:var(--grn);color:var(--ink);background:color-mix(in srgb,var(--grn) 8%,transparent)}
-.cm.sys.tone-error{border-left-color:var(--red);color:var(--ink);background:color-mix(in srgb,var(--red) 8%,transparent)}
+/* ── The chat's SYSTEM channel (components/kit.tsx SystemCardView) ────────────────────────
+   Deliberately unlike a chat bubble: this is the system reporting a fact it has evidence for,
+   not Mr Lxwa talking. Full width, a status-coloured left rail, an icon and an agent chip —
+   so nobody has to work out whether a line is true or generated (MASTER_PLAN §10 rule 1).
+   Every card is drawn from a SystemCard value (lib/chat-events.ts); no text is ever parsed
+   into one. Lives here rather than in styled-jsx because that transform panics on kit.tsx. */
+.cm.sys{align-self:stretch;max-width:100%;background:transparent;border:1px solid var(--line);border-left:3px solid var(--mut2);border-radius:9px;padding:8px 11px;font-size:11.5px;line-height:1.55;color:var(--mut)}
+/* Status colours from the existing tokens — ok / warn / err / info, nothing new. */
+.cm.sys.tone-ok{border-left-color:var(--grn);color:var(--ink);background:color-mix(in srgb,var(--grn) 8%,transparent)}
+.cm.sys.tone-err{border-left-color:var(--red);color:var(--ink);background:color-mix(in srgb,var(--red) 8%,transparent)}
+.cm.sys.tone-warn{border-left-color:var(--amb);color:var(--ink);background:color-mix(in srgb,var(--amb) 9%,transparent)}
+.cm.sys.tone-info{border-left-color:var(--ac);color:var(--ink);background:color-mix(in srgb,var(--ac) 7%,transparent)}
+.sysc-top{display:flex;align-items:center;gap:7px;min-width:0}
+.sysc-ic{flex:none;width:14px;text-align:center;font-size:11px;font-weight:800;line-height:1}
+.tone-ok .sysc-ic{color:var(--grn)} .tone-err .sysc-ic{color:var(--red)}
+.tone-warn .sysc-ic{color:var(--amb)} .tone-info .sysc-ic{color:var(--ac)}
+/* Running: the spinner IS the status. It stops when the work stops — a card whose agent has
+   gone quiet must not keep animating, because that animation would be a claim. */
+.sysc-spin{flex:none;width:11px;height:11px;margin:0 1px;border-radius:50%;
+           border:2px solid color-mix(in srgb,var(--ac) 30%,transparent);border-top-color:var(--ac);
+           animation:sp .8s linear infinite}
+.sysc-spin.is-stopped{animation:none;border-top-color:var(--mut2);opacity:.55}
+.sysc-title{flex:1;min-width:0;color:var(--ink);font-weight:700;font-size:12px;overflow-wrap:anywhere}
+.sysc-chip{flex:none;font-size:9.5px;font-weight:700;letter-spacing:.2px;color:var(--mut);
+           background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:2px 7px;white-space:nowrap}
+/* Fixed width + tabular figures: a timer that ticks every second may not move anything. */
+.sysc-time{flex:none;min-width:44px;text-align:right;font-size:10.5px;color:var(--mut2);
+           font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+.sysc-detail{margin-top:5px;color:var(--mut);font-size:11.5px}
+.sysc-detail b{color:var(--ink)}
+/* Reserved height whether or not there is a line in it — the progress line changes on every
+   poll and must not be able to resize the card. */
+.sysc-live{margin-top:4px;min-height:15px;color:var(--mut2);font-size:10.5px;
+           overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sysc-link{display:inline-block;margin-top:6px;color:var(--ac);font-size:11.5px;font-weight:700;
+           text-decoration:underline;text-underline-offset:2px;overflow-wrap:anywhere}
+.sysc-acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.sysc-acts .btn{min-height:30px;padding:4px 11px;font-size:12px}
+/* The system channel for screen readers: one region that is already in the DOM when a card
+   lands, carrying only the newest fact — never the model's stream. */
+.sysc-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+         clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}

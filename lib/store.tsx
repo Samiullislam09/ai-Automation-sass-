@@ -86,7 +86,7 @@ type State = {
   crawl: { phase: string; done: number; total: number; current: string | null; label: string | null; startedAt: string } | null;
   /** Finished-job announcements for the chat. Mr Lxwa confirms the work in the conversation
    *  itself — a toast that has already faded is not an answer to "did it happen?". */
-  chatNotices: { id: string; text: string; tone: "done" | "error" }[];
+  chatNotices: { id: string; text: string; tone: "done" | "error"; agentId?: string }[];
   /** The keyword table waiting on the user, counting down (components/KeywordChoice.tsx). */
   keywordChoice: {
     id: string; topic: string; candidates: any[]; recommended: string;
