@@ -30,6 +30,8 @@ const ITEMS: [string, keyof typeof Icon, string][] = [
   // What the team understood about the business, with the evidence behind every field
   // (MASTER_PLAN §25.7). Next to Memory because both answer "what does it know about me?".
   ["Site Brain", "memory", "/app/site-brain"],
+  // Mr. Audit's report and its score trend (MASTER_PLAN §7.4).
+  ["Site audit", "reports", "/app/audit"],
   ["Billing", "billing", "/app/billing"],
   // Review screen for the intent evaluation set (lib/eval/README.md). Reuses the activity icon.
   ["Eval", "activity", "/app/eval"],

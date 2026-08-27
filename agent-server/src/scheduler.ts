@@ -44,12 +44,15 @@ export function startScheduler() {
 /** Three timetables, one tick. Independent on purpose: a broken recurring schedule must not
  *  stop a customer's one-off order from firing, and vice versa.
  *
+ *  `tickAudits` is the fourth, and the only one nobody books: §7.4 says the site audit is
+ *  weekly by default, so it runs itself rather than waiting to be asked.
+ *
  *  `brainTick` is the third: tasks booked for later (`tasks.run_at`, migration 017). It runs
  *  alongside `tickOrders` rather than replacing it, because `scheduled_orders` still holds
  *  everything booked before the brain existed — the old table drains, it is not migrated
  *  (plan §22 con #10). */
 async function sweep() {
-  await Promise.allSettled([tick(), tickOrders(), brainSweep()]);
+  await Promise.allSettled([tick(), tickOrders(), brainSweep(), tickAudits()]);
 }
 
 async function brainSweep() {
@@ -60,6 +63,71 @@ async function brainSweep() {
     // Before the brain has booted (or if it refused to), this is simply not its turn yet.
     if (!/has not started/i.test(e?.message ?? "")) console.error("[scheduler] brain tick failed:", e?.message);
   }
+}
+
+/* ── The weekly site audit ────────────────────────────────────────────────────────────── */
+
+/** §7.4: "Scheduled: weekly default". Nobody books this one — a site audit is worth having
+ *  precisely when the owner has stopped thinking about it, so it books itself.
+ *
+ *  Three deliberate limits, all for the same reason (this runs for every tenant at once and
+ *  fetches fifty pages of somebody's website each time):
+ *
+ *   · a tenant is only audited if it has a website address AND pages we have already crawled.
+ *     A half-finished signup is not a customer, and auditing one spends three minutes on a
+ *     site nobody has connected;
+ *   · at most `AUDITS_PER_TICK` are started per sweep, so a hundred tenants due on the same
+ *     Monday become a queue that drains over an hour instead of a hundred simultaneous crawls;
+ *   · there is no separate schedule table. "Is the newest audit older than a week?" is the
+ *     whole rule, and it is a query — which means it survives a restart, cannot drift, and a
+ *     manual audit today correctly pushes the automatic one out by a week.
+ */
+const AUDIT_EVERY_MS = 7 * 24 * 60 * 60 * 1000;
+const AUDITS_PER_TICK = 3;
+
+export async function tickAudits(now: Date = new Date()): Promise<number> {
+  const { data: tenants, error } = await supabase.from("tenants").select("id, website_url").not("website_url", "is", null).limit(500);
+  if (error) {
+    console.error("[scheduler] could not read tenants for the weekly audit:", error.message);
+    return 0;
+  }
+  if (!tenants?.length) return 0;
+
+  let started = 0;
+  for (const t of tenants) {
+    if (started >= AUDITS_PER_TICK) break;
+    try {
+      const { data: last, error: auditError } = await supabase
+        .from("site_audits")
+        .select("created_at")
+        .eq("tenant_id", t.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      // Migration 020 not applied: this is not a reason to log once a minute for every tenant,
+      // and it is certainly not a reason to audit everybody. Stop the sweep entirely.
+      if (auditError) {
+        console.error("[scheduler] weekly audit paused:", auditError.message);
+        return started;
+      }
+
+      const lastAt = last?.created_at ? new Date(last.created_at).getTime() : 0;
+      if (lastAt && now.getTime() - lastAt < AUDIT_EVERY_MS) continue;
+
+      // Never audit a site we have not read: an account that stopped halfway through signup
+      // has an address and nothing behind it.
+      const { count } = await supabase.from("site_pages").select("id", { count: "exact", head: true }).eq("tenant_id", t.id);
+      if (!count) continue;
+
+      await enqueue("audit", { tenantId: t.id, taskLabel: "Weekly site audit", source: "schedule" } as any);
+      started++;
+      console.log(`[scheduler] tenant ${t.id}: weekly site audit enqueued`);
+    } catch (e: any) {
+      console.error(`[scheduler] weekly audit for tenant ${t.id} failed:`, e?.message);
+    }
+  }
+  return started;
 }
 
 export function stopScheduler() {
