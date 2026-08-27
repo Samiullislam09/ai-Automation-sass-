@@ -76,7 +76,10 @@ export type Plan = {
   steps: PlanStep[];
   /** Human-readable, one line per step — this is what the "here is what I will do" card shows. */
   outline: string[];
-  /** Sum of the manifests' estimates, so "~5 min" is arithmetic and not a guess. */
+  /** The **critical path**, not the sum: steps that run in parallel are counted once, at the
+   *  slowest of them. "~5 min" is then arithmetic rather than a guess, and it does not inflate
+   *  every time another parallel check is added to the plan. `cost_units` IS a plain sum —
+   *  parallel work costs twice and takes once. */
   estimated_seconds: number;
   cost_units: number;
 };

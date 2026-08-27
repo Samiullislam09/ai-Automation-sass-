@@ -11,6 +11,8 @@ import { startScheduler, stopScheduler } from "./scheduler.js";
 import { dailyUsage } from "./jobsLog.js";
 import { CAP_TABLE } from "./config/caps.js";
 import { nvidiaWindow } from "./lib/nvidia.js";
+import { mountBrain, startBrain } from "./brain/server.js";
+import { stopEvents } from "./brain/events.js";
 
 const app = express();
 app.use(cors({ origin: env.CORS_ORIGIN.split(",").map((s) => s.trim()) }));
@@ -109,6 +111,12 @@ app.post("/jobs/:type", async (req, res) => {
 async function main() {
   await initQueues(); // declares each agent's queue in Postgres before anything sends/works them
 
+  // The brain builds its registry here and refuses to start on a contradictory one (two agents
+  // claiming a phrase, a cycle in the needs graph). That refusal is deliberate: those bugs
+  // otherwise surface as an order going to the wrong agent, intermittently, weeks later.
+  await startBrain();
+  mountBrain(app);
+
   const httpServer = createServer(app);
   initSocket(httpServer);
   await startWorkers();
@@ -122,6 +130,9 @@ async function main() {
 
   process.on("SIGTERM", async () => {
     stopScheduler();
+    // Write the last half-second of the recording before the process goes: a redeploy in the
+    // middle of a run should not lose the evidence of what was happening.
+    await stopEvents();
     await boss.stop();
     httpServer.close();
   });

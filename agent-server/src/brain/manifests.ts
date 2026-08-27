@@ -123,7 +123,11 @@ export const MANIFESTS: Manifest[] = [
           "article likho", "blog likho", "write an article", "write a post",
           "likh do", "post banao", "content likho",
         ],
-        input: { topic: "string", keywords: "string[]?", tone: "string?", words: "number?" },
+        // `keywords` is required, not optional, because it is also a hard `need`: the planner
+        // guarantees a keyword step ran first, so declaring it optional was a lie that only
+        // survived because nothing checked. (The planner exempts fields that are also needs
+        // from the missing-slot question, so this costs the user no extra question.)
+        input: { topic: "string", keywords: "string[]", tone: "string?", words: "number?" },
         output: { title: "string", body: "string", wordCount: "number", qualityGate: "object" },
         provides: "article",
         needs: ["keywords"],
@@ -183,6 +187,11 @@ export const MANIFESTS: Manifest[] = [
         provides: "published_url",
         // seo_passed is required and NOT optional: a page on the customer's live site is the
         // one thing that cannot be quietly undone, so it does not go up unmeasured.
+        //
+        // `images` is deliberately absent until an image agent exists. The plan's diagram has
+        // publish needing images — but a need nobody provides makes every publish plan fail,
+        // and an optional-need for a non-existent agent is noise in every outline. Add
+        // "images" here the same day agent-image gets a manifest, not before.
         needs: ["article", "seo_passed"],
         irreversible: true,
         estimated_seconds: 30, // measured: WP REST round-trip plus the 200 check

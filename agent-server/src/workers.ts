@@ -1,6 +1,6 @@
 import type { JobWithMetadata } from "pg-boss";
 import { boss, ensureBossStarted } from "./db.js";
-import { AGENT_TYPES, type AgentType } from "./queues.js";
+import { AGENT_TYPES, BRAIN_QUEUE, type AgentType } from "./queues.js";
 import { BossAgent } from "./agents/boss.js";
 import { KeywordAgent } from "./agents/keyword.js";
 import { WriterAgent } from "./agents/writer.js";
@@ -15,6 +15,7 @@ import { emitAgentStatus } from "./socket.js";
 import { explainAgentError } from "./lib/errors.js";
 import { brainRefOf } from "./brain/adapter.js";
 import { onStepDone, onStepFailed } from "./brain/orchestrator.js";
+import { handleBrainDispatch } from "./brain/server.js";
 
 // queues.ts sets retryLimit: 2, i.e. the first run plus two retries.
 const MAX_ATTEMPTS = 3;
@@ -160,5 +161,19 @@ export async function startWorkers() {
       process(type, job as JobWithMetadata<AgentJobData>)
     );
   }
-  console.log(`[workers] pg-boss workers started — agents: ${AGENT_TYPES.join(", ")}`);
+
+  // The brain's own queue carries no work, only "look at task X again" — that is how a retry
+  // survives its backoff. It is not in AGENT_TYPES because it has no agent, no cap and no room
+  // in the office; giving it one would put a fake worker on the dashboard.
+  await boss.work<{ task_id: string; tenant_id: string }>(BRAIN_QUEUE, { localConcurrency: 4 }, async ([job]) => {
+    try {
+      await handleBrainDispatch(job.data);
+    } catch (e: any) {
+      // retryLimit is 0 on this queue: re-dispatch is idempotent, so a failure here means the
+      // task is stuck for another reason and a retry would only hide it.
+      console.error(`[brain] dispatch for task ${job.data?.task_id} failed:`, e?.message);
+    }
+  });
+
+  console.log(`[workers] pg-boss workers started — agents: ${AGENT_TYPES.join(", ")}, plus ${BRAIN_QUEUE}`);
 }

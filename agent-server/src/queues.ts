@@ -26,6 +26,15 @@ const QUEUE_OPTIONS = {
 const CRAWLER_QUEUE_OPTIONS = { ...QUEUE_OPTIONS, expireInSeconds: 3600 };
 const LONG_RUNNING: AgentType[] = ["crawler", "analyst"];
 
+/** The brain's own queue. Not an agent: the only thing it carries is "look at task X again",
+ *  which is how a retry survives its backoff and how a step wakes up after a delay. Kept off
+ *  AGENT_TYPES on purpose — it has no agent class, no cap, and must never appear in the office.
+ *
+ *  retryLimit 0: re-dispatching is already idempotent (it reads the rows and sends whatever is
+ *  ready), so a pg-boss retry on top would be a second opinion nobody asked for. */
+export const BRAIN_QUEUE = "brain-dispatch";
+const BRAIN_QUEUE_OPTIONS = { retryLimit: 0 };
+
 /** Declares each agent's queue in Postgres. Must run once before send()/work() calls
  *  (pg-boss requires a queue to exist before it's used) — called from index.ts on boot. */
 export async function initQueues() {
@@ -33,6 +42,13 @@ export async function initQueues() {
   for (const type of AGENT_TYPES) {
     await boss.createQueue(type, LONG_RUNNING.includes(type) ? CRAWLER_QUEUE_OPTIONS : QUEUE_OPTIONS);
   }
+  await boss.createQueue(BRAIN_QUEUE, BRAIN_QUEUE_OPTIONS);
+}
+
+/** Ask the brain to look at a task again, now or after a delay. */
+export async function enqueueBrainDispatch(data: { task_id: string; tenant_id: string }, options?: { startAfter?: number }) {
+  await ensureBossStarted();
+  return boss.send(BRAIN_QUEUE, data, options ?? {});
 }
 
 /** `startAfter` (seconds) is how the keyword agent holds a writer job open while the human

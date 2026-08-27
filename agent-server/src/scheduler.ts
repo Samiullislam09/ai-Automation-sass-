@@ -3,6 +3,7 @@ import { supabase } from "./supabase.js";
 import { enqueue } from "./queues.js";
 import { publishContentItem } from "./lib/publish.js";
 import { logJobStart, logJobFinish } from "./jobsLog.js";
+import { brainTick } from "./brain/server.js";
 
 /** The thing that makes this product actually automatic.
  *
@@ -40,10 +41,25 @@ export function startScheduler() {
   console.log("[scheduler] running — checking schedules and one-off orders every 60s");
 }
 
-/** Both timetables, one tick. Independent on purpose: a broken recurring schedule must not
- *  stop a customer's one-off order from firing, and vice versa. */
+/** Three timetables, one tick. Independent on purpose: a broken recurring schedule must not
+ *  stop a customer's one-off order from firing, and vice versa.
+ *
+ *  `brainTick` is the third: tasks booked for later (`tasks.run_at`, migration 017). It runs
+ *  alongside `tickOrders` rather than replacing it, because `scheduled_orders` still holds
+ *  everything booked before the brain existed — the old table drains, it is not migrated
+ *  (plan §22 con #10). */
 async function sweep() {
-  await Promise.allSettled([tick(), tickOrders()]);
+  await Promise.allSettled([tick(), tickOrders(), brainSweep()]);
+}
+
+async function brainSweep() {
+  try {
+    const started = await brainTick();
+    if (started) console.log(`[scheduler] brain started ${started} booked task(s)`);
+  } catch (e: any) {
+    // Before the brain has booted (or if it refused to), this is simply not its turn yet.
+    if (!/has not started/i.test(e?.message ?? "")) console.error("[scheduler] brain tick failed:", e?.message);
+  }
 }
 
 export function stopScheduler() {

@@ -237,8 +237,11 @@ export async function start(taskId: string, tenantId: string): Promise<void> {
 }
 
 /** The one function that decides what runs next, and the reason a crash costs nothing: it
- *  answers purely from the rows. */
-async function dispatchReady(taskId: string, tenantId: string): Promise<void> {
+ *  answers purely from the rows.
+ *
+ *  Exported because a delayed retry has to re-enter here after its backoff: the queue job
+ *  that wakes up carries only ids, and this rebuilds the whole picture from them. */
+export async function dispatchReady(taskId: string, tenantId: string): Promise<void> {
   const { db, schedule, runStep, checkCap, now } = need();
   const { data: steps } = await db.from("task_steps").select("*").eq("task_id", taskId).order("no");
   if (!steps) return;
