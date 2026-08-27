@@ -163,6 +163,7 @@ test("enabledActions never offers a tool whose agent would answer 'stub'", () =>
   const offered = enabledActions(reg).map((a) => a.spec.id);
 
   assert.deepEqual(offered, [
+    "audit_site",
     "build_site_profile",
     "check_seo",
     "crawl_site",

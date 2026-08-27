@@ -248,11 +248,17 @@ test("row 5 · publishing an existing article, once it is routable, is the 1-2 s
 
 // ══ ROW 6 · "site audit karo" → audit_site → 1 ═══════════════════════════════════════════
 
-test("row 6 · audit_site has no manifest yet → unknown_action, not an invented step", () => {
-  const res = failed(plan(intent("audit_site", {}), TODAY));
-  assert.deepEqual(res.failure, { kind: "unknown_action", action: "audit_site" });
-  assert.match(res.message, /audit_site/);
-  assert.match(res.message, /nahi hai/);
+test("row 6 · audit_site is one step, and it needs nothing first", () => {
+  // §14's table says one step, and the manifest is what makes that true: auditing reads the
+  // live site, so there is nothing for the backward walk to build first. The day it grows a
+  // `needs`, this test is the one that notices.
+  const p = okPlan(plan(intent("audit_site", {}), TODAY));
+  assert.equal(p.steps.length, 1);
+  assert.equal(p.steps[0].agent_id, "audit");
+  assert.equal(p.steps[0].action, "audit_site");
+  // No delivery step appended: reading a site produces nothing anybody publishes, so the
+  // backward walk has nowhere else to go.
+  assert.equal(p.outline.length, 1);
 });
 
 // ══ ROW 7 · "is article ki image badlo" → make_images → 1 ════════════════════════════════

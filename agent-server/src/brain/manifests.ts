@@ -202,6 +202,30 @@ export const MANIFESTS: Manifest[] = [
   },
 
   {
+    id: "audit",
+    name: "Mr. Audit",
+    version: "1.0.0",
+    description: "Checks the whole site for what is broken, invisible to Google, or costing traffic.",
+    actions: [
+      {
+        id: "audit_site",
+        phrases: ["site audit karo", "audit my site", "meri site check karo", "site audit", "what is wrong with my site", "site ki problem batao"],
+        input: { pages: "number?" },
+        output: { score: "number", issues: "object[]", summary: "string" },
+        provides: "site_audit",
+        needs: [],
+        irreversible: false,
+        // Measured against the sequential fetch: 50 pages at ~400ms of politeness plus the
+        // response itself. §7.4 quotes 2-4 minutes for the Playwright version; this one is
+        // lighter because it never starts a browser.
+        estimated_seconds: 150,
+        cost_units: 6,
+      },
+    ],
+    office: { room: "audit", ico: "🩺", color: "#facc15" },
+  },
+
+  {
     id: "social",
     name: "Mr. Social",
     version: "0.1.0", // stub — Phase 3

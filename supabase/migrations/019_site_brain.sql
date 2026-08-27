@@ -1,4 +1,4 @@
--- 019 · Site Brain: the written-down understanding of one tenant's website (rebuild plan §25).
+  -- 019 · Site Brain: the written-down understanding of one tenant's website (rebuild plan §25).
 --
 -- Today the crawl is STORED but never UNDERSTOOD: site_pages holds text + embeddings, and the
 -- only thing anybody does with it is feed 40 page titles to the planner. §25 fixes that with
