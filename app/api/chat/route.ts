@@ -15,6 +15,10 @@ import { classifyIntent, mightBeAnOrder } from "@/lib/chat-classify";
 import { enqueueAgentJob } from "@/lib/agent-jobs";
 import { loadBusiness, loadCounts, loadRecentWork, loadSchedule, type Counts, type Turn } from "@/lib/chat-context";
 import type { SystemEventPayload } from "@/lib/chat-events";
+import * as brain from "@/lib/brain";
+import { brainTurn, legacyJobOf, type BrainTurn, type BrainTurnDeps, type OrderResult } from "@/lib/chat-brain";
+import { extractIntent } from "@/lib/chat-brain-intent";
+import { clearState, loadState, savePending } from "@/lib/chat-conversation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -175,17 +179,28 @@ const ASKS_ABOUT_WORK =
 const ASKS_HOW_MANY = /\b(kitne|kitna|kitni|how many|how much|count|total|sab milakar|overall)\b/i;
 const ASKS_ABOUT_SCHEDULE =
   /\b(schedule|scheduled|schudule|automation|automatic|auto|kab|kitne baje|kitnebaje|timing|time|daily|roz|routine|next run|nextrun|cron|publish\w*)\b/i;
+/** "kya tum Instagram pe post kar sakte ho?" — a question about the TEAM, not about the work.
+ *  It is answered from the registry (plan §5.2 / §14), which is the only place that knows what
+ *  is wired up today, so the model gets that list and the instruction not to improve on it. */
+const ASKS_WHAT_YOU_CAN_DO =
+  /\b(kar sakte|kar sakta|kar sakti|kar paoge|kar paoge|karoge|kya kya|can you|could you|are you able|able to|do you support|is it possible|possible hai|ho sakta hai|ho payega)\b/i;
 
 function buildMessages(
   q: string,
   ctx: any,
-  c: { business: string | null; recentWork: string | null; schedule: string | null; counts: Counts | null },
+  c: { business: string | null; recentWork: string | null; schedule: string | null; counts: Counts | null; capabilities?: string },
   history: Turn[]
 ) {
   const wantCounts = ASKS_HOW_MANY.test(q);
   const wantWork = !wantCounts && ASKS_ABOUT_WORK.test(q);
   const wantSchedule = ASKS_ABOUT_SCHEDULE.test(q);
-  lastSections = [wantWork && "work", wantCounts && "counts", wantSchedule && "schedule"].filter(Boolean).join("+") || "none";
+  // The team's own list of what it can and cannot do. Attached when they ask about ability,
+  // and when nothing else was needed — never on top of three other sections, because handing
+  // this model four reference blocks is what made "hi hello" come back as a status report.
+  const wantTeam = !!c.capabilities && (ASKS_WHAT_YOU_CAN_DO.test(q) || (!wantWork && !wantCounts && !wantSchedule));
+  lastSections =
+    [wantWork && "work", wantCounts && "counts", wantSchedule && "schedule", wantTeam && "team"].filter(Boolean).join("+") ||
+    "none";
   return [
     { role: "system" as const, content: systemPrompt(ctx, c.business, c.counts?.awaiting ?? null) },
     ...history,
@@ -226,6 +241,7 @@ function buildMessages(
               ``,
             ]
           : []),
+        ...(wantTeam ? [c.capabilities as string, ``] : []),
         !wantWork && !wantSchedule && !wantCounts
           ? `This question needs no stored facts — just answer it. If it is a greeting, greet back in one short line, e.g. "Salam! Kya chahiye?".`
           : `HARD LIMIT: do not state any work, progress, publishing, billing or account change that is not written above. Guessing here is the one thing you must never do.`,
@@ -421,21 +437,14 @@ function fallback(q: string, ctx: any): string {
  *  `agentId` and `jobId` exist so the office can light the right room the moment the reply
  *  lands, instead of standing still until the next poll finds a jobs_log row. It is only ever
  *  set when the enqueue really returned — a refused order carries neither, and the office is
- *  therefore never able to animate work that was not started. */
-type OrderResult = {
-  text: string;
-  agentId: string | null;
-  jobId: string | null;
-  label: string | null;
-  /** The SYSTEM channel's half of the answer (docs/MASTER_PLAN.html §10 rule 1).
-   *
-   *  `text` is prose and is drawn as a bubble. `event` is the fact — booked, published,
-   *  stopped — and is drawn as a card, from data. It is set only where the row was written or
-   *  the publish returned ok, so a card cannot exist for something that did not happen; the
-   *  shape is shared with the browser through lib/chat-events.ts, and in Phase 1 the brain
-   *  emits exactly this. */
-  event?: SystemEventPayload;
-};
+ *  therefore never able to animate work that was not started.
+ *
+ *  The type itself now lives in lib/chat-brain.ts, because the brain path builds the same
+ *  thing and the two must not drift. Its `event` field is the SYSTEM channel's half of the
+ *  answer (docs/MASTER_PLAN.html §10 rule 1): `text` is prose and is drawn as a bubble,
+ *  `event` is the fact — booked, published, stopped — and is drawn as a card, from data. It is
+ *  set only where a row was written, an enqueue returned, or the brain answered, so a card
+ *  cannot exist for something that did not happen. */
 
 /** Said back to the user with no job and no row behind it. Kept as its own constructor so the
  *  three null fields are a decision rather than an oversight: nothing animates, because
@@ -783,6 +792,56 @@ async function publishOrder(
   );
 }
 
+/* ── The brain path ──────────────────────────────────────────────────────────────────── */
+
+/** THE STRANGLER SEAM (plan §5, §10, §14).
+ *
+ *  With `BRAIN_ENABLED` on, an order stops being "a regex picked a job type and we enqueued
+ *  it" and becomes "the intent engine named a registered action and the brain made a task out
+ *  of it". Everything above this line — startWork, scheduleOrder, publishOrder, cancelBooked,
+ *  changeSchedule, rejectDraft — is still here, still reachable, and still exactly what runs
+ *  when the flag is off. Nothing was deleted, because the brain cannot do all of it yet: the
+ *  four exceptions are listed on `legacyJobOf` in lib/chat-brain.ts, which is the function
+ *  that decides which of them a message is. */
+async function runBrainTurn(
+  q: string,
+  tenantId: string,
+  userId: string | null,
+  convId: string | null,
+  history: Turn[],
+  supabase: SupabaseClient
+): Promise<BrainTurn> {
+  const tz = await cached(`tz:${tenantId}`, TTL.schedule, () => tenantTimezone(supabase, tenantId));
+
+  const deps: BrainTurnDeps = {
+    getRegistry: brain.getRegistry,
+    extractIntent,
+    createTask: brain.createTask,
+    confirmTask: brain.confirmTask,
+    cancelTask: brain.cancelTask,
+    state: {
+      load: async () => (convId ? loadState(supabase, tenantId, convId) : null),
+      save: async (pending, askedSlot, turnNo) =>
+        convId
+          ? savePending(supabase, { tenantId, conversationId: convId, pending, askedSlot, turnNo })
+          : // No conversation row means no way to hear the answer. Said, not swallowed: the
+            // caller turns this into "poora order ek message me likh dena".
+            { ok: false, error: "no conversation to remember this against" },
+      clear: async () => (convId ? clearState(supabase, tenantId, convId) : { ok: true }),
+    },
+    runLegacy: async (job) => {
+      const legacy = detectChatIntent(job.message);
+      if (!legacy) {
+        return { text: "Wo order ab yaad nahi raha — dobara bata dijiye.", agentId: null, jobId: null, label: null };
+      }
+      return startWork(legacy, tenantId, userId, job.message, supabase);
+    },
+    legacyKind: (message) => legacyJobOf(message, tz),
+  };
+
+  return brainTurn({ message: q, tenantId, userId, conversationId: convId, tz, history }, deps);
+}
+
 /* ── The request ─────────────────────────────────────────────────────────────────────── */
 
 /** Fills the caches while nobody is waiting, so the first real question doesn't pay for them.
@@ -861,17 +920,28 @@ export async function POST(req: NextRequest) {
       ? Promise.resolve([] as Turn[])
       : loadHistoryFromDb(supabase, tenantId, askedFor);
 
+  // Which system decides what this message means. `legacyJobOf` in lib/chat-brain.ts lists
+  // what the brain still cannot do, and lib/brain.ts `brainEnabled()` carries the flag's
+  // default (on everywhere except production, until it is turned on there deliberately).
+  const useBrain = brain.brainEnabled() && !!tenantId;
+
+  // ---- The old path, unchanged, for BRAIN_ENABLED=0 ----
+  //
   // Intent first, because an order needs no model call at all. The regex is instant; the
   // classifier only runs on messages that mention the work, and it runs while the database
   // reads above are still in flight rather than after them.
-  const fast = detectChatIntent(q);
-  const intent = fast ?? (mightBeAnOrder(q) ? await classifyIntent(q, clientHistory) : null);
-  lap("intent");
+  const fast = useBrain ? null : detectChatIntent(q);
+  const intent = useBrain ? null : fast ?? (mightBeAnOrder(q) ? await classifyIntent(q, clientHistory) : null);
+  if (!useBrain) lap("intent");
 
   // Put the team to work NOW, alongside opening the conversation rather than after it. The
   // enqueue is a network hop to the agent server and the conversation row is a Supabase
   // round trip; neither needs the other's answer, and running them nose-to-tail put ~800ms of
   // "does this thread exist" in front of the thing the user actually asked for.
+  //
+  // The brain path cannot do this: a follow-up ("haan") is resolved against the conversation's
+  // own pending-order row, so it has to know which conversation it is in first. One round trip
+  // is the price of multi-turn orders that do not silently break.
   const orderP = intent && tenantId ? startWork(intent, tenantId, userId, q, supabase) : null;
 
   const convId = await convP;
@@ -905,11 +975,25 @@ export async function POST(req: NextRequest) {
     return reply(order.text, order);
   }
 
+  // ---- The brain. An order returns here; a question falls through with the team's own list
+  //      of what it can and cannot do, so "kya tum Instagram pe post kar sakte ho?" is
+  //      answered from the registry instead of from the model's imagination. ----
+  let capabilities = "";
+  if (useBrain) {
+    const turn = await runBrainTurn(q, tenantId, userId, convId, clientHistory, supabase);
+    lap("brain");
+    if (turn.handled && turn.order) {
+      console.log(`[chat] timing ${JSON.stringify(mark)} brain=${turn.action}`);
+      return reply(turn.order.text, turn.order);
+    }
+    capabilities = turn.capabilities ?? "";
+  }
+
   const [business, recentWork, schedule, counts, storedHistory] = await Promise.all([businessP, workP, scheduleP, countsP, historyP]);
   lap("context");
   // The stored history only counts if the conversation it came from is the one we ended up in.
   const history = convId && convId === askedFor && storedHistory.length ? storedHistory : clientHistory;
-  const messages = buildMessages(q, ctx || {}, { business, recentWork, schedule, counts }, history);
+  const messages = buildMessages(q, ctx || {}, { business, recentWork, schedule, counts, capabilities }, history);
 
   // Primary model, then the fallback model — but only at OPENING the stream. Once tokens are
   // flowing a retry would mean re-writing text the reader has already seen, so a mid-stream
