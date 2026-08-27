@@ -94,7 +94,7 @@ ready kar dunga (`npm publish --access public`). Tab tak code chalta rahega (in-
 ### 11. Meta (Facebook) App Review — Phase 3 se pehle — [ ]
 **Kyun:** social posting ke liye Meta ka review hafton leta hai; line lambi hai to jaldi lagana behtar.
 
-### 12. Groq free API key — chat ko 8s se ~0.5s karne ke liye — [ ]
+### 12. Groq free API key — chat ko 8s se ~0.5s karne ke liye — [~] local ho gaya, Vercel baaki
 **Kyun:** MASTER_PLAN §18 ne measure kiya — aaj ka free NIM endpoint ek shared queue hai, 0.5s se 19s
 tak kuch bhi de sakta hai, apne code ki wajah se nahi. Groq apna dedicated hardware hai, free tier
 (~1k requests/din, 30 RPM, card nahi chahiye), aur first word ~200-400ms me aata hai. Code isi liye
@@ -111,6 +111,16 @@ tha jab maine test kiya — Groq pehle try karo.
 hai, khatam/fail ho to khud dusri try karta hai, dono fail ho to Cerebras/NIM pe jaata hai jaisa
 pehle se. 5 keys tak yahi tareeqa chalta hai (`GROQ_API_KEY_3`, `_4`, `_5`) — koi code change nahi
 chahiye, bas naya env var.
+
+**Status 2026-08-28:** pehli `GROQ_API_KEY` `.env.local` me daal di gayi aur real call se verify
+ki gayi (first byte ~1ms, sahi jawab aaya). Do cheezein baaki:
+1. Vercel → project → Settings → Environment Variables me `GROQ_API_KEY` (production) — abhi sirf
+   local pe hai, live site pe nahi.
+2. `GROQ_API_KEY_2` — doosra free account banana abhi baaki (khud bola tha "thodi der me deta hu").
+
+**Note (2026-08-28):** Groq ne apna purana `llama-3.3-70b-versatile` retire kar diya tha — code ab
+`openai/gpt-oss-120b` use karta hai (NIM ke primary jaisa he). Isi wajah se Cerebras ka default bhi
+`gpt-oss-120b` kar diya, par wahan abhi bhi 402 (no quota) hai us account pe.
 
 ---
 

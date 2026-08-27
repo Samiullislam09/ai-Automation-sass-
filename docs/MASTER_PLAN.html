@@ -988,13 +988,23 @@ traces    har task ka har LLM call: prompt_version, input, output, tokens, ms, c
 <!-- ============================================================ -->
 <h2 id="llm">18 · Chat 8 second kyun, aur kaunsa AI (free)</h2>
 
-<p><span class="pill ok">DONE 2026-08-27</span> Section 18.2 ke paanch fix me se teen ab true hain
-production me bhi: <strong>#3 instant acknowledgement</strong> (do-channel UI, Phase 0), <strong>#4
+<p><span class="pill ok">DONE 2026-08-28</span> Section 18.2 ke paanch fix me se <strong>char</strong> ab true
+hain production me bhi: <strong>#3 instant acknowledgement</strong> (do-channel UI, Phase 0), <strong>#4
 classifier critical path se hata</strong> (brain ab har environment me default-on hai &mdash; neeche
-&sect;18.6), aur <strong>#1 provider switch</strong> ka code (<code>lib/ai/fastChat.ts</code>, 6 tests)
-&mdash; <span class="pill warn">BAAKI (aapka kaam)</span> ek free Groq key (manual step 12), uske bina
-ye abhi inert hai aur NIM hi chalta hai jaisa aaj chalta hai. #2 (hedged request) aur #5 (chhota
-model) abhi nahi &mdash; dono ko do live providers ya A/B data chahiye jo abhi nahi hai.</p>
+&sect;18.6), aur <strong>#1 provider switch</strong> &mdash; <code>lib/ai/fastChat.ts</code> &mdash; ab
+sirf code nahi, <strong>live hai</strong>: owner ne apni Groq key daal di (2026-08-28), aur real call se
+verify kiya &mdash; first byte ~1ms (NIM ke 0.5-19s ke saamne), <code>content</code> field sahi assemble
+hota hai, aur gpt-oss ke &ldquo;reasoning&rdquo; chunks kabhi user tak nahi pahunchte (<code>relay()</code>
+sirf <code>delta.content</code> padhta hai). Ek bug raaste me mila aur theek hua: Groq/Cerebras dono ne
+apna purana Llama model retire kar diya tha (§18.3 ke measurement ke baad) &mdash; ab dono
+<code>gpt-oss-120b</code> pe hain (NIM ke primary jaisa he), jisme wahi &ldquo;bina reasoning_effort:low
+ke khaali content&rdquo; bug tha jo NIM pe pehle mila tha &mdash; <code>modelParams()</code> reuse karke
+theek kiya, dusri copy nahi banayi. Owner ne khud <strong>doosri Groq key</strong> bhi maangi (5 users,
+ek key ka daily cap khatam ho jaaye to) &mdash; <code>GROQ_API_KEY_2</code> (..<code>_5</code>) ab khud
+try hoti hai agli provider ki baari se pehle. Cerebras abhi bhi 402 hai (no quota, us account pe) &mdash;
+live re-check kiya, wahi status. #2 (hedged request) aur #5 (chhota model) abhi nahi &mdash; #2 ko ab
+do LIVE providers mil sakte hain (Groq + Cerebras dono wired) par Cerebras 402 hone tak hedge karne ko
+kuch nahi; #5 ko A/B data chahiye jo abhi nahi hai.</p>
 
 <h3>18.1 Measured, guessed nahi</h3>
 <p>Ek hi request — “hello, kya haal hai?”, 80 tokens, <code>thinking:false</code> — NIM ke <code>nemotron-3.5-lightning-30b-a3b</code> pe 2026-08-27 ko lagataar:</p>
@@ -1692,6 +1702,7 @@ aur commit ke saath &mdash; taaki kal koi (aap, main, ya 10 saal baad koi employ
 <tr><td>2026-08-27</td><td><code>3b4ac79</code></td><td>&sect;15 row 1: <code>scripts/compare-writer-models.mjs</code> &mdash; asli 5-topic model comparison harness, <code>--confirm</code> ke bina live calls nahi karta (ek galti se seekha)</td><td>&mdash;</td></tr>
 <tr><td>2026-08-28</td><td><code>4dbca8f</code></td><td>Unpublish chat se: &ldquo;isko site se hata do&rdquo; ab kaam karta hai (echo-first, publish jaisa). WP status &rarr; draft (delete nahi), <code>wpPostId</code> ab publish time pe save hota hai (app + agent-server dono). Phase 2 ka exit criterion ka aakhri khula hissa band</td><td>130 web + 224 agent-server green</td></tr>
 <tr><td>2026-08-28</td><td><code>64a0039</code></td><td>&sect;18.2 #1 ka extension: doosri (teesri...) Groq/Cerebras free-tier key (<code>GROQ_API_KEY_2</code>..<code>_5</code>) khud try hoti hai jab pehli key ka daily/per-minute cap khatam ho &mdash; agla provider (Cerebras/NIM) baari se pehle nahi. 5 users ke real scale ke liye, owner ke apne faisle se</td><td>134 web green (+2)</td></tr>
+<tr><td>2026-08-28</td><td><code>025b1cb</code></td><td>&sect;18.2 #1 <strong>live ho gaya</strong>: owner ne Groq key di, real call se verify (~1ms first byte). Raaste me mila bug theek kiya &mdash; Groq/Cerebras dono ne purana Llama model retire kar diya tha, ab dono <code>gpt-oss-120b</code> pe hain, <code>modelParams()</code> reuse karke &ldquo;bina reasoning_effort:low khaali content&rdquo; bug NIM jaisa hi theek kiya</td><td>132 web green</td></tr>
 </table></div>
 
 <h3>26.1 Abhi kya baaki hai (is order me)</h3>
