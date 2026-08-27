@@ -91,6 +91,17 @@ function translate(agentId: string, action: string, input: Record<string, unknow
     case "audit.audit_site":
       return { queue: "audit", data: { pages: input.pages ?? null, taskLabel: "Auditing your site" } };
 
+    case "social.draft_social":
+      return {
+        queue: "social",
+        data: {
+          article: input.article ?? null,
+          content_item_id: (input.article as any)?.contentItemId ?? (input.article as any)?.id ?? null,
+          networks: input.networks ?? null,
+          taskLabel: "Drafting social posts",
+        },
+      };
+
     case "leads.find_leads":
       // The agent takes `query` but the phrase the user typed often arrives as `topic` (the
       // intent engine's generic slot), so both are passed and the agent prefers `query`.

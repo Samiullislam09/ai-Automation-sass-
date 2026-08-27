@@ -302,10 +302,11 @@ export class AnalystAgent extends Agent {
     }
 
     // ── 6 · competitors and goals — the two fields only a HUMAN can fill ──────────────────
-    // §25.2 says both come from user input, and §25.7 adds the onboarding screen that asks.
-    // Until that screen exists these stay empty rather than being guessed from the site: a
-    // wrong goal ("traffic" when they wanted enquiries) misdirects every agent downstream.
-    // If onboarding already stored something on the tenant, it is carried in as-is.
+    // §25.2 says both come from user input, and §25.7's onboarding screen asks for them.
+    // These stay empty rather than being guessed from the site: a wrong goal ("traffic" when
+    // they wanted enquiries) misdirects every agent downstream. If onboarding already stored
+    // something on the tenant (from the wizard, or a later PATCH /api/site-brain), it is
+    // carried in as-is — this analyst run must never quietly erase the user's own answer.
     const stored = (tenant?.icp_profile as any) ?? {};
     const storedGoals = stored?.goals ?? (tenant?.tone_profile as any)?.goals ?? null;
     if (storedGoals && typeof storedGoals === "object") {
@@ -313,6 +314,7 @@ export class AnalystAgent extends Agent {
       profile.goals = {
         primary: primary === "leads" || primary === "traffic" || primary === "sales" ? (primary as any) : null,
         kpis: uniqStrings(storedGoals.kpis, 5, 120),
+        focus: uniqStrings(storedGoals.focus, 3, 120),
       };
       sources.goals = ["onboarding"];
       confidence.goals = "high";

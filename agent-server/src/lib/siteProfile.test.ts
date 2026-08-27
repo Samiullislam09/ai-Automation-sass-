@@ -34,7 +34,7 @@ function iso(): SiteProfile {
     geo: "India and UAE",
     language: "en",
     competitors: ["competitor.test"],
-    goals: { primary: "leads", kpis: ["monthly certification enquiries"] },
+    goals: { primary: "leads", kpis: ["monthly certification enquiries"], focus: [] },
     confidence: { what_they_do: "high", offerings: "high" },
     sources: { what_they_do: ["https://x.test/"], offerings: ["https://x.test/services/iso-9001"] },
   };
@@ -177,7 +177,7 @@ test("diffProfiles: voice and goals are reported once, as a whole", () => {
   const after: SiteProfile = {
     ...iso(),
     voice: { tone: "plain and direct", do: ["use we"], dont: [], samples: [] },
-    goals: { primary: "sales", kpis: [] },
+    goals: { primary: "sales", kpis: [], focus: [] },
   };
   const changes = diffProfiles(iso(), after);
 

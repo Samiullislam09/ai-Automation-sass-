@@ -312,11 +312,13 @@ test("slots the intent engine already flagged as missing are carried through", (
 });
 
 test("a target whose own agent is a stub → agent_unhealthy, named", () => {
-  // Mr. Social is the stub that is left. What the test is really about is the shape of the
-  // refusal: the agent is named, so the user hears which one, not "something went wrong".
-  const res = failed(plan(intent("draft_social", { article: {} }), TODAY));
+  // No agent is a real stub any more, so the mechanism is exercised with a manufactured one.
+  // What the test is really about is the shape of the refusal: the agent is named, so the
+  // user hears which one, not "something went wrong".
+  const stubbed = buildRegistry(MANIFESTS, { stubs: new Set(["social"]), notRouted: new Set() });
+  const res = failed(plan(intent("draft_social", { article: {} }), stubbed));
   assert.deepEqual(res.failure, { kind: "agent_unhealthy", agent_id: "social", required: true });
-  assert.match(res.message, /^Mr\. Social abhi available nahi hai/);
+  assert.match(res.message, /^Miss Social abhi available nahi hai/);
 });
 
 test("an OPTIONAL step whose agent is down is skipped with a note, and the plan still runs", () => {

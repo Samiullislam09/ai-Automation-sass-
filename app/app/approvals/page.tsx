@@ -10,11 +10,13 @@ type ContentItem = {
   status: string;
   title: string | null;
   body: string | null;
-  meta: { wordCount?: number; sections?: number; links?: number } | null;
+  meta: { wordCount?: number; sections?: number; links?: number; network?: string; copyOnly?: boolean; imageBrief?: string } | null;
   created_at: string;
 };
 
 const ICO: Record<string, string> = { article: "📝", story: "🎨", social: "📣", gbp: "📍" };
+
+const NETWORK_LABEL: Record<string, string> = { facebook: "Facebook", instagram: "Instagram", linkedin: "LinkedIn", x: "X (Twitter)" };
 
 function qcSummary(c: ContentItem): string {
   const m = c.meta ?? {};
@@ -44,17 +46,33 @@ export default function Approvals() {
       const res = await fetch(`/api/content/${c.id}/approve`, { method: "POST" });
       const data = await res.json();
       if (data.ok) {
-        act(`"It's live. Prepare distribution."`, "Mr Lxwa", "Miss Social");
-        report(`Published after your approval: "${c.title}"`);
-        toast(data.url ? `Published! ${data.url}` : "Published!");
+        if (data.copyOnly) {
+          // §7.7: nothing here posts anywhere — approving a social draft only marks it ready
+          // to copy, so the wording must not say "published" or "live" about it.
+          report(`Approved for copying — not posted anywhere: "${c.title}"`);
+          toast("Marked ready — copy the text and post it yourself.");
+        } else {
+          act(`"It's live. Prepare distribution."`, "Mr Lxwa", "Miss Social");
+          report(`Published after your approval: "${c.title}"`);
+          toast(data.url ? `Published! ${data.url}` : "Published!");
+        }
         setItems((prev) => prev.filter((x) => x.id !== c.id));
       } else {
-        toast(`Publish failed: ${data.error}`, "error");
+        toast(`${c.type === "social" ? "Couldn't approve" : "Publish failed"}: ${data.error}`, "error");
       }
     } catch {
-      toast("Publish failed — network error.", "error");
+      toast("Network error — try again.", "error");
     } finally {
       setBusy(null);
+    }
+  };
+
+  const copyPost = async (c: ContentItem) => {
+    try {
+      await navigator.clipboard.writeText(c.body ?? "");
+      toast("Copied — paste it into the app.");
+    } catch {
+      toast("Couldn't copy — select and copy the text manually.", "error");
     }
   };
 
@@ -111,17 +129,33 @@ export default function Approvals() {
                   viewport on a phone — flex items default to min-width:auto. */}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <b className="brk" style={{ fontSize: 14, display: "block" }}>{c.title || "Untitled"}</b>
-                <div className="xs mut" style={{ marginTop: 2 }}>{c.type} · quality gate ✓ passed · {new Date(c.created_at).toLocaleString()}</div>
+                <div className="xs mut" style={{ marginTop: 2 }}>
+                  {c.type === "social" ? (c.meta?.network ? NETWORK_LABEL[c.meta.network] ?? c.meta.network : "social") : `${c.type} · quality gate ✓ passed`} · {new Date(c.created_at).toLocaleString()}
+                </div>
               </div>
             </div>
-            <p className="sm mut" style={{ background: "var(--panel2)", borderRadius: 10, padding: 12, border: "1px solid var(--line)", margin: 0 }}>{qcSummary(c)}</p>
-            <div className="btnrow" style={{ marginTop: 13 }}>
-              {/* Approving from a two-line summary was approving on faith. This opens the
-                  draft as a real page, with hand-editing and an AI editor beside it. */}
-              <Link href={`/app/content/${c.id}`} className="btn btn-p btn-sm">Read &amp; edit</Link>
-              <button className="btn btn-g btn-sm" disabled={busy === c.id} onClick={() => approve(c)}>{busy === c.id ? "Publishing…" : "✓ Approve & publish"}</button>
-              <button className="btn btn-red btn-sm" disabled={busy === c.id} onClick={() => reject(c)}>{busy === c.id ? "Rejecting…" : "Reject"}</button>
-            </div>
+            {c.type === "social" ? (
+              <>
+                <p className="sm brk" style={{ background: "var(--panel2)", borderRadius: 10, padding: 12, border: "1px solid var(--line)", margin: 0, whiteSpace: "pre-wrap" }}>{c.body}</p>
+                {c.meta?.imageBrief && <p className="xs mut" style={{ margin: "8px 0 0" }}>📷 {c.meta.imageBrief}</p>}
+                <div className="btnrow" style={{ marginTop: 13 }}>
+                  <button className="btn btn-g btn-sm" onClick={() => copyPost(c)}>Copy text</button>
+                  <button className="btn btn-p btn-sm" disabled={busy === c.id} onClick={() => approve(c)}>{busy === c.id ? "Marking…" : "✓ Mark ready"}</button>
+                  <button className="btn btn-red btn-sm" disabled={busy === c.id} onClick={() => reject(c)}>{busy === c.id ? "Rejecting…" : "Reject"}</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="sm mut" style={{ background: "var(--panel2)", borderRadius: 10, padding: 12, border: "1px solid var(--line)", margin: 0 }}>{qcSummary(c)}</p>
+                <div className="btnrow" style={{ marginTop: 13 }}>
+                  {/* Approving from a two-line summary was approving on faith. This opens the
+                      draft as a real page, with hand-editing and an AI editor beside it. */}
+                  <Link href={`/app/content/${c.id}`} className="btn btn-p btn-sm">Read &amp; edit</Link>
+                  <button className="btn btn-g btn-sm" disabled={busy === c.id} onClick={() => approve(c)}>{busy === c.id ? "Publishing…" : "✓ Approve & publish"}</button>
+                  <button className="btn btn-red btn-sm" disabled={busy === c.id} onClick={() => reject(c)}>{busy === c.id ? "Rejecting…" : "Reject"}</button>
+                </div>
+              </>
+            )}
           </div>
         )) : (
           <div className="card emptycard">

@@ -67,6 +67,10 @@ export type Voice = {
 export type Goals = {
   primary: "leads" | "traffic" | "sales" | null;
   kpis: string[];
+  /** Onboarding's "kaunse 3 offerings sabse zaroori?" (§25.7) — read by boss.ts so topic
+   *  planning weights these over an offering that merely exists. Kept in step with the web
+   *  app's copy in components/SiteBrainModel.tsx; both read the same jsonb column. */
+  focus: string[];
 };
 
 export type Confidence = "high" | "medium" | "low";
@@ -145,7 +149,7 @@ export function emptyProfile(): SiteProfile {
     geo: null,
     language: null,
     competitors: [],
-    goals: null,
+    goals: null, // { primary: null, kpis: [], focus: [] } once set — normalize below fills a partial row
     confidence: {},
     sources: {},
   };
@@ -366,8 +370,12 @@ export function profileBlock(profile: SiteProfile | null | undefined, options?: 
     if (v.length) lines.push("", "HOUSE VOICE:", ...v.map((s) => `- ${s}`));
   }
 
-  if (p.goals?.primary || p.goals?.kpis.length) {
-    const goal = [p.goals?.primary ? `Primary goal: ${p.goals.primary}` : "", p.goals?.kpis.length ? `Measured by: ${p.goals.kpis.join("; ")}` : ""]
+  if (p.goals?.primary || p.goals?.kpis.length || p.goals?.focus?.length) {
+    const goal = [
+      p.goals?.primary ? `Primary goal: ${p.goals.primary}` : "",
+      p.goals?.focus?.length ? `Grow these first: ${p.goals.focus.join(", ")}` : "",
+      p.goals?.kpis.length ? `Measured by: ${p.goals.kpis.join("; ")}` : "",
+    ]
       .filter(Boolean)
       .join(" · ");
     if (goal) lines.push("", goal);

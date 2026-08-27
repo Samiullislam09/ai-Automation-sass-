@@ -172,7 +172,7 @@ const TASKS: Record<string, string> = {
   keyword: "Researching keywords",
   writer: "Writing article",
   seo: "Analyzing SEO",
-  social: "Scheduling posts",
+  social: "Drafting social posts",
 };
 
 /* ============================ ONE AGENT, IN DETAIL ============================

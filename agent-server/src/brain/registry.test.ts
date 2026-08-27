@@ -158,7 +158,9 @@ test("stub and not-yet-routed agents are registered but disabled", () => {
   assert.equal(reg.agents.get("keyword")?.healthy, true);
 });
 
-test("enabledActions never offers a tool whose agent would answer 'stub'", () => {
+test("enabledActions offers every action once its agent stops being a stub", () => {
+  // Miss Social was the last stub; the day it un-stubbed, this list grew by one rather than
+  // needing a hidden-tools branch — the whole point of driving this off STUB_AGENTS.
   const reg = buildRegistry(MANIFESTS, REAL_OPTS);
   const offered = enabledActions(reg).map((a) => a.spec.id);
 
@@ -167,6 +169,7 @@ test("enabledActions never offers a tool whose agent would answer 'stub'", () =>
     "build_site_profile",
     "check_seo",
     "crawl_site",
+    "draft_social",
     "find_keywords",
     "find_leads",
     "plan_topics",
@@ -174,10 +177,13 @@ test("enabledActions never offers a tool whose agent would answer 'stub'", () =>
     "research_brief",
     "write_article",
   ]);
-  for (const hidden of ["draft_social"]) {
-    assert.ok(!offered.includes(hidden), `${hidden} must not be offered to the model`);
-    assert.ok(reg.actions.has(hidden), `${hidden} must still be in the graph so the planner can explain it`);
-  }
+});
+
+test("a stub agent's action is registered but never offered — the seam this whole mechanism protects", () => {
+  const reg = buildRegistry(MANIFESTS, { stubs: new Set(["social"]), notRouted: NOT_YET_ROUTED });
+  const offered = enabledActions(reg).map((a) => a.spec.id);
+  assert.ok(!offered.includes("draft_social"), "a stub must not be offered to the model");
+  assert.ok(reg.actions.has("draft_social"), "but it stays in the graph so the planner can explain it");
 });
 
 test("an enabled agent that failed its health check is also kept out of enabledActions", () => {
@@ -195,19 +201,23 @@ test("baseUrls are attached; absent means in-process", () => {
 
 // ── capabilities text ─────────────────────────────────────────────────────────────────────
 
-test("describeCapabilities separates what the team can and cannot do", () => {
+test("describeCapabilities is all CAN DO NOW once nothing is a stub", () => {
   const text = describeCapabilities(buildRegistry(MANIFESTS, REAL_OPTS));
   assert.match(text, /CAN DO NOW/);
-  assert.match(text, /CANNOT DO YET/);
   assert.match(text, /Mr\. Keyword · find_keywords/);
   assert.match(text, /Mr\. SEO · check_seo/);
-  // Mr. SEO is real now, so it belongs in the "can" half; Miss Social is the one that still
-  // has to be honest about not existing yet.
+  assert.match(text, /Miss Social · draft_social/);
+  assert.equal(text.includes("CANNOT DO YET"), false, "nothing is a stub, so there is nothing to be honest about not doing");
+  assert.ok(text.length < 2000, "this block is prepended to every chat turn — keep it small");
+});
+
+test("describeCapabilities puts a stub agent's action in CANNOT DO YET, not CAN DO NOW", () => {
+  const text = describeCapabilities(buildRegistry(MANIFESTS, { stubs: new Set(["social"]), notRouted: NOT_YET_ROUTED }));
+  assert.match(text, /CANNOT DO YET/);
   const [can, cannot] = text.split("CANNOT DO YET");
   assert.ok(can.includes("check_seo"), "a real agent must be offered");
   assert.ok(!cannot.includes("check_seo"));
   assert.ok(cannot.includes("draft_social"), "a stub must be listed as something we cannot do");
-  assert.ok(text.length < 2000, "this block is prepended to every chat turn — keep it small");
 });
 
 // ── database sync ─────────────────────────────────────────────────────────────────────────
@@ -224,12 +234,9 @@ test("toAgentRows matches the agents table in migration 017", () => {
   assert.equal(kw.healthy_at, "2026-08-27T10:00:00.000Z");
   assert.equal(kw.manifest.actions[0].id, "find_keywords");
 
-  // A disabled agent still gets a row — the dashboard draws its room from the manifest — but
-  // it is marked disabled and has no health timestamp, because it has never been healthy.
-  // Miss Social is the example now that Mr. SEO is real.
+  // With REAL_OPTS (no stubs left), every registered agent is enabled — Miss Social included.
   const social = rows.find((r) => r.id === "social")!;
-  assert.equal(social.enabled, false);
-  assert.equal(social.healthy_at, null, "a disabled agent has never been healthy");
+  assert.equal(social.enabled, true, "Miss Social became a real agent on 2026-08-27");
 
   const seo = rows.find((r) => r.id === "seo")!;
   assert.equal(seo.enabled, true, "Mr. SEO became a real agent on 2026-08-27");

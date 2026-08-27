@@ -130,12 +130,18 @@ test('§14 "publish mat karna" · delivery approvals plans no publish step', () 
 });
 
 test("§14 · a stub agent is never offered, and asking for it is refused rather than accepted", () => {
-  const { registry } = world();
-  for (const stub of STUB_AGENTS) {
-    const offered = enabledActions(registry).some((a) => a.agent_id === stub);
-    assert.equal(offered, false, `${stub} is a stub — offering it would promise work that returns a placeholder`);
-  }
+  // No agent is a real stub any more (STUB_AGENTS is empty as of the leads/social wiring), so
+  // the mechanism is exercised with a manufactured one rather than asserting nothing.
+  const { registry } = world({ stubs: new Set(["social"]), notRouted: new Set() });
+  const offered = enabledActions(registry).some((a) => a.agent_id === "social");
+  assert.equal(offered, false, "a stub — offering it would promise work that returns a placeholder");
   assert.equal(isAvailable(registry, "draft_social"), false);
+});
+
+test("§14 · with no stubs left, every registered action is offered", () => {
+  const { registry } = world();
+  assert.equal(STUB_AGENTS.size, 0);
+  assert.equal(isAvailable(registry, "draft_social"), true);
 });
 
 test("§14 · a required agent that is down fails the plan with a sentence, not a stack trace", () => {
