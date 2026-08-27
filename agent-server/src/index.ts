@@ -24,12 +24,16 @@ const STARTED_AT = new Date().toISOString();
 /** "Is the brain up, and what can it actually route?" — the question that used to need a real
  *  order and a look at the logs. `actions` is the honest number: stubs and unrouted agents are
  *  registered but excluded, so this counts what a user could really ask for. */
+let brainStartupError: string | null = null;
+
 function brainStatus() {
   try {
     const reg = getRegistry();
-    return { up: true, actions: enabledActions(reg).length, agents: reg.agents.size, problems: reg.problems.length };
+    return { up: true, actions: enabledActions(reg).length, agents: reg.agents.size, problems: reg.problems.length, error: null };
   } catch {
-    return { up: false, actions: 0, agents: 0, problems: 0 };
+    // The reason, not just the fact. "brain.up: false" with no explanation is the kind of
+    // status line that sends someone reading Railway logs for twenty minutes.
+    return { up: false, actions: 0, agents: 0, problems: 0, error: brainStartupError ?? "not started yet" };
   }
 }
 
@@ -124,11 +128,26 @@ app.post("/jobs/:type", async (req, res) => {
 async function main() {
   await initQueues(); // declares each agent's queue in Postgres before anything sends/works them
 
-  // The brain builds its registry here and refuses to start on a contradictory one (two agents
-  // claiming a phrase, a cycle in the needs graph). That refusal is deliberate: those bugs
-  // otherwise surface as an order going to the wrong agent, intermittently, weeks later.
-  await startBrain();
-  mountBrain(app);
+  // The brain refuses to start on a contradictory registry — two agents claiming a phrase, a
+  // cycle in the needs graph. That refusal is deliberate: those bugs otherwise surface as an
+  // order going to the wrong agent, intermittently, weeks later.
+  //
+  // But the refusal is scoped to the brain, not to the process. Taking the crawler, the
+  // writer and the scheduler down with it would turn a routing bug into an outage — every
+  // customer's booked work would stop for a mistake that only affects new orders. So the
+  // brain stays down and says so: /version reports `brain.up: false`, its routes are never
+  // mounted, and the web app's client already has a sentence for "team abhi reachable nahi".
+  try {
+    await startBrain();
+    mountBrain(app);
+  } catch (e: any) {
+    brainStartupError = e?.message ?? String(e);
+    console.error(
+      "\n[brain] REFUSED TO START — new orders will be declined until this is fixed:\n" +
+        `        ${brainStartupError}\n` +
+        "        Everything already scheduled keeps running. See GET /version.\n",
+    );
+  }
 
   const httpServer = createServer(app);
   initSocket(httpServer);
