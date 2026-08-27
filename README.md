@@ -48,6 +48,29 @@ key; DataForSEO, Google and WordPress are all optional and degrade gracefully wh
 
 Apply `supabase/migrations/*.sql` in order via the Supabase SQL editor (or the CLI).
 
+### `BRAIN_ENABLED` — which system reads a chat order
+
+The chat has two order paths and one flag chooses between them.
+
+| Value | What the chat does with "solar pe article likho" |
+|---|---|
+| `1` | Fetches the brain's registry, builds the model's tools from the manifests, and `POST`s an Intent to `/brain/tasks`. The reply is a **system card** built from the brain's answer. |
+| `0` | The old path: regex + classifier → `enqueueAgentJob` straight onto a worker queue. |
+| unset | On everywhere except production. |
+
+The default is the strangler's point: the new path runs on every dev machine and in every
+preview from the first commit, and production keeps the old one until `BRAIN_ENABLED=1` is set
+there deliberately. Both paths are in `app/api/chat/route.ts`; nothing was deleted.
+
+With it on, the chat needs `AGENT_SERVER_URL`, and migration `017` for the confirm flow
+(`conversation_state`). **If the brain cannot be reached, an order is refused in plain words —
+it is never quietly re-sent down the old path**, because two systems creating work for one
+sentence is two articles and two bills. Questions and greetings are answered either way.
+
+Four kinds of order still run on the old path even when the flag is on, because the brain
+cannot carry them out yet: changing the recurring timetable, cancelling a booking, rejecting a
+draft, and publishing an existing article. See `legacyJobOf` in `lib/chat-brain.ts`.
+
 ---
 
 ## The agents
