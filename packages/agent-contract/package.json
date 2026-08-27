@@ -11,11 +11,12 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "README.md"],
+  "files": ["dist", "README.md", "CONTRACT.md"],
   "engines": { "node": ">=20" },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.examples.json",
     "test": "tsx --test src/**/*.test.ts",
+    "example:echo": "tsx examples/echo-agent/server.ts",
     "prepack": "npm run build"
   },
   "dependencies": {},

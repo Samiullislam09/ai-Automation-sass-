@@ -11,7 +11,70 @@ The one shape every MrLxwa agent has (MASTER_PLAN §6, §20, §24). It gives you
 
 Zero runtime dependencies. Node ≥ 20, ESM.
 
-## A 40-line agent
+**[CONTRACT.md](./CONTRACT.md) is the normative wire spec** — endpoints, headers, real captured event
+and callback JSON, the signature algorithm, retry semantics and the manifest schema in prose. This
+README is the TypeScript quickstart; CONTRACT.md is what a per-agent repo (or a Python port) is built
+against.
+
+## Quickstart: run the echo agent
+
+[`examples/echo-agent/`](./examples/echo-agent) is a complete, runnable agent in three files —
+[`manifest.ts`](./examples/echo-agent/manifest.ts) (what it can do),
+[`agent.ts`](./examples/echo-agent/agent.ts) (~30 lines: the whole agent) and
+[`server.ts`](./examples/echo-agent/server.ts) (a dependency-free `node:http` host, no express).
+
+```
+npm install
+npm run example:echo        # PORT=7801 AGENT_TOKEN=echo-dev-token by default
+```
+
+```console
+$ curl -s http://127.0.0.1:7801/health
+{"ok":true,"version":"1.0.0","uptime":2}
+
+$ curl -s http://127.0.0.1:7801/run -X POST \
+    -H 'content-type: application/json' -H 'x-agent-token: echo-dev-token' \
+    -d '{"run_id":"r1","tenant_id":"t1","action":"echo",
+         "input":{"text":"hello from the brain","delay_seconds":1.2},
+         "context":{},"callback_url":"http://127.0.0.1:9911/callback"}'
+{"accepted":true,"run_id":"r1"}
+```
+
+The 202 comes back in ~38 ms; the run itself takes ~1 260 ms and streams `step_started`, `data`
+(one per word), `progress` and `log` events to `callback_url` in batches, then one signed
+`{"kind":"result"}` message. The exact JSON of all of it is in [CONTRACT.md §5](./CONTRACT.md#5-callbacks).
+
+The handler is the whole agent:
+
+```ts
+async echo(ctx) {
+  const { text, delay_seconds = 0 } = ctx.input;
+
+  ctx.step("parse", "Reading the text");
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (!words.length) throw new AgentError("text has no words to echo", false, "empty_input");
+  ctx.log(`parsed ${words.length} word(s)`, "debug");
+
+  ctx.step("echo", "Echoing word by word");
+  for (const [i, word] of words.entries()) {
+    await sleep((delay_seconds * 1000) / words.length);
+    if (ctx.signal.aborted) throw new AgentError("cancelled while echoing", true, "aborted");
+    ctx.data("chunk", { index: i, word });
+    ctx.progress((i + 1) / words.length, `${i + 1}/${words.length}`);
+  }
+
+  ctx.step("assemble", "Putting it back together");
+  return { text: words.join(" "), steps: 3 };
+}
+```
+
+`src/e2e.test.ts` runs that same agent and a fake brain on two real sockets and asserts the whole
+round trip — 202 latency, event order, the `data` chunks, the signed result, a rejected tampered
+signature, and that an unauthorised `/run` produces no callback at all.
+
+## A 40-line agent, for real work
+
+Same shape as the echo example, with an LLM and express instead of `node:http`:
 
 ```ts
 // src/server.ts
@@ -91,6 +154,8 @@ const result = await keyword.run({ run_id, tenant_id, action: "find_keywords", i
 
 ### HTTP contract (what `createHttpAgent` implements)
 
+Summary only — [CONTRACT.md](./CONTRACT.md) is the authority, with real captured JSON for every message.
+
 ```
 GET  /health    → 200 { ok, version, uptime }
 GET  /manifest  → 200 manifest
@@ -124,9 +189,14 @@ if (!verifyCallbackSignature(secret, body.run_id, status, req.header("x-run-sign
 
 ```
 npm install
-npm run build     # tsc → dist/
-npm test          # tsx --test src/**/*.test.ts (no network)
+npm run build       # tsc → dist/, then a type-check pass over examples/
+npm test            # tsx --test src/**/*.test.ts
+npm run example:echo  # the reference agent on http://127.0.0.1:7801
 ```
+
+Unit tests use no network at all. `src/e2e.test.ts` binds two `node:http` servers on **ephemeral
+loopback ports** (127.0.0.1:0) — no fixed port, no outbound traffic — and closes them, keep-alive
+connections included, when it finishes.
 
 ## Consuming from agent-server
 
