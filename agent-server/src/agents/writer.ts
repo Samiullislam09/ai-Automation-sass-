@@ -1,7 +1,8 @@
 import type { Job } from "pg-boss";
 import { Agent, type AgentContext, type AgentJobData } from "./base.js";
-import { writeArticle, type WriterContext } from "../lib/writer.js";
-import { gateArticle, extractTitle, summarizeGate } from "../lib/qualityGate.js";
+import type { WriterContext } from "../lib/writer.js";
+import { writeArticlePipeline, nimComplete } from "../lib/writerPipeline.js";
+import { gateArticle, summarizeGate } from "../lib/qualityGate.js";
 import { supabase } from "../supabase.js";
 import { loadInsights, writerBlock } from "../lib/insights.js";
 import { buildBlueprint, matchOfferings, nearestCluster, type Research } from "../lib/blueprint.js";
@@ -87,19 +88,22 @@ export class WriterAgent extends Agent {
     // Without this the model wrote generic filler that could have belonged to any company.
     const context = await loadWriterContext(tenantId, topic.trim(), profile);
 
-    const body = await writeArticle(topic.trim(), blueprint, context);
+    // Outline → sections in parallel → polish → meta (MASTER_PLAN §16.3 Upgrade E). Sections
+    // arrive at the live workspace (§24.4b) AS THEY FINISH, not split out of an already-done
+    // draft — ctx.data below fires from writeArticlePipeline's onSection, mid-generation.
+    const pipeline = await writeArticlePipeline(topic.trim(), blueprint, context, nimComplete, {
+      onSection: (section) => ctx.data("section", { h2: section.h2, words: section.words }),
+    });
+    const body = pipeline.body;
+    const title = pipeline.title;
+
     // The topic IS the primary keyword: buildBlueprint() writes it as "Primary keyword: …"
-    // and the writer is told to answer it in the first 100 words. No meta title/description
-    // exist in the job yet, so those gate checks stay off until something produces them.
-    const gate = gateArticle(body, { primaryKeyword: topic.trim() });
-    const title = extractTitle(body, topic.trim());
+    // and the writer is told to answer it in the first 100 words. metaTitle/metaDescription
+    // now come from the pipeline's own meta step — the checks in qualityGate.ts that scored
+    // them have existed since Phase 2 planning began and had nothing to score until today.
+    const gate = gateArticle(body, { primaryKeyword: topic.trim(), metaTitle: pipeline.meta.metaTitle, metaDescription: pipeline.meta.metaDescription });
     console.log(`[writer] "${title}" — ${summarizeGate(gate)}`);
 
-    // The draft, section by section, for the live workspace to assemble in front of the user
-    // (plan §24.4b). Today the model returns the whole article in one call, so these arrive
-    // together rather than as it writes — when the section-by-section writer lands in Phase 2
-    // this same loop becomes a real stream with no change at either end.
-    for (const section of splitSections(body)) ctx.data("section", section);
     ctx.data("score", { quality: gate.score, passed: gate.passed, words: gate.wordCount, sections: gate.sections });
 
     const meta: Record<string, unknown> = {
@@ -111,6 +115,12 @@ export class WriterAgent extends Agent {
       qualityGate: gate,
       qualityScore: gate.score,
       scheduleRunId: scheduleRunId ?? null,
+      // Mr. Writer's own meta step (§16.3 Upgrade E) — read by Mr. Publish and Mr. SEO instead
+      // of falling back to the H1 and nothing.
+      metaTitle: pipeline.meta.metaTitle,
+      metaDescription: pipeline.meta.metaDescription,
+      slug: pipeline.meta.slug,
+      jsonLd: pipeline.meta.jsonLd,
       // What the draft was actually grounded in — so "why did it write this?" is answerable.
       contextUsed: {
         niche: !!context.niche,
@@ -140,6 +150,11 @@ export class WriterAgent extends Agent {
         status: gate.passed ? "awaiting_approval" : "failed",
         title,
         body,
+        // §25.5 lock 1 depends on this column being real: findExistingBySlug (lib/dedupe.ts)
+        // queries content_items.slug directly, and until the writer's own meta step existed
+        // there was nothing to put here — every row's slug stayed null, and the unique index
+        // migration 019 added had nothing to enforce. It has something now.
+        slug: pipeline.meta.slug || null,
         blueprint: blueprint ? { text: blueprint } : {},
         meta,
       })
@@ -167,6 +182,7 @@ export class WriterAgent extends Agent {
       wordCount: gate.wordCount,
       contentItemId: item?.id,
       qualityGate: gate,
+      meta: pipeline.meta,
       scheduleRunId: scheduleRunId ?? null,
       autoPublish,
       // Read by lib/dashboard-data.ts describeJob() — this is how the receipt gets to say
@@ -330,25 +346,3 @@ export function duplicateSentence(verdict: DuplicateVerdict): string {
   return "";
 }
 
-/** The draft split at its own H2s, as `{h2, words}` — what the workspace draws as a document
- *  assembling itself. Everything before the first H2 is the intro and is reported as such, so
- *  a reader watching sees the article grow from the top rather than starting at section two. */
-function splitSections(body: string): { h2: string; words: number }[] {
-  const lines = String(body ?? "").split(/\r?\n/);
-  const out: { h2: string; words: number }[] = [];
-  let current = { h2: "Intro", words: 0 };
-  const count = (s: string) => s.trim().split(/\s+/).filter(Boolean).length;
-
-  for (const line of lines) {
-    const heading = /^##\s+(.+?)\s*$/.exec(line);
-    if (heading) {
-      if (current.words) out.push(current);
-      current = { h2: heading[1], words: 0 };
-      continue;
-    }
-    if (/^#\s+/.test(line)) continue; // the title is not a section
-    current.words += count(line);
-  }
-  if (current.words) out.push(current);
-  return out;
-}
