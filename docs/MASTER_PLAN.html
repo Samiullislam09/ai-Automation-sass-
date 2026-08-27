@@ -1006,6 +1006,33 @@ live re-check kiya, wahi status. #2 (hedged request) aur #5 (chhota model) abhi 
 do LIVE providers mil sakte hain (Groq + Cerebras dono wired) par Cerebras 402 hone tak hedge karne ko
 kuch nahi; #5 ko A/B data chahiye jo abhi nahi hai.</p>
 
+<p><span class="pill ok">DONE 2026-08-28 (dusra pass)</span> Owner ne key daalne ke baad bhi 19-20s
+report kiya &mdash; teen alag cheezein mili, guess se nahi, dev server ko supervise karke asli
+<code>mark</code>/<code>lap</code> timing padh ke:</p>
+<ol>
+<li><strong>extractIntent khud NIM pe hardcoded tha</strong> &mdash; ye woh call hai jo HAR message pe
+pehle chalta hai (order hai ya sawaal), reply se pehle. Fast reply bana di thi par classification
+abhi bhi purani &sect;18.1 wali 0.5-19s variance jhelti thi. <code>lib/ai/fastChat.ts</code> me naya
+<code>openFastCompletion</code> (non-streaming, tool-calling) add kiya, <code>extractIntent</code> ab
+isse pehle try karta hai (chhota 6s timeout, NIM ka apna 12s se kam &mdash; stalled fast provider ne
+NIM se zyada waqt nahi lena chahiye). Live verify: classification 535-826ms.</li>
+<li><strong>Asal bug:</strong> <code>lib/ai/fastChat.ts</code> is app ki EK hi fetch-wali file thi jo
+<code>lib/dns-fix.ts</code> import nahi karti thi &mdash; jabki har doosri fetch-wali file karti hai
+(iski apni wajah likhi hai: Node IPv6 pehle try karta hai naye host ke liye, aur 15-20s timeout ke
+baad IPv4 pe girta hai). Groq/Cerebras naye hosts the is file ke liye &mdash; import add kiya,
+established pattern follow karte hue.</li>
+<li><strong>Sabse bada hissa (25-66s) code ka bug tha he nahi</strong> &mdash; ek atka hua dev server
+process tha. Fresh restart ke baad pehla request ek-baari &ldquo;cold&rdquo; Supabase connection cost
+(~16.5s, <code>ensureConversation</code>) deta hai, doosra request usi warm server pe <strong>4.4s
+total, model khud 44ms me jawab deta hai</strong>. <code>lib/supabase/server.ts</code> ka apna
+comment isi symptom ko pehle bhi document kar chuka tha (42,665ms measured on <code>/api/dashboard/live</code>)
+&mdash; recur hua, dubara nahi khoja gaya, seedha dev server restart + real timing se pakda gaya.</li>
+</ol>
+<p><span class="pill ok">DONE 2026-08-28</span> Aur ab jawab &ldquo;fast lagta hai&rdquo; feeling nahi,
+screen pe number hai: <code>components/kit.tsx</code> har bot reply ke neeche ek chhota <code>Xs</code>
+badge dikhata hai, client-side se measure kiya (request bhejne se stream khatam hone tak) &mdash;
+owner ki apni maang thi, kyunki server log koi customer nahi dekh sakta.</p>
+
 <h3>18.1 Measured, guessed nahi</h3>
 <p>Ek hi request — “hello, kya haal hai?”, 80 tokens, <code>thinking:false</code> — NIM ke <code>nemotron-3.5-lightning-30b-a3b</code> pe 2026-08-27 ko lagataar:</p>
 <div class="tablewrap"><table>
@@ -1703,6 +1730,8 @@ aur commit ke saath &mdash; taaki kal koi (aap, main, ya 10 saal baad koi employ
 <tr><td>2026-08-28</td><td><code>4dbca8f</code></td><td>Unpublish chat se: &ldquo;isko site se hata do&rdquo; ab kaam karta hai (echo-first, publish jaisa). WP status &rarr; draft (delete nahi), <code>wpPostId</code> ab publish time pe save hota hai (app + agent-server dono). Phase 2 ka exit criterion ka aakhri khula hissa band</td><td>130 web + 224 agent-server green</td></tr>
 <tr><td>2026-08-28</td><td><code>64a0039</code></td><td>&sect;18.2 #1 ka extension: doosri (teesri...) Groq/Cerebras free-tier key (<code>GROQ_API_KEY_2</code>..<code>_5</code>) khud try hoti hai jab pehli key ka daily/per-minute cap khatam ho &mdash; agla provider (Cerebras/NIM) baari se pehle nahi. 5 users ke real scale ke liye, owner ke apne faisle se</td><td>134 web green (+2)</td></tr>
 <tr><td>2026-08-28</td><td><code>025b1cb</code></td><td>&sect;18.2 #1 <strong>live ho gaya</strong>: owner ne Groq key di, real call se verify (~1ms first byte). Raaste me mila bug theek kiya &mdash; Groq/Cerebras dono ne purana Llama model retire kar diya tha, ab dono <code>gpt-oss-120b</code> pe hain, <code>modelParams()</code> reuse karke &ldquo;bina reasoning_effort:low khaali content&rdquo; bug NIM jaisa hi theek kiya</td><td>132 web green</td></tr>
+<tr><td>2026-08-28</td><td><code>9e2e33a</code></td><td><code>extractIntent</code> (brain ka apna classification call, har message pe pehle chalta hai) bhi ab fast provider pehle try karta hai &mdash; naya <code>openFastCompletion</code>, live verify 535-826ms (pehle NIM pe up to 19s+12s timeout)</td><td>141 web green (+5)</td></tr>
+<tr><td>2026-08-28</td><td><code>1418d08</code></td><td>Asal 40-70s wali wajah: <code>fastChat.ts</code> me <code>dns-fix</code> import missing tha (fixed), aur ek atka hua dev server process (restart se theek). Screen pe timing badge (<code>components/kit.tsx</code>) &mdash; har reply ke neeche real seconds, owner ki maang</td><td>build clean</td></tr>
 </table></div>
 
 <h3>26.1 Abhi kya baaki hai (is order me)</h3>
