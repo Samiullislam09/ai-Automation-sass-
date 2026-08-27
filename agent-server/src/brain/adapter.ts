@@ -74,6 +74,18 @@ function translate(agentId: string, action: string, input: Record<string, unknow
     case "analyst.build_site_profile":
       return { queue: "analyst", data: { pages: input.pages ?? null, taskLabel: "Understanding your site" } };
 
+    case "publish.publish_article":
+      return {
+        queue: "publish",
+        data: {
+          content_item_id: input.content_item_id ?? (input.article as any)?.contentItemId ?? (input.article as any)?.id ?? null,
+          // Passed through so the publish agent can refuse a draft the SEO step failed —
+          // the guard belongs next to the irreversible action, not only in the planner.
+          seo_passed: input.seo_passed ?? null,
+          taskLabel: "Publishing to your site",
+        },
+      };
+
     default:
       throw new Error(`No route for ${agentId}.${action}. Add it to brain/adapter.ts — do not guess a job shape.`);
   }

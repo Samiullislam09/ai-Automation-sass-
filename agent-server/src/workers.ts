@@ -9,13 +9,15 @@ import { SeoAgent } from "./agents/seo.js";
 import { LeadsAgent } from "./agents/leads.js";
 import { CrawlerAgent } from "./agents/crawler.js";
 import { AnalystAgent } from "./agents/analyst.js";
-import type { Agent, AgentJobData } from "./agents/base.js";
+import { PublishAgent } from "./agents/publish.js";
+import type { Agent, AgentContext, AgentJobData } from "./agents/base.js";
 import { dailyUsage, logJobStart, logJobFinish, logJobError, logJobProgress, logJobSkipped } from "./jobsLog.js";
 import { emitAgentStatus } from "./socket.js";
 import { explainAgentError } from "./lib/errors.js";
 import { brainRefOf } from "./brain/adapter.js";
 import { onStepDone, onStepFailed } from "./brain/orchestrator.js";
 import { handleBrainDispatch } from "./brain/server.js";
+import { emit } from "./brain/events.js";
 
 // queues.ts sets retryLimit: 2, i.e. the first run plus two retries.
 const MAX_ATTEMPTS = 3;
@@ -26,7 +28,7 @@ const PROGRESS_MS = 2000;
 const AGENT_LABEL: Record<string, string> = {
   boss: "Mr Lxwa", keyword: "Mr. Keyword", writer: "Mr. Writer",
   crawler: "the site crawler", social: "Miss Social", seo: "Mr. SEO", leads: "the leads agent",
-  analyst: "Mr. Analyst",
+  analyst: "Mr. Analyst", publish: "Mr. Publish",
 };
 
 /** The human task text whoever enqueued the job passed, falling back to the queue name. */
@@ -44,6 +46,7 @@ const AGENTS: Record<AgentType, Agent> = {
   leads: new LeadsAgent(),
   crawler: new CrawlerAgent(),
   analyst: new AnalystAgent(),
+  publish: new PublishAgent(),
 };
 
 async function process(type: AgentType, job: JobWithMetadata<AgentJobData>) {
@@ -102,17 +105,48 @@ async function process(type: AgentType, job: JobWithMetadata<AgentJobData>) {
   // otherwise be 300 extra round trips, and the dashboard only polls every few seconds anyway.
   let lastProgressAt = 0;
   const onProgress = (progress: Record<string, unknown>) => {
+    // The live channel gets every call: a workspace that only updates every two seconds looks
+    // stuck, and a broadcast costs nothing. Only the jobs_log write is throttled.
+    if (brainRef && typeof (progress as any).label === "string") {
+      liveEvent({
+        type: "progress",
+        fraction: typeof (progress as any).fraction === "number" ? (progress as any).fraction : 0,
+        label: (progress as any).label,
+      });
+    }
     const now = Date.now();
     if (now - lastProgressAt < PROGRESS_MS) return;
     lastProgressAt = now;
     void logJobProgress(logId, progress, attempt);
   };
 
+  /** One place that turns an agent's call into a brain event, or drops it when the job is not
+   *  part of a task. Agents therefore never branch on "is anyone watching". */
+  const liveEvent = (partial: Record<string, unknown>) => {
+    if (!brainRef) return;
+    emit({
+      run_id: String(job.id),
+      tenant_id: tenantId,
+      agent_id: type,
+      at: new Date().toISOString(),
+      task_id: brainRef.task_id,
+      step_id: brainRef.step_id,
+      ...partial,
+    } as any);
+  };
+
+  const ctx: AgentContext = {
+    onProgress,
+    data: (kind, payload) => liveEvent({ type: "data", kind, payload }),
+    progress: (fraction, label) => liveEvent({ type: "progress", fraction, label }),
+    log: (message, level = "info") => liveEvent({ type: "log", level, message_dev: message }),
+  };
+
   // Everything above and below is unchanged for ordinary jobs — the `brainRef` branches are
   // the whole of the strangler seam (brain/adapter.ts explains why a step rides the agent's
   // own queue instead of a new one).
   try {
-    const result = await AGENTS[type].run(job, { onProgress });
+    const result = await AGENTS[type].run(job, ctx);
     await logJobFinish(logId, result);
     emitAgentStatus({ agent: type, tenant: tenantId, status: "idle", task: "Done" });
     if (brainRef) {
