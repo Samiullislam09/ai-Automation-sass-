@@ -13,6 +13,8 @@ import type { Agent, AgentJobData } from "./agents/base.js";
 import { dailyUsage, logJobStart, logJobFinish, logJobError, logJobProgress, logJobSkipped } from "./jobsLog.js";
 import { emitAgentStatus } from "./socket.js";
 import { explainAgentError } from "./lib/errors.js";
+import { brainRefOf } from "./brain/adapter.js";
+import { onStepDone, onStepFailed } from "./brain/orchestrator.js";
 
 // queues.ts sets retryLimit: 2, i.e. the first run plus two retries.
 const MAX_ATTEMPTS = 3;
@@ -48,6 +50,11 @@ async function process(type: AgentType, job: JobWithMetadata<AgentJobData>) {
 
   const attempt = (job.retryCount ?? 0) + 1;
 
+  // A job that belongs to a brain task carries a reference to the step it is. Read before the
+  // cap check, because a capped step still has to be reported — otherwise the task sits in
+  // `running` forever waiting for a job that was never allowed to start.
+  const brainRef = brainRefOf(job.data);
+
   // Retries are not new work: the first attempt already paid for this job's slot, and
   // re-checking here meant three failed tries could lock the agent out for the rest of the day.
   if (attempt === 1) {
@@ -64,6 +71,13 @@ async function process(type: AgentType, job: JobWithMetadata<AgentJobData>) {
       emitAgentStatus({ agent: type, tenant: tenantId, status: "idle", task: reason });
       console.warn(`[${type}] ${reason}`);
       // Not an error — a cap hit is expected/normal, so don't burn a retry on it.
+      if (brainRef) {
+        // Not retryable: the cap will still be there in a second, and the user has been told
+        // why. The task stops in needs_attention with this exact sentence.
+        await onStepFailed(brainRef.task_id, brainRef.tenant_id, brainRef.step_id, reason, false).catch((e: any) =>
+          console.error(`[${type}] capped step could not be reported:`, e?.message),
+        );
+      }
       return { skipped: true, reason };
     }
   }
@@ -93,15 +107,39 @@ async function process(type: AgentType, job: JobWithMetadata<AgentJobData>) {
     void logJobProgress(logId, progress, attempt);
   };
 
+  // Everything above and below is unchanged for ordinary jobs — the `brainRef` branches are
+  // the whole of the strangler seam (brain/adapter.ts explains why a step rides the agent's
+  // own queue instead of a new one).
   try {
     const result = await AGENTS[type].run(job, { onProgress });
     await logJobFinish(logId, result);
     emitAgentStatus({ agent: type, tenant: tenantId, status: "idle", task: "Done" });
+    if (brainRef) {
+      // Reporting back must never turn a finished job into a failed one: the work is done and
+      // logged either way, and a retry would repeat it.
+      try {
+        await onStepDone(brainRef.task_id, brainRef.tenant_id, brainRef.step_id, result);
+      } catch (e: any) {
+        console.error(`[${type}] step ${brainRef.step_id} finished but the brain could not be told:`, e?.message);
+      }
+    }
     return result;
   } catch (err: any) {
     const durationMs = Date.now() - startedAt;
     const explained = explainAgentError(type, err, durationMs);
     await logJobError(logId, { ...explained, attempt, attempts, durationMs, agent: type, at: new Date().toISOString() });
+    if (brainRef) {
+      // pg-boss owns the retrying (queues.ts: retryLimit 2). The brain is only told once the
+      // last attempt is spent, so the two retry policies cannot multiply into nine tries.
+      const lastAttempt = attempt >= attempts;
+      if (lastAttempt) {
+        try {
+          await onStepFailed(brainRef.task_id, brainRef.tenant_id, brainRef.step_id, explained.message, false);
+        } catch (e: any) {
+          console.error(`[${type}] step ${brainRef.step_id} failed and the brain could not be told:`, e?.message);
+        }
+      }
+    }
     // Full detail to the server log too — Railway's log is where you go when even the
     // dashboard can't tell you (e.g. the jobs_log write itself is failing).
     console.error(`[${type}] attempt ${attempt}/${attempts} failed after ${Math.round(durationMs / 1000)}s: ${explained.cause}`);

@@ -4,6 +4,7 @@ import { discoverUrls, extractPage, normalizeSiteUrl } from "../lib/crawl.js";
 import { embed } from "../lib/embeddings.js";
 import { completeJson } from "../lib/llm.js";
 import { supabase } from "../supabase.js";
+import { enqueue } from "../queues.js";
 
 // A real small-business site rarely has more than a few hundred pages — this is a safety
 // ceiling, not a target. Runs as a background job specifically so it CAN go this deep:
@@ -102,6 +103,22 @@ export class CrawlerAgent extends Agent {
         .eq("id", tenantId);
     } catch (e: any) {
       console.error("[crawler] niche re-summary failed:", e.message);
+    }
+
+    // Reading the site is only half the job — the pages are useless to the other agents until
+    // Mr. Analyst has turned them into a profile (plan §25). Chaining it here is what makes
+    // "connect your site" enough on its own: no second button, no manual step, and by the time
+    // the user asks for a keyword the system already knows what the business does.
+    //
+    // Best effort on purpose: a crawl that succeeded must not be reported as failed because
+    // the follow-up could not be queued. The profile can always be rebuilt later.
+    if (!(job.data as any).__brain) {
+      // Under the brain, the analyst is a planned step — chaining here too would run it twice.
+      try {
+        await enqueue("analyst", { tenantId, taskLabel: "Understanding your site" });
+      } catch (e: any) {
+        console.error("[crawler] could not queue Mr. Analyst:", e?.message);
+      }
     }
 
     return {

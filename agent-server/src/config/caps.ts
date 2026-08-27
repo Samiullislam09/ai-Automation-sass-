@@ -26,14 +26,16 @@ type PlanCaps = Record<string, number | null>;
 
 const PLAN_CAPS: Record<Plan, PlanCaps> = {
   // A trial should be enough to see the whole product work end to end, once or twice.
-  free: { boss: 5, keyword: 30, writer: 3, social: 10, seo: 10, leads: 10, crawler: 2 },
+  // The analyst is tied to the crawler: it runs after a crawl and on a weekly refresh, so its
+  // cap is the crawler's plus a little room for a manual "re-read my site".
+  free: { boss: 5, keyword: 30, writer: 3, social: 10, seo: 10, leads: 10, crawler: 2, analyst: 4 },
 
   // Paid. Comfortably above what anyone runs by hand in a day, so the cap is never the thing
   // a customer notices — their monthly allowance is what they actually bought.
-  starter: { boss: 40, keyword: 300, writer: 30, social: 100, seo: 60, leads: 100, crawler: 5 },
+  starter: { boss: 40, keyword: 300, writer: 30, social: 100, seo: 60, leads: 100, crawler: 5, analyst: 10 },
 
   // Top plan: no daily rationing at all. Only the runaway guard below still applies.
-  growth: { boss: null, keyword: null, writer: null, social: null, seo: null, leads: null, crawler: 10 },
+  growth: { boss: null, keyword: null, writer: null, social: null, seo: null, leads: null, crawler: 10, analyst: 20 },
 };
 
 /** Per hour, every plan, no exceptions. Sized so that a human being cannot reach it and a
@@ -47,6 +49,10 @@ const RUNAWAY_PER_HOUR: Record<string, number> = {
   seo: 200,
   leads: 200,
   crawler: 12,
+  // Six LLM calls plus an embedding per Search Console query, all through the shared 30 rpm
+  // limiter — a loop here would eat the whole NVIDIA budget rather than money, but it would
+  // eat it just as completely.
+  analyst: 12,
 };
 
 export function runawayLimit(agentType: string): number {
