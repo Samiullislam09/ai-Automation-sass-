@@ -5,9 +5,12 @@
 # bad migration (015 -> 016 was one), the only copy of the customers' articles is the
 # one this workflow made.
 #
-# Required secret: SUPABASE_DB_URL — the *direct* Postgres connection string from
-# Supabase → Project Settings → Database → Connection string (URI), with the password
-# filled in. NOT the REST URL, NOT the service-role key.
+# Required secret: SUPABASE_DB_URL — the **Session pooler** connection string from
+# Supabase → Connect → Method "Session pooler", with the password filled in:
+#   postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
+# NOT the "Direct connection" string: that host only resolves to IPv6 and GitHub's runners
+# have no IPv6, so pg_dump dies with "Network is unreachable" (run #1 did exactly that).
+# NOT the REST URL, NOT the service-role key.
 #
 # The dump is stored as a workflow artifact (90-day retention on GitHub's side) and is
 # encrypted with BACKUP_PASSPHRASE if that secret exists, so a leaked artifact is not a
