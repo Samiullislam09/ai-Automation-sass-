@@ -8,6 +8,7 @@ import { SocialAgent } from "./agents/social.js";
 import { SeoAgent } from "./agents/seo.js";
 import { LeadsAgent } from "./agents/leads.js";
 import { CrawlerAgent } from "./agents/crawler.js";
+import { AnalystAgent } from "./agents/analyst.js";
 import type { Agent, AgentJobData } from "./agents/base.js";
 import { dailyUsage, logJobStart, logJobFinish, logJobError, logJobProgress, logJobSkipped } from "./jobsLog.js";
 import { emitAgentStatus } from "./socket.js";
@@ -22,6 +23,7 @@ const PROGRESS_MS = 2000;
 const AGENT_LABEL: Record<string, string> = {
   boss: "Mr Lxwa", keyword: "Mr. Keyword", writer: "Mr. Writer",
   crawler: "the site crawler", social: "Miss Social", seo: "Mr. SEO", leads: "the leads agent",
+  analyst: "Mr. Analyst",
 };
 
 /** The human task text whoever enqueued the job passed, falling back to the queue name. */
@@ -38,6 +40,7 @@ const AGENTS: Record<AgentType, Agent> = {
   seo: new SeoAgent(),
   leads: new LeadsAgent(),
   crawler: new CrawlerAgent(),
+  analyst: new AnalystAgent(),
 };
 
 async function process(type: AgentType, job: JobWithMetadata<AgentJobData>) {
