@@ -2,6 +2,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useStore } from "@/lib/store";
+import { GoalsStep, UnderstandingStep, useOnboardingProfile } from "@/components/OnboardingUnderstanding";
 
 const STEPS = [
   { key: "type", q: "What kind of business?", opts: ["Local service", "Online store", "Agency / freelancer", "SaaS / startup", "Blog / creator", "Other"] },
@@ -25,6 +26,14 @@ export default function OnboardingWizard() {
   const [thinking, setThinking] = useState<string[]>([]);
 
   const [method, setMethod] = useState<ConnectMethod>(null);
+  const [siteSaving, setSiteSaving] = useState(false);
+  const [siteError, setSiteError] = useState<string | null>(null);
+
+  // Steps 5 and 6 are §25.7's two new screens. They can only show something real once Mr.
+  // Analyst has finished, so the read starts at step 4 — one screen early — and a "thinking"
+  // or "no-pages" answer means the screens are skipped rather than shown empty.
+  const understanding = useOnboardingProfile(step >= 4);
+  const brainReady = understanding?.status === "ready" && !!understanding.profile;
 
   // WordPress connect
   const [wpUrl, setWpUrl] = useState("");
@@ -40,7 +49,7 @@ export default function OnboardingWizard() {
   const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const pct = [10, 25, 40, 55, 70, 85, 100][step];
+  const pct = [8, 20, 30, 40, 52, 64, 76, 88, 100][step];
 
   const testWordPress = async () => {
     if (!wpUrl.trim() || !wpUser.trim() || !wpPass.trim()) {
@@ -89,14 +98,20 @@ export default function OnboardingWizard() {
     : `Content-led growth for ${(ans.aud || "").toLowerCase()} — clarity and consistency matter most`;
 
   const goToLearning = async () => {
-    setStep(6);
+    setStep(8);
     const lines = [noSite ? "Working from your answers…" : `Reading ${site} …`, "Detecting your niche and topics …", "Learning your brand tone …", "Mapping content opportunities …", "Building your team's memory …"];
     lines.forEach((l, i) => setTimeout(() => setThinking(t => [...t, l]), 500 + i * 700));
 
     // Build Guide Step 5 — real crawl + embeddings, running while the animation plays above.
     // Falls back to the wizard's own answers if the crawl fails (no site, no API key yet, etc).
     const minDelay = new Promise(r => setTimeout(r, 500 + lines.length * 700 + 500));
-    const crawl = fetch("/api/onboarding/crawl", { method: "POST" }).then(r => r.json()).catch(() => null);
+    // The background crawler has been running since step 0 (§25.7) and site_pages is unique on
+    // (tenant_id, url), so re-running the old synchronous 15-page crawl on top of it would be
+    // one rejected insert per page for no gain. It stays as the fallback for the case it was
+    // written for: nothing was read in the background at all.
+    const crawl = understanding?.pagesCrawled
+      ? Promise.resolve(null)
+      : fetch("/api/onboarding/crawl", { method: "POST" }).then(r => r.json()).catch(() => null);
     const [, crawlResult] = await Promise.all([minDelay, crawl]);
 
     const niche = crawlResult?.niche || nicheSummary();
@@ -146,6 +161,33 @@ export default function OnboardingWizard() {
     }
   };
 
+  /** §25.7's first line: "Site URL → crawl start (background)". Saving the address here and
+   *  starting the crawl now is what gives the confirm screen something true to show four
+   *  screens later; it used to start after the wizard ended, when it was too late to confirm
+   *  anything. A crawl that will not start is not fatal — /api/onboarding/complete saves the
+   *  address again at the end and the old end-of-wizard crawl still runs. */
+  const startReading = async () => {
+    setSiteSaving(true);
+    setSiteError(null);
+    try {
+      const res = await fetch("/api/onboarding/site", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ websiteUrl: site.trim() }),
+      });
+      const data = await res.json();
+      if (!data.ok && res.status === 400) {
+        setSiteError(data.error || "That doesn't look like a website address.");
+        return;
+      }
+    } catch {
+      // Offline or a bad gateway: carry on. The address is asked for again at the end.
+    } finally {
+      setSiteSaving(false);
+    }
+    setStep(1);
+  };
+
   const copySecret = () => {
     if (!revealedSecret) return;
     navigator.clipboard?.writeText(revealedSecret);
@@ -163,7 +205,8 @@ export default function OnboardingWizard() {
             <h2 style={{ fontSize: 22 }}>Let&apos;s meet your business 👋</h2>
             <p className="sm mut" style={{ margin: "8px 0 18px" }}>Paste your website — Mr Lxwa will study it and learn everything by itself. This is the only typing you&apos;ll do.</p>
             <div className="field"><label>Your website</label><input placeholder="https://yourbusiness.com" value={site} onChange={e => setSite(e.target.value)} /></div>
-            <button className="btn btn-p" style={{ width: "100%", marginTop: 10 }} disabled={!site.trim()} onClick={() => setStep(1)}>Continue →</button>
+            <button className="btn btn-p" style={{ width: "100%", marginTop: 10 }} disabled={!site.trim() || siteSaving} onClick={startReading}>{siteSaving ? "Starting…" : "Continue →"}</button>
+            {siteError && <p className="sm" style={{ marginTop: 8, color: "#ff6b6b" }}>{siteError}</p>}
             <p className="xs mut" style={{ textAlign: "center", marginTop: 12 }}>No website yet? <a style={{ cursor: "pointer" }} onClick={() => { setSite(""); setNoSite(true); setStep(1); }}>Skip — describe instead</a></p>
           </>
         )}
@@ -178,12 +221,39 @@ export default function OnboardingWizard() {
             </div>
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
               <button className="btn btn-g" onClick={() => setStep(step - 1)}>← Back</button>
-              <button className="btn btn-p" style={{ flex: 1 }} disabled={!ans[STEPS[step - 1].key]} onClick={() => setStep(step + 1)}>Continue →</button>
+              <button className="btn btn-p" style={{ flex: 1 }} disabled={!ans[STEPS[step - 1].key]} onClick={() => setStep(step === 4 && !brainReady ? 7 : step + 1)}>Continue →</button>
             </div>
           </>
         )}
 
-        {step === 5 && revealedSecret && (
+        {step === 5 && (
+          brainReady ? (
+            <UnderstandingStep
+              profile={understanding!.profile!}
+              pages={understanding!.builtFromPages ?? understanding!.pagesCrawled}
+              onBack={() => setStep(4)}
+              onContinue={() => setStep(6)}
+            />
+          ) : (
+            // Reached only by pressing Back from the goals screen after the profile went away;
+            // the forward path skips straight past both screens when there is nothing to show.
+            <>
+              <h2 style={{ fontSize: 20 }}>Still reading your site…</h2>
+              <p className="sm mut" style={{ margin: "8px 0 16px" }}>We&apos;ll show you what we understood on the Site Brain page once it&apos;s done.</p>
+              <button className="btn btn-p" style={{ width: "100%" }} onClick={() => setStep(7)}>Continue →</button>
+            </>
+          )
+        )}
+
+        {step === 6 && (
+          <GoalsStep
+            profile={understanding?.profile ?? null}
+            onBack={() => setStep(5)}
+            onContinue={() => setStep(7)}
+          />
+        )}
+
+        {step === 7 && revealedSecret && (
           <>
             <h2 style={{ fontSize: 20 }}>Your webhook secret 🔑</h2>
             <p className="sm mut" style={{ margin: "8px 0 14px" }}>
@@ -220,7 +290,7 @@ export async function POST(req: Request) {
           </>
         )}
 
-        {step === 5 && !revealedSecret && method === null && (
+        {step === 7 && !revealedSecret && method === null && (
           <>
             <h2 style={{ fontSize: 20 }}>How does your site work?</h2>
             <p className="sm mut" style={{ margin: "8px 0 18px" }}>Mr. SEO ke published articles kahan bhejne hain?</p>
@@ -241,7 +311,7 @@ export async function POST(req: Request) {
           </>
         )}
 
-        {step === 5 && !revealedSecret && method === "wordpress" && (
+        {step === 7 && !revealedSecret && method === "wordpress" && (
           <>
             <h2 style={{ fontSize: 20 }}>Connect WordPress</h2>
             <p className="sm mut" style={{ margin: "8px 0 18px" }}>
@@ -275,7 +345,7 @@ export async function POST(req: Request) {
           </>
         )}
 
-        {step === 5 && !revealedSecret && method === "webhook" && (
+        {step === 7 && !revealedSecret && method === "webhook" && (
           <>
             <h2 style={{ fontSize: 20 }}>Connect via webhook</h2>
             <p className="sm mut" style={{ margin: "8px 0 18px" }}>
@@ -311,7 +381,7 @@ export async function POST(req: Request) {
           </>
         )}
 
-        {step === 6 && (
+        {step === 8 && (
           <>
             <h2 style={{ fontSize: 20 }}>Mr Lxwa is learning your business…</h2>
             <div style={{ display: "flex", flexDirection: "column", gap: 11, margin: "22px 0" }}>

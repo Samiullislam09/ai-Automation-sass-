@@ -32,7 +32,11 @@ export type ContentGap = {
   nearest_cluster: string | null;
 };
 export type Voice = { tone: string | null; do: string[]; dont: string[]; samples: string[] };
-export type Goals = { primary: "leads" | "traffic" | "sales" | null; kpis: string[] };
+/** `focus` is onboarding's "kaunse 3 offerings sabse zaroori?" (§25.7) — the offerings the
+ *  business actually wants grown, which is not the same as the offerings it happens to list.
+ *  The planner reads it to weight topics; without it every offering looks equally important
+ *  and the team spends the month writing about the one that pays least. */
+export type Goals = { primary: "leads" | "traffic" | "sales" | null; kpis: string[]; focus: string[] };
 export type Confidence = "high" | "medium" | "low";
 
 export const PROFILE_FIELDS = [
@@ -262,7 +266,9 @@ export function coerceField(field: ProfileField, raw: unknown): CoerceResult {
       const g = raw as Partial<Goals>;
       const primary = g.primary === "leads" || g.primary === "traffic" || g.primary === "sales" ? g.primary : null;
       const kpis = strList(g.kpis);
-      return { ok: true, value: primary || kpis.length ? { primary, kpis } : null };
+      // Three, because the screen asks for three. A "priority" list of eight is a list.
+      const focus = strList(g.focus).slice(0, 3);
+      return { ok: true, value: primary || kpis.length || focus.length ? { primary, kpis, focus } : null };
     }
 
     default:
@@ -277,7 +283,7 @@ export function isFieldEmpty(profile: SiteProfile, field: ProfileField): boolean
   if (v === null || v === undefined) return true;
   if (Array.isArray(v)) return v.length === 0;
   if (field === "voice") return !v.tone && !v.do?.length && !v.dont?.length;
-  if (field === "goals") return !v.primary && !v.kpis?.length;
+  if (field === "goals") return !v.primary && !v.kpis?.length && !v.focus?.length;
   if (typeof v === "string") return !v.trim();
   return false;
 }

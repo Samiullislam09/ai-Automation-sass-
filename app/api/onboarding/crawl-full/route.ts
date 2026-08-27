@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
+import { enqueueAgentJob } from "@/lib/agent-jobs";
 
 /** Manually (re-)triggers the full background site crawl (agent-server's "crawler" agent)
  *  for the signed-in user's tenant — for tenants who onboarded before this existed, and as
@@ -10,16 +11,11 @@ export async function POST() {
   const tenantId = await getCurrentTenantId(supabase);
   if (!tenantId) return NextResponse.json({ ok: false, error: "Not signed in." }, { status: 401 });
 
-  const agentServerUrl = process.env.AGENT_SERVER_URL;
-  if (!agentServerUrl) return NextResponse.json({ ok: false, error: "AGENT_SERVER_URL not configured." }, { status: 500 });
+  // Through enqueueAgentJob rather than a bare fetch: agent-server's /jobs is behind
+  // AGENT_SERVER_TOKEN now, and this route was still calling it without the header — so it had
+  // been answering 401 to every "re-analyze my site" since the gate went on.
+  const result = await enqueueAgentJob("crawler", tenantId, { taskLabel: "Reading your site" });
+  if (!result.ok) return NextResponse.json({ ok: false, error: result.error }, { status: result.status ?? 502 });
 
-  const res = await fetch(`${agentServerUrl}/jobs/crawler`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tenantId }),
-  }).catch((e) => null);
-
-  if (!res || !res.ok) return NextResponse.json({ ok: false, error: "Could not reach the crawl job queue." }, { status: 502 });
-  const data = await res.json();
-  return NextResponse.json({ ok: true, jobId: data.jobId });
+  return NextResponse.json({ ok: true, jobId: result.jobId });
 }

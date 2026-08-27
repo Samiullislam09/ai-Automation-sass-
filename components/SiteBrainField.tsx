@@ -322,6 +322,7 @@ function FieldValue({ field, profile }: { field: ProfileField; profile: SiteProf
       return (
         <div>
           {g.primary && <p className="sb-pv brk">{LABEL[g.primary] ?? g.primary}</p>}
+          {g.focus?.length > 0 && <p className="sb-pv brk xs mut">Grow first: {g.focus.join(" · ")}</p>}
           {g.kpis?.length > 0 && <p className="sb-pv brk xs mut">Measured by: {g.kpis.join(" · ")}</p>}
         </div>
       );
@@ -460,7 +461,7 @@ function FieldEditor({
     }
 
     case "goals": {
-      const g: Goals = value ?? { primary: null, kpis: [] };
+      const g: Goals = value ?? { primary: null, kpis: [], focus: [] };
       return (
         <div className="sb-stack">
           <fieldset className="sb-gset">
@@ -472,6 +473,10 @@ function FieldEditor({
               </label>
             ))}
           </fieldset>
+          <div className="field">
+            <label htmlFor="sb-focus">Which offerings should grow first? (up to 3, one per line)</label>
+            <textarea id="sb-focus" rows={3} value={(g.focus ?? []).join("\n")} onChange={(e) => onChange({ ...g, focus: e.target.value.split("\n").slice(0, 3) })} />
+          </div>
           <div className="field">
             <label htmlFor="sb-kpi">How you&apos;ll measure it (one per line)</label>
             <textarea id="sb-kpi" ref={firstRef} rows={3} value={(g.kpis ?? []).join("\n")} onChange={(e) => onChange({ ...g, kpis: e.target.value.split("\n") })} />
