@@ -24,6 +24,8 @@ const ITEMS: [string, keyof typeof Icon, string][] = [
   ["Reports", "reports", "/app/reports"],
   ["Memory", "memory", "/app/memory"],
   ["Billing", "billing", "/app/billing"],
+  // Review screen for the intent evaluation set (lib/eval/README.md). Reuses the activity icon.
+  ["Eval", "activity", "/app/eval"],
 ];
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
