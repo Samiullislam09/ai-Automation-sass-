@@ -11,13 +11,14 @@ Jo ho jaye uske aage `[x]` laga dena.
 
 ## 🔴 Abhi ke abhi (inke bina naya code live nahi hoga)
 
-### 1. Migration 018 + 019 chalao — [ ]
-**Kyun:** eval set (`intent_eval`) aur Site Brain (`site_profiles`, duplicate locks) ke tables.
+### 1. Migration 018 + 019 + 020 chalao — [ ]
+**Kyun:** eval set (`intent_eval`), Site Brain (`site_profiles`, duplicate locks) aur site audit (`site_audits`) ke tables.
 Inke bina `/app/eval` page aur naya keyword/writer flow DB error dega.
 **Kahan:** Supabase → aapka project → **SQL Editor** → New query.
 **Kya:** repo se ye files kholo aur poora content paste karke **Run**, ek-ek karke, isi order me:
 1. `supabase/migrations/018_intent_eval.sql`
-2. `supabase/migrations/019_site_brain.sql` *(jab main ise bana dunga — is file me neeche "Status" section dekho)*
+2. `supabase/migrations/019_site_brain.sql`
+3. `supabase/migrations/020_site_audits.sql` *(Mr. Audit ki report yahan jaati hai — iske bina "site audit karo" chalega to sahi par report save nahi hogi)*
 
 Dono idempotent hain — galti se dobara chala do to kuch nahi bigdega.
 

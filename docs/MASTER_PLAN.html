@@ -666,7 +666,7 @@ tenant_icp        tenant_id, icp jsonb, updated_at
 </ul><p><strong>Exit:</strong> 20 articles 5 different niches me, 18+ QA+SEO pass bina human edit; koi placeholder text; avg &lt; 8 min; publish URL 200 verified; unpublish chat se kaam karta hai.</p></div></div>
 
 <div class="phase"><div class="ph"><h3>Phase 3 · Site audit, leads, social</h3><span class="exit">3-4 hafte</span></div><div class="body"><ul>
-<li><code>agent-site-audit</code>: seomator CLI, weekly schedule, chat se on-demand, Insights page</li>
+<li><span class="pill ok">DONE 2026-08-27</span> <code>agent-site-audit</code> (Mr. Audit, 26 tests): sitemap/robots se pages chunta hai, 50 pages tak politely fetch, deterministic catalogue (toota hua, Google se chhupa hua, on-page, orphan/duplicate), score 100&minus;25&times;block&minus;5&times;warn, migration <strong>020</strong> <code>site_audits</code> me poori report + pichhla score (trend). Chat se <code>audit_site</code> chalta hai. <strong>Playwright/seomator abhi nahi</strong> &mdash; Core Web Vitals ka number banaya <em>nahi</em> jaata, har report me <code>skipped</code> me saaf likha hota hai; alag service milte hi wo checks isi catalogue me judenge. <span class="pill warn">BAAKI</span> weekly schedule + Insights page (trend).</li>
 <li><span class="pill ok">DONE 2026-08-27</span> <code>agent-leads</code>: ICP query + Site Brain se, OpenStreetMap/Nominatim (free, keyless, attributed) se discovery, har prospect ka apna page padh ke personalisation, fit score. Google Places + Apollo <em>bilkul DataForSEO jaise</em> optional &mdash; keys na hon to report me note, error nahi. Compliance code me hai: robots.txt pehle, personal email kabhi nahi, host throttle, sirf list + draft, bhejna kabhi nahi. <span class="pill warn">BAAKI</span> adapter route + manifest se stub hatana &mdash; chat se abhi nahi bulaya ja sakta.</li>
 <li><code>agent-social</code>: repo finalize; pehla version = draft + image + Facebook Pages; Meta App Review file karo Phase 2 me hi (lambi line hai)</li>
 </ul><p><strong>Exit:</strong> “meri site audit karo” → 3 min me top-5 issues chat me; “Dubai ke 20 restaurant leads dhundo” → list + score + draft; audit score trend dikhta hai.</p></div></div>
@@ -1656,11 +1656,12 @@ aur commit ke saath &mdash; taaki kal koi (aap, main, ya 10 saal baad koi employ
 <tr><td>2026-08-27</td><td><code>74d0d7f</code></td><td>Mr. Lead asli: ICP, OSM discovery, page padh ke personalisation, compliance code me. Chat se abhi nahi &mdash; adapter route baaki</td><td>agent-server 264 green</td></tr>
 <tr><td>2026-08-27</td><td><code>cb7eeed</code></td><td>Leads brain se juda: adapter route + manifest se stub hata. Ab &ldquo;Dubai ke 20 restaurant leads dhundo&rdquo; chat se chalta hai</td><td>264 green</td></tr>
 <tr><td>2026-08-27</td><td><code>d492963</code>, <code>e7861c0</code></td><td>Site Brain page (&sect;25.7) &mdash; har field ka source + confidence + edit, version history, Refresh. Onboarding ke do naye screen, aur crawl ab site URL dete hi shuru</td><td>web build + 92 green</td></tr>
+<tr><td>2026-08-27</td><td><code>fe1ef76</code></td><td>Mr. Audit (&sect;7.4): site-wide checks, migration 020 <code>site_audits</code>, chat se <code>audit_site</code>. Core Web Vitals jaanbujh ke skipped (browser nahi hai)</td><td>290 green (+26)</td></tr>
 </table></div>
 
 <h3>26.1 Abhi kya baaki hai (is order me)</h3>
 <ol>
-<li><strong>Mr. Audit</strong> (Phase 3) &mdash; shuru hi nahi hua</li>
+<li><strong>Mr. Audit ka baaki hissa</strong> &mdash; weekly schedule aur Insights page (score trend). Agent khud ban chuka hai</li>
   <li><strong>Mr. Social</strong> (Phase 3) &mdash; Postiz, bina modify kiye (AGPL). Meta App Review pehle (&sect;7.7)</li>
   <li><strong>Phase 2</strong> &mdash; Python <code>agent-writer</code> (gpt-researcher), section-by-section writer, LLM comparison test</li>
   <li><strong>Phase 4</strong> &mdash; writer &times;4-8, schedule jitter, cost dashboard, load test, runbook</li>
