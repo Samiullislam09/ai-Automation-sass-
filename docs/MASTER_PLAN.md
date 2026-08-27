@@ -23,6 +23,7 @@ committed snapshot so the plan survives any tool, account or decade.
 | 23 | UI audit — professional down to every button, 3-tier fix plan |
 | 24 | Live visualisation: AG-UI events, **Agent Workspace** (Manus-style) replaces the pixel office as default, browser live view, replay |
 | 25 | **Site Brain**: how crawl + GSC/GA data is actually used, duplicate locks, growth-first planning, **Mr. Support** website chatbot, how the brain stays fresh |
+| 26 | **Build log** — kya ban chuka hai, kis commit me, aur kya abhi baaki hai. Har naye kaam pe yahan ek row jodo |
 
 ## How to update it
 

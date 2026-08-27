@@ -111,6 +111,7 @@ small{color:var(--ink-3)}
   <a href="#ui"><strong>23 · UI audit — professional har button tak</strong></a>
   <a href="#live"><strong>24 · Har agent ka kaam live, video jaisa</strong></a>
   <a href="#sitebrain"><strong>25 · Site Brain — crawl, GSC/GA, duplicate, website chatbot</strong></a>
+  <a href="#buildlog"><strong>26 &middot; Build log &mdash; kya ban chuka hai, kis commit me</strong></a>
 </div>
 <div class="callout warn">
   <p class="t">v2 — 2026-08-27 shaam</p>
@@ -650,8 +651,9 @@ tenant_icp        tenant_id, icp jsonb, updated_at
 <li><span class="pill ok">DONE</span> <strong>Aaj ke agents contract me</strong> — par queue ke through: step agent ke <em>apne</em> queue pe jaata hai ek <code>__brain</code> reference ke saath, to caps, jobs_log, progress sab jaisa hai waisa chalta rahta hai. Naya queue sirf “task X ko dobara dekho” ke liye.</li>
 <li><span class="pill ok">DONE</span> <strong>Do-channel UI</strong> (14 tests): system card typed fields se banta hai, model ki prose se kabhi nahi — aur test yahi enforce karta hai. Ticks/crosses message text se poori tarah gaye.</li>
 <li><span class="pill ok">DONE</span> <strong>Site Brain Phase 1</strong> (§25, 26 tests): migration 019, Mr. Analyst, duplicate lock 1+3, crawl ke baad analyst apne aap chalta hai.</li>
-<li><span class="pill info">CHAL RAHA HAI</span> Chat route → brain (intent tools registry se, conversation state, echo/confirm), aur keyword/writer ka Site Brain read-side</li>
-<li><span class="pill info">NEXT</span> §14 ke 16 acceptance tests CI me; Agent Workspace UI (§24.4b); office/schedule page <code>tasks</code> table se</li>
+<li><span class="pill ok">DONE 2026-08-27</span> <strong>Chat route &rarr; brain</strong> (<code>lib/brain.ts</code>, <code>lib/chat-brain.ts</code>, <code>lib/chat-tools.ts</code>, <code>lib/chat-conversation.ts</code>): tools registry se aate hain (hardcoded list nahi), conversation state chalti hai, irreversible pe echo/confirm. Jis phrase ka brain ke paas plan nahi, wo <code>legacyJobOf</code> se purane single-agent path pe girti hai &mdash; kal jo chalta tha wo aaj band nahi hua. Keyword/Writer/Boss Site Brain padhte hain (gaps + clusters).</li>
+<li><span class="pill ok">DONE 2026-08-27</span> <strong>Agent Workspace</strong> (&sect;24.4b, 23 tests) aur uske producers: keyword row-by-row, draft section-by-section (<code>ctx.data</code>). &sect;14 ke acceptance rows <code>acceptance.test.ts</code> me, CI (<code>.github/workflows/tests.yml</code>) me chalte hain.</li>
+<li><span class="pill info">BAAKI</span> Site Brain dashboard page (API ban chuki hai, page nahi); office/schedule page <code>tasks</code> table se</li>
 </ul><p><strong>Exit:</strong> “40 min baad article likh ke publish kar do” end-to-end: sawaal → echo → booked card → 40 min baad chala → Approvals/live → link chat me. Model ka koi text kabhi “booked/published” nahi kehta (test se enforce). Office aur Schedule page tasks table se draw hote hain.</p></div></div>
 
 <div class="phase"><div class="ph"><h3>Phase 2 · Writer aur SEO asli</h3><span class="exit">2-3 hafte</span></div><div class="body"><ul>
@@ -664,7 +666,7 @@ tenant_icp        tenant_id, icp jsonb, updated_at
 
 <div class="phase"><div class="ph"><h3>Phase 3 · Site audit, leads, social</h3><span class="exit">3-4 hafte</span></div><div class="body"><ul>
 <li><code>agent-site-audit</code>: seomator CLI, weekly schedule, chat se on-demand, Insights page</li>
-<li><code>agent-leads</code>: apna LangGraph, Apollo, ICP from onboarding, compliance rules, list + draft only</li>
+<li><span class="pill ok">DONE 2026-08-27</span> <code>agent-leads</code>: ICP query + Site Brain se, OpenStreetMap/Nominatim (free, keyless, attributed) se discovery, har prospect ka apna page padh ke personalisation, fit score. Google Places + Apollo <em>bilkul DataForSEO jaise</em> optional &mdash; keys na hon to report me note, error nahi. Compliance code me hai: robots.txt pehle, personal email kabhi nahi, host throttle, sirf list + draft, bhejna kabhi nahi. <span class="pill warn">BAAKI</span> adapter route + manifest se stub hatana &mdash; chat se abhi nahi bulaya ja sakta.</li>
 <li><code>agent-social</code>: repo finalize; pehla version = draft + image + Facebook Pages; Meta App Review file karo Phase 2 me hi (lambi line hai)</li>
 </ul><p><strong>Exit:</strong> “meri site audit karo” → 3 min me top-5 issues chat me; “Dubai ke 20 restaurant leads dhundo” → list + score + draft; audit score trend dikhta hai.</p></div></div>
 
@@ -1634,6 +1636,35 @@ sequenceDiagram
   <li><strong>Phase 3:</strong> Mr. Support — widget + API + dashboard section; unanswered → content_gaps.</li>
   <li><strong>Exit test:</strong> ISO-certification site connect karo, kuch mat batao, “keyword do” bolo → saare 8 keywords ISO/compliance pe hon, ek bhi off-topic nahi, aur har ek ke saath “kyun” me site ka page ya GSC number ho. Phir “ISO 9001 cost pe article” bolo jab wo page already ho → system pehle poochhe “update karun?” — dobara na likhe.</li>
 </ul>
+
+
+<!-- ============================================================ -->
+<h2 id="buildlog">26 &middot; Build log &mdash; kya ban chuka hai, kis commit me</h2>
+<p>Phases (&sect;13) batate hain <em>kya karna hai</em>. Ye table batata hai <em>kya ho chuka hai</em>, tareekh
+aur commit ke saath &mdash; taaki kal koi (aap, main, ya 10 saal baad koi employee) ye na poochhe
+&ldquo;ye kaam hua tha ya nahi?&rdquo;. <strong>Har naye kaam pe yahan ek row jodo</strong>, phase ka pill bhi update karo.</p>
+
+<div class="tablewrap"><table>
+<tr><th>Tareekh</th><th>Commit</th><th>Kya bana</th><th>Tests</th></tr>
+<tr><td>2026-08-27</td><td><code>ec5d154</code></td><td>Phase 0 zameen: free keyword chain (autocomplete), DataForSEO optional, THIRD_PARTY_LICENSES, DB backup workflow green</td><td>&mdash;</td></tr>
+<tr><td>2026-08-27</td><td>brain series</td><td>Brain: registry, planner, orchestrator, events, adapter, server (&sect;4&ndash;6)</td><td>19 + 30 + 12 + 8</td></tr>
+<tr><td>2026-08-27</td><td><code>3187491</code></td><td>Site Brain Phase 1: migration 019, Mr. Analyst, duplicate lock, planner site se poochhta hai</td><td>26</td></tr>
+<tr><td>2026-08-27</td><td><code>3a6f694</code></td><td>Mr. SEO asli (24 checks), Mr. Publish asli (URL verify) &mdash; poori chain keyword &rarr; writer &rarr; seo &rarr; publish resolve hoti hai</td><td>32</td></tr>
+<tr><td>2026-08-27</td><td><code>910a389</code>, <code>bc30418</code></td><td>Agent Workspace (&sect;24.4b) + uske producers: keyword row-by-row, draft section-by-section</td><td>23 + 14</td></tr>
+<tr><td>2026-08-27</td><td><code>c330f15</code></td><td>Chat route &rarr; brain (Phase 1 ka aakhri piece); Site Brain read/write API + onboarding profile view</td><td>web 92 green</td></tr>
+<tr><td>2026-08-27</td><td><code>74d0d7f</code></td><td>Mr. Lead asli: ICP, OSM discovery, page padh ke personalisation, compliance code me. Chat se abhi nahi &mdash; adapter route baaki</td><td>agent-server 264 green</td></tr>
+</table></div>
+
+<h3>26.1 Abhi kya baaki hai (is order me)</h3>
+<ol>
+  <li><strong>Leads ko brain se jodo</strong> &mdash; manifest se stub hatao, queue + worker + adapter route + cap</li>
+  <li><strong>Site Brain dashboard page</strong> &mdash; API ban chuki hai, page nahi (&sect;25.7)</li>
+  <li><strong>Mr. Audit</strong> (Phase 3) &mdash; shuru hi nahi hua</li>
+  <li><strong>Mr. Social</strong> (Phase 3) &mdash; Postiz, bina modify kiye (AGPL). Meta App Review pehle (&sect;7.7)</li>
+  <li><strong>Phase 2</strong> &mdash; Python <code>agent-writer</code> (gpt-researcher), section-by-section writer, LLM comparison test</li>
+  <li><strong>Phase 4</strong> &mdash; writer &times;4-8, schedule jitter, cost dashboard, load test, runbook</li>
+</ol>
+<p>Aapke haath ka kaam alag file me hai: <code>docs/MANUAL_STEPS.md</code>.</p>
 
 <p style="margin-top:56px"><small>Verified on 2026-08-27 against GitHub API and repo READMEs; codebase facts from commit fa22a68. Numbers in Section 12 are estimates to be replaced by one week of measured data.</small></p>
 </div>
