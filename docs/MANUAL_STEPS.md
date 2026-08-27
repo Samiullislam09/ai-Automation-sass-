@@ -94,6 +94,19 @@ ready kar dunga (`npm publish --access public`). Tab tak code chalta rahega (in-
 ### 11. Meta (Facebook) App Review — Phase 3 se pehle — [ ]
 **Kyun:** social posting ke liye Meta ka review hafton leta hai; line lambi hai to jaldi lagana behtar.
 
+### 12. Groq free API key — chat ko 8s se ~0.5s karne ke liye — [ ]
+**Kyun:** MASTER_PLAN §18 ne measure kiya — aaj ka free NIM endpoint ek shared queue hai, 0.5s se 19s
+tak kuch bhi de sakta hai, apne code ki wajah se nahi. Groq apna dedicated hardware hai, free tier
+(~1k requests/din, 30 RPM, card nahi chahiye), aur first word ~200-400ms me aata hai. Code isi liye
+`lib/ai/fastChat.ts` me ready hai (6 tests, koi real key ke bina) — abhi bilkul kuch nahi badla,
+kyunki koi key set nahi hai.
+**Kahan:** console.groq.com → sign up (free, no card) → API Keys → Create Key.
+**Kya:** Vercel → project → Settings → Environment Variables → `GROQ_API_KEY` = wahi key. Deploy karo.
+Bas itna — code khud detect karke Groq try karega, aur agar wo kabhi fail ho (rate limit, down) to
+chupke se NIM pe wapas chala jaata hai, koi user "error" nahi dekhega.
+**Note:** Cerebras bhi wired hai (`CEREBRAS_API_KEY`) par unke free tier pe abhi 402 (no quota) mila
+tha jab maine test kiya — Groq pehle try karo.
+
 ---
 
 ## Status — main kya kar chuka hoon

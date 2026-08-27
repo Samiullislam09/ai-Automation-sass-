@@ -846,7 +846,10 @@ test("every order carries an idempotency key even when the caller forgot one", a
   );
 });
 
-test("BRAIN_ENABLED: 1 on, 0 off, unset means on everywhere but production", async () => {
+test("BRAIN_ENABLED: 1 on, 0 off, unset means on — in every environment, production included", async () => {
+  // "Ek dimaag" (MASTER_PLAN §4): once Phase 1's exit criterion was met, an environment's
+  // NAME stopped being allowed to decide which of two systems answers a message. The flag is
+  // the only knob left, and it defaults on.
   const { brainEnabled } = await import("@/lib/brain");
   const realFlag = process.env.BRAIN_ENABLED;
   const realEnv = process.env.NODE_ENV;
@@ -857,10 +860,11 @@ test("BRAIN_ENABLED: 1 on, 0 off, unset means on everywhere but production", asy
   try {
     set("1", "production"); assert.equal(brainEnabled(), true);
     set("0", "development"); assert.equal(brainEnabled(), false);
+    set("0", "production"); assert.equal(brainEnabled(), false, "the kill switch works in production too");
     set("true", "production"); assert.equal(brainEnabled(), true);
     set(undefined, "development"); assert.equal(brainEnabled(), true);
     set(undefined, "test"); assert.equal(brainEnabled(), true);
-    set(undefined, "production"); assert.equal(brainEnabled(), false);
+    set(undefined, "production"); assert.equal(brainEnabled(), true, "unset means on, in every environment now");
   } finally {
     if (realFlag === undefined) delete process.env.BRAIN_ENABLED; else process.env.BRAIN_ENABLED = realFlag;
     (process.env as any).NODE_ENV = realEnv;

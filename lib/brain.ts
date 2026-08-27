@@ -360,12 +360,25 @@ export async function getTaskEvents(
 
 /** Is the chat allowed to route orders through the brain?
  *
- *  `BRAIN_ENABLED=1` on, `BRAIN_ENABLED=0` off. Unset means ON everywhere except production,
- *  which is the strangler's whole point: the new path runs on every dev machine and in every
- *  preview from the first commit, and production keeps the old one until it is turned on
- *  deliberately. Read at call time, never cached, so a test can flip it. */
+ *  `BRAIN_ENABLED=1` on, `BRAIN_ENABLED=0` off. Unset means ON — everywhere, production
+ *  included. It was not always: the strangler's rollout had this off in production by
+ *  default until Phase 1's own exit criterion was met (end-to-end "40 min baad article likh
+ *  ke publish kar do", tested, §14's acceptance rows green). Leaving it there past that point
+ *  is the thing MASTER_PLAN §4's "ek dimaag" is a principle against — two systems that can
+ *  each decide what a message means is exactly the shape of bug a customer would never be
+ *  able to explain ("kabhi kaam karta hai, kabhi nahi"). So the default flips: ONE decision
+ *  system runs in every environment now, and the flag remains only as an emergency kill
+ *  switch if the brain itself needs to be pulled out of the loop — set `BRAIN_ENABLED=0`,
+ *  never rely on an environment's NAME to make that call for you.
+ *
+ *  This does not retire `legacyJobOf`'s four cases (lib/chat-brain.ts) — those stay, and
+ *  correctly so: they are not a second brain, they are the documented, narrow set of things
+ *  that are not the brain's job at all (a schedule setting, a reject, a cancel) or that need
+ *  a lookup the intent model has no way to do today (which article "isko publish karo" means
+ *  — see the comment on `legacyJobOf` itself). Read at call time, never cached, so a test can
+ *  flip it. */
 export function brainEnabled(): boolean {
   const raw = process.env.BRAIN_ENABLED;
-  if (raw === undefined || raw === "") return process.env.NODE_ENV !== "production";
+  if (raw === undefined || raw === "") return true;
   return raw === "1" || raw.toLowerCase() === "true" || raw.toLowerCase() === "on";
 }

@@ -69,9 +69,16 @@ export type LegacyJob = {
  *     means working out which one, and today's bookings live in `scheduled_orders`, not in
  *     `tasks`.
  *   · rejecting a draft — a `content_items` status change, again not an agent's work.
- *   · publishing an existing article — the publish action IS in the brain's manifests, but its
- *     agent is in `NOT_YET_ROUTED`, so the registry keeps it disabled and the model is never
- *     offered it. Routing it to the brain would create a task no worker can run.
+ *   · publishing an existing article — NOT because the agent is unrouted any more (it moved
+ *     out of `NOT_YET_ROUTED` the day Mr. Publish became real, and `publish_article` IS
+ *     offered to the model as a tool today). The real gap is one step earlier: "isko publish
+ *     kar do" needs to know WHICH article, and the intent engine's function-calling has no
+ *     conversation-aware lookup for "the most recent one still waiting" the way
+ *     `findPublishable()` below does — it sees the last two turns of chat text, not the
+ *     database. Teaching the intent layer that lookup (so `publish_article`'s `content_item_id`
+ *     gets filled the way `keywords` or `article` already can be, from context rather than
+ *     always from the model) is the way this entry actually leaves the list; it is not on the
+ *     roadmap yet, so it stays here, correctly, for a different reason than it used to.
  *
  *  Writing, research and planning are deliberately NOT here: they belong to the brain now, and
  *  returning them would mean two systems creating work for one sentence.

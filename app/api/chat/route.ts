@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
 import { cached, invalidate, sessionKey, TTL } from "@/lib/chat-cache";
 import { NVIDIA_URL, chatModelsInOrder, modelParams } from "@/lib/chat-model";
+import { openFastChatStream } from "@/lib/ai/fastChat";
 import { detectChatIntent, wantsAutoPublish } from "@/lib/chat-intent";
 import { parseWhen, describeWhen } from "@/lib/when";
 import { applySchedule, describeSchedule } from "@/lib/chat-schedule";
@@ -255,6 +256,13 @@ function buildMessages(
 /** Opens the NVIDIA stream and hands back the raw byte stream plus the response, so the
  *  caller can start writing to the browser the moment the first token exists. */
 async function openLightningStream(model: string, messages: any[], signal: AbortSignal): Promise<ReadableStream<Uint8Array>> {
+  // §18.2 item 1: a dedicated-hardware provider (Groq, Cerebras) answers in ~200-400ms where
+  // NIM's shared free queue measured 0.5-19s on the identical request (§18.1). Tried first,
+  // and only when one is actually configured (docs/MANUAL_STEPS.md) — inert otherwise, and
+  // NIM below is unchanged either way.
+  const fast = await openFastChatStream(messages, { temperature: 0.2, max_tokens: 260, signal });
+  if (fast) return fast.stream;
+
   const key = process.env.NVIDIA_API_KEY;
   if (!key) throw new Error("NVIDIA_API_KEY missing");
 
