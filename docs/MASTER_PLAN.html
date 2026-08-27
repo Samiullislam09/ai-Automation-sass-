@@ -658,12 +658,13 @@ tenant_icp        tenant_id, icp jsonb, updated_at
 </ul><p><strong>Exit:</strong> “40 min baad article likh ke publish kar do” end-to-end: sawaal → echo → booked card → 40 min baad chala → Approvals/live → link chat me. Model ka koi text kabhi “booked/published” nahi kehta (test se enforce). Office aur Schedule page tasks table se draw hote hain.</p></div></div>
 
 <div class="phase"><div class="ph"><h3>Phase 2 · Writer aur SEO asli</h3><span class="exit">2-3 hafte</span></div><div class="body"><ul>
-<li><code>agent-writer</code>: Python, gpt-researcher, NIM via OPENAI_BASE_URL, QA gate port, custom style config</li>
-<li>LLM comparison test (Section 15) — same 5 topics, DeepSeek vs Nemotron vs Qwen, score by QA gate + human read</li>
-<li><code>agent-seo</code>: 11 checks port, loop max 2</li>
-<li><code>agent-publish</code>: alag repo, URL verify, unpublish</li>
-<li>Full-site crawler (300 pages) — memory ka open requirement</li>
-</ul><p><strong>Exit:</strong> 20 articles 5 different niches me, 18+ QA+SEO pass bina human edit; koi placeholder text; avg &lt; 8 min; publish URL 200 verified; unpublish chat se kaam karta hai.</p></div></div>
+<li><span class="pill ok">DONE 2026-08-27 (TS scope)</span> Writer ka Upgrade E (&sect;16.3): outline &rarr; parallel sections &rarr; polish &rarr; meta, 14 tests. <code>metaTitle</code>/<code>metaDescription</code>/<code>slug</code>/JSON-LD ab asal me bante hain &mdash; qualityGate/seoChecks ke meta-length checks pehle kabhi chalte he nahi the, aur <code>content_items.slug</code> (migration 019 ka unique lock) kabhi bhara he nahi jaata tha. <span class="pill warn">BAAKI</span> <code>agent-writer</code> Python + gpt-researcher me &mdash; naya deploy unit, naya runtime, naya monthly Railway kharcha, solo/free-tier project ke liye bada faisla. Pipeline TS me agent-server ke andar hai (brain jaisa he strangler tradeoff), gpt-researcher ki jagah nahi li &mdash; har fact tenant ke apne Site Brain/crawl/blueprint se aana zaroori hai, isliye open-web research wahi paragraphs deta jo likhne ki ijazat he nahi hai.</li>
+<li><span class="pill ok">DONE 2026-08-27 (harness)</span> LLM comparison test (&sect;15 row 1): <code>scripts/compare-writer-models.mjs</code> &mdash; 5 topics, asli writer pipeline, asli qualityGate se score, sample excerpts. <span class="pill warn">AAPKA FAISLA</span> chalane ke liye: <code>npx tsx scripts/compare-writer-models.mjs --confirm</code> (real NIM calls, isliye <code>--confirm</code> zaroori hai). Winner script nahi chunta &mdash; §15 khud kehta hai ye owner ka faisla hai.</li>
+<li><span class="pill ok">DONE (pehle se)</span> <code>agent-seo</code>: 24 checks (11 se zyada), loop max 2 orchestrator me hai (§5.5)</li>
+<li><span class="pill ok">DONE (pehle se)</span> Full-site crawler 300 pages (<code>CRAWL_PAGE_LIMIT</code>)</li>
+<li><span class="pill warn">BAAKI</span> <code>agent-publish</code>: URL verify ban chuka hai; &ldquo;alag repo&rdquo; nahi (brain jaisa he tradeoff); <strong>unpublish abhi nahi hai</strong> &mdash; chat se koi bhi article pull nahi ho sakta.</li>
+</ul><p><strong>Exit:</strong> 20 articles 5 different niches me, 18+ QA+SEO pass bina human edit; koi placeholder text; avg &lt; 8 min; publish URL 200 verified; unpublish chat se kaam karta hai.</p>
+<p><strong>Exit ka haal 2026-08-27:</strong> writer/SEO/publish/crawler code se asli hain aur naya quality upgrade (Upgrade E) laga; &ldquo;20 articles, 18+ pass&rdquo; ka numbers-wala test abhi nahi chala (chalane ke liye NIM calls chahiye, &sect;15 ki tarah aapka faisla/permission chahiye). <strong>Unpublish nahi bana</strong> &mdash; exit criterion ka aakhri hissa khula hai.</p></div></div>
 
 <div class="phase"><div class="ph"><h3>Phase 3 · Site audit, leads, social</h3><span class="exit">3-4 hafte</span></div><div class="body"><ul>
 <li><span class="pill ok">DONE 2026-08-27</span> <code>agent-site-audit</code> (Mr. Audit, 26 tests): sitemap/robots se pages chunta hai, 50 pages tak politely fetch, deterministic catalogue (toota hua, Google se chhupa hua, on-page, orphan/duplicate), score 100&minus;25&times;block&minus;5&times;warn, migration <strong>020</strong> <code>site_audits</code> me poori report + pichhla score (trend). Chat se <code>audit_site</code> chalta hai. <strong>Playwright/seomator abhi nahi</strong> &mdash; Core Web Vitals ka number banaya <em>nahi</em> jaata, har report me <code>skipped</code> me saaf likha hota hai; alag service milte hi wo checks isi catalogue me judenge. Weekly schedule khud chalta hai (scheduler sweep, 3 per tick, sirf un tenants ke liye jinki site padh chuki hai), aur <code>/app/audit</code> page pe report + score trend + &ldquo;jo measure nahi kiya&rdquo; list.</li>
@@ -771,7 +772,7 @@ tenant_icp        tenant_id, icp jsonb, updated_at
 </table></div>
 <p>Contract wahi rehta hai — in-process call ya HTTP, agent ko farq nahi padta (contract package dono adapter deta hai). Jab writer ko alag scale chahiye (Phase 4), ek env var se HTTP pe shift. <strong>Idle cost 9 services se 3, failure surface 1/3.</strong></p>
 
-<h4>E · Writer: research alag, likhna alag, sections me <span class="pill warn">v2</span></h4>
+<h4>E · Writer: research alag, likhna alag, sections me <span class="pill ok">DONE 2026-08-27 (TS scope)</span></h4>
 <ol>
   <li><strong>Research</strong> — gpt-researcher ka sirf <code>conduct_research()</code> (sources + context), <code>write_report()</code> nahi</li>
   <li><strong>Outline</strong> — ek call: H2/H3 structure, har section ka goal, target keyword placement, reader ka sawaal jo wo section answer karta hai</li>
@@ -1687,12 +1688,17 @@ aur commit ke saath &mdash; taaki kal koi (aap, main, ya 10 saal baad koi employ
 <tr><td>2026-08-27</td><td><code>ec3b2c0</code></td><td>Audit ka weekly schedule (khud chalta hai) + <code>/app/audit</code> page: score trend, issues worst-first, aur jo measure nahi kiya wo bhi likha</td><td>290 + 92 green</td></tr>
 <tr><td>2026-08-27</td><td><code>01a01c9</code></td><td>Miss Social (&sect;7.7): draft-only posts for 4 networks, grounded in Site Brain, Approvals copy flow. Goals.focus wired into agent-server (boss.ts ko pehli baar dikhta hai)</td><td>305 + 92 green</td></tr>
 <tr><td>2026-08-27</td><td><code>8648211</code></td><td>&sect;16/&sect;18 audit se: <code>BRAIN_ENABLED</code> ab har environment me default-on (&sect;18.6, &ldquo;ek dimaag&rdquo; asal me), stale <code>legacyJobOf</code> publish comment fix, <code>lib/ai/fastChat.ts</code> (&sect;18.2 #1, Groq/Cerebras hedge-ready, inert bina key ke)</td><td>98 web green (+6)</td></tr>
+<tr><td>2026-08-27</td><td><code>06b0245</code></td><td>Phase 2 / Upgrade E: Mr. Writer outline &rarr; parallel sections &rarr; polish &rarr; meta (<code>writerPipeline.ts</code>). metaTitle/metaDescription/slug/JSON-LD asal me bante hain pehli baar; <code>content_items.slug</code> lock ab bharta hai</td><td>319 agent-server (+14)</td></tr>
+<tr><td>2026-08-27</td><td><code>3b4ac79</code></td><td>&sect;15 row 1: <code>scripts/compare-writer-models.mjs</code> &mdash; asli 5-topic model comparison harness, <code>--confirm</code> ke bina live calls nahi karta (ek galti se seekha)</td><td>&mdash;</td></tr>
 </table></div>
 
 <h3>26.1 Abhi kya baaki hai (is order me)</h3>
 <ol>
-<li><strong>Phase 2</strong> &mdash; Python <code>agent-writer</code> (gpt-researcher), section-by-section writer, LLM comparison test</li>
-  <li><strong>Phase 4</strong> &mdash; writer &times;4-8, schedule jitter, cost dashboard, load test, runbook</li>
+<li><strong>Unpublish</strong> &mdash; chat se koi live article pull karne ka koi tareeqa nahi hai. Phase 2 ka exit criterion ka aakhri khula hissa.</li>
+<li><strong>LLM comparison chalao</strong> &mdash; harness ban chuka hai, par kisi ne <code>--confirm</code> ke saath chalaya nahi (real NIM calls, isliye aapka faisla)</li>
+<li><strong>agent-writer Python + gpt-researcher</strong> &mdash; jaanbujh ke deferred, wajah &sect;26 Phase 2 row me. Upgrade E ka substance TS me ban chuka hai</li>
+<li><strong>Groq/Cerebras key</strong> &mdash; code ready hai (<code>lib/ai/fastChat.ts</code>), inert hai bina key ke (manual step 12)</li>
+<li><strong>Phase 4</strong> &mdash; writer &times;4-8, schedule jitter, cost dashboard, load test, runbook</li>
 </ol>
 <p>Aapke haath ka kaam alag file me hai: <code>docs/MANUAL_STEPS.md</code>.</p>
 
