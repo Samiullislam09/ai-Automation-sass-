@@ -5,6 +5,8 @@ import { completeJson } from "../lib/llm.js";
 import { enqueue } from "../queues.js";
 import { loadInsights, planningBlock } from "../lib/insights.js";
 import { syncGoogleInsights } from "../lib/googleSync.js";
+import { checkDuplicate, type DuplicateVerdict } from "../lib/dedupe.js";
+import { duplicateSentence } from "./writer.js";
 
 /** Mr Lxwa — the orchestrator. Until now every agent only ran when a human poked an
  *  endpoint, and nothing connected them: Mr. Keyword's research went into jobs_log and
@@ -90,10 +92,33 @@ export class BossAgent extends Agent {
 
     if (!topics.length) return { planned: 0, source, scheduleRunId, reason: "The planner returned no usable topics." };
 
+    // ── the duplicate locks, at the point suggestions are made (§25.5) ───────────────────
+    // "Already written (DO NOT repeat these)" in the prompt above is a request, and a model
+    // request is not a lock: it sees 30 titles, it does not see the 400 pages the crawler
+    // found, and it cannot see what another run enqueued ninety seconds ago. So every topic
+    // is checked against the database before it is ever shown, and a topic that fails is
+    // DROPPED HERE — not carried down the chain to be refused by the writer three jobs later,
+    // by which time the user has already been told it was planned.
+    const checked = await dropDuplicateTopics(topics, (topic) => checkDuplicate(tenantId, { title: topic, topic }));
+    if (checked.dropped.length) {
+      console.log(`[boss] dropped ${checked.dropped.length} of ${topics.length} planned topic(s) as duplicates: ${checked.dropped.map((d) => d.topic).join("; ")}`);
+    }
+
+    if (!checked.kept.length) {
+      return {
+        planned: 0,
+        source,
+        scheduleRunId,
+        droppedDuplicates: checked.dropped.length,
+        dropped: checked.dropped,
+        reason: `Jitne topic plan hue the (${checked.dropped.length}), wo sab aapke paas pehle se hain — isliye kuch naya shuru nahi kiya. Neeche har ek ka page diya hai; unhe update karwao, ya mujhe koi naya subject batao.`,
+      };
+    }
+
     // Hand each topic to Mr. Keyword. `chain: true` is what makes him pass it on to Mr.
     // Writer once the keyword data comes back (see keyword.ts) — a keyword job without it
     // stays a one-off lookup, which is what the manual /jobs/keyword endpoint still does.
-    for (const t of topics) {
+    for (const t of checked.kept) {
       await enqueue("keyword", {
         tenantId,
         topic: t.topic,
@@ -105,8 +130,15 @@ export class BossAgent extends Agent {
     }
 
     return {
-      planned: topics.length,
-      topics,
+      // Only what was actually started. `topics` is what the dashboard lists, so it must be
+      // the kept ones — reporting the planner's raw count would promise articles that were
+      // deliberately not started.
+      planned: checked.kept.length,
+      topics: checked.kept,
+      // How many the locks caught, and each one's sentence. This is the number that says
+      // whether the planner is repeating itself, so it is reported even when it is zero.
+      droppedDuplicates: checked.dropped.length,
+      dropped: checked.dropped,
       chain,
       // Echoed into jobs_log so /api/schedule/history can tell a scheduled run from a
       // hand-started one, tie it to the articles it produced, and say whether THAT run was
@@ -120,4 +152,77 @@ export class BossAgent extends Agent {
         : { source: "site-crawl-and-niche" },
     };
   }
+}
+
+export type PlannedTopic = { topic: string; why: string };
+
+export type DroppedTopic = {
+  topic: string;
+  status: "exists" | "in_progress";
+  /** Where the thing that already covers it lives, so the UI can link straight to it. */
+  url: string | null;
+  /** The full sentence, same wording Mr. Writer uses when it refuses one (agents/writer.ts). */
+  reason: string;
+};
+
+/** Run the duplicate locks over a planned list and keep only what is genuinely new (§25.5).
+ *
+ *  `check` is injected rather than imported so this can be tested without a database, and so
+ *  the one call the planner makes per topic is visible at the call site rather than hidden
+ *  three files down.
+ *
+ *  Two decisions worth stating:
+ *
+ *   · a LOOKUP FAILURE KEEPS the topic. checkDuplicate() already swallows its own missing-table
+ *     and query errors and answers "free"; if it throws anyway, the safe direction is to plan
+ *     the article and let the writer's own check (which runs seconds before the LLM call) catch
+ *     it. Dropping on an error would silently stop planning for a tenant whose migration is
+ *     half-applied, and nobody would know why;
+ *
+ *   · topics are checked SEQUENTIALLY, and each kept topic is remembered. Two topics in one
+ *     plan that slug to the same thing ("ISO 9001 Cost" and "iso-9001 cost") are a duplicate
+ *     the database cannot catch, because neither of them has been written yet. */
+export async function dropDuplicateTopics(
+  topics: PlannedTopic[],
+  check: (topic: string) => Promise<DuplicateVerdict>
+): Promise<{ kept: PlannedTopic[]; dropped: DroppedTopic[] }> {
+  const kept: PlannedTopic[] = [];
+  const dropped: DroppedTopic[] = [];
+  const keptKeys = new Set<string>();
+
+  for (const t of topics) {
+    const key = t.topic.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    if (key && keptKeys.has(key)) {
+      dropped.push({
+        topic: t.topic,
+        status: "exists",
+        url: null,
+        reason: `"${t.topic}" isi plan me pehle se hai — ek hi cheez do baar shuru karne ka koi matlab nahi.`,
+      });
+      continue;
+    }
+
+    let verdict: DuplicateVerdict;
+    try {
+      verdict = await check(t.topic);
+    } catch (e: any) {
+      console.error(`[boss] duplicate check failed for "${t.topic}", keeping it:`, e?.message);
+      verdict = { status: "free" };
+    }
+
+    if (verdict.status === "free") {
+      kept.push(t);
+      if (key) keptKeys.add(key);
+      continue;
+    }
+
+    dropped.push({
+      topic: t.topic,
+      status: verdict.status,
+      url: verdict.status === "exists" ? verdict.url : null,
+      reason: duplicateSentence(verdict),
+    });
+  }
+
+  return { kept, dropped };
 }

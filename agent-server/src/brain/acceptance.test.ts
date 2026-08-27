@@ -33,7 +33,9 @@ function world(opts: { stubs?: Set<string>; notRouted?: Set<string> } = {}) {
   configureOrchestrator({
     db: db as any,
     now: () => new Date("2026-08-27T10:00:00.000Z"),
-    runStep: async (c) => calls.push(c),
+    runStep: async (c) => {
+      calls.push(c);
+    },
     schedule: async () => {},
   });
   return { registry, db, events, calls };

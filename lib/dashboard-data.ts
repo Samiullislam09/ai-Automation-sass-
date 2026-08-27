@@ -376,6 +376,13 @@ function describeJob(jobAgent: string, status: string, detail: any): { summary: 
   }
 
   if (jobAgent === "writer") {
+    // Nothing was written, and saying so is the whole point. Mr. Writer now refuses a topic
+    // the site already covers (duplicate lock, plan §25.5) and returns the reason instead of
+    // a draft — without this branch the receipt below would happily report a quality-gated
+    // article waiting for approval, which is a lie about work that never happened.
+    if (detail.written === false) {
+      return { summary: String(detail.reason ?? "Kuch nahi likha gaya."), items: [] };
+    }
     const gate = detail.qualityGate ?? {};
     const title = detail.title ?? detail.topic ?? "the draft";
     const words = detail.wordCount ?? gate.wordCount;

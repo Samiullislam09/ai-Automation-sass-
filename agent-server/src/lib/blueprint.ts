@@ -1,3 +1,5 @@
+import { profileBlock, type Offering, type SiteProfile, type TopicCluster } from "./siteProfile.js";
+
 /** The brief Mr. Writer writes from.
  *
  *  Lifted out of the keyword agent because it is now needed twice: once when research
@@ -7,7 +9,22 @@
  *
  *  Plain text, not JSON, because it goes straight into the writing prompt. Every number in it
  *  is labelled with where it came from, so the writer can never present an AI suggestion or a
- *  Search Console impression count as a measured search volume. */
+ *  Search Console impression count as a measured search volume.
+ *
+ *  §25.3 — THE BRIEF NOW CARRIES THE BUSINESS. Until now this file described a TOPIC: a
+ *  keyword, some related queries, a structure. Any company on earth could have been the
+ *  subject. The Site Brain (lib/siteProfile.ts) is passed in as an optional third argument and
+ *  rendered by profileBlock(), which brings four things the writer never had:
+ *
+ *    · what_they_do / audience / geo — who this article is for;
+ *    · offerings WITH THEIR REAL URLs — so the call to action is "book the ISO 27001 gap
+ *      audit" pointing at /services/iso-27001-gap-audit, not "contact us";
+ *    · proof[] under the rule that these are the ONLY facts about the business it may state;
+ *    · the topic cluster this keyword belongs to, so internal links go to sibling pages.
+ *
+ *  The profile is OPTIONAL and absent is normal. Passed null (no analyst run yet, migration
+ *  019 not applied, thin site) this function returns exactly the string it returned before —
+ *  profileBlock() renders "" for an empty profile precisely so this stays true. */
 
 export type Related = {
   keyword: string;
@@ -15,6 +32,28 @@ export type Related = {
   competitionLevel?: string | null;
   impressions?: number;
   position?: number;
+  /** §25.3 column 2 — cosine(this keyword, nearest topic-cluster centroid). Set by Mr.
+   *  Keyword (agents/keyword.ts). null/absent means NOT SCORED, which is not the same as
+   *  scoring badly: no profile, no centroids, or past the embedding cap. */
+  fitScore?: number | null;
+  fitCluster?: string | null;
+  /** §25.3 column 3 — this exact query is already earning impressions for this site. Kept
+   *  as its own object, never folded into fitScore: they answer different questions and a
+   *  user must be able to take the two apart. */
+  gscOpportunity?: GscOpportunity | null;
+  /** True when the query came from expanding the seed in the site's context rather than from
+   *  a search-data provider. It therefore has no volume and never will — see buildBlueprint. */
+  fromSiteContext?: boolean;
+};
+
+/** "This site is already shown for this search." Measured, from Search Console — either the
+ *  striking-distance list (insights.ts) or a content gap the analyst recorded. */
+export type GscOpportunity = {
+  query: string;
+  impressions: number;
+  position: number | null;
+  clicks: number | null;
+  from: "striking-distance" | "content-gap";
 };
 
 export type Source = "dataforseo" | "gsc" | "autocomplete" | "ai";
@@ -27,9 +66,13 @@ export type Research = {
   relatedKeywords: Related[];
   providerError: string | null;
   ownSearchConsole: { query: string; impressions: number; clicks: number; position: number }[];
+  /** Queries produced by expanding the seed topic in this business's own context (§25.3).
+   *  Model-derived phrasings of a real offering — they have NO volume and are printed under
+   *  their own heading so they can never be read as measured demand. */
+  siteContextQueries?: string[];
 };
 
-export function buildBlueprint(primary: string, research: Research): string {
+export function buildBlueprint(primary: string, research: Research, profile?: SiteProfile | null): string {
   const { source, providerError, relatedKeywords, ownSearchConsole } = research;
 
   // Whatever the primary keyword is, it shouldn't also appear in the "related" list.
@@ -95,12 +138,128 @@ export function buildBlueprint(primary: string, research: Research): string {
     );
   }
 
+  // Queries that came from expanding the seed in the site's own context. Their own heading,
+  // their own honesty note: these are phrasings, not measurements, and the difference has to
+  // survive all the way into the writer's prompt.
+  const siteContext = (research.siteContextQueries ?? []).filter((q) => q && q.toLowerCase() !== primary.toLowerCase());
+  if (siteContext.length) {
+    lines.push(
+      "",
+      "HOW THIS BUSINESS'S OWN CUSTOMERS PHRASE IT (worked out from their site profile — these are",
+      "phrasings, NOT measured demand; there is no volume figure for any of them):",
+      ...siteContext.slice(0, 8).map((q) => `- ${q}`)
+    );
+  }
+
+  // ── the business itself (§25.3) ───────────────────────────────────────────────────────────
+  // Everything from here down is skipped entirely when there is no profile, which is what
+  // keeps the no-Site-Brain output byte-identical to what this function produced before.
+  if (profile) {
+    const brain = profileBlock(profile, { maxOfferings: 8, maxClusters: 6, maxGaps: 4 });
+    if (brain) lines.push(brain.replace(/\n+$/, ""));
+
+    const offerings = matchOfferings(primary, profile, 3);
+    if (offerings.length) {
+      const cta = offerings.find((o) => o.url) ?? offerings[0];
+      lines.push(
+        "",
+        "CALL TO ACTION — the article must end by pointing the reader at this specific thing they sell.",
+        'Never a generic "contact us", never a made-up offer:',
+        cta.url
+          ? `- ${cta.name} — link the closing call to action to ${cta.url}`
+          : `- ${cta.name} — no page URL is on file for it, so name it in words and do NOT invent a link`
+      );
+      const others = offerings.filter((o) => o !== cta && o.url);
+      if (others.length) {
+        lines.push("Also relevant to this keyword, link where it genuinely helps:", ...others.map((o) => `- ${o.name} — ${o.url}`));
+      }
+    }
+
+    const cluster = nearestCluster(primary, profile);
+    if (cluster?.page_urls.length) {
+      lines.push(
+        "",
+        `INTERNAL LINKS — these pages are the same topic area ("${cluster.name}"). Link the relevant ones`,
+        "first, using these exact URLs. Do not invent a URL that is not listed here:",
+        ...cluster.page_urls.slice(0, 6).map((u) => `- ${u}`)
+      );
+    }
+  }
+
   lines.push(
     "",
     "Structure: open by answering the primary keyword directly, then one section per query",
     "above, then a short practical conclusion. Use ## headings."
   );
   return lines.join("\n");
+}
+
+// ── matching the keyword to the business (§25.3) ────────────────────────────────────────────
+
+/** The things this business sells that are actually about this keyword.
+ *
+ *  Word overlap, not embeddings, and deliberately so: buildBlueprint() is synchronous, pure
+ *  and called from two places, and an offering list is a handful of short names where a shared
+ *  content word ("audit", "27001", "training") is a strong enough signal. The embedding work
+ *  is Mr. Keyword's fit score, where it earns its cost by ranking dozens of candidates.
+ *
+ *  Ranked by how many meaningful words are shared. Nothing shared = nothing returned, and the
+ *  caller falls back to the FIRST offerings so the CTA still points at something real: an
+ *  article about a subject none of the offerings names is exactly when a generic "contact us"
+ *  would otherwise creep back in. */
+export function matchOfferings(primary: string, profile: SiteProfile | null | undefined, max = 3): Offering[] {
+  const offerings = (profile?.offerings ?? []).filter((o) => o && o.name);
+  if (!offerings.length) return [];
+
+  const wanted = new Set(tokens(primary));
+  const scored = offerings
+    .map((o) => ({ o, score: overlap(wanted, tokens(`${o.name} ${o.url ?? ""}`)) }))
+    .filter((s) => s.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  if (scored.length) return scored.slice(0, max).map((s) => s.o);
+  return offerings.slice(0, 1);
+}
+
+/** The topic cluster this keyword sits closest to, by the same word overlap. Null when the
+ *  keyword shares nothing with any cluster name or any of its page URLs — better no internal
+ *  link suggestion than a confidently wrong one. */
+export function nearestCluster(primary: string, profile: SiteProfile | null | undefined): TopicCluster | null {
+  const clusters = (profile?.topic_clusters ?? []).filter((c) => c && c.name);
+  if (!clusters.length) return null;
+
+  const wanted = new Set(tokens(primary));
+  let best: TopicCluster | null = null;
+  let bestScore = 0;
+  for (const c of clusters) {
+    // The cluster's own pages count too: a cluster labelled "infosec" whose pages live at
+    // /iso-27001-* still matches the keyword "iso 27001 cost".
+    const score = overlap(wanted, tokens(`${c.name} ${c.page_urls.slice(0, 8).join(" ")}`));
+    if (score > bestScore) { bestScore = score; best = c; }
+  }
+  return bestScore > 0 ? best : null;
+}
+
+function overlap(wanted: Set<string>, candidate: string[]): number {
+  let n = 0;
+  const seen = new Set<string>();
+  for (const w of candidate) {
+    if (seen.has(w)) continue;
+    seen.add(w);
+    if (wanted.has(w)) n++;
+  }
+  return n;
+}
+
+// Same stopword idea as insights.ts's tokens(). Kept local rather than imported because that
+// one is tuned for Search Console queries; this one also has to survive being fed a URL.
+const STOP = new Set(["the", "and", "for", "with", "you", "your", "our", "how", "what", "why", "are", "is", "in", "of", "to", "a", "an", "best", "top", "www", "http", "https", "com", "org", "net", "html", "php"]);
+
+function tokens(s: string): string[] {
+  return String(s ?? "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length > 2 && !STOP.has(w));
 }
 
 /** The one we start writing about if nobody picks.

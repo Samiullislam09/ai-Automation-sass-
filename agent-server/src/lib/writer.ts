@@ -22,11 +22,21 @@ export type WriterContext = {
   niche?: string | null;
   audience?: string | null;
   tone?: string | null;
-  /** Real crawled pages, used for internal links — never invented URLs. */
+  /** Real crawled pages, used for internal links — never invented URLs. Ordered by
+   *  agents/writer.ts so pages in the SAME topic cluster as this article come first (§25.3):
+   *  the model links what it reads first, and a sibling page is a better link than a
+   *  same-site stranger. */
   pages?: { title: string; url: string }[];
   /** Pre-rendered block of measured Search Console / GA4 facts about this site
    *  (agent-server/src/lib/insights.ts). Empty string when Google isn't connected. */
   searchEvidence?: string;
+  /** Pre-rendered Site Brain (lib/siteProfile.ts profileBlock) — what this business does,
+   *  what it sells with real URLs, the proof it may state and nothing else, its voice and its
+   *  service area (§25.3). Empty string when the analyst has not run. */
+  siteBrain?: string;
+  /** The thing this article should send the reader to, taken from the offerings that match
+   *  its keyword. Replaces the generic "contact us" the writer used to invent. */
+  cta?: { name: string; url: string | null } | null;
 };
 
 /** A full article is the longest single generation in this product. 60s was the old value
@@ -61,21 +71,48 @@ export const WRITING_RULES = [
   "1200-1800 words, starting with a single '# Title' line.",
 ];
 
-function contextBlock(context?: WriterContext): string {
+/** Marker that the blueprint already carries the Site Brain, so the same 30 lines are not
+ *  pasted into one prompt twice. lib/blueprint.ts renders profileBlock(), whose heading is
+ *  this exact string; when it is present, this file adds only what the blueprint does not
+ *  have. Cheap and explicit — the alternative is threading a flag through four call sites. */
+const BRAIN_HEADING = "SITE BRAIN";
+
+function contextBlock(context?: WriterContext, blueprint?: string): string {
   if (!context) return "";
+  const blueprintHasBrain = (blueprint ?? "").includes(BRAIN_HEADING);
   const bits: string[] = [];
   if (context.businessName) bits.push(`Business: ${context.businessName}`);
   if (context.websiteUrl) bits.push(`Website: ${context.websiteUrl}`);
+  // The Site Brain says what they do in evidence, with sources; `niche` is one word from a
+  // signup form. When the brain is here, it wins — but niche stays as the fallback, because
+  // a tenant with no analyst run still has to get a grounded article.
   if (context.niche) bits.push(`What they do: ${context.niche}`);
   if (context.audience) bits.push(`Audience: ${context.audience}`);
   if (context.tone) bits.push(`Brand tone: ${context.tone}`);
   if (context.pages?.length) {
     bits.push(
-      "Their existing pages (use as internal links where relevant, exact URLs only):",
+      "Their existing pages (use as internal links where relevant, exact URLs only — the ones",
+      "closest to this article's subject are listed first):",
       ...context.pages.slice(0, 12).map((p) => `- ${p.title} -> ${p.url}`)
     );
   }
-  return bits.length ? `BUSINESS CONTEXT (everything you may treat as true):\n${bits.join("\n")}\n\n` : "";
+
+  const head = bits.length ? `BUSINESS CONTEXT (everything you may treat as true):\n${bits.join("\n")}\n\n` : "";
+  if (blueprintHasBrain) return head;
+
+  const brain = (context.siteBrain ?? "").trim();
+  const cta = context.cta
+    ? [
+        "CALL TO ACTION — end the article by pointing the reader at this specific thing they sell,",
+        'never a generic "contact us" and never an offer that is not named here:',
+        context.cta.url
+          ? `- ${context.cta.name} — link it to ${context.cta.url}`
+          : `- ${context.cta.name} — no URL is on file, so name it in words and do NOT invent a link`,
+        "",
+      ].join("\n")
+    : "";
+
+  return [head, brain ? `${brain}\n\n` : "", cta].filter(Boolean).join("");
 }
 
 async function writeWithNvidia(topic: string, blueprint?: string, context?: WriterContext): Promise<string> {
@@ -83,7 +120,7 @@ async function writeWithNvidia(topic: string, blueprint?: string, context?: Writ
   if (!key) throw new Error("NVIDIA_API_KEY missing");
 
   const prompt = [
-    contextBlock(context),
+    contextBlock(context, blueprint),
     `Write a complete, well-structured SEO article on "${topic}".`,
     blueprint ? `\nBLUEPRINT (from real keyword research):\n${blueprint}` : "",
     `\nRULES (all of them apply):\n${WRITING_RULES.map((r, i) => `${i + 1}. ${r}`).join("\n")}`,

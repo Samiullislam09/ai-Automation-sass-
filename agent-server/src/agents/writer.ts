@@ -4,8 +4,10 @@ import { writeArticle, type WriterContext } from "../lib/writer.js";
 import { gateArticle, extractTitle, summarizeGate } from "../lib/qualityGate.js";
 import { supabase } from "../supabase.js";
 import { loadInsights, writerBlock } from "../lib/insights.js";
-import { buildBlueprint, type Research } from "../lib/blueprint.js";
+import { buildBlueprint, matchOfferings, nearestCluster, type Research } from "../lib/blueprint.js";
 import { publishContentItem } from "../lib/publish.js";
+import { loadActiveProfile, profileBlock, type SiteProfile } from "../lib/siteProfile.js";
+import { checkDuplicate, type DuplicateVerdict } from "../lib/dedupe.js";
 
 /** Build Guide Step 11 — Mr. Writer drafts the article.
  *  Currently runs on NVIDIA (Lightning tier) as a temporary stand-in for the
@@ -33,22 +35,59 @@ export class WriterAgent extends Agent {
     // Scheduled behind a keyword choice: the human had a window to pick, and this is where we
     // find out what they picked. The blueprint is rebuilt for the keyword that actually won —
     // reusing the recommended one's brief would write about the wrong thing.
+    // The Site Brain, read once and used twice: to rebuild the brief when a choice resolves,
+    // and to ground the prompt below. Never fatal — null is the normal state of a tenant whose
+    // analyst has not run, and everything downstream of it falls back to what it did before.
+    let profile: SiteProfile | null = null;
+    try {
+      profile = (await loadActiveProfile(tenantId))?.profile ?? null;
+    } catch (e: any) {
+      console.error("[writer] site profile unreadable, writing without it:", e?.message);
+    }
+
     let chosenBy: "user" | "auto" | null = null;
     if (choiceId) {
       const resolved = await resolveChoice(tenantId, choiceId);
       if (!resolved) throw new Error(`The keyword choice ${choiceId} is gone — nothing was written.`);
       topic = resolved.keyword;
-      blueprint = buildBlueprint(resolved.keyword, resolved.research);
+      blueprint = buildBlueprint(resolved.keyword, resolved.research, profile);
       chosenBy = resolved.chosenBy;
       ctx.onProgress({ label: `Writing "${resolved.keyword}" (${chosenBy === "user" ? "you picked it" : "auto-picked"})` });
     }
 
     if (!topic?.trim()) throw new Error("writer job needs a 'topic' string");
 
-    // Ground the draft in THIS business: its niche, audience, tone and its own crawled
-    // pages (for real internal links). Without this the model wrote generic filler that
-    // could have belonged to any company.
-    const context = await loadWriterContext(tenantId);
+    // ── the duplicate locks, before a single token is spent (§25.5, locks 1 and 3) ────────
+    // This is the last gate before an LLM call and a row in content_items, and it is the one
+    // that has to hold: everything upstream (chat, planner, scheduler) can and does enqueue
+    // the same subject twice. "exists" is NOT a failure — the right answer to "write about ISO
+    // 9001 cost" when /iso-9001-cost is already live is to offer to update it, and the update
+    // mode itself is Phase 2. We stop, we name the page, we hand the choice back.
+    const verdict = await checkDuplicate(tenantId, { title: topic.trim(), topic: topic.trim() });
+    if (verdict.status !== "free") {
+      const reason = duplicateSentence(verdict);
+      ctx.onProgress({ label: reason });
+      console.log(`[writer] not writing "${topic.trim()}": ${verdict.status}`);
+      // NOTE for whoever owns lib/dashboard-data.ts (outside this change's file boundary):
+      // describeJob()'s `writer` branch has no branch for `written: false` yet, so this
+      // result currently renders as if a draft existed. One `if (detail.written === false)
+      // return { summary: String(detail.reason), items: [] }` at the top of that branch is
+      // the whole fix.
+      return {
+        topic: topic.trim(),
+        written: false,
+        duplicate: verdict,
+        reason,
+        chosenBy,
+        scheduleRunId: scheduleRunId ?? null,
+      };
+    }
+
+    // Ground the draft in THIS business: the Site Brain (what they do, what they sell with
+    // real URLs, the proof they may state, their voice), its niche/audience/tone, and its own
+    // crawled pages ordered so the ones in this article's own topic cluster come first.
+    // Without this the model wrote generic filler that could have belonged to any company.
+    const context = await loadWriterContext(tenantId, topic.trim(), profile);
 
     const body = await writeArticle(topic.trim(), blueprint, context);
     // The topic IS the primary keyword: buildBlueprint() writes it as "Primary keyword: …"
@@ -74,6 +113,9 @@ export class WriterAgent extends Agent {
         tone: !!context.tone,
         pages: context.pages?.length ?? 0,
         searchConsole: !!context.searchEvidence,
+        // §25.3 — was this written for THIS business, or for the topic in the abstract?
+        siteBrain: !!context.siteBrain,
+        cta: context.cta?.name ?? null,
       },
     };
 
@@ -205,23 +247,43 @@ async function resolveChoice(
   return { keyword, research: (data.research ?? {}) as Research, chosenBy };
 }
 
-async function loadWriterContext(tenantId: string): Promise<WriterContext> {
+async function loadWriterContext(tenantId: string, topic: string, profile: SiteProfile | null): Promise<WriterContext> {
   try {
+    // 24, not 12: the cluster ordering below needs enough pages to have something to prefer.
+    // Only the first 12 ever reach the prompt (lib/writer.ts) — this just decides WHICH 12.
     const [{ data: tenant }, { data: pages }, insights] = await Promise.all([
       supabase.from("tenants").select("name, website_url, niche, tone_profile, icp_profile").eq("id", tenantId).single(),
-      supabase.from("site_pages").select("title, url").eq("tenant_id", tenantId).limit(12),
+      supabase.from("site_pages").select("title, url").eq("tenant_id", tenantId).limit(24),
       loadInsights(tenantId),
     ]);
     const tone = (tenant?.tone_profile as any) ?? {};
     const icp = (tenant?.icp_profile as any) ?? {};
+
+    const allPages = (pages ?? []).filter((p: any) => p.title && p.url).map((p: any) => ({ title: String(p.title), url: String(p.url) }));
+
+    // §25.3 — internal links prefer the same topic cluster. The cluster's own page_urls are
+    // pulled to the front; everything else keeps its order behind them. A stable partition,
+    // not a sort: two pages with equal claim must not swap places between runs.
+    const cluster = nearestCluster(topic, profile);
+    const clusterUrls = new Set((cluster?.page_urls ?? []).map(normalizeUrl));
+    const sameCluster = allPages.filter((p) => clusterUrls.has(normalizeUrl(p.url)));
+    const rest = allPages.filter((p) => !clusterUrls.has(normalizeUrl(p.url)));
+
+    // The CTA: the offering whose words match this article's keyword. matchOfferings falls
+    // back to the first offering rather than to nothing, because "no match" is exactly when a
+    // generic "contact us" used to appear.
+    const offering = matchOfferings(topic, profile, 1)[0] ?? null;
+
     return {
       businessName: tenant?.name ?? null,
       websiteUrl: tenant?.website_url ?? null,
       niche: tenant?.niche ?? null,
       audience: tone.audience ?? icp.businessType ?? null,
       tone: tone.tone ?? null,
-      pages: (pages ?? []).filter((p: any) => p.title && p.url).map((p: any) => ({ title: p.title, url: p.url })),
+      pages: [...sameCluster, ...rest],
       searchEvidence: writerBlock(insights),
+      siteBrain: profileBlock(profile, { maxOfferings: 8, maxClusters: 6, maxGaps: 4 }),
+      cta: offering ? { name: offering.name, url: offering.url } : null,
     };
   } catch (e: any) {
     // Context is an improvement, not a prerequisite — a lookup failure must not cost the
@@ -229,4 +291,36 @@ async function loadWriterContext(tenantId: string): Promise<WriterContext> {
     console.error("[writer] could not load business context:", e?.message);
     return {};
   }
+}
+
+/** Trailing slash and case are not a different page. Same normalisation lib/dedupe.ts applies
+ *  to slugs, for the same reason: two spellings of one URL must not read as two pages. */
+function normalizeUrl(url: string): string {
+  return String(url ?? "").trim().toLowerCase().replace(/\/+$/, "");
+}
+
+// ── what the user is told when a duplicate stops the article (§25.5) ────────────────────────
+
+/** The sentence a business owner reads instead of a second copy of an article they already
+ *  have. It has to do three things, in the product's Hinglish voice: say plainly that nothing
+ *  was written, NAME the page that already exists (with its URL, so it is one click away), and
+ *  give the choice back — update it, or pick a different angle.
+ *
+ *  What it deliberately does NOT do is offer to do the update itself. Writer update mode is
+ *  Phase 2 (plan §25.8); promising it here would be a button that does nothing.
+ *
+ *  Exported because agents/boss.ts says the same thing about a suggestion it drops before the
+ *  user ever sees it — one wording, one place. */
+export function duplicateSentence(verdict: DuplicateVerdict): string {
+  if (verdict.status === "in_progress") {
+    const what = verdict.label ? `"${verdict.label}"` : "ek job";
+    return `Ye topic abhi likha ja raha hai — ${what} already chal raha hai (${verdict.source === "tasks" ? "task" : "job"} ${verdict.task_id}). Maine dobara shuru nahi kiya. Usi ke poora hone ka intezaar karo.`;
+  }
+  if (verdict.status === "exists") {
+    const name = verdict.title ? `"${verdict.title}"` : `"${verdict.slug}"`;
+    const where = verdict.where === "site_pages" ? "aapki website par pehle se maujood hai" : "aapke content me pehle se maujood hai";
+    const link = verdict.url ? ` — ${verdict.url}` : "";
+    return `${name} ${where}${link}. Maine dobara nahi likha, warna aapki hi do pages aapas me compete karte. Do raaste hain: usi page ko update karwao, ya isi topic ka koi naya angle chuno.`;
+  }
+  return "";
 }
