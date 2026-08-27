@@ -1,0 +1,92 @@
+# Weekly Postgres backup of the Supabase database.
+#
+# Supabase's free tier keeps no daily backups, and a project that sees no traffic for
+# seven days is paused. Neither loses data by itself, but the first time someone runs a
+# bad migration (015 -> 016 was one), the only copy of the customers' articles is the
+# one this workflow made.
+#
+# Required secret: SUPABASE_DB_URL — the *direct* Postgres connection string from
+# Supabase → Project Settings → Database → Connection string (URI), with the password
+# filled in. NOT the REST URL, NOT the service-role key.
+#
+# The dump is stored as a workflow artifact (90-day retention on GitHub's side) and is
+# encrypted with BACKUP_PASSPHRASE if that secret exists, so a leaked artifact is not a
+# leaked database. To restore:  gpg -d backup.sql.gz.gpg | gunzip | psql "$SUPABASE_DB_URL"
+name: db-backup
+
+on:
+  schedule:
+    - cron: "17 2 * * 1"   # Mondays 02:17 UTC — off the hour so it doesn't queue behind everyone else's cron
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Install Postgres 17 client (matches Supabase's server major)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-common >/dev/null
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y >/dev/null
+          sudo apt-get install -y -qq postgresql-client-17 >/dev/null
+          pg_dump --version
+
+      - name: Dump
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_DB_URL:-}" ]; then
+            echo "::error::SUPABASE_DB_URL secret is not set — nothing was backed up."
+            exit 1
+          fi
+          stamp="$(date -u +%Y%m%d-%H%M)"
+          # --no-owner/--no-privileges: restore into any project without role errors.
+          # Schemas: only ours plus auth (users) and storage metadata. Supabase-internal
+          # schemas are recreated by the platform and only break a restore.
+          pg_dump "$SUPABASE_DB_URL" \
+            --format=plain --no-owner --no-privileges \
+            --schema=public --schema=auth --schema=storage \
+            | gzip -9 > "backup-${stamp}.sql.gz"
+          ls -la backup-*.sql.gz
+          echo "STAMP=${stamp}" >> "$GITHUB_ENV"
+
+      - name: Encrypt (if BACKUP_PASSPHRASE is set)
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          if [ -n "${BACKUP_PASSPHRASE:-}" ]; then
+            gpg --batch --yes --symmetric --cipher-algo AES256 \
+              --passphrase "$BACKUP_PASSPHRASE" \
+              -o "backup-${STAMP}.sql.gz.gpg" "backup-${STAMP}.sql.gz"
+            rm "backup-${STAMP}.sql.gz"
+            echo "encrypted"
+          else
+            echo "::warning::BACKUP_PASSPHRASE not set — artifact is an unencrypted database dump."
+          fi
+
+      - name: Sanity check — the dump must contain our tables
+        run: |
+          set -euo pipefail
+          f=$(ls backup-*.sql.gz* | head -1)
+          if [[ "$f" == *.gpg ]]; then
+            echo "encrypted — skipping content check"; exit 0
+          fi
+          for t in content_items schedules jobs_log; do
+            if ! gunzip -c "$f" | grep -q "CREATE TABLE public.${t}"; then
+              echo "::error::table ${t} missing from dump"; exit 1
+            fi
+          done
+          echo "ok"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: db-backup-${{ env.STAMP }}
+          path: backup-*
+          retention-days: 90
+          if-no-files-found: error

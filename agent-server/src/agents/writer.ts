@@ -1,7 +1,7 @@
 import type { Job } from "pg-boss";
 import { Agent, type AgentContext, type AgentJobData } from "./base.js";
 import { writeArticle, type WriterContext } from "../lib/writer.js";
-import { gateArticle, extractTitle } from "../lib/qualityGate.js";
+import { gateArticle, extractTitle, summarizeGate } from "../lib/qualityGate.js";
 import { supabase } from "../supabase.js";
 import { loadInsights, writerBlock } from "../lib/insights.js";
 import { buildBlueprint, type Research } from "../lib/blueprint.js";
@@ -51,14 +51,21 @@ export class WriterAgent extends Agent {
     const context = await loadWriterContext(tenantId);
 
     const body = await writeArticle(topic.trim(), blueprint, context);
-    const gate = gateArticle(body);
+    // The topic IS the primary keyword: buildBlueprint() writes it as "Primary keyword: …"
+    // and the writer is told to answer it in the first 100 words. No meta title/description
+    // exist in the job yet, so those gate checks stay off until something produces them.
+    const gate = gateArticle(body, { primaryKeyword: topic.trim() });
     const title = extractTitle(body, topic.trim());
+    console.log(`[writer] "${title}" — ${summarizeGate(gate)}`);
 
     const meta: Record<string, unknown> = {
       wordCount: gate.wordCount,
       sections: gate.sections,
       links: gate.links,
+      // Full v2 gate (score, checks[], warnings[]) lives here; describeJob reads
+      // detail.qualityGate.{passed,reasons,wordCount,sections,links} exactly as before.
       qualityGate: gate,
+      qualityScore: gate.score,
       scheduleRunId: scheduleRunId ?? null,
       // What the draft was actually grounded in — so "why did it write this?" is answerable.
       contextUsed: {

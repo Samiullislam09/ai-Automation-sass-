@@ -64,8 +64,9 @@ export const WRITING_RULES: string[] = [
 
 /** What the quality gate actually measures (agent-server/src/lib/qualityGate.ts). */
 export const QUALITY_GATE: string[] = [
-  "At least 600 words.",
-  "At least 2 section headings.",
+  "600–2,500 words, starting with one title line.",
+  "At least 3 sections, and the primary keyword in the title or the first 100 words.",
+  "No placeholders, no leaked AI text, no duplicate paragraphs, no more than a few AI clichés.",
   "Link count recorded on the item.",
   "Fails the gate → saved as 'failed' and visible, not silently dropped.",
 ];

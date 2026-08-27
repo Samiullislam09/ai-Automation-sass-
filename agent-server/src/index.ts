@@ -58,6 +58,12 @@ app.post("/jobs/:type", async (req, res) => {
     if (req.get("x-agent-token") !== env.AGENT_SERVER_TOKEN) {
       return res.status(401).json({ error: "Unauthorized" });
     }
+  } else if (process.env.NODE_ENV === "production" && process.env.ALLOW_OPEN_JOBS !== "1") {
+    // In production an unset token is not a warning, it is an open door to everyone's
+    // model credits. Refuse rather than log — the log was warning for weeks and nobody
+    // reads Railway logs until something is already wrong.
+    console.error("[jobs] refusing request: AGENT_SERVER_TOKEN is not set (set it, or ALLOW_OPEN_JOBS=1 to accept the exposure)");
+    return res.status(503).json({ error: "Agent server is not configured: AGENT_SERVER_TOKEN missing" });
   } else {
     console.warn("[jobs] AGENT_SERVER_TOKEN is not set — this endpoint is open to anyone with the URL");
   }
