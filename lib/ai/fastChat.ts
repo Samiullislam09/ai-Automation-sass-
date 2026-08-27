@@ -11,11 +11,24 @@
  *  WHY THIS IS SEPARATE FROM lib/chat-model.ts. That file answers "which model" on NIM,
  *  measured against NIM's own catalogue. This file answers "which provider, before NIM at
  *  all" — and it is written to cost nothing and change nothing when the answer is "none
- *  configured", because that is true today: §18.4b's own measurement found Cerebras returning
- *  402 (no free quota on the account that tested it), and nobody has a Groq key yet either.
- *  So every export here is inert until GROQ_API_KEY (or another provider below) is set —
- *  docs/MANUAL_STEPS.md has the "get a free key" step. Until then, chat behaves exactly as it
- *  does today: NIM, unchanged, in `lib/chat-model.ts`.
+ *  configured". §18.4b's own measurement found Cerebras returning 402 (no free quota on the
+ *  account that tested it) — still true as of 2026-08-28 (re-checked with a live key). Until a
+ *  provider is configured, chat behaves exactly as it does today: NIM, unchanged, in
+ *  `lib/chat-model.ts`.
+ *
+ *  BOTH PROVIDERS' OLD DEFAULT MODELS WERE RETIRED. This file originally defaulted to
+ *  `llama-3.3-70b-versatile` (Groq) and `llama-3.3-70b` (Cerebras) per §18.3's measurement —
+ *  both now 404 "model not found" (checked live 2026-08-28). Groq's chat catalogue today is
+ *  `openai/gpt-oss-120b`/`-20b`, Qwen 3, and their own `compound` models — no Llama chat model
+ *  remains. Both providers now default to gpt-oss-120b (Groq: `openai/gpt-oss-120b`, Cerebras:
+ *  `gpt-oss-120b` — no prefix, different naming convention on the same model), which happens to
+ *  MATCH `lib/chat-model.ts`'s own NIM primary — one fewer thing to reason about when NIM and a
+ *  fast provider disagree on tone. Reuses `modelParams()` from chat-model.ts for the same reason
+ *  it exists there: gpt-oss without `reasoning_effort:"low"` spends the completion budget on
+ *  hidden reasoning tokens and returns an EMPTY content string at low max_tokens (reproduced
+ *  live against Groq 2026-08-28) — Nemotron's `thinking:false` switch would apply the same way
+ *  if a provider ever serves it. A model overridden via `*_CHAT_MODEL` still gets whichever
+ *  params match ITS name, not the default's — the regex looks at the model actually being sent.
  *
  *  WHY SEQUENTIAL, NOT HEDGED. §18.2 item 2 (send to two providers, take whichever answers
  *  first, abort the loser) is the next upgrade once TWO fast providers are actually
@@ -31,6 +44,8 @@
  *  parses exactly that framing and needs zero changes — the plan's own line 18.5: "aaj ka
  *  code OpenAI-compatible hai — 10 line ka badlaav".
  */
+
+import { modelParams } from "@/lib/chat-model";
 
 export type FastProvider = {
   id: string;
@@ -57,23 +72,24 @@ export type FastProvider = {
 const MAX_KEYS_PER_PROVIDER = 5;
 
 /** Cerebras is listed second, not first, on purpose: §18.4b measured the account that tested
- *  this plan getting HTTP 402 (no free quota) from Cerebras on 2026-08-27. It may work on a
- *  different account or once billing is sorted — the code supports it — but Groq is the one
- *  with a reported-working free tier (§18.3: ~1k req/day, 30 RPM, no card), so it tries first. */
+ *  this plan getting HTTP 402 (no free quota) from Cerebras — re-checked live 2026-08-28,
+ *  still 402. It may work on a different account or once billing is sorted — the code supports
+ *  it — but Groq is the one with a reported-working free tier (§18.3: ~1k req/day, 30 RPM, no
+ *  card), so it tries first. */
 export const FAST_PROVIDERS: FastProvider[] = [
   {
     id: "groq",
     baseUrl: "https://api.groq.com/openai/v1/chat/completions",
     apiKeyEnv: "GROQ_API_KEY",
     modelEnv: "GROQ_CHAT_MODEL",
-    defaultModel: "llama-3.3-70b-versatile",
+    defaultModel: "openai/gpt-oss-120b",
   },
   {
     id: "cerebras",
     baseUrl: "https://api.cerebras.ai/v1/chat/completions",
     apiKeyEnv: "CEREBRAS_API_KEY",
     modelEnv: "CEREBRAS_CHAT_MODEL",
-    defaultModel: "llama-3.3-70b",
+    defaultModel: "gpt-oss-120b",
   },
 ];
 
@@ -131,6 +147,9 @@ export async function openFastChatStream(
             temperature: opts.temperature ?? 0.2,
             max_tokens: opts.max_tokens ?? 260,
             messages,
+            // gpt-oss without this returns an EMPTY content string at low max_tokens — the
+            // model spends the budget on hidden reasoning instead (see the file header).
+            ...modelParams(c.model),
           }),
           signal: opts.signal,
         });

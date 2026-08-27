@@ -60,21 +60,31 @@ test("a configured provider is used, with its own model and key", async () => {
     const result = await openFastChatStream([{ role: "user", content: "hi" }], { fetchImpl });
     assert.ok(result);
     assert.equal(result!.provider, "groq");
-    assert.equal(result!.model, "llama-3.3-70b-versatile");
+    assert.equal(result!.model, "openai/gpt-oss-120b");
     assert.equal(calls.length, 1);
     assert.match(calls[0].url, /groq\.com/);
     assert.equal(calls[0].init.headers.Authorization, "Bearer gk_test");
     const body = JSON.parse(calls[0].init.body);
     assert.equal(body.stream, true);
-    assert.equal(body.model, "llama-3.3-70b-versatile");
+    assert.equal(body.model, "openai/gpt-oss-120b");
+    // The default model is gpt-oss, and gpt-oss without this returns empty content at low
+    // max_tokens (verified live against Groq 2026-08-28) — see the file header.
+    assert.equal(body.reasoning_effort, "low");
   });
 });
 
-test("a model override env var is read, not the default", async () => {
+test("a model override env var is read, not the default — and gets ITS OWN model's params", async () => {
   await withEnv({ ...ALL_KEYS, GROQ_API_KEY: "gk_test", GROQ_CHAT_MODEL: "llama-3.1-8b-instant" }, async () => {
-    const fetchImpl = (async () => new Response(fakeStream() as any, { status: 200 })) as any;
+    const calls: any[] = [];
+    const fetchImpl = (async (url: string, init: any) => {
+      calls.push(init);
+      return new Response(fakeStream() as any, { status: 200 });
+    }) as any;
     const result = await openFastChatStream([], { fetchImpl });
     assert.equal(result!.model, "llama-3.1-8b-instant");
+    // A non-gpt-oss override must NOT carry gpt-oss's reasoning_effort — that field is meant
+    // for one specific model family, not stamped onto whatever the override happens to be.
+    assert.equal(JSON.parse(calls[0].body).reasoning_effort, undefined);
   });
 });
 
