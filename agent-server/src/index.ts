@@ -11,7 +11,8 @@ import { startScheduler, stopScheduler } from "./scheduler.js";
 import { dailyUsage } from "./jobsLog.js";
 import { CAP_TABLE } from "./config/caps.js";
 import { nvidiaWindow } from "./lib/nvidia.js";
-import { mountBrain, startBrain } from "./brain/server.js";
+import { mountBrain, startBrain, getRegistry } from "./brain/server.js";
+import { enabledActions } from "./brain/registry.js";
 import { stopEvents } from "./brain/events.js";
 
 const app = express();
@@ -19,6 +20,18 @@ app.use(cors({ origin: env.CORS_ORIGIN.split(",").map((s) => s.trim()) }));
 app.use(express.json());
 
 const STARTED_AT = new Date().toISOString();
+
+/** "Is the brain up, and what can it actually route?" — the question that used to need a real
+ *  order and a look at the logs. `actions` is the honest number: stubs and unrouted agents are
+ *  registered but excluded, so this counts what a user could really ask for. */
+function brainStatus() {
+  try {
+    const reg = getRegistry();
+    return { up: true, actions: enabledActions(reg).length, agents: reg.agents.size, problems: reg.problems.length };
+  } catch {
+    return { up: false, actions: 0, agents: 0, problems: 0 };
+  }
+}
 
 app.get("/health", (_req, res) => res.send("ok"));
 
@@ -36,7 +49,7 @@ app.get("/version", (_req, res) => {
     agents: AGENT_TYPES,
     // Cheap, honest capability flags — each one is a feature whose absence has previously
     // been mistaken for a bug in the web app rather than a stale deploy.
-    features: { scheduler: true, keywordAiFallback: true, writerThinkingDisabled: true },
+    features: { scheduler: true, keywordAiFallback: true, writerThinkingDisabled: true, brain: brainStatus() },
     // Per-plan caps plus the runaway guard, so the dashboard can show a tenant their real
     // allowance ("3 of 30 runs used today") instead of letting them walk into an invisible
     // wall. null in here means that plan has no daily cap for that agent.
