@@ -27,7 +27,7 @@ function pillClass(status: string) {
 }
 
 export default function Memory() {
-  const { s, toast, act, saveMemory } = useStore();
+  const { s, toast, act, saveMemory, confirmAction } = useStore();
   const [edit, setEdit] = useState<number | null>(null);
   const [val, setVal] = useState("");
   const [adding, setAdding] = useState(false);
@@ -37,19 +37,34 @@ export default function Memory() {
   // Google's own measurements of this site. Null while loading; `connected:false` when
   // there is genuinely nothing to show, which the panel says out loud rather than faking.
   const [insights, setInsights] = useState<any>(null);
+  // A failed read is not "nothing connected" — each panel says it failed and offers a retry.
+  const [statusError, setStatusError] = useState(false);
+  const [insightsError, setInsightsError] = useState(false);
 
-  useEffect(() => {
+  const loadStatus = () => {
+    setLoadingStatus(true);
+    setStatusError(false);
     fetch("/api/dashboard/status")
       .then((r) => r.json())
-      .then((data) => { if (data.ok) setStatus(data); })
-      .catch(() => {})
+      .then((data) => { if (data.ok) setStatus(data); else setStatusError(true); })
+      .catch(() => setStatusError(true))
       .finally(() => setLoadingStatus(false));
-
+  };
+  const loadInsights = () => {
+    setInsights(null);
+    setInsightsError(false);
     fetch("/api/insights")
-      .then((r) => r.json())
+      .then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
       .then(setInsights)
-      .catch(() => setInsights({ ok: false, connected: false }));
-  }, []);
+      .catch(() => setInsightsError(true));
+  };
+  useEffect(() => { loadStatus(); loadInsights(); }, []);
+
+  const retry = (fn: () => void) => (
+    <p className="sm" style={{ margin: 0, color: "var(--red)" }}>
+      Couldn&apos;t load — <button type="button" className="acc" onClick={fn} style={{ background: "none", border: "none", padding: 0, font: "inherit", cursor: "pointer", fontWeight: 600 }}>Retry</button>
+    </p>
+  );
 
   // Every edit goes through saveMemory, which writes to the DB — the list used to live only
   // in localStorage, so signing out erased it.
@@ -58,13 +73,21 @@ export default function Memory() {
     act(`"Noted. All agents realigned."`, "Mr Lxwa");
     toast("Memory updated — team adjusted."); setEdit(null);
   };
-  const del = (i: number) => {
+  const del = async (i: number) => {
+    const m = s.memory[i];
+    const ok = await confirmAction({
+      title: `Delete "${m?.k ?? "this fact"}"?`,
+      body: "Every agent stops using it immediately. This can't be undone.",
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!ok) return;
     act(`"Forgotten."`, "Mr Lxwa");
     saveMemory(s.memory.filter((_: any, j: number) => j !== i));
     toast("Removed.");
   };
   const add = () => {
-    if (!nk.trim() || !nv.trim()) return toast("Both fields needed");
+    if (!nk.trim() || !nv.trim()) return toast("Both fields needed", "info");
     saveMemory([...s.memory, { k: nk.trim(), v: nv.trim() }]);
     act(`learned something new from you: <b>${nk.trim()}</b>.`, "Mr Lxwa");
     toast("Team memory updated."); setAdding(false); setNk(""); setNv("");
@@ -80,7 +103,7 @@ export default function Memory() {
         <h2 className="pg-h3">What we&apos;ve connected</h2>
         {loadingStatus ? (
           <p className="sm mut" style={{ margin: 0 }}>Checking…</p>
-        ) : !status?.integrations.length ? (
+        ) : statusError ? retry(loadStatus) : !status?.integrations.length ? (
           <p className="sm mut" style={{ margin: 0 }}>Nothing connected yet. <Link href="/app/connect">Connect WordPress, your site or social →</Link></p>
         ) : (
           <div>
@@ -104,7 +127,7 @@ export default function Memory() {
           and Mr. Writer uses it to link to the pages that already work.
         </p>
 
-        {!insights ? (
+        {insightsError ? retry(loadInsights) : !insights ? (
           <p className="sm mut">Checking…</p>
         ) : !insights.connected ? (
           <p className="sm mut">
@@ -197,7 +220,7 @@ export default function Memory() {
         <h2 className="pg-h3">What we&apos;ve learned from your site</h2>
         {loadingStatus ? (
           <p className="sm mut">Checking…</p>
-        ) : !status?.crawl.pagesIndexed ? (
+        ) : statusError ? retry(loadStatus) : !status?.crawl.pagesIndexed ? (
           <p className="sm mut">Site not analyzed yet — this happens automatically during onboarding.</p>
         ) : (
           <>
@@ -238,6 +261,12 @@ export default function Memory() {
           box at all. On a 360px phone that left ~120px for the fact and gave the edit/delete
           controls a ~16px hit area. Grid now, stacking the label above the value on a phone. */}
       <div className="listgrid" style={{ gap: 9 }}>
+        {!s.memory.length && (
+          <div className="card card-tight" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <p className="sm mut" style={{ margin: 0, flex: "1 1 240px" }}>No facts yet — add one so the team writes about the right things.</p>
+            <button className="btn btn-g btn-sm" onClick={() => setAdding(true)}>+ Add fact</button>
+          </div>
+        )}
         {s.memory.map((m: any, i: number) => (
           <div key={i} className="card card-tight fact">
             <span className="fact-k">{m.k}</span>

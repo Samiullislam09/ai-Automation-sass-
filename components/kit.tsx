@@ -133,7 +133,11 @@ export function BossChat() {
   // "sys" is a job announcement, not a turn in the conversation: green when the team
   // finished something, red when it failed. Never persisted — it reports what the dashboard
   // already knows, and replaying yesterday's completions on reopen would be noise.
-  const [msgs, setMsgs] = useState<{ who: "bot" | "me" | "sys"; txt: string; live?: boolean; tone?: "done" | "error" }[]>([]);
+  // `failed` marks a bot bubble whose reply never arrived; `retryOf` is the user text to re-send.
+  const [msgs, setMsgs] = useState<{ who: "bot" | "me" | "sys"; txt: string; live?: boolean; tone?: "done" | "error"; failed?: boolean; retryOf?: string }[]>([]);
+  // Desktop only: the dock can be closed and stays closed across reloads (localStorage). On
+  // narrow screens `open` is the floating card's own state and this flag is ignored.
+  const [collapsed, setCollapsed] = useState(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [listening, setListening] = useState(false);
@@ -188,7 +192,27 @@ export function BossChat() {
   }, [notices]);
 
   useEffect(() => { convIdRef.current = convId; }, [convId]);
-  useEffect(() => { box.current?.scrollTo(0, 99999); }, [msgs, open]);
+  // Only follow the stream if the reader was already at (or within 80px of) the bottom before
+  // this update — scrolling up to re-read an earlier answer must not be yanked back.
+  const nearBottom = useRef(true);
+  const onBoxScroll = () => {
+    const el = box.current; if (!el) return;
+    nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight <= 80;
+  };
+  useEffect(() => { if (nearBottom.current) box.current?.scrollTo(0, 99999); }, [msgs, open]);
+  // Reopening the panel starts at the bottom, whatever the previous scroll position was.
+  useEffect(() => { if (open) { nearBottom.current = true; box.current?.scrollTo(0, 99999); } }, [open]);
+
+  // Collapsed state is per-browser. A class on <body> lets AppShell's layout reclaim the dock
+  // width without the two components sharing state.
+  useEffect(() => {
+    try { setCollapsed(localStorage.getItem("bosschat:collapsed") === "1"); } catch {}
+  }, []);
+  useEffect(() => {
+    document.body.classList.toggle("chat-collapsed", collapsed);
+    try { localStorage.setItem("bosschat:collapsed", collapsed ? "1" : "0"); } catch {}
+    return () => { document.body.classList.remove("chat-collapsed"); };
+  }, [collapsed]);
 
   useEffect(() => {
     if (helloFired.current) return;
@@ -242,7 +266,21 @@ export function BossChat() {
   }
 
   async function deleteConversation(id: string) {
-    await fetch(`/api/chat/conversations/${id}`, { method: "DELETE" }).catch(() => {});
+    const title = convs.find((c) => c.id === id)?.title || "this chat";
+    const ok = await store?.confirmAction?.({
+      title: `Delete "${title}"?`,
+      body: "The whole conversation is removed. This can't be undone.",
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (ok === false) return;
+    try {
+      const res = await fetch(`/api/chat/conversations/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (e: any) {
+      store?.toast?.(`Couldn't delete chat: ${e?.message ?? "network error"}`, "error");
+      return;
+    }
     setConvs((c) => c.filter((x) => x.id !== id));
     if (id === convId) newChat();
   }
@@ -318,56 +356,83 @@ export function BossChat() {
   async function stream(q: string) {
     setBusy(true);
     setMsgs(m => [...m, { who: "bot", txt: "", live: true }]);
+    // Which bubble is ours. The index is captured now: a "sys" notice can be appended while
+    // this reply streams, and "the last bubble" would then be the wrong one.
+    let slot = -1;
+    setMsgs(m => { slot = m.length - 1; return m; });
+    const patchSlot = (fn: (b: (typeof msgs)[number]) => (typeof msgs)[number]) =>
+      setMsgs(m => { const i = slot >= 0 && slot < m.length ? slot : m.length - 1; const c = [...m]; c[i] = fn(c[i]); return c; });
     const ctx = store ? { tokens: store.s.tokens, tokensMax: store.s.tokensMax, plan: store.s.plan, memory: store.s.memory, awaiting: store.s.content.filter((c: any) => c.status === "awaiting").length, report: store.s.reports[0]?.lines?.slice(-1)[0]?.s } : {};
     // The conversation so far. Without this every message was a cold start: ask for an
     // article, then ask "kya update hai?" one message later and Mr Lxwa had no idea he had
     // just been asked for anything. The empty placeholder bubble added a line above is
     // dropped, and old turns are trimmed so a long session can't grow the prompt forever.
     const history = msgs
-      .filter((m) => m.txt.trim() && !m.live)
+      .filter((m) => m.txt.trim() && !m.live && !m.failed)
       .slice(-8)
       .map((m) => ({ role: m.who === "me" ? "user" : "assistant", content: m.txt.slice(0, 700) }));
-    const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ q, ctx, history, conversationId: convId }) });
-    // The server opens (or reopens) the thread and names it on a header, so the rest of the
-    // session keeps writing into the same one without waiting for the stream to finish.
-    const returned = res.headers.get("X-Conversation-Id");
-    if (returned && returned !== convId) setConvId(returned);
-
-    // An order that was actually accepted (the enqueue returned a job id) — see the
-    // OrderResult type in app/api/chat/route.ts. Handing it to the store here is what closes
-    // the gap the whole complaint was about: it used to take up to four seconds for the
-    // office to react to "write me an article", because nothing moved until the next poll
-    // found a jobs_log row. Now the room lights the moment the reply does.
-    const runAgent = res.headers.get("X-Run-Agent");
-    if (runAgent) {
-      const label = res.headers.get("X-Run-Label");
-      store?.startRun?.(runAgent, label ? decodeURIComponent(label) : "Order accepted", res.headers.get("X-Run-Job"));
-    }
-    const reader = res.body!.getReader(); const dec = new TextDecoder();
-    // A fresh reply cancels whatever the previous one was still saying; after this the
-    // sentences queue behind each other instead of interrupting.
-    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
-    spokenChars.current = 0;
     let full = "";
-    while (true) {
-      const { done, value } = await reader.read(); if (done) break;
-      // stream:true matters now that these are real model chunks rather than whole words —
-      // a multi-byte character (an emoji, an accented letter) can straddle two chunks, and
-      // decoding each one in isolation turns it into replacement squares.
-      const chunk = dec.decode(value, { stream: true });
-      full += chunk;
-      setMsgs(m => { const c = [...m]; c[c.length - 1] = { ...c[c.length - 1], txt: c[c.length - 1].txt + chunk }; return c; });
-      // Say each sentence the moment it is finished, rather than banking the whole reply and
-      // starting the audio after it. This is the difference between hearing an answer at one
-      // second and hearing it at four.
-      speakSoFar(full);
+    try {
+      const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ q, ctx, history, conversationId: convId }) });
+      // A 4xx/5xx still has a body (an error page, a JSON error) — reading it as the reply
+      // would print the error page into the bubble and never mark the turn as failed.
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+      // The server opens (or reopens) the thread and names it on a header, so the rest of the
+      // session keeps writing into the same one without waiting for the stream to finish.
+      const returned = res.headers.get("X-Conversation-Id");
+      if (returned && returned !== convId) setConvId(returned);
+
+      // An order that was actually accepted (the enqueue returned a job id) — see the
+      // OrderResult type in app/api/chat/route.ts. Handing it to the store here is what closes
+      // the gap the whole complaint was about: it used to take up to four seconds for the
+      // office to react to "write me an article", because nothing moved until the next poll
+      // found a jobs_log row. Now the room lights the moment the reply does.
+      const runAgent = res.headers.get("X-Run-Agent");
+      if (runAgent) {
+        const label = res.headers.get("X-Run-Label");
+        store?.startRun?.(runAgent, label ? decodeURIComponent(label) : "Order accepted", res.headers.get("X-Run-Job"));
+      }
+      const reader = res.body.getReader(); const dec = new TextDecoder();
+      // A fresh reply cancels whatever the previous one was still saying; after this the
+      // sentences queue behind each other instead of interrupting.
+      if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+      spokenChars.current = 0;
+      while (true) {
+        const { done, value } = await reader.read(); if (done) break;
+        // stream:true matters now that these are real model chunks rather than whole words —
+        // a multi-byte character (an emoji, an accented letter) can straddle two chunks, and
+        // decoding each one in isolation turns it into replacement squares.
+        const chunk = dec.decode(value, { stream: true });
+        full += chunk;
+        patchSlot(b => ({ ...b, txt: b.txt + chunk }));
+        // Say each sentence the moment it is finished, rather than banking the whole reply and
+        // starting the audio after it. This is the difference between hearing an answer at one
+        // second and hearing it at four.
+        speakSoFar(full);
+      }
+      speakSoFar(full, true);
+      patchSlot(b => ({ ...b, live: false }));
+      // Titles are set from the first question, so the list only becomes useful after a turn.
+      if (q !== "__hello__") void refreshConvs();
+    } catch (e: any) {
+      // The bubble stays, but as a failure with a Retry — an empty bubble with a blinking
+      // cursor forever was the old behaviour, with the send button stuck disabled behind it.
+      const partial = full.trim();
+      patchSlot(b => ({
+        ...b, live: false, failed: true, retryOf: q,
+        txt: partial ? `${partial}\n\n**Reply cut off** (${e?.message ?? "network error"})` : `**Reply failed** (${e?.message ?? "network error"})`,
+      }));
+    } finally {
+      setBusy(false);
     }
-    speakSoFar(full, true);
-    setMsgs(m => { const c = [...m]; c[c.length - 1] = { ...c[c.length - 1], live: false }; return c; });
-    setBusy(false);
-    // Titles are set from the first question, so the list only becomes useful after a turn.
-    if (q !== "__hello__") void refreshConvs();
   }
+  /** Re-sends the message a failed bubble belonged to, replacing that bubble. */
+  const retry = (i: number) => {
+    if (busy) return;
+    const q = msgs[i]?.retryOf; if (!q) return;
+    setMsgs(m => m.filter((_, j) => j !== i));
+    stream(q);
+  };
   const send = () => {
     const v = input.trim(); if (!v || busy) return;
     setInput(""); setMsgs(m => [...m, { who: "me", txt: v }]); stream(v);
@@ -379,13 +444,13 @@ export function BossChat() {
 
   return (
     <>
-      <button aria-label="Chat with Mr Lxwa" className="bosschat-bubble" onClick={() => setOpen(o => !o)}
+      <button aria-label="Chat with Mr Lxwa" className={"bosschat-bubble" + (collapsed ? " is-collapsed" : "")} onClick={() => { setCollapsed(false); setOpen(o => !o); }}
         style={{ position: "fixed", bottom: 22, right: 22, zIndex: 150, width: 54, height: 54, borderRadius: "50%", background: "linear-gradient(135deg,var(--ac),var(--ac-d))", color: "#ffffff", fontSize: 22, boxShadow: "0 8px 26px #6a5af044", border: "none", cursor: "pointer" }}>💬</button>
 
       {/* Size/position live in CSS only — they used to be inline, and inline styles beat the
           desktop media query below, so the "full-height docked column" never applied: the
           panel stayed a 336x440 floating card that covered the office. */}
-      <div className={"bosschat-panel" + (open ? " is-open" : "")}>
+      <div className={"bosschat-panel" + (open ? " is-open" : "") + (collapsed ? " is-collapsed" : "")}>
         <div style={{ display: "flex", gap: 10, alignItems: "center", padding: "13px 15px", borderBottom: "1px solid var(--line)", background: "var(--bg2)" }}>
           <div className="corb" /><div><b style={{ fontSize: 13.5 }}>Mr Lxwa</b><div className="xs acc">● online</div></div>
           <div style={{ flex: 1 }} />
@@ -395,7 +460,7 @@ export function BossChat() {
             style={{ background: "none", color: "var(--mut)", border: "1px solid var(--line2)", borderRadius: 8, width: 26, height: 26, cursor: "pointer", fontSize: 15, lineHeight: 1 }}>+</button>
           <button aria-label="Toggle voice replies" title="Read replies aloud" onClick={() => setVoiceOut(v => !v)}
             style={{ background: voiceOut ? "var(--ac)" : "none", color: voiceOut ? "#ffffff" : "var(--mut)", border: "1px solid " + (voiceOut ? "var(--ac)" : "var(--line2)"), borderRadius: 8, width: 26, height: 26, cursor: "pointer", fontSize: 13 }}>🔊</button>
-          <button className="bosschat-close" onClick={() => setOpen(false)} style={{ background: "none", border: "none", color: "var(--mut)", cursor: "pointer" }}>✕</button>
+          <button className="bosschat-close" aria-label="Close chat" title="Close chat" onClick={() => { setOpen(false); setCollapsed(true); }} style={{ background: "none", border: "none", color: "var(--mut)", cursor: "pointer" }}>✕</button>
         </div>
         {/* History replaces the transcript rather than floating over it — the panel is only
             ~300px wide, and an overlay at that width is a worse list than a full-height one. */}
@@ -408,17 +473,20 @@ export function BossChat() {
                   <span className="chist-t">{c.title || "New chat"}</span>
                   <span className="chist-d">{new Date(c.updated_at).toLocaleString()}</span>
                 </button>
-                <span className="chist-x" title="Delete" onClick={() => deleteConversation(c.id)}>✕</span>
+                <button type="button" className="chist-x" title="Delete" aria-label="Delete conversation" onClick={() => deleteConversation(c.id)}>✕</button>
               </div>
             ))}
           </div>
         ) : (
-          <div ref={box} style={{ flex: 1, overflowY: "auto", padding: 13, display: "flex", flexDirection: "column", gap: 9 }}>
+          <div ref={box} onScroll={onBoxScroll} style={{ flex: 1, overflowY: "auto", padding: 13, display: "flex", flexDirection: "column", gap: 9 }}>
             {/* Mr Lxwa's "I've put the team on it" replies are numbered, multi-line — without the
                 \n -> <br> the whole pipeline collapsed into one unreadable paragraph. */}
             {msgs.map((m, i) => (
-              <div key={i} className={"cm " + m.who + (m.live ? " cursor" : "") + (m.tone ? " tone-" + m.tone : "")}>
+              <div key={i} className={"cm " + m.who + (m.live ? " cursor" : "") + (m.tone ? " tone-" + m.tone : "") + (m.failed ? " is-failed" : "")}>
                 {renderMessage(m.txt)}
+                {m.failed && m.retryOf && (
+                  <button type="button" className="btn btn-g btn-sm cm-retry" disabled={busy} onClick={() => retry(i)}>Retry</button>
+                )}
               </div>
             ))}
           </div>
@@ -467,16 +535,25 @@ export function BossChat() {
         }
         .bosschat-panel.is-open { display: flex; }
 
+        /* A reply that never arrived. Red edge, and the Retry button re-sends the same text. */
+        .cm.bot.is-failed { border-color: color-mix(in srgb, var(--red) 45%, transparent);
+                            background: color-mix(in srgb, var(--red) 8%, transparent); }
+        .cm-retry { display: inline-flex; margin-top: 8px; min-height: 30px; padding: 4px 11px; font-size: 12px; }
+
         /* desktop: a real full-height column docked to the right edge. The width is the same
-           --chatw app/app/layout.tsx reserves for it, so it never covers the office again. */
+           --chatw app/app/layout.tsx reserves for it, so it never covers the office again.
+           The close button collapses the dock (remembered in localStorage) and the bubble comes
+           back so it can be reopened; AppShell reads body.chat-collapsed to reclaim the width. */
         @media (min-width: 900px) {
-          .bosschat-bubble, .bosschat-close { display: none !important; }
+          .bosschat-bubble { display: none !important; }
+          .bosschat-bubble.is-collapsed { display: block !important; }
           .bosschat-panel {
             display: flex; top: 0; bottom: 0; right: 0;
             height: 100vh; max-height: 100vh;
             width: var(--chatw, 288px); max-width: var(--chatw, 288px);
             border-radius: 0; border-top: none; border-bottom: none; border-right: none;
           }
+          .bosschat-panel.is-collapsed { display: none; }
         }
       `}</style>
     </>

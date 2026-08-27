@@ -112,7 +112,7 @@ const listOf = <T,>(v: T[] | { error: string } | undefined): T[] => (Array.isArr
 const errorOf = (v: unknown): string | null => (v && !Array.isArray(v) && (v as any).error) || null;
 
 export default function Connect() {
-  const { toast } = useStore();
+  const { toast, confirmAction } = useStore();
   const [items, setItems] = useState<Item[] | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
@@ -157,11 +157,26 @@ export default function Connect() {
   };
 
   const disconnect = async (card: Card) => {
+    const ok = await confirmAction({
+      title: `Disconnect ${card.name}?`,
+      body: card.live ? "The team will stop publishing here until you connect it again." : "You can connect it again any time.",
+      confirmLabel: "Disconnect",
+      danger: true,
+    });
+    if (!ok) return;
     setBusy(card.type);
-    await fetch(`/api/integrations?type=${card.type}`, { method: "DELETE" }).catch(() => {});
-    setBusy(null);
-    toast(`${card.name} disconnected.`);
-    load();
+    try {
+      const res = await fetch(`/api/integrations?type=${card.type}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) throw new Error(data?.error ?? `HTTP ${res.status}`);
+      toast(`${card.name} disconnected.`);
+      load();
+    } catch (e: any) {
+      // Still connected — the card must keep saying so.
+      toast(`Couldn't disconnect ${card.name}: ${e?.message ?? "network error"}`, "error");
+    } finally {
+      setBusy(null);
+    }
   };
 
   return (
@@ -270,7 +285,7 @@ export default function Connect() {
         })}
       </div>
 
-      <GoogleSection onToast={toast} />
+      <GoogleSection onToast={toast} confirmAction={confirmAction} />
 
       <p className="sm mut" style={{ marginTop: 18 }}>
         Kab kya publish ho — wo <Link href="/app/schedule" className="acc">Schedule</Link> me set hota hai.
@@ -305,7 +320,10 @@ export default function Connect() {
  *  `site_insights` and from there into topic planning, keyword research and the article
  *  itself. Nothing here invents a number: if Google returns nothing, the card says nothing.
  */
-function GoogleSection({ onToast }: { onToast: (m: string) => void }) {
+function GoogleSection({ onToast, confirmAction }: {
+  onToast: (m: string, tone?: "ok" | "error" | "info") => void;
+  confirmAction: (o: { title: string; body?: string; confirmLabel?: string; danger?: boolean }) => Promise<boolean>;
+}) {
   const [g, setG] = useState<GoogleState | null>(null);
   const [sel, setSel] = useState({ gscSiteUrl: "", ga4PropertyId: "", gbpLocationName: "" });
   const [busy, setBusy] = useState("");
@@ -345,7 +363,7 @@ function GoogleSection({ onToast }: { onToast: (m: string) => void }) {
     }).then((r) => r.json()).catch((e) => ({ ok: false, error: e?.message }));
     setBusy("");
     setSyncResult(res);
-    if (!quiet) onToast(res.ok ? "Google data refresh ho gaya." : "Refresh fail hua.");
+    if (!quiet) onToast(res.ok ? "Google data refresh ho gaya." : "Refresh fail hua.", res.ok ? "ok" : "error");
     load();
   };
 
@@ -364,12 +382,26 @@ function GoogleSection({ onToast }: { onToast: (m: string) => void }) {
   };
 
   const disconnect = async () => {
+    const ok = await confirmAction({
+      title: "Disconnect Google?",
+      body: "Search Console and Analytics data will stop refreshing. The team goes back to guessing from the site crawl.",
+      confirmLabel: "Disconnect",
+      danger: true,
+    });
+    if (!ok) return;
     setBusy("disc");
-    await fetch("/api/integrations/google", { method: "DELETE" }).catch(() => {});
-    setBusy("");
-    onToast("Google disconnect ho gaya.");
-    setSyncResult(null);
-    load();
+    try {
+      const res = await fetch("/api/integrations/google", { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) throw new Error(data?.error ?? `HTTP ${res.status}`);
+      onToast("Google disconnect ho gaya.");
+      setSyncResult(null);
+      load();
+    } catch (e: any) {
+      onToast(`Google disconnect nahi hua: ${e?.message ?? "network error"}`, "error");
+    } finally {
+      setBusy("");
+    }
   };
 
   if (!g) return <p className="sm mut" style={{ marginTop: 26 }}>Google status check ho raha hai…</p>;

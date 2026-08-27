@@ -331,6 +331,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
              absolutely positioned box is laid out against the PADDING box — padding-right
              would have been ignored and the office would still slide under the chat. */
           .appmain.is-dash { padding-right: 0; margin-right: var(--chatw); }
+          /* Dock closed (components/kit.tsx sets body.chat-collapsed): give the width back. */
+          body.chat-collapsed .appmain { padding-right: clamp(14px,2.4vw,26px); }
+          body.chat-collapsed .appmain.is-dash { padding-right: 0; margin-right: 0; }
         }
 
         /* ---- mobile ---- */

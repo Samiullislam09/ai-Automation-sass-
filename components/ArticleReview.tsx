@@ -46,7 +46,7 @@ const STATUS_LABEL: Record<string, string> = {
  *  browser: the tabs, the editor, the AI instructions and the buttons. If the client half
  *  ever fails again, the article is still on screen. */
 export default function ArticleReview({ item, editable, id }: { item: Item; editable: boolean; id: string }) {
-  const { toast, act, report } = useStore();
+  const { toast, act, report, confirmAction } = useStore();
   const router = useRouter();
 
   const [tab, setTab] = useState<"read" | "edit">("read");
@@ -116,38 +116,53 @@ export default function ArticleReview({ item, editable, id }: { item: Item; edit
         body: JSON.stringify({ body, title }),
       });
       const data = await res.json();
-      if (!data.ok) { toast(data.error ?? "Save failed."); return; }
+      if (!data.ok) { toast(data.error ?? "Save failed.", "error"); return; }
       setSavedBody(body);
       setSavedTitle(title);
       undoStack.current = [];
       toast("Saved.");
+    } catch (e: any) {
+      toast(`Save failed: ${e?.message ?? "network error"}`, "error");
     } finally {
       setBusy("");
     }
   };
 
   const approve = async () => {
-    if (dirty) { toast("Pehle changes save karo, phir publish."); return; }
+    if (dirty) { toast("Pehle changes save karo, phir publish.", "info"); return; }
     setBusy("approve");
     try {
       const res = await fetch(`/api/content/${id}/approve`, { method: "POST" });
       const data = await res.json();
-      if (!data.ok) { toast(data.error ?? "Publish failed."); return; }
+      if (!data.ok) { toast(data.error ?? "Publish failed.", "error"); return; }
       act(`"It's live."`, "Mr Lxwa");
       report(`Published after your approval: "${title}"`);
       toast(data.url ? `Published! ${data.url}` : "Published!");
       router.push("/app/approvals");
+    } catch (e: any) {
+      toast(`Publish failed: ${e?.message ?? "network error"}`, "error");
     } finally {
       setBusy("");
     }
   };
 
   const reject = async () => {
+    const ok = await confirmAction({
+      title: "Reject this article?",
+      body: "It leaves the approval queue and the team treats it as feedback. This can't be undone here.",
+      confirmLabel: "Reject",
+      danger: true,
+    });
+    if (!ok) return;
     setBusy("reject");
     try {
-      await fetch(`/api/content/${id}/reject`, { method: "POST" });
+      const res = await fetch(`/api/content/${id}/reject`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) throw new Error(data?.error ?? `HTTP ${res.status}`);
       toast("Rejected — the team will adjust.");
       router.push("/app/approvals");
+    } catch (e: any) {
+      toast(`Reject failed: ${e?.message ?? "network error"}`, "error");
     } finally {
       setBusy("");
     }

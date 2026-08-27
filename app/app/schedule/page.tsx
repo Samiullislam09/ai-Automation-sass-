@@ -74,7 +74,7 @@ const DEFAULTS: Sched = {
 };
 
 export default function Schedule() {
-  const { toast } = useStore();
+  const { toast, confirmAction } = useStore();
   const [sched, setSched] = useState<Sched | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -162,15 +162,22 @@ export default function Schedule() {
   }, []);
 
   const cancel = async (id: string) => {
+    const ok = await confirmAction({
+      title: "Cancel this order?",
+      body: "It will not run. You can book it again in the chat.",
+      confirmLabel: "Cancel order",
+      danger: true,
+    });
+    if (!ok) return;
     setCancelling(id);
     try {
       const d = await fetch(`/api/scheduled-orders?id=${encodeURIComponent(id)}`, { method: "DELETE" }).then((r) => r.json());
       // Re-read either way. On success it proves the row really says cancelled; on failure it
       // shows why — usually because the scheduler already picked it up.
       await loadOrders();
-      toast(d.ok ? "Cancel ho gaya — ab ye nahi chalega." : d.error ?? "Cancel nahi ho paya.");
+      toast(d.ok ? "Cancel ho gaya — ab ye nahi chalega." : d.error ?? "Cancel nahi ho paya.", d.ok ? "ok" : "error");
     } catch (e: any) {
-      toast(e?.message ?? "Network error.");
+      toast(e?.message ?? "Network error.", "error");
     } finally {
       setCancelling("");
     }
@@ -397,7 +404,18 @@ export default function Schedule() {
             <button
               className={"sw" + (autoPublishOn ? " on" : "")}
               disabled={saving || autoPublishBlocked}
-              onClick={() => save({ autoPublish: !sched.autoPublish })}
+              onClick={async () => {
+                if (!sched.autoPublish) {
+                  const ok = await confirmAction({
+                    title: "Publish without review?",
+                    body: "Every scheduled article that passes the quality gate will be published to your live site without you seeing it first.",
+                    confirmLabel: "Turn on auto-publish",
+                    danger: true,
+                  });
+                  if (!ok) return;
+                }
+                save({ autoPublish: !sched.autoPublish });
+              }}
               aria-label="Toggle auto-publish"
             >
               <i />

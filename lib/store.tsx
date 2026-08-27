@@ -105,14 +105,29 @@ const initial: State = {
   flash: null, celebration: null, crawl: null, chatNotices: [], keywordChoice: null, liveError: null,
 };
 
+export type ToastTone = "ok" | "error" | "info";
+type Toast = { id: number; msg: string; tone: ToastTone; action?: { label: string; onClick: () => void } };
+export type ConfirmOpts = { title: string; body?: string; confirmLabel?: string; danger?: boolean };
+
 const Ctx = createContext<any>(null);
 export const useStore = () => useContext(Ctx);
 const nowT = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [s, setS] = useState<State>(initial);
-  const [toasts, setToasts] = useState<{ id: number; msg: string }[]>([]);
+  const [toasts, setToasts] = useState<Toast[]>([]);
   const loaded = useRef(false);
+  // One confirmation at a time. `resolve` answers the promise confirmAction() handed out.
+  const [confirm, setConfirm] = useState<(ConfirmOpts & { resolve: (ok: boolean) => void }) | null>(null);
+  const confirmBtn = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!confirm) return;
+    confirmBtn.current?.focus();
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { confirm.resolve(false); setConfirm(null); } };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [confirm]);
 
   // persistence — TODO(backend): replace with Supabase
   useEffect(() => {
@@ -196,7 +211,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return () => sub.subscription.unsubscribe();
   }, []);
 
-  const toast = (msg: string) => { const id = Date.now(); setToasts(t => [...t, { id, msg }]); setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3200); };
+  /** Returns a dismiss function so a caller can take the toast down early (e.g. after Undo). */
+  const toast = (msg: string, tone: ToastTone = "ok", opts?: { action?: Toast["action"]; ms?: number }) => {
+    const id = Date.now() + Math.random();
+    const dismiss = () => setToasts(t => t.filter(x => x.id !== id));
+    setToasts(t => [...t, { id, msg, tone, action: opts?.action }]);
+    setTimeout(dismiss, opts?.ms ?? 3200);
+    return dismiss;
+  };
+  /** Ask before doing something that can't be undone. Resolves true only on the confirm button. */
+  const confirmAction = (o: ConfirmOpts) =>
+    new Promise<boolean>((resolve) => setConfirm({ ...o, resolve }));
+  const answer = (ok: boolean) => { confirm?.resolve(ok); setConfirm(null); };
   const patch = (p: Partial<State> | ((prev: State) => Partial<State>)) => setS(prev => ({ ...prev, ...(typeof p === "function" ? p(prev) : p) }));
 
   const act = (msg: string, from?: string, to?: string) =>
@@ -305,7 +331,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     } catch (e: any) {
       console.error("[store] memory not saved:", e?.message);
       setS(prev => ({ ...prev, memory: previous }));
-      toast("Memory save nahi hua — dobara try karo.");
+      toast("Memory save nahi hua — dobara try karo.", "error");
     }
   };
 
@@ -340,11 +366,36 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     location.href = "/login";
   };
 
-  const api = { s, patch, toast, act, setAgent, focusOn, startRun, report, generate, approve, reject, applyPlan, saveMemory, pushChatNotice, signOut };
+  const api = { s, patch, toast, confirmAction, act, setAgent, focusOn, startRun, report, generate, approve, reject, applyPlan, saveMemory, pushChatNotice, signOut };
   return (
     <Ctx.Provider value={api}>
       {children}
-      <div className="toastwrap">{toasts.map(t => <div key={t.id} className="toast">✓ {t.msg}</div>)}</div>
+      <div className="toastwrap">
+        {toasts.map(t => (
+          <div key={t.id} className={"toast toast-" + t.tone} role={t.tone === "error" ? "alert" : "status"}>
+            {t.tone === "ok" ? "✓ " : t.tone === "error" ? "✕ " : ""}{t.msg}
+            {t.action && (
+              <button className="toast-act" onClick={() => { t.action!.onClick(); setToasts(x => x.filter(y => y.id !== t.id)); }}>
+                {t.action.label}
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      {confirm && (
+        <div className="modalwrap" onClick={() => answer(false)}>
+          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title" onClick={e => e.stopPropagation()}>
+            <h3 id="confirm-title" style={{ marginTop: 0 }}>{confirm.title}</h3>
+            {confirm.body && <p className="sm mut" style={{ margin: "0 0 14px" }}>{confirm.body}</p>}
+            <div className="btnrow">
+              <button className="btn btn-g" onClick={() => answer(false)}>Cancel</button>
+              <button ref={confirmBtn} className={"btn " + (confirm.danger ? "btn-red" : "btn-p")} style={{ flex: "1 1 auto" }} onClick={() => answer(true)}>
+                {confirm.confirmLabel ?? "Confirm"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </Ctx.Provider>
   );
 }

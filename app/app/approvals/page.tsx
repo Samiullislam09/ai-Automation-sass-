@@ -33,7 +33,7 @@ export default function Approvals() {
     fetch("/api/content?status=awaiting_approval")
       .then((r) => r.json())
       .then((data) => { if (data.ok) setItems(data.items); })
-      .catch(() => toast("Couldn't load approvals — try refreshing."))
+      .catch(() => toast("Couldn't load approvals — try refreshing.", "error"))
       .finally(() => setLoading(false));
   };
   useEffect(load, []);
@@ -49,32 +49,52 @@ export default function Approvals() {
         toast(data.url ? `Published! ${data.url}` : "Published!");
         setItems((prev) => prev.filter((x) => x.id !== c.id));
       } else {
-        toast(`Publish failed: ${data.error}`);
+        toast(`Publish failed: ${data.error}`, "error");
       }
     } catch {
-      toast("Publish failed — network error.");
+      toast("Publish failed — network error.", "error");
     } finally {
       setBusy(null);
     }
   };
 
-  const reject = async (c: ContentItem) => {
-    setBusy(c.id);
-    try {
-      const res = await fetch(`/api/content/${c.id}/reject`, { method: "POST" });
-      const data = await res.json();
-      if (data.ok) {
-        act(`"Understood. We'll adjust and learn from this."`, "Mr Lxwa");
-        report(`Rejected by you (team will adjust): "${c.title}"`);
-        setItems((prev) => prev.filter((x) => x.id !== c.id));
-      } else {
-        toast(`Reject failed: ${data.error}`);
+  // Reject is optimistic with a 6-second Undo: the card leaves the list at once, but the API
+  // call is only made when the toast expires. Undo cancels the timer and puts the card back —
+  // there is no un-reject endpoint, so delaying the call is what makes Undo real.
+  const reject = (c: ContentItem) => {
+    const index = items.findIndex((x) => x.id === c.id);
+    setItems((prev) => prev.filter((x) => x.id !== c.id));
+    let undone = false;
+    const timer = setTimeout(async () => {
+      setBusy(c.id);
+      try {
+        const res = await fetch(`/api/content/${c.id}/reject`, { method: "POST" });
+        const data = await res.json();
+        if (data.ok) {
+          act(`"Understood. We'll adjust and learn from this."`, "Mr Lxwa");
+          report(`Rejected by you (team will adjust): "${c.title}"`);
+        } else {
+          restore();
+          toast(`Reject failed: ${data.error}`, "error");
+        }
+      } catch {
+        restore();
+        toast("Reject failed — network error.", "error");
+      } finally {
+        setBusy(null);
       }
-    } catch {
-      toast("Reject failed — network error.");
-    } finally {
-      setBusy(null);
-    }
+    }, 6000);
+    const restore = () =>
+      setItems((prev) => {
+        if (prev.some((x) => x.id === c.id)) return prev;
+        const next = [...prev];
+        next.splice(Math.min(index < 0 ? prev.length : index, prev.length), 0, c);
+        return next;
+      });
+    toast("Rejected", "ok", {
+      ms: 6000,
+      action: { label: "Undo", onClick: () => { if (undone) return; undone = true; clearTimeout(timer); restore(); } },
+    });
   };
 
   return (
@@ -99,8 +119,8 @@ export default function Approvals() {
               {/* Approving from a two-line summary was approving on faith. This opens the
                   draft as a real page, with hand-editing and an AI editor beside it. */}
               <Link href={`/app/content/${c.id}`} className="btn btn-p btn-sm">Read &amp; edit</Link>
-              <button className="btn btn-g btn-sm" disabled={busy === c.id} onClick={() => approve(c)}>✓ Approve &amp; publish</button>
-              <button className="btn btn-red btn-sm" disabled={busy === c.id} onClick={() => reject(c)}>Reject</button>
+              <button className="btn btn-g btn-sm" disabled={busy === c.id} onClick={() => approve(c)}>{busy === c.id ? "Publishing…" : "✓ Approve & publish"}</button>
+              <button className="btn btn-red btn-sm" disabled={busy === c.id} onClick={() => reject(c)}>{busy === c.id ? "Rejecting…" : "Reject"}</button>
             </div>
           </div>
         )) : (

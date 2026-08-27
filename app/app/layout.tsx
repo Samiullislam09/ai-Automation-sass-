@@ -16,6 +16,8 @@ import AppShell from "@/components/AppShell";
  *  And it redirects ONLY on a definite `onboarded === false`. If the read fails, the app
  *  renders — a broken query must never look like a brand-new account. */
 export const dynamic = "force-dynamic";
+// Per-route layouts (approvals/, billing/, ...) override this with their own title.
+export const metadata = { title: "Dashboard — MrLxwa" };
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
