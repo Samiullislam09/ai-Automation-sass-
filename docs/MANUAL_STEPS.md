@@ -101,4 +101,5 @@ Ye section main update karta rahunga (aakhri update sabse upar).
 
 | Date | Kya hua |
 |---|---|
-| 2026-08-27 | Ye file bani. Phase 0 ka code poora, Phase 1 shuru. |
+| 2026-08-27 raat | **Phase 1 ka core ban gaya.** Brain zinda hai: registry (9 agents, boot pe hi galat setup mana kar deta hai), planner (code, LLM nahi — target se peeche chalta hai), orchestrator (parallel join, retry 1/4/16, crash ke baad resume, double-click = ek task), live event channel, aur 6 HTTP routes. Site Brain (migration 019 + Mr. Analyst + duplicate lock) bhi. Mr. Publish ab asli hai — publish karke page ko fetch karke check bhi karta hai. **Test count: 68 brain + 26 site brain + 29 contract + 14 chat-events + 85 purane.** |
+| 2026-08-27 | Phase 0 poora: contract package + echo agent round-trip, eval set, do-channel UI, free keyword chain. |
