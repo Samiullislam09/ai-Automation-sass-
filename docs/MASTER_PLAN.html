@@ -584,26 +584,32 @@ tenant_icp        tenant_id, icp jsonb, updated_at
 
 <!-- ============================================================ -->
 <h2 id="repos-layout">11 · Repo aur deploy layout</h2>
-<p>Aapka faisla: har agent apna repo. Sahi faisla hai — <strong>agar</strong> contract shared package me ho, warna 8 repo me 8 alag shape ban jaayenge. Layout:</p>
+<p>Aapka <strong>original</strong> faisla: har agent apna repo. Sahi faisla hai — <strong>agar</strong> contract shared package me ho, warna 8 repo me 8 alag shape ban jaayenge. Layout, jaisa pehle socha gaya tha:</p>
+<div class="callout warn">
+  <p class="t">Ye table ab plan ka current instruction NAHI hai — &sect;22 con #2 aur #4 ne isse revise kiya</p>
+  <p><strong>&sect;22 con #2</strong> (&ldquo;Big-bang rewrite&rdquo;) ka fix: &ldquo;Brain agent-server ke andar ugta hai&rdquo; &mdash; alag repo nahi. <strong>&sect;22 con #4</strong> ka fix: &ldquo;TS agents brain ke saath in-process &mdash; koi webhook nahi. HTTP sirf Python/Playwright units ke liye.&rdquo; Dono &ldquo;ab plan ka hissa&rdquo; hain, deviation nahi. Har agent jo asal me bana (neeche) TypeScript nikla aur <code>agent-server/src/agents/*.ts</code> ke andar hi reh gaya &mdash; koi bhi &ldquo;Python + alag repo&rdquo; column is se plan ke apne fix ki wajah se follow nahi hua, kisi galti se nahi. Ye tabhi badlega jab budget/scale (10+ paying tenants) alag repo ka Railway kharcha justify kare &mdash; strangler pattern ka poora point yahi hai: module self-contained hai, jis din alag hona hai sirf imports badlenge.</p>
+</div>
 <div class="tablewrap"><table>
-<tr><th>Repo</th><th>Language</th><th>Andar</th><th>Railway service</th><th>RAM</th></tr>
-<tr><td><code>mrlxwa-web</code></td><td>TS/Next</td><td>Aaj ka app (chat route ab brain ko proxy)</td><td>Vercel</td><td>—</td></tr>
-<tr><td><code>mrlxwa-brain</code></td><td>TS</td><td>Intent, planner, orchestrator, registry, scheduler, pg-boss, conversation</td><td>brain</td><td>512MB</td></tr>
-<tr><td><code>mrlxwa-agent-contract</code></td><td>TS + Python</td><td>Manifest types, /run wrapper, callback client, logger. npm + PyPI (ya git dep)</td><td>—</td><td>—</td></tr>
-<tr><td><code>agent-keyword</code></td><td>TS</td><td>Aaj ka keyword.ts + fallback + dataforseo</td><td>keyword</td><td>256MB</td></tr>
-<tr><td><code>agent-writer</code></td><td>Python 3.11</td><td>FastAPI + gpt-researcher + qualityGate port</td><td>writer ×N</td><td>1GB</td></tr>
-<tr><td><code>agent-seo</code></td><td>Python</td><td>11 content checks (ported) + NIM scoring</td><td>seo</td><td>512MB</td></tr>
-<tr><td><code>agent-site-audit</code></td><td>TS</td><td>seomator CLI wrapper + Playwright; crawler bhi yahin</td><td>audit</td><td>1-2GB</td></tr>
-<tr><td><code>agent-publish</code></td><td>TS</td><td>WP REST, webhook, unpublish, URL verify</td><td>publish</td><td>256MB</td></tr>
-<tr><td><code>agent-leads</code></td><td>Python</td><td>LangGraph, Apollo, ICP, compliance</td><td>leads</td><td>512MB</td></tr>
-<tr><td><code>agent-social</code></td><td class="num">real (agent-server/src/agents/social.ts)</td><td><span class="pill ok">DONE</span></td><td>social</td><td>—</td></tr>
+<tr><th>Repo (original socha gaya)</th><th>Language (planned)</th><th>Andar</th><th><strong>Aaj asal me</strong></th></tr>
+<tr><td><code>mrlxwa-web</code></td><td>TS/Next</td><td>Aaj ka app (chat route brain ko in-process bulata hai)</td><td><span class="pill ok">MATCH</span> — Vercel pe, jaisa socha gaya</td></tr>
+<tr><td><code>mrlxwa-brain</code></td><td>TS</td><td>Intent, planner, orchestrator, registry, scheduler, pg-boss, conversation</td><td><span class="pill info">STRANGLER</span> — <code>agent-server/src/brain/</code> ke andar, alag repo nahi (&sect;22 #2)</td></tr>
+<tr><td><code>mrlxwa-agent-contract</code></td><td>TS + Python</td><td>Manifest types, /run wrapper, callback client, logger</td><td><span class="pill ok">MATCH</span> — <code>packages/agent-contract</code>, vendor hota hai <code>sync-contract.mjs</code> se jab tak npm publish na ho</td></tr>
+<tr><td><code>agent-keyword</code></td><td>TS</td><td>Aaj ka keyword.ts + fallback + dataforseo</td><td><span class="pill info">STRANGLER</span> — <code>agents/keyword.ts</code>, in-process (&sect;22 #4: TS agent)</td></tr>
+<tr><td><code>agent-writer</code></td><td>Python 3.11 (planned)</td><td>FastAPI + gpt-researcher + qualityGate port</td><td><span class="pill warn">TS bana</span> — <code>agents/writer.ts</code> + <code>lib/writerPipeline.ts</code> (&sect;16.3 Upgrade E). Python + gpt-researcher jaanbujh ke deferred (Phase 2 build log) &mdash; naya deploy unit, naya kharcha</td></tr>
+<tr><td><code>agent-seo</code></td><td>Python (planned)</td><td>11 content checks (ported) + NIM scoring</td><td><span class="pill warn">TS bana</span> — <code>agents/seo.ts</code>, 24 checks (11 se zyada), in-process</td></tr>
+<tr><td><code>agent-site-audit</code></td><td>TS</td><td>seomator CLI wrapper + Playwright; crawler bhi yahin</td><td><span class="pill info">STRANGLER</span> — <code>agents/audit.ts</code>, 26 tests. Playwright/seomator abhi nahi (Core Web Vitals skip)</td></tr>
+<tr><td><code>agent-publish</code></td><td>TS</td><td>WP REST, webhook, unpublish, URL verify</td><td><span class="pill info">STRANGLER</span> — <code>agents/publish.ts</code>, unpublish 2026-08-28 ko laga</td></tr>
+<tr><td><code>agent-leads</code></td><td>Python (planned)</td><td>LangGraph, Apollo, ICP, compliance</td><td><span class="pill warn">TS bana</span> — <code>agents/leads.ts</code>, OpenStreetMap se (Apollo optional key ke bina)</td></tr>
+<tr><td><code>agent-social</code></td><td>TS</td><td>Draft-only posts</td><td><span class="pill info">STRANGLER</span> — <code>agents/social.ts</code>, 12 tests</td></tr>
 </table></div>
+<p><small>Har agent ke naam ke saamne jo asal file hai wahi source of truth hai (<code>agent-server/src/agents/</code>) &mdash; is table ka &ldquo;planned&rdquo; column sirf history ke liye hai, taaki koi puche ki original socha kya tha.</small></p>
 <ul>
   <li>Har agent repo me: <code>Dockerfile</code>, <code>manifest.json</code>, <code>/health</code>, ek <code>test/run.test</code> jo fixed input pe output shape verify kare, aur README jo bataye “akela kaise chalao”.</li>
   <li>CI: har push pe test + manifest validate (contract package ka validator). Manifest invalid = deploy nahi.</li>
   <li>Brain boot pe sab agents ka <code>/manifest</code> poll karta hai, har 60s <code>/health</code>. Agent down → uske actions router se hat jaate hain aur user ko “Mr. Writer abhi available nahi” milta hai, silent fail nahi.</li>
   <li>Railway gotchas (memory me hain): Root Directory slash bug, Nixpacks, rediss TLS — ab alag repo hone se root-directory wala issue khatam.</li>
 </ul>
+<p><small>Ye poori list — Dockerfile se leke health-poll tak — bhi upar wale table jaisi hi <strong>planned</strong> hai, aaj ka setup nahi. Aaj: ek hi <code>agent-server</code> repo, ek hi Railway service, manifest in-process se aata hai (<code>agent-server/src/brain/manifests.ts</code>), health registry ke andar hi check hota hai. Kaam wahi hai, tareeqa simple.</small></p>
 
 <!-- ============================================================ -->
 <h2 id="scale">12 · 1000 articles/day ka hisaab</h2>
