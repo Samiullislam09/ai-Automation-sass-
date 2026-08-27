@@ -269,6 +269,23 @@ export class KeywordAgent extends Agent {
     for (const r of [...related, ...siteContext]) r.gscOpportunity = gscOpportunityFor(r.keyword, insights, profile);
     const seedOpportunity = gscOpportunityFor(t, insights, profile);
 
+    // One event per keyword, in the order they will be shown. This is what the live workspace
+    // renders as a table filling row by row (plan §24.4b) — the granularity rule is one event
+    // per user-meaningful thing, so a keyword, never a token. No-op when nobody is watching.
+    for (const r of related) {
+      ctx.data("keyword", {
+        keyword: r.keyword,
+        // The three columns stay three columns here too. Blending them into one number is
+        // exactly what the plan forbids, and the UI cannot un-blend what we send blended.
+        searchVolume: r.searchVolume ?? null,
+        competitionLevel: r.competitionLevel ?? null,
+        fitScore: r.fitScore ?? null,
+        fitCluster: r.fitCluster ?? null,
+        gsc: r.gscOpportunity ?? null,
+        source,
+      });
+    }
+
     const research: Research = {
       topic: t,
       source,

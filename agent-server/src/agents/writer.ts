@@ -68,11 +68,9 @@ export class WriterAgent extends Agent {
       const reason = duplicateSentence(verdict);
       ctx.onProgress({ label: reason });
       console.log(`[writer] not writing "${topic.trim()}": ${verdict.status}`);
-      // NOTE for whoever owns lib/dashboard-data.ts (outside this change's file boundary):
-      // describeJob()'s `writer` branch has no branch for `written: false` yet, so this
-      // result currently renders as if a draft existed. One `if (detail.written === false)
-      // return { summary: String(detail.reason), items: [] }` at the top of that branch is
-      // the whole fix.
+      // `written: false` is load-bearing: lib/dashboard-data.ts checks it first in describeJob's
+      // writer branch, because without that check this result renders as a finished draft
+      // waiting for approval — a receipt for work that never happened.
       return {
         topic: topic.trim(),
         written: false,
@@ -96,6 +94,13 @@ export class WriterAgent extends Agent {
     const gate = gateArticle(body, { primaryKeyword: topic.trim() });
     const title = extractTitle(body, topic.trim());
     console.log(`[writer] "${title}" — ${summarizeGate(gate)}`);
+
+    // The draft, section by section, for the live workspace to assemble in front of the user
+    // (plan §24.4b). Today the model returns the whole article in one call, so these arrive
+    // together rather than as it writes — when the section-by-section writer lands in Phase 2
+    // this same loop becomes a real stream with no change at either end.
+    for (const section of splitSections(body)) ctx.data("section", section);
+    ctx.data("score", { quality: gate.score, passed: gate.passed, words: gate.wordCount, sections: gate.sections });
 
     const meta: Record<string, unknown> = {
       wordCount: gate.wordCount,
@@ -323,4 +328,27 @@ export function duplicateSentence(verdict: DuplicateVerdict): string {
     return `${name} ${where}${link}. Maine dobara nahi likha, warna aapki hi do pages aapas me compete karte. Do raaste hain: usi page ko update karwao, ya isi topic ka koi naya angle chuno.`;
   }
   return "";
+}
+
+/** The draft split at its own H2s, as `{h2, words}` — what the workspace draws as a document
+ *  assembling itself. Everything before the first H2 is the intro and is reported as such, so
+ *  a reader watching sees the article grow from the top rather than starting at section two. */
+function splitSections(body: string): { h2: string; words: number }[] {
+  const lines = String(body ?? "").split(/\r?\n/);
+  const out: { h2: string; words: number }[] = [];
+  let current = { h2: "Intro", words: 0 };
+  const count = (s: string) => s.trim().split(/\s+/).filter(Boolean).length;
+
+  for (const line of lines) {
+    const heading = /^##\s+(.+?)\s*$/.exec(line);
+    if (heading) {
+      if (current.words) out.push(current);
+      current = { h2: heading[1], words: 0 };
+      continue;
+    }
+    if (/^#\s+/.test(line)) continue; // the title is not a section
+    current.words += count(line);
+  }
+  if (current.words) out.push(current);
+  return out;
 }
