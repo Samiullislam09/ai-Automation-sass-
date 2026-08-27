@@ -117,6 +117,29 @@ export function activeFastProviders(): string[] {
   return FAST_PROVIDERS.filter((p) => configuredKeys(p).length > 0).map((p) => p.id);
 }
 
+type KeyEntry = { key: string; model: string; envVar: string };
+
+/** Walks every configured key across every provider, in try-order (all keys on provider 1, then
+ *  all keys on provider 2, ...), stopping at the first `attempt` that returns non-null. Shared
+ *  by the streaming chat-reply path and the non-streaming tool-calling path below — same
+ *  providers, same key-then-provider fallback, same "returns null, never throws" contract either
+ *  caller needs, so the fallback order can only drift once instead of twice. */
+async function tryFastProviders<T>(
+  attempt: (p: FastProvider, c: KeyEntry) => Promise<T | null>
+): Promise<T | null> {
+  for (const p of FAST_PROVIDERS) {
+    // Every configured key on THIS provider first — a second Groq account is only worth having
+    // if it is tried before falling all the way through to Cerebras or NIM, which are slower
+    // (Cerebras) or much slower under load (NIM, §18.1). Only once every key on this provider
+    // is exhausted does the next provider get a turn.
+    for (const c of configuredKeys(p)) {
+      const result = await attempt(p, c);
+      if (result !== null) return result;
+    }
+  }
+  return null;
+}
+
 export type FastChatResult = { stream: ReadableStream<Uint8Array>; provider: string; model: string };
 
 /** Tries each configured fast provider in order; returns null (never throws) when none is
@@ -131,44 +154,83 @@ export async function openFastChatStream(
 ): Promise<FastChatResult | null> {
   const fetchImpl = opts.fetchImpl ?? fetch;
 
-  for (const p of FAST_PROVIDERS) {
-    // Every configured key on THIS provider first — a second Groq account is only worth having
-    // if it is tried before falling all the way through to Cerebras or NIM, which are slower
-    // (Cerebras) or much slower under load (NIM, §18.1). Only once every key on this provider
-    // is exhausted does the next provider get a turn.
-    for (const c of configuredKeys(p)) {
-      try {
-        const res = await fetchImpl(p.baseUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${c.key}` },
-          body: JSON.stringify({
-            model: c.model,
-            stream: true,
-            temperature: opts.temperature ?? 0.2,
-            max_tokens: opts.max_tokens ?? 260,
-            messages,
-            // gpt-oss without this returns an EMPTY content string at low max_tokens — the
-            // model spends the budget on hidden reasoning instead (see the file header).
-            ...modelParams(c.model),
-          }),
-          signal: opts.signal,
-        });
+  return tryFastProviders(async (p, c) => {
+    try {
+      const res = await fetchImpl(p.baseUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${c.key}` },
+        body: JSON.stringify({
+          model: c.model,
+          stream: true,
+          temperature: opts.temperature ?? 0.2,
+          max_tokens: opts.max_tokens ?? 260,
+          messages,
+          // gpt-oss without this returns an EMPTY content string at low max_tokens — the
+          // model spends the budget on hidden reasoning instead (see the file header).
+          ...modelParams(c.model),
+        }),
+        signal: opts.signal,
+      });
 
-        if (res.ok && res.body) return { stream: res.body, provider: p.id, model: c.model };
+      if (res.ok && res.body) return { stream: res.body, provider: p.id, model: c.model };
 
-        // A non-2xx here is the provider's own answer (rate limit, bad model id, billing) — log
-        // it, with WHICH key so a rate-limited first key vs. a genuinely misconfigured second one
-        // are distinguishable, but never let it reach the customer: the next key (or provider,
-        // or NIM) gets the request instead.
+      // A non-2xx here is the provider's own answer (rate limit, bad model id, billing) — log
+      // it, with WHICH key so a rate-limited first key vs. a genuinely misconfigured second one
+      // are distinguishable, but never let it reach the customer: the next key (or provider,
+      // or NIM) gets the request instead.
+      console.warn(
+        `[fastChat] ${p.id} (${c.envVar}) refused (${res.status}) — falling through`,
+        (await res.text().catch(() => "")).slice(0, 200)
+      );
+      return null;
+    } catch (e: any) {
+      console.warn(`[fastChat] ${p.id} (${c.envVar}) unreachable — falling through:`, e?.message);
+      return null;
+    }
+  });
+}
+
+export type FastCompletionResult = { data: any; provider: string; model: string };
+
+/** The tool-calling counterpart to openFastChatStream — a NON-streaming call that returns the
+ *  full JSON body, for callers that need `tool_calls` resolved before they can do anything at
+ *  all (lib/chat-brain-intent.ts's extractIntent, which is the brain's OWN classification call,
+ *  not the reply the customer reads). Same provider/key fallback order, same never-throws
+ *  contract; `body` is the caller's own request minus `model`/`stream` (this fills those in per
+ *  provider) so a caller can pass `tools`, `tool_choice`, `messages`, `temperature`, whatever it
+ *  needs — this file does not need to know the tool-calling shape to route around a slow queue.
+ *
+ *  WHY THIS MATTERS MORE THAN THE STREAM ABOVE. extractIntent runs on EVERY message, before the
+ *  brain even knows if it is an order or a question — §18.1's 0.5-19s NIM variance was landing
+ *  here first, in full, even once the final reply itself was fast: a 12s classification call
+ *  followed by a 1ms reply is still a 12s answer. This is the piece that was still missing. */
+export async function openFastCompletion(
+  body: Record<string, unknown>,
+  opts: { fetchImpl?: typeof fetch; signal?: AbortSignal } = {}
+): Promise<FastCompletionResult | null> {
+  const fetchImpl = opts.fetchImpl ?? fetch;
+
+  return tryFastProviders(async (p, c) => {
+    try {
+      const res = await fetchImpl(p.baseUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${c.key}` },
+        body: JSON.stringify({ ...body, model: c.model, stream: false, ...modelParams(c.model) }),
+        signal: opts.signal,
+      });
+
+      if (!res.ok) {
         console.warn(
           `[fastChat] ${p.id} (${c.envVar}) refused (${res.status}) — falling through`,
           (await res.text().catch(() => "")).slice(0, 200)
         );
-      } catch (e: any) {
-        console.warn(`[fastChat] ${p.id} (${c.envVar}) unreachable — falling through:`, e?.message);
+        return null;
       }
+      const data = await res.json();
+      return { data, provider: p.id, model: c.model };
+    } catch (e: any) {
+      console.warn(`[fastChat] ${p.id} (${c.envVar}) unreachable — falling through:`, e?.message);
+      return null;
     }
-  }
-
-  return null;
+  });
 }

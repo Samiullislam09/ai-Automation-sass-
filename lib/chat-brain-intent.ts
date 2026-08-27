@@ -28,10 +28,21 @@
  *  MODEL: whatever lib/chat-model.ts says, with that file's per-model reasoning-off switch —
  *  today gpt-oss-120b, which read all seven real Hinglish orders correctly including "isko
  *  publish mat karna" (commit f3503b8). No model name appears in this file.
+ *
+ *  WHY THIS CALL TRIES A FAST PROVIDER FIRST (2026-08-28). This is the call that decides
+ *  "order or question" for EVERY message, before anything else can happen — including the
+ *  reply the customer actually watches. §18.1 measured NIM's shared free queue at 0.5-19s
+ *  variance, and until this change that variance landed here in full even after §18.2 #1
+ *  (lib/ai/fastChat.ts) made the FINAL reply fast: a 12s classification call ahead of a 1ms
+ *  reply is still a 12s answer to the user. `openFastCompletion` (same file) tries Groq/
+ *  Cerebras first, with a shorter timeout than NIM's own (stalling on a "fast" provider must
+ *  not cost more than the NIM path it was supposed to beat) — inert, zero network calls, when
+ *  none is configured, so this is unchanged behaviour until a key is set.
  */
 
 import "@/lib/dns-fix";
 import { NVIDIA_URL, chatModelsInOrder, modelParams } from "@/lib/chat-model";
+import { openFastCompletion } from "@/lib/ai/fastChat";
 import { parseWhen, describeWhen, type When } from "@/lib/when";
 import { wantsAutoPublish } from "@/lib/chat-intent";
 import type { BrainRegistry } from "@/lib/brain";
@@ -69,6 +80,11 @@ export const CONFIDENCE_FLOOR = 0.75;
 const ASSUMED_CONFIDENCE = 0.9;
 
 const TIMEOUT_MS = 12_000;
+// A fast provider (Groq/Cerebras, §18.2 #1) is dedicated hardware — if it has not answered in
+// this long it is not going to beat NIM anyway, and waiting the full TIMEOUT_MS on a stalled
+// fast provider before ALSO paying NIM's own timeout is the one way this change could make the
+// worst case slower instead of faster. Shorter, not equal, on purpose.
+const FAST_TIMEOUT_MS = 6_000;
 
 export const nothingOrdered = (confidence = 1): IntentPlan => ({
   action: ANSWER_QUESTION,
@@ -211,6 +227,10 @@ export type ExtractOptions = {
   /** Injected by the tests. Production always uses the global fetch. */
   fetchImpl?: typeof fetch;
   apiKey?: string;
+  /** Injected by the tests to stand in for lib/ai/fastChat.ts's openFastCompletion, so a test
+   *  can prove the fast path is TRIED first without needing a real Groq key. Production always
+   *  uses the real one — see the file header on why this call matters more than the reply. */
+  fastCompletion?: typeof openFastCompletion;
 };
 
 /** The whole intent engine: registry → tools → one model call → a plan.
@@ -232,14 +252,36 @@ export async function extractIntent(
   // Only the question tool means the team can do nothing at all — do not spend a call on it.
   if (tools.length <= 1) return nothingOrdered();
 
-  const key = opts.apiKey ?? process.env.NVIDIA_API_KEY;
-  if (!key) return nothingOrdered();
-
   const doFetch = opts.fetchImpl ?? fetch;
   const prior = (opts.history ?? [])
     .slice(-2)
     .filter((t) => t && typeof t.content === "string")
     .map((t) => ({ role: t.role === "user" ? "user" : "assistant", content: String(t.content).slice(0, 300) }));
+  const messages = [{ role: "system", content: systemPrompt() }, ...prior, { role: "user", content: q }];
+
+  // ── The fast path first (§18.2 #1, extended past just the reply — see the file header) ────
+  //
+  // This is THE call that decides "order or question" for every single message, before the
+  // brain knows which it is looking at — so it is the one place §18.1's 0.5-19s NIM variance
+  // hurt the most, worse than the final reply itself, because nothing else can start until this
+  // one answers. Same providers (Groq, then Cerebras), same key fallback as the reply path;
+  // inert with zero network calls when none is configured, exactly like fastChat.ts elsewhere.
+  const tryFast = opts.fastCompletion ?? openFastCompletion;
+  const fast = await tryFast(
+    { temperature: 0, max_tokens: 300, tools, tool_choice: "auto", messages },
+    { fetchImpl: opts.fetchImpl, signal: AbortSignal.timeout(FAST_TIMEOUT_MS) }
+  ).catch((e: any) => {
+    console.error(`[chat-brain-intent] fast provider errored, falling back to NIM:`, e?.message);
+    return null;
+  });
+  if (fast) {
+    const call = readToolCall(fast.data);
+    if (!call) return nothingOrdered(); // the model answered in prose: it is a conversation
+    return planFromToolCall(call.name, call.args, { message: q, registry, tz, now: opts.now });
+  }
+
+  const key = opts.apiKey ?? process.env.NVIDIA_API_KEY;
+  if (!key) return nothingOrdered();
 
   for (const model of chatModelsInOrder()) {
     try {
@@ -256,7 +298,7 @@ export async function extractIntent(
           max_tokens: 300,
           tools,
           tool_choice: "auto",
-          messages: [{ role: "system", content: systemPrompt() }, ...prior, { role: "user", content: q }],
+          messages,
         }),
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });

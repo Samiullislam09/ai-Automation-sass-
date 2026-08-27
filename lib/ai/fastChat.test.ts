@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { activeFastProviders, openFastChatStream, FAST_PROVIDERS } from "./fastChat.js";
+import { activeFastProviders, openFastChatStream, openFastCompletion, FAST_PROVIDERS } from "./fastChat.js";
 
 /** §18.2 item 1's mechanism, proven without a real key: try each configured provider, in
  *  order, and fall through — to the next provider, or to null (NIM) — on anything but a
@@ -147,6 +147,71 @@ test("a 2xx with no body is treated as a refusal, not a stream with nothing in i
   await withEnv({ ...ALL_KEYS, GROQ_API_KEY: "gk_test" }, async () => {
     const fetchImpl = (async () => new Response(null, { status: 200 })) as any;
     const result = await openFastChatStream([], { fetchImpl });
+    assert.equal(result, null);
+  });
+});
+
+/** openFastCompletion — the non-streaming, tool-calling counterpart used by
+ *  lib/chat-brain-intent.ts. Same provider/key fallback machinery as the stream above (proven
+ *  there); these tests are about the parts unique to this function: stream:false, the raw JSON
+ *  body returned intact, and reasoning_effort still attached for the gpt-oss default. */
+
+test("openFastCompletion: no provider configured means null, no fetch attempted", async () => {
+  await withEnv(ALL_KEYS, async () => {
+    const result = await openFastCompletion(
+      { messages: [] },
+      { fetchImpl: (async () => { throw new Error("must not be called"); }) as any }
+    );
+    assert.equal(result, null);
+  });
+});
+
+test("openFastCompletion: a configured provider gets stream:false and the caller's own body, plus reasoning_effort for gpt-oss", async () => {
+  await withEnv({ ...ALL_KEYS, GROQ_API_KEY: "gk_test" }, async () => {
+    const calls: any[] = [];
+    const fakeToolCallJson = { choices: [{ message: { tool_calls: [{ function: { name: "find_keywords", arguments: "{}" } }] } }] };
+    const fetchImpl = (async (url: string, init: any) => {
+      calls.push({ url, init });
+      return new Response(JSON.stringify(fakeToolCallJson), { status: 200 });
+    }) as any;
+
+    const result = await openFastCompletion(
+      { temperature: 0, max_tokens: 300, tools: [{ type: "function" }], tool_choice: "auto", messages: [{ role: "user", content: "hi" }] },
+      { fetchImpl }
+    );
+
+    assert.ok(result);
+    assert.equal(result!.provider, "groq");
+    assert.equal(result!.model, "openai/gpt-oss-120b");
+    assert.deepEqual(result!.data, fakeToolCallJson, "the raw JSON body is returned intact, unparsed by this file");
+    assert.match(calls[0].url, /groq\.com/);
+    const body = JSON.parse(calls[0].init.body);
+    assert.equal(body.stream, false);
+    assert.equal(body.temperature, 0);
+    assert.equal(body.tool_choice, "auto");
+    assert.equal(body.reasoning_effort, "low");
+  });
+});
+
+test("openFastCompletion: a refusal falls through to the next provider, same as the stream", async () => {
+  await withEnv({ ...ALL_KEYS, GROQ_API_KEY: "gk_test", CEREBRAS_API_KEY: "ck_test" }, async () => {
+    const seen: string[] = [];
+    const fetchImpl = (async (url: string) => {
+      seen.push(url);
+      if (/groq\.com/.test(url)) return new Response("rate limited", { status: 429 });
+      return new Response(JSON.stringify({ choices: [{ message: {} }] }), { status: 200 });
+    }) as any;
+
+    const result = await openFastCompletion({ messages: [] }, { fetchImpl });
+    assert.equal(result!.provider, "cerebras");
+    assert.equal(seen.length, 2);
+  });
+});
+
+test("openFastCompletion: a network error on every configured provider is null, not a throw", async () => {
+  await withEnv({ ...ALL_KEYS, GROQ_API_KEY: "gk_test" }, async () => {
+    const fetchImpl = (async () => { throw new Error("ENOTFOUND"); }) as any;
+    const result = await openFastCompletion({ messages: [] }, { fetchImpl });
     assert.equal(result, null);
   });
 });
