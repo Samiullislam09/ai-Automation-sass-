@@ -398,6 +398,26 @@ test('"isko publish kar do" — an echo first, and nothing happens before the ye
   assert.equal(order(t2).text, "old path ran");
 });
 
+test('"isko site se hata do" — unpublish is also echoed first, not run straight away', async () => {
+  const s = stub({ tool: null });
+  const t = await turn("isko site se hata do", s.deps);
+
+  const o = order(t);
+  assert.equal(o.event?.kind, "needs_confirm", "§10 rule 2: irreversible work is echoed first");
+  assert.equal(s.rec.legacy.length, 0, "the unpublish has NOT run");
+  assert.equal(s.rec.saved[0].pending.route, "legacy");
+  assert.equal(legacyJobOf("isko site se hata do", TZ)?.kind, "unpublish");
+
+  const t2 = await turn("haan, kar do", s.deps);
+  assert.equal(s.rec.legacy.length, 1, "now it runs");
+  assert.equal(s.rec.legacy[0].kind, "unpublish");
+  assert.equal(order(t2).text, "old path ran");
+});
+
+test('"isko hata do" alone stays a draft-reject, not an unpublish — unpublish needs the site/live word', () => {
+  assert.equal(legacyJobOf("isko hata do", TZ)?.kind, "reject");
+});
+
 test('"nahi, rehne do" cancels the pending order and nothing else', async () => {
   const s = stub({ tool: null });
   await turn("isko publish kar do", s.deps);

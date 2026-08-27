@@ -17,7 +17,9 @@ import { supabase } from "../supabase.js";
  *  verifying it, rotating a webhook secret — stays in the app, where the customer is.
  */
 
-export type PublishResult = { ok: boolean; url?: string; error?: string };
+// wpPostId lets a later chat "isko site se hata do" address the SAME WordPress post instead of
+// guessing one from a title — see agents/publish.ts, which stores this in content_items.meta.
+export type PublishResult = { ok: boolean; url?: string; wpPostId?: number; error?: string };
 
 export async function publishContentItem(
   tenantId: string,
@@ -57,7 +59,7 @@ async function publishToWordPress(
     });
     if (!res.ok) return { ok: false, error: `WordPress publish failed (${res.status}): ${(await res.text().catch(() => "")).slice(0, 300)}` };
     const data: any = await res.json();
-    return { ok: true, url: data?.link };
+    return { ok: true, url: data?.link, wpPostId: typeof data?.id === "number" ? data.id : undefined };
   } catch (e: any) {
     return { ok: false, error: `WordPress publish error: ${e?.message ?? e}` };
   }

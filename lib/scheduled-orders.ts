@@ -159,3 +159,25 @@ export async function findPublishable(
   const c = data[0] as any;
   return { id: String(c.id), title: c.title ?? null, status: c.status };
 }
+
+/** The article a bare "isko site se hata do" refers to: the most recently published one — same
+ *  "the last thing they were told about" reasoning as findPublishable above, mirrored for the
+ *  opposite direction. Ordered by created_at rather than a publish timestamp for the same reason
+ *  findPublishable is: content_items has no reliable updated_at (no trigger bumps it, and
+ *  approveAndPublish's own update does not touch it either), so "the newest row" is the honest
+ *  signal available rather than a fabricated precise one. */
+export async function findLatestPublished(
+  supabase: SupabaseClient,
+  tenantId: string
+): Promise<{ id: string; title: string | null } | null> {
+  const { data, error } = await supabase
+    .from("content_items")
+    .select("id, title, created_at")
+    .eq("tenant_id", tenantId)
+    .eq("status", "published")
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (error || !data?.length) return null;
+  const c = data[0] as any;
+  return { id: String(c.id), title: c.title ?? null };
+}

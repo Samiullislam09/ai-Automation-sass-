@@ -20,9 +20,11 @@ import { supabase } from "../supabase.js";
  *      confirm (manifest `irreversible: true`), recorded with a timestamp before this agent
  *      is ever queued.
  *
- *  Unpublishing is NOT here yet — plan Phase 2 puts it in agent-publish alongside a
- *  reachable-from-chat "take it down". Until then the honest position is that this agent can
- *  only put things up, and it says so rather than pretending otherwise.
+ *  Unpublishing lives OUTSIDE this file, in lib/publish.ts's unpublishContentItem — reached
+ *  synchronously from the chat route the same way approveAndPublish already is, not as an
+ *  agent-server job. There is nothing here for a job to wait on: like "publish it now", "take it
+ *  down" either succeeds or fails inside one request. This agent still stores `wpPostId` on
+ *  every successful publish (below) so that later unpublish call has a post to address.
  */
 export class PublishAgent extends Agent {
   type = "publish";
@@ -108,6 +110,9 @@ export class PublishAgent extends Agent {
           publishedAt: new Date().toISOString(),
           publishVerified: verification.verified,
           publishVerifyNote: verification.note,
+          // Needed to unpublish the SAME post later from chat (lib/publish.ts's
+          // unpublishContentItem) instead of guessing one from a title match.
+          wpPostId: result.wpPostId ?? null,
         },
       })
       .eq("id", item.id)

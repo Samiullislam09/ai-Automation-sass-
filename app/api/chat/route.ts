@@ -10,8 +10,8 @@ import { openFastChatStream } from "@/lib/ai/fastChat";
 import { detectChatIntent, wantsAutoPublish } from "@/lib/chat-intent";
 import { parseWhen, describeWhen } from "@/lib/when";
 import { applySchedule, describeSchedule } from "@/lib/chat-schedule";
-import { placeOrder, findPublishable, listPending, cancelOrder, MIGRATION_HINT, type OrderKind } from "@/lib/scheduled-orders";
-import { approveAndPublish } from "@/lib/publish";
+import { placeOrder, findPublishable, findLatestPublished, listPending, cancelOrder, MIGRATION_HINT, type OrderKind } from "@/lib/scheduled-orders";
+import { approveAndPublish, unpublishContent } from "@/lib/publish";
 import { classifyIntent, mightBeAnOrder } from "@/lib/chat-classify";
 import { enqueueAgentJob } from "@/lib/agent-jobs";
 import { loadBusiness, loadCounts, loadRecentWork, loadSchedule, type Counts, type Turn } from "@/lib/chat-context";
@@ -492,6 +492,7 @@ async function startWork(
   if (intent.kind === "schedule") return changeSchedule(supabase, tenantId, intent.patch);
   if (intent.kind === "cancel") return cancelBooked(supabase, tenantId, intent.which);
   if (intent.kind === "reject") return rejectDraft(supabase, tenantId);
+  if (intent.kind === "unpublish") return unpublishOrder(supabase, tenantId);
 
   const tz = await cached(`tz:${tenantId}`, TTL.schedule, () => tenantTimezone(supabase, tenantId));
   const when = parseWhen(message, tz);
@@ -657,6 +658,36 @@ async function rejectDraft(supabase: SupabaseClient, tenantId: string): Promise<
   }
   return nothingStarted(
     `Rejected — **${item.title ?? "that draft"}** is out of Approvals and will not be published. It stays in your content list if you want to look at it again.`
+  );
+}
+
+/** "isko site se hata do" — pull the most recently published article back off the live site.
+ *
+ *  The other half of publishOrder below, and the piece Phase 2's own exit criterion named that
+ *  had nothing behind it: no parser recognised the words, so it fell through to the chat model
+ *  and got a friendly, fabricated answer instead of either the action or an honest refusal. Same
+ *  honesty rule as everywhere else in this file — the reply is built from what unpublishContent
+ *  actually did, never from the request. */
+async function unpublishOrder(supabase: SupabaseClient, tenantId: string): Promise<OrderResult> {
+  const item = await findLatestPublished(supabase, tenantId);
+  if (!item) {
+    return nothingStarted(`Koi article abhi live nahi hai jise hataya ja sake.`);
+  }
+  const name = item.title ? `**"${item.title}"**` : "your latest published article";
+
+  const result = await unpublishContent(supabase, tenantId, item.id);
+  if (result.ok) {
+    return nothingStarted(`Hata diya — ${name} ab live nahi hai. Chaho to dobara publish kar sakte ho.`, {
+      kind: "done",
+      title: "Unpublished",
+      detail: item.title ?? undefined,
+      agent: "publish",
+      task_id: item.id,
+    });
+  }
+  return nothingStarted(
+    `${name} hata nahi paya: **${result.error}**. Ye abhi bhi live hai.`,
+    { kind: "failed", title: "Hata nahi paya", detail: result.error, agent: "publish", task_id: item.id }
   );
 }
 

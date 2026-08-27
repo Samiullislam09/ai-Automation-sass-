@@ -46,9 +46,9 @@ const nothingStarted = (text: string, event?: SystemEventPayload): OrderResult =
   event,
 });
 
-/** The four things the brain still cannot carry out, which the old code path does today.
+/** The five things the brain still cannot carry out, which the old code path does today.
  *  Every one of these is a gap with a name, not a design: see the notes on `legacyKind`. */
-export type LegacyKind = "schedule" | "cancel" | "reject" | "publish";
+export type LegacyKind = "schedule" | "cancel" | "reject" | "publish" | "unpublish";
 export type LegacyJob = {
   kind: LegacyKind;
   which?: "next" | "all";
@@ -80,16 +80,22 @@ export type LegacyJob = {
  *     always from the model) is the way this entry actually leaves the list; it is not on the
  *     roadmap yet, so it stays here, correctly, for a different reason than it used to.
  *
+ *   · unpublishing an already-live article — the same gap as publish, one step earlier: "isko
+ *     site se hata do" needs "isko" resolved against the database (the newest published item),
+ *     which is exactly what findLatestPublished (lib/scheduled-orders.ts) does and what the
+ *     intent engine's function-calling still cannot. Leaves the list the same way publish does.
+ *
  *  Writing, research and planning are deliberately NOT here: they belong to the brain now, and
  *  returning them would mean two systems creating work for one sentence.
  *
- *  The two irreversible ones (publish-now, cancel-everything) get the echo §10 rule 2 has
- *  always asked for, through the same conversation_state row the brain's own confirmations
- *  use — so the user cannot tell which code will carry it out, and should not have to. */
+ *  The three irreversible ones (publish-now, unpublish, cancel-everything) get the echo §10
+ *  rule 2 has always asked for, through the same conversation_state row the brain's own
+ *  confirmations use — so the user cannot tell which code will carry it out, and should not
+ *  have to. */
 export function legacyJobOf(message: string, tz: string): LegacyJob | null {
   const i = detectChatIntent(message);
   if (!i) return null;
-  if (i.kind === "schedule" || i.kind === "reject") return { kind: i.kind, message };
+  if (i.kind === "schedule" || i.kind === "reject" || i.kind === "unpublish") return { kind: i.kind, message };
   if (i.kind === "cancel") return { kind: "cancel", which: i.which, message };
   if (i.kind === "publish") return { kind: "publish", message, scheduled: !!parseWhen(message, tz) };
   return null;
@@ -222,7 +228,9 @@ export async function brainTurn(input: BrainTurnInput, deps: BrainTurnDeps): Pro
   const legacy = follow.kind === "slot" ? null : deps.legacyKind(message);
   if (legacy) {
     const irreversible =
-      (legacy.kind === "publish" && !legacy.scheduled) || (legacy.kind === "cancel" && legacy.which === "all");
+      (legacy.kind === "publish" && !legacy.scheduled) ||
+      legacy.kind === "unpublish" ||
+      (legacy.kind === "cancel" && legacy.which === "all");
     if (!irreversible) return { handled: true, order: await deps.runLegacy(legacy), action: `legacy:${legacy.kind}` };
     return {
       handled: true,
@@ -500,7 +508,9 @@ async function askToConfirmLegacy(
   const echo =
     legacy.kind === "publish"
       ? "Ye article abhi aapki live site pe daal dun?"
-      : "Saare booked orders cancel kar dun?";
+      : legacy.kind === "unpublish"
+        ? "Ye article abhi live site se hata dun?"
+        : "Saare booked orders cancel kar dun?";
 
   const saved = await deps.state.save(
     { v: 1, route: "legacy", action: `legacy:${legacy.kind}`, echo, message: legacy.message, legacy: { kind: legacy.kind, which: legacy.which } },

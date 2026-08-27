@@ -32,6 +32,9 @@ export type ChatIntent =
   | { kind: "cancel"; which: "next" | "all" }
   // Throw a draft away instead of publishing it.
   | { kind: "reject" }
+  // Pull something ALREADY LIVE back off the site — the opposite of "publish". Different from
+  // "reject" (a draft that never went live) and "cancel" (a booking that has not run yet).
+  | { kind: "unpublish" }
   | null;
 
 // "how does X work", "kya", "kaise", "?" — these are questions ABOUT the work, not orders.
@@ -70,6 +73,14 @@ const CANCEL_ALL = /\b(sab|sabhi|saare|sara|all|everything|har\s*ek)\b/i;
 // Throwing a draft away. Deliberately narrow — there is no undo, and "reject" is a word people
 // also use about ideas and suggestions in ordinary conversation.
 const REJECT_VERB = /\b(reject|rejct|thukra\w*|delete\s*kar\w*|hata\s*do|discard|bin\s*it|scrap)\b/i;
+
+// Pulling something that is already LIVE back off the site. "hata do" alone is already claimed
+// by REJECT_VERB above (throwing away a draft that never went live), so a bare "isko hata do"
+// stays a reject — this needs either an unambiguous word ("unpublish", "take down") or a removal
+// verb paired explicitly with the site/live itself ("site se hata do", "live se utaar do").
+const UNPUBLISH_VERB = /\b(unpublish\w*|un-publish\w*|takedown|take\s*down|pull\s*down|de-?list\w*)\b/i;
+const SITE_OR_LIVE = /\b(site|website|live|web ?page)\b/i;
+const REMOVE_VERB = /\b(hata\w*|remove\w*|nikal\w*|utaar\w*|utar\w*|wapas\s*le\w*|offline\s*kar\w*|down\s*kar\w*)\b/i;
 
 // "keyword research karke do", "sirf keyword nikalo", "find me some keywords".
 const RESEARCH_NOUN = /\b(keywords?|key ?word|kw)\b/i;
@@ -113,6 +124,13 @@ export function detectChatIntent(raw: string): ChatIntent {
   // need an explicit cancel/reject verb.
   const schedulePatch = parseScheduleCommand(q);
   if (schedulePatch) return { kind: "schedule", patch: schedulePatch };
+
+  // Checked before cancel/reject: "site se hata do" would otherwise satisfy CANCEL_VERB's or
+  // REJECT_VERB's bare "hata do" and get answered as the wrong one of the three. An unambiguous
+  // unpublish verb, or a removal verb paired explicitly with the site/live, wins here first.
+  if (!MAKES_A_NEW_ONE.test(q) && (UNPUBLISH_VERB.test(q) || (SITE_OR_LIVE.test(q) && REMOVE_VERB.test(q)))) {
+    return { kind: "unpublish" };
+  }
 
   if (CANCEL_VERB.test(q) && CANCEL_TARGET.test(q) && !MAKES_A_NEW_ONE.test(q)) {
     return { kind: "cancel", which: CANCEL_ALL.test(q) ? "all" : "next" };

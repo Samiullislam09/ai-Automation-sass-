@@ -58,6 +58,16 @@ test("write, with and without publishing", () => {
   reads("artical nahi likhna, sirf keyword nikalo", "research", false, null);
 });
 
+test("pulling something already-live back off the site is unpublish, not reject or cancel", () => {
+  reads("isko site se hata do", "unpublish", false, null);
+  reads("live se utaar do", "unpublish", false, null);
+  reads("unpublish it", "unpublish", false, null);
+  reads("take down the article from the website", "unpublish", false, null);
+  // "hata do" alone, with no site/live word, stays a draft-reject — unpublish needs the
+  // unambiguous verb or the site/live word explicitly, or it would steal every plain reject.
+  reads("isko hata do", "reject", false, null);
+});
+
 test("a negation is a refusal, never an instruction — the most expensive mistake available", () => {
   // "publish mat karna" must not become a publish, and must not cancel anything either.
   reads("no publish mat karna", null, false, null);
