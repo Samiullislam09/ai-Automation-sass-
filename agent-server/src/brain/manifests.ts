@@ -155,7 +155,9 @@ export const MANIFESTS: Manifest[] = [
   {
     id: "seo",
     name: "Mr. SEO",
-    version: "0.1.0", // stub today — registry keeps it disabled until the real checks land (Phase 2)
+    version: "1.0.0", // was 0.1.0/stub — agents/seo.ts (24 checks) landed in Phase 2, `seo.test.ts`
+    // itself asserts `STUB_AGENTS.has("seo") === false`. This comment was the only stale thing:
+    // STUB_AGENTS below was already empty, so the agent has been enabled all along.
     description: "Scores a draft against the SERP and the on-page checklist, and sends it back if it fails.",
     actions: [
       {
