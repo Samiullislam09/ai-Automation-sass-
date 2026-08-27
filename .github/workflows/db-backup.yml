@@ -36,7 +36,9 @@ jobs:
           sudo apt-get install -y -qq postgresql-common >/dev/null
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y >/dev/null
           sudo apt-get install -y -qq postgresql-client-17 >/dev/null
-          pg_dump --version
+          # The runner image ships pg_dump 16 first on PATH; a 16 client refuses a 17 server
+          # ("server version mismatch", run #2). Pin the versioned binary explicitly.
+          /usr/lib/postgresql/17/bin/pg_dump --version
 
       - name: Dump
         env:
@@ -51,7 +53,7 @@ jobs:
           # --no-owner/--no-privileges: restore into any project without role errors.
           # Schemas: only ours plus auth (users) and storage metadata. Supabase-internal
           # schemas are recreated by the platform and only break a restore.
-          pg_dump "$SUPABASE_DB_URL" \
+          /usr/lib/postgresql/17/bin/pg_dump "$SUPABASE_DB_URL" \
             --format=plain --no-owner --no-privileges \
             --schema=public --schema=auth --schema=storage \
             | gzip -9 > "backup-${stamp}.sql.gz"
