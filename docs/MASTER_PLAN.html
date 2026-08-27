@@ -987,6 +987,14 @@ traces    har task ka har LLM call: prompt_version, input, output, tokens, ms, c
 <!-- ============================================================ -->
 <h2 id="llm">18 · Chat 8 second kyun, aur kaunsa AI (free)</h2>
 
+<p><span class="pill ok">DONE 2026-08-27</span> Section 18.2 ke paanch fix me se teen ab true hain
+production me bhi: <strong>#3 instant acknowledgement</strong> (do-channel UI, Phase 0), <strong>#4
+classifier critical path se hata</strong> (brain ab har environment me default-on hai &mdash; neeche
+&sect;18.6), aur <strong>#1 provider switch</strong> ka code (<code>lib/ai/fastChat.ts</code>, 6 tests)
+&mdash; <span class="pill warn">BAAKI (aapka kaam)</span> ek free Groq key (manual step 12), uske bina
+ye abhi inert hai aur NIM hi chalta hai jaisa aaj chalta hai. #2 (hedged request) aur #5 (chhota
+model) abhi nahi &mdash; dono ko do live providers ya A/B data chahiye jo abhi nahi hai.</p>
+
 <h3>18.1 Measured, guessed nahi</h3>
 <p>Ek hi request — “hello, kya haal hai?”, 80 tokens, <code>thinking:false</code> — NIM ke <code>nemotron-3.5-lightning-30b-a3b</code> pe 2026-08-27 ko lagataar:</p>
 <div class="tablewrap"><table>
@@ -1089,6 +1097,23 @@ traces    har task ka har LLM call: prompt_version, input, output, tokens, ms, c
 </table></div>
 <p><strong>Aaj ke liye, free pe, ek line me:</strong> Cerebras ki free key lo (5 min), chat route me <code>OPENAI_BASE_URL</code> style se lagao (aaj ka code OpenAI-compatible hai — 10 line ka badlaav), writer NIM pe hi rehne do. 8s → ~0.5s. Baaki sab Phase 1-2 me.</p>
 <p><small>Test script: <code>scratchpad/ttfb.js</code> — kisi bhi provider pe wahi 5 calls chala ke compare kar sakte ho.</small></p>
+
+<h3>18.6 Ek dimaag — asal me on, sirf docs me nahi <span class="pill ok">DONE 2026-08-27</span></h3>
+<p><code>BRAIN_ENABLED</code> flag (lib/brain.ts) pehle <em>production ke alawa har jagah</em> default-on
+tha — matlab jahan asli customer hai, wahi ek dimaag ki jagah purana regex-classifier-plus-direct-enqueue
+system chalta tha, aur poora brain (registry, planner, orchestrator, 293+ tests) unused baitha tha.
+Phase 1 ka exit criterion pura ho chuka tha (poora chain resolve hota hai, &sect;14 ke rows green), to
+carve-out hataya: <strong>ab flag har environment me default-on hai</strong>, aur khud sirf ek emergency
+kill switch reh gaya (<code>BRAIN_ENABLED=0</code>) — kisi environment ke naam se faisla nahi hota.
+Isi se &sect;18.2 ka #4 (classifier critical path se) bhi free me mil gaya: purana classifier sirf
+tab chalta hai jab flag explicitly 0 ho.</p>
+<p><code>legacyJobOf</code> ke 4 exceptions (schedule, cancel, reject, publish-lookup) waise he rahenge
+— wo dusra dimaag nahi hain, documented gaps hain (settings write jo agent ka kaam kabhi tha hi nahi,
+ya ek lookup jo intent model abhi nahi kar sakta). <strong>Publish wale comment me galti thi</strong> —
+usne <code>NOT_YET_ROUTED</code> ko wajah bataya tha, jo Mr. Publish asli banne ke din khaali ho gaya
+tha. Asli wajah: &ldquo;isko publish karo&rdquo; ko pata hona chahiye <em>kaunsi</em> article — aur
+<code>findPublishable()</code> jaisa database lookup intent engine ke paas nahi hai (sirf pichhle 2 turns
+ka text dekhta hai). Comment ab sahi wajah kehta hai.</p>
 
 <!-- ============================================================ -->
 <h2 id="media">19 · Mr. Image aur Mr. Story — naye agents</h2>
@@ -1661,6 +1686,7 @@ aur commit ke saath &mdash; taaki kal koi (aap, main, ya 10 saal baad koi employ
 <tr><td>2026-08-27</td><td><code>fe1ef76</code></td><td>Mr. Audit (&sect;7.4): site-wide checks, migration 020 <code>site_audits</code>, chat se <code>audit_site</code>. Core Web Vitals jaanbujh ke skipped (browser nahi hai)</td><td>290 green (+26)</td></tr>
 <tr><td>2026-08-27</td><td><code>ec3b2c0</code></td><td>Audit ka weekly schedule (khud chalta hai) + <code>/app/audit</code> page: score trend, issues worst-first, aur jo measure nahi kiya wo bhi likha</td><td>290 + 92 green</td></tr>
 <tr><td>2026-08-27</td><td><code>01a01c9</code></td><td>Miss Social (&sect;7.7): draft-only posts for 4 networks, grounded in Site Brain, Approvals copy flow. Goals.focus wired into agent-server (boss.ts ko pehli baar dikhta hai)</td><td>305 + 92 green</td></tr>
+<tr><td>2026-08-27</td><td><code>8648211</code></td><td>&sect;16/&sect;18 audit se: <code>BRAIN_ENABLED</code> ab har environment me default-on (&sect;18.6, &ldquo;ek dimaag&rdquo; asal me), stale <code>legacyJobOf</code> publish comment fix, <code>lib/ai/fastChat.ts</code> (&sect;18.2 #1, Groq/Cerebras hedge-ready, inert bina key ke)</td><td>98 web green (+6)</td></tr>
 </table></div>
 
 <h3>26.1 Abhi kya baaki hai (is order me)</h3>
