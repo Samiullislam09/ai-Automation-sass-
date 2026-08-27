@@ -1,0 +1,83 @@
+# Every push runs everything that can be checked without a database, a browser or an API key.
+#
+# The point is not coverage theatre. It is the three things this project has actually been
+# bitten by, in order of how much they hurt:
+#
+#   1. A change that compiles in one package and breaks the other (the web app and agent-server
+#      have separate tsconfigs, separate dependency trees, and one copied file between them).
+#   2. A contract edit that never reaches the vendored copy agent-server actually imports —
+#      `sync-contract.mjs --check` is the whole defence against "vendored" becoming "forked".
+#   3. A manifest that contradicts itself: two agents claiming one phrase, or a cycle in the
+#      needs graph. Both are caught at boot, but a red CI is a much cheaper place to find out
+#      than a failed deploy.
+#
+# No secrets are used anywhere in this file, so it runs on forks and pull requests too.
+
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # ── The shared contract ────────────────────────────────────────────────────────────
+      - name: Install (agent-contract)
+        working-directory: packages/agent-contract
+        run: npm ci || npm install
+
+      - name: Build (agent-contract)
+        working-directory: packages/agent-contract
+        run: npm run build
+
+      - name: Test (agent-contract)
+        working-directory: packages/agent-contract
+        run: npm test
+
+      # ── agent-server ───────────────────────────────────────────────────────────────────
+      - name: Install (agent-server)
+        working-directory: agent-server
+        run: npm ci || npm install
+
+      - name: The vendored contract still matches the package
+        run: node scripts/sync-contract.mjs --check
+
+      - name: Typecheck (agent-server)
+        working-directory: agent-server
+        run: npx tsc --noEmit -p .
+
+      - name: Test (agent-server)
+        working-directory: agent-server
+        # env.ts throws on missing config at import time; the tests never reach a network or a
+        # database, they only need the module to load.
+        env:
+          DATABASE_URL: postgres://ci:ci@localhost:5432/ci
+          SUPABASE_URL: https://ci.invalid
+          NEXT_PUBLIC_SUPABASE_URL: https://ci.invalid
+          SUPABASE_SERVICE_ROLE_KEY: ci-not-a-real-key
+          NVIDIA_API_KEY: ci-not-a-real-key
+        run: npm test
+
+      # ── The web app ────────────────────────────────────────────────────────────────────
+      - name: Install (web)
+        run: npm ci || npm install
+
+      - name: Typecheck (web)
+        run: npx tsc --noEmit -p .
+
+      - name: Test (web)
+        run: npx tsx --test lib/**/*.test.ts
