@@ -3,7 +3,11 @@
  *  Mr Lxwa in chat for an article starts exactly the same real pg-boss job the button does —
  *  the chat is not allowed to have its own, different, pretend pipeline. */
 
-export const AGENT_JOB_TYPES = ["boss", "keyword", "writer", "social", "seo"] as const;
+// "crawler" is here for the Site Brain page's Refresh (MASTER_PLAN §25.9, manual refresh):
+// re-reading the site is what makes the profile fresh, and the crawler enqueues Mr. Analyst
+// itself when it finishes, so one job rebuilds the whole brain. "analyst" is separate because
+// a profile can also be rebuilt from pages already crawled, without paying for a crawl.
+export const AGENT_JOB_TYPES = ["boss", "keyword", "writer", "social", "seo", "crawler", "analyst"] as const;
 export type AgentJobType = (typeof AGENT_JOB_TYPES)[number];
 
 // One flat shape rather than a discriminated union on purpose: this repo compiles with

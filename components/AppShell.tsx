@@ -27,6 +27,9 @@ const ITEMS: [string, keyof typeof Icon, string][] = [
   ["Schedule", "schedule", "/app/schedule"],
   ["Reports", "reports", "/app/reports"],
   ["Memory", "memory", "/app/memory"],
+  // What the team understood about the business, with the evidence behind every field
+  // (MASTER_PLAN §25.7). Next to Memory because both answer "what does it know about me?".
+  ["Site Brain", "memory", "/app/site-brain"],
   ["Billing", "billing", "/app/billing"],
   // Review screen for the intent evaluation set (lib/eval/README.md). Reuses the activity icon.
   ["Eval", "activity", "/app/eval"],

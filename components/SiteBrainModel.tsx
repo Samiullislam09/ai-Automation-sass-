@@ -139,7 +139,11 @@ export function normalizeProfile(raw: unknown): SiteProfile {
 
 // ── validation: the only gate between a PATCH body and the jsonb column ──────────────────────
 
-export type CoerceResult = { ok: true; value: unknown } | { ok: false; error: string };
+// Flat, not a discriminated union, for the same reason lib/agent-jobs.ts is: this repo
+// compiles with strict:false, where TS cannot narrow `ok: true | false` unions at all — the
+// union version type-checks in isolation and then fails at the one call site that reads
+// `.error` after checking `.ok`.
+export type CoerceResult = { ok: boolean; value?: unknown; error?: string };
 
 const str = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
 const nullableStr = (v: unknown): string | null => (str(v) ? str(v) : null);
