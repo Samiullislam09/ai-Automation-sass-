@@ -1,7 +1,8 @@
 import type { Job } from "pg-boss";
 import { Agent, type AgentContext, type AgentJobData } from "./base.js";
-import { keywordSuggestions } from "../lib/dataforseo.js";
+import { dataForSeoConfigured, keywordSuggestions } from "../lib/dataforseo.js";
 import { aiRelatedQueries } from "../lib/keywordFallback.js";
+import { autocompleteRelated } from "../lib/autocomplete.js";
 import { loadInsights, relatedFromSearchConsole } from "../lib/insights.js";
 import { buildBlueprint, recommend, type Related, type Research, type Source } from "../lib/blueprint.js";
 import { supabase } from "../supabase.js";
@@ -9,11 +10,14 @@ import { enqueue } from "../queues.js";
 
 /** Build Guide Step 9 — keyword validation.
  *
- *  THREE SOURCES, IN ORDER OF EVIDENCE:
+ *  FOUR SOURCES, IN ORDER OF EVIDENCE — the first one that answers wins:
  *   1. DataForSEO — average monthly search volume and competition for the whole market.
+ *      Paid, therefore OPTIONAL: skipped (not failed) when its env vars are unset.
  *   2. Google Search Console — the searches THIS site is already shown for. Not market
  *      volume, but the strongest possible signal that the query is real and winnable here.
- *   3. NVIDIA — last resort. Queries only, never a number: an invented volume is
+ *   3. Google Autocomplete — free, keyless: the completions Google shows in its own search
+ *      box. Real phrases, no numbers. Throttled 1 req/s, cached 24h (lib/autocomplete.ts).
+ *   4. NVIDIA — last resort. Queries only, never a number: an invented volume is
  *      indistinguishable from a measured one.
  *
  *  THREE MODES, set by whoever enqueues it:
@@ -52,45 +56,68 @@ export class KeywordAgent extends Agent {
     let seedVolume: number | null = null;
     let seedCompetition: string | null = null;
     let related: Related[] = [];
-    let source: Source = "dataforseo";
+    let source: Source | null = null;
     let providerError: string | null = null;
 
-    try {
-      const ideas = await keywordSuggestions(t, 15);
-      const seed = ideas.find((i) => i.keyword.toLowerCase() === t.toLowerCase());
-      seedVolume = seed?.searchVolume ?? null;
-      seedCompetition = seed?.competitionLevel ?? null;
-      // Competition is kept now, not dropped — the choice table is useless without it.
-      related = ideas
-        .sort((a, b) => (b.searchVolume ?? 0) - (a.searchVolume ?? 0))
-        .slice(0, 12)
-        .map((i) => ({
-          keyword: i.keyword,
-          searchVolume: i.searchVolume ?? null,
-          competitionLevel: i.competitionLevel ?? null,
-        }));
-    } catch (e: any) {
-      providerError = e?.message ?? "Keyword provider unavailable";
-      console.error("[keyword] DataForSEO failed:", providerError);
+    // ── 1. DataForSEO — the only source with real volume, and the only paid one. ────────
+    // Not configured is not an error: it is the normal state of a free install, and the
+    // chain below is built to work without it. When a customer buys an account, set the
+    // two env vars and this step simply starts winning.
+    if (dataForSeoConfigured()) {
+      try {
+        const ideas = await keywordSuggestions(t, 15);
+        const seed = ideas.find((i) => i.keyword.toLowerCase() === t.toLowerCase());
+        seedVolume = seed?.searchVolume ?? null;
+        seedCompetition = seed?.competitionLevel ?? null;
+        // Competition is kept now, not dropped — the choice table is useless without it.
+        related = ideas
+          .sort((a, b) => (b.searchVolume ?? 0) - (a.searchVolume ?? 0))
+          .slice(0, 12)
+          .map((i) => ({
+            keyword: i.keyword,
+            searchVolume: i.searchVolume ?? null,
+            competitionLevel: i.competitionLevel ?? null,
+          }));
+        source = "dataforseo";
+      } catch (e: any) {
+        providerError = e?.message ?? "Keyword provider unavailable";
+        console.error("[keyword] DataForSEO failed:", providerError);
+      }
+    } else {
+      providerError = "DataForSEO not configured (paid provider — optional)";
+    }
 
-      if (ownSearches.length >= 3) {
-        source = "gsc";
-        related = ownSearches.map((q) => ({
-          keyword: q.query,
-          searchVolume: null, // impressions ≠ search volume and must never be printed as one
-          impressions: q.impressions,
-          position: q.position,
-        }));
-      } else {
-        const { data: tenant } = await supabase.from("tenants").select("niche").eq("id", tenantId).single();
-        related = (await aiRelatedQueries(t, tenant?.niche ?? null, 8)).map((r) => ({
-          keyword: r.keyword,
-          searchVolume: null,
-        }));
-        source = "ai";
-        if (!related.length) {
-          throw new Error(`Keyword research failed and every fallback returned nothing. Original error: ${providerError}`);
-        }
+    // ── 2. Search Console — this site's own real searches. ─────────────────────────────
+    if (!source && ownSearches.length >= 3) {
+      source = "gsc";
+      related = ownSearches.map((q) => ({
+        keyword: q.query,
+        searchVolume: null, // impressions ≠ search volume and must never be printed as one
+        impressions: q.impressions,
+        position: q.position,
+      }));
+    }
+
+    // ── 3. Google Autocomplete — free, real phrases people type, no numbers. ───────────
+    if (!source) {
+      ctx.onProgress({ label: `Asking Google Autocomplete what people type around "${t}"` });
+      const ac = await autocompleteRelated(t, 12);
+      if (ac.length >= 3) {
+        source = "autocomplete";
+        related = ac.map((r) => ({ keyword: r.keyword, searchVolume: null }));
+      }
+    }
+
+    // ── 4. The model — last resort, queries only. ──────────────────────────────────────
+    if (!source) {
+      const { data: tenant } = await supabase.from("tenants").select("niche").eq("id", tenantId).single();
+      related = (await aiRelatedQueries(t, tenant?.niche ?? null, 8)).map((r) => ({
+        keyword: r.keyword,
+        searchVolume: null,
+      }));
+      source = "ai";
+      if (!related.length) {
+        throw new Error(`Keyword research failed and every fallback returned nothing. Last provider error: ${providerError}`);
       }
     }
 

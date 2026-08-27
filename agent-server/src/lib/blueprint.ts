@@ -17,7 +17,7 @@ export type Related = {
   position?: number;
 };
 
-export type Source = "dataforseo" | "gsc" | "ai";
+export type Source = "dataforseo" | "gsc" | "autocomplete" | "ai";
 
 export type Research = {
   topic: string;
@@ -46,6 +46,13 @@ export function buildBlueprint(primary: string, research: Research): string {
       "below are AI-suggested customer questions, NOT measured search volumes. Do not state or imply",
       "any search volume, ranking difficulty or traffic number anywhere in the article."
     );
+  } else if (source === "autocomplete") {
+    lines.push(
+      "",
+      "NOTE: the queries below are Google Autocomplete suggestions — real phrases people type into",
+      "Google around this topic, in roughly Google's own popularity order. There is NO volume number",
+      "for any of them. Do not state or imply any search volume, ranking difficulty or traffic figure."
+    );
   } else if (source === "gsc") {
     lines.push(
       "",
@@ -66,6 +73,8 @@ export function buildBlueprint(primary: string, research: Research): string {
         ? "Questions to answer (AI-suggested — work each in naturally, as a section or a paragraph):"
         : source === "gsc"
         ? "Real searches this site already appears for (answer each one directly):"
+        : source === "autocomplete"
+        ? "What people type into Google around this topic (Google Autocomplete — cover each as a section or paragraph):"
         : "Related queries to cover (real search data — work each in naturally, as a section or a paragraph):",
       ...related.map((r) => {
         if (r.searchVolume != null) return `- ${r.keyword} (${r.searchVolume}/mo)`;
@@ -112,6 +121,12 @@ export function recommend(source: Source, candidates: Related[]): { keyword: str
       keyword: best.keyword,
       why: `Your site is already shown for this ${best.impressions ?? 0} times — the easiest one to actually win.`,
     };
+  }
+
+  if (source === "autocomplete") {
+    // Google lists completions in (roughly) popularity order; the first one is the only
+    // ranking signal that exists here, and it is a real one.
+    return { keyword: candidates[0].keyword, why: "Google's top autocomplete suggestion for this topic — the phrase people type most." };
   }
 
   if (source === "ai") {

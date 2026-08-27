@@ -358,9 +358,15 @@ function describeJob(jobAgent: string, status: string, detail: any): { summary: 
         items,
       };
     }
+    if (detail.source === "autocomplete") {
+      return {
+        summary: `These are Google Autocomplete suggestions — real phrases people type around “${detail.topic}”, in Google's own order, no volume numbers. Blueprint handed to Mr. Writer.`,
+        items,
+      };
+    }
     if (detail.source === "ai" || detail.searchDataAvailable === false) {
       return {
-        summary: `DataForSEO was unavailable (${detail.searchDataError ?? "provider error"}), so these came from the AI as customer questions — suggestions, not measured volumes — and the topic still went to Mr. Writer.`,
+        summary: `No live search data was available (${detail.searchDataError ?? "provider error"}), so these came from the AI as customer questions — suggestions, not measured volumes — and the topic still went to Mr. Writer.`,
         items,
       };
     }

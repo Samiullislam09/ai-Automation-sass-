@@ -13,6 +13,9 @@ export type KeywordIdea = {
 
 const AUTH = Buffer.from(`${env.DATAFORSEO_LOGIN}:${env.DATAFORSEO_PASSWORD}`).toString("base64");
 
+/** Paid provider — absent on a free install, present once a customer buys an account. */
+export const dataForSeoConfigured = () => !!(env.DATAFORSEO_LOGIN && env.DATAFORSEO_PASSWORD);
+
 async function dfsPost(path: string, body: unknown) {
   if (!env.DATAFORSEO_LOGIN || !env.DATAFORSEO_PASSWORD) {
     throw new Error("DATAFORSEO_LOGIN / DATAFORSEO_PASSWORD not configured");
