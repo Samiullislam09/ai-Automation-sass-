@@ -481,8 +481,8 @@ POST /run        → body: { run_id, tenant_id, action, input, context, callback
 <tr><td>Output</td><td><code>{ leads: [{company, contact, score, why, draft_message}] }</code> → Leads page + chat summary (“12 leads mile, 4 strong”).</td></tr>
 </table></div>
 
-<h3>7.7 Miss Social <span class="pill warn">Phase 3</span></h3>
-<p>Repo TBD. Jo bhi chuno, usse pehle ye check: Meta Graph API App Review (Instagram/Facebook publish) 2-6 hafte leta hai aur business verification maangta hai. Pinterest API bhi approval. X (Twitter) paid. LinkedIn Marketing API partner-only. Matlab: “auto-post” ka pehla version <strong>sirf draft + image + “copy/schedule”</strong> hoga, aur Facebook Pages (jo aasaan hai). Isko Phase 3 me rakho taaki article pipeline pehle rock-solid ho.</p>
+<h3>7.7 Miss Social <span class="pill ok">DONE 2026-08-27</span></h3>
+<p>Repo TBD (agent apne agent-server ke andar hi hai, brain ke doosre agents ki tarah). Meta Graph API App Review (Instagram/Facebook publish) 2-6 hafte leta hai aur business verification maangta hai — Pinterest API bhi approval, X paid, LinkedIn partner-only, sab abhi <span class="pill warn">AAPKA KAAM</span> (docs/MANUAL_STEPS.md). Isliye pehla version wahi hai jo yahan likha tha: ek model call se Facebook/Instagram/LinkedIn/X — chaaron ke liye ek-ek draft, Site Brain ki voice/offerings/proof se grounded (invented nahi), har ek ka <code>imageBrief</code> (Mr. Image abhi nahi bana isliye ek sentence instruction), Approvals me Copy button ke saath. <strong>Kahin auto-post nahi hota</strong> — har run ka note yahi kehta hai, aur approve karna sirf &ldquo;copy ke liye taiyar&rdquo; maarta hai, publishContentItem se kabhi nahi guzarta.</p>
 
 <h3>7.8 Crawler <span class="pill info">TS · aaj ka, aur deep</span></h3>
 <p>Aaj ka <code>agents/crawler.ts</code> agent ban jaata hai (<code>crawl_site</code> action). Memory me ek open requirement hai: connect pe <strong>full site analysis</strong> chahiye, aaj 15-page/titles-only sample hai. Naye me: 300 pages, headings + body summary + internal link graph → writer ko internal links milte hain, keyword ko niche milti hai. Site audit agent aur crawler ek hi Playwright service share kar sakte hain (dono browser chahte hain).</p>
@@ -596,7 +596,7 @@ tenant_icp        tenant_id, icp jsonb, updated_at
 <tr><td><code>agent-site-audit</code></td><td>TS</td><td>seomator CLI wrapper + Playwright; crawler bhi yahin</td><td>audit</td><td>1-2GB</td></tr>
 <tr><td><code>agent-publish</code></td><td>TS</td><td>WP REST, webhook, unpublish, URL verify</td><td>publish</td><td>256MB</td></tr>
 <tr><td><code>agent-leads</code></td><td>Python</td><td>LangGraph, Apollo, ICP, compliance</td><td>leads</td><td>512MB</td></tr>
-<tr><td><code>agent-social</code></td><td>TBD</td><td>Phase 3</td><td>social</td><td>—</td></tr>
+<tr><td><code>agent-social</code></td><td class="num">real (agent-server/src/agents/social.ts)</td><td><span class="pill ok">DONE</span></td><td>social</td><td>—</td></tr>
 </table></div>
 <ul>
   <li>Har agent repo me: <code>Dockerfile</code>, <code>manifest.json</code>, <code>/health</code>, ek <code>test/run.test</code> jo fixed input pe output shape verify kare, aur README jo bataye “akela kaise chalao”.</li>
@@ -668,7 +668,7 @@ tenant_icp        tenant_id, icp jsonb, updated_at
 <div class="phase"><div class="ph"><h3>Phase 3 · Site audit, leads, social</h3><span class="exit">3-4 hafte</span></div><div class="body"><ul>
 <li><span class="pill ok">DONE 2026-08-27</span> <code>agent-site-audit</code> (Mr. Audit, 26 tests): sitemap/robots se pages chunta hai, 50 pages tak politely fetch, deterministic catalogue (toota hua, Google se chhupa hua, on-page, orphan/duplicate), score 100&minus;25&times;block&minus;5&times;warn, migration <strong>020</strong> <code>site_audits</code> me poori report + pichhla score (trend). Chat se <code>audit_site</code> chalta hai. <strong>Playwright/seomator abhi nahi</strong> &mdash; Core Web Vitals ka number banaya <em>nahi</em> jaata, har report me <code>skipped</code> me saaf likha hota hai; alag service milte hi wo checks isi catalogue me judenge. Weekly schedule khud chalta hai (scheduler sweep, 3 per tick, sirf un tenants ke liye jinki site padh chuki hai), aur <code>/app/audit</code> page pe report + score trend + &ldquo;jo measure nahi kiya&rdquo; list.</li>
 <li><span class="pill ok">DONE 2026-08-27</span> <code>agent-leads</code>: ICP query + Site Brain se, OpenStreetMap/Nominatim (free, keyless, attributed) se discovery, har prospect ka apna page padh ke personalisation, fit score. Google Places + Apollo <em>bilkul DataForSEO jaise</em> optional &mdash; keys na hon to report me note, error nahi. Compliance code me hai: robots.txt pehle, personal email kabhi nahi, host throttle, sirf list + draft, bhejna kabhi nahi. <span class="pill warn">BAAKI</span> adapter route + manifest se stub hatana &mdash; chat se abhi nahi bulaya ja sakta.</li>
-<li><code>agent-social</code>: repo finalize; pehla version = draft + image + Facebook Pages; Meta App Review file karo Phase 2 me hi (lambi line hai)</li>
+<li><span class="pill ok">DONE 2026-08-27</span> <code>agent-social</code> (12 tests): draft + imageBrief, 4 networks, copy-only Approvals flow. <span class="pill warn">BAAKI (aapka kaam)</span> Meta App Review file karna — uske bina koi network live nahi jud sakta.</li>
 </ul><p><strong>Exit:</strong> “meri site audit karo” → 3 min me top-5 issues chat me; “Dubai ke 20 restaurant leads dhundo” → list + score + draft; audit score trend dikhta hai.</p></div></div>
 
 <div class="phase"><div class="ph"><h3>Phase 4 · Scale aur polish</h3><span class="exit">2 hafte</span></div><div class="body"><ul>
@@ -935,6 +935,7 @@ traces    har task ka har LLM call: prompt_version, input, output, tokens, ms, c
 
 <!-- ---------------- SOCIAL ---------------- -->
 <h3>17.5 Miss Social</h3>
+<p class="xs mut">§7.7 ka honest v1 (draft-only, koi network live nahi) ban chuka hai. Ye poora section Postiz ke saath Phase 4 ka full vision hai &mdash; App Review clear hone ke baad.</p>
 <div class="tablewrap"><table>
 <tr><th>Candidate</th><th>License</th><th>★</th><th>Push</th><th>Kya hai</th><th>Faisla</th></tr>
 <tr><td><code>gitroomhq/postiz-app</code></td><td><strong>AGPL-3.0</strong></td><td class="num">35.2k</td><td class="num"><strong>Aug 26 (kal)</strong></td><td>14 platforms (X, IG, FB, LinkedIn, TikTok, Pinterest, Threads, YouTube, Reddit…), <strong>public HTTP API + Node SDK</strong>, self-host = cloud ke barabar features, NestJS + Postgres + Temporal</td><td><span class="pill ok">PUBLISHING RAIL</span> — alag service, API se use</td></tr>
@@ -1658,12 +1659,12 @@ aur commit ke saath &mdash; taaki kal koi (aap, main, ya 10 saal baad koi employ
 <tr><td>2026-08-27</td><td><code>d492963</code>, <code>e7861c0</code></td><td>Site Brain page (&sect;25.7) &mdash; har field ka source + confidence + edit, version history, Refresh. Onboarding ke do naye screen, aur crawl ab site URL dete hi shuru</td><td>web build + 92 green</td></tr>
 <tr><td>2026-08-27</td><td><code>fe1ef76</code></td><td>Mr. Audit (&sect;7.4): site-wide checks, migration 020 <code>site_audits</code>, chat se <code>audit_site</code>. Core Web Vitals jaanbujh ke skipped (browser nahi hai)</td><td>290 green (+26)</td></tr>
 <tr><td>2026-08-27</td><td><code>ec3b2c0</code></td><td>Audit ka weekly schedule (khud chalta hai) + <code>/app/audit</code> page: score trend, issues worst-first, aur jo measure nahi kiya wo bhi likha</td><td>290 + 92 green</td></tr>
+<tr><td>2026-08-27</td><td><code>01a01c9</code></td><td>Miss Social (&sect;7.7): draft-only posts for 4 networks, grounded in Site Brain, Approvals copy flow. Goals.focus wired into agent-server (boss.ts ko pehli baar dikhta hai)</td><td>305 + 92 green</td></tr>
 </table></div>
 
 <h3>26.1 Abhi kya baaki hai (is order me)</h3>
 <ol>
-<li><strong>Mr. Social</strong> (Phase 3) &mdash; Postiz, bina modify kiye (AGPL). Meta App Review pehle (&sect;7.7)</li>
-  <li><strong>Phase 2</strong> &mdash; Python <code>agent-writer</code> (gpt-researcher), section-by-section writer, LLM comparison test</li>
+<li><strong>Phase 2</strong> &mdash; Python <code>agent-writer</code> (gpt-researcher), section-by-section writer, LLM comparison test</li>
   <li><strong>Phase 4</strong> &mdash; writer &times;4-8, schedule jitter, cost dashboard, load test, runbook</li>
 </ol>
 <p>Aapke haath ka kaam alag file me hai: <code>docs/MANUAL_STEPS.md</code>.</p>
