@@ -45,6 +45,12 @@
  *  code OpenAI-compatible hai — 10 line ka badlaav".
  */
 
+// Belt-and-suspenders, same as every other file in this app that calls fetch() on an external
+// host (see lib/dns-fix.ts's own comment): without this, Node tries IPv6 first for a host it
+// has never resolved and times out for ~15-20s before falling back to IPv4 — on THIS file that
+// means every Groq/Cerebras call pays that tax on a fresh process, which reads exactly like "the
+// fast provider is slow" when the fast provider itself answers in under 50ms once resolved.
+import "@/lib/dns-fix";
 import { modelParams } from "@/lib/chat-model";
 
 export type FastProvider = {

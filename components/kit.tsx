@@ -151,6 +151,14 @@ type ChatMsg = {
   live?: boolean;
   failed?: boolean;
   card?: SystemCard;
+  /** How long THIS reply actually took, measured on the client from the moment the request was
+   *  sent — not a server log nobody in the room can see. §18's whole point was that the same
+   *  code answers anywhere from ~1s to 19s depending on the model provider's queue, and that is
+   *  invisible unless it is on the screen. `firstMs` is first byte (roughly what the user felt
+   *  as "did it start"), `ms` is the full reply. Undefined for anything that isn't a completed
+   *  bot reply — never shown on "me" bubbles, cards, or a still-streaming one. */
+  firstMs?: number;
+  ms?: number;
 };
 
 export function BossChat() {
@@ -413,6 +421,10 @@ export function BossChat() {
       .slice(-8)
       .map((m) => ({ role: m.who === "me" ? "user" : "assistant", content: m.txt.slice(0, 700) }));
     let full = "";
+    // Client-side, not a server log — the number that matters is what THIS person waited,
+    // wherever they are, not what a log line says in a data center. See ChatMsg.ms.
+    const t0 = Date.now();
+    let firstMs: number | null = null;
     try {
       const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ q, ctx, history, conversationId: convId }) });
       // A 4xx/5xx still has a body (an error page, a JSON error) — reading it as the reply
@@ -444,6 +456,7 @@ export function BossChat() {
       spokenChars.current = 0;
       while (true) {
         const { done, value } = await reader.read(); if (done) break;
+        if (firstMs === null) firstMs = Date.now() - t0;
         // stream:true matters now that these are real model chunks rather than whole words —
         // a multi-byte character (an emoji, an accented letter) can straddle two chunks, and
         // decoding each one in isolation turns it into replacement squares.
@@ -456,7 +469,8 @@ export function BossChat() {
         speakSoFar(full);
       }
       speakSoFar(full, true);
-      patchSlot(b => ({ ...b, live: false }));
+      const totalMs = Date.now() - t0;
+      patchSlot(b => ({ ...b, live: false, ms: totalMs, firstMs: firstMs ?? totalMs }));
       // Titles are set from the first question, so the list only becomes useful after a turn.
       if (q !== "__hello__") void refreshConvs();
     } catch (e: any) {
@@ -561,9 +575,16 @@ export function BossChat() {
               channelOf(m) === "system" ? (
                 <SystemCardView key={i} card={m.card!} busy={busy} onAction={(a) => onCardAction(i, m.card!, a)} />
               ) : (
-                <div key={i} className={"cm " + m.who + (m.live ? " cursor" : "") + (m.failed ? " is-failed" : "")}>
-                  {renderMessage(m.txt)}
-                </div>
+                <React.Fragment key={i}>
+                  <div className={"cm " + m.who + (m.live ? " cursor" : "") + (m.failed ? " is-failed" : "")}>
+                    {renderMessage(m.txt)}
+                  </div>
+                  {m.who === "bot" && m.ms != null && (
+                    <div className="cm-timing" title={`first word ${(m.firstMs! / 1000).toFixed(1)}s · full reply ${(m.ms / 1000).toFixed(1)}s`}>
+                      {(m.ms / 1000).toFixed(1)}s
+                    </div>
+                  )}
+                </React.Fragment>
               )
             )}
             {/* The system channel, for screen readers. One region that already exists when a
@@ -621,6 +642,11 @@ export function BossChat() {
            the Retry are on the system card below it, not written in Mr Lxwa's voice. */
         .cm.bot.is-failed { border-color: color-mix(in srgb, var(--red) 45%, transparent);
                             background: color-mix(in srgb, var(--red) 8%, transparent); }
+
+        /* §18's speed number, on screen — how long THIS reply actually took, not a server log.
+           Sits under the bubble it belongs to, small enough to ignore and there when you need it. */
+        .cm-timing { align-self: flex-start; font-size: 10.5px; color: var(--mut); opacity: .75;
+                     margin: -4px 0 0 2px; font-variant-numeric: tabular-nums; }
 
         /* desktop: a real full-height column docked to the right edge. The width is the same
            --chatw app/app/layout.tsx reserves for it, so it never covers the office again.
