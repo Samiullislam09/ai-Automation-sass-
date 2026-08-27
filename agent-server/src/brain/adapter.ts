@@ -74,6 +74,20 @@ function translate(agentId: string, action: string, input: Record<string, unknow
     case "analyst.build_site_profile":
       return { queue: "analyst", data: { pages: input.pages ?? null, taskLabel: "Understanding your site" } };
 
+    case "seo.check_seo":
+      return {
+        queue: "seo",
+        data: {
+          // The agent takes any of these: the article inline, an id to load it by, or the
+          // keyword step's whole output. Passing all three costs nothing and means the step
+          // works wherever in the chain it is placed.
+          article: input.article ?? null,
+          content_item_id: input.content_item_id ?? (input.article as any)?.contentItemId ?? (input.article as any)?.id ?? null,
+          keywords: input.keywords ?? null,
+          taskLabel: "SEO check",
+        },
+      };
+
     case "publish.publish_article":
       return {
         queue: "publish",

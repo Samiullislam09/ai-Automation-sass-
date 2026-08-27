@@ -150,18 +150,16 @@ test("row 3 · article likho, in the registry §5.5 describes → 4 steps, image
   ]);
 });
 
-test("row 3 · article likho, as the product actually stands today → 2 steps and an honest note", () => {
+test("row 3 · article likho, as the product actually stands today → keyword, writer, SEO", () => {
   const p = okPlan(plan(intent("write_article", { topic: "solar panels for homes" }), TODAY));
 
-  // There is no image agent, and Mr. SEO is a stub — so the plan is the two steps that exist
-  // and one line telling the user what is missing. It does not invent an image step.
-  assert.deepEqual(shape(p.steps), ["1:keyword.find_keywords", "2:writer.write_article"]);
-  assert.equal(p.estimated_seconds, 320);
-  assert.equal(p.cost_units, 43);
-  assert.ok(
-    p.outline.some((l) => l.startsWith("—") && l.includes("Mr. SEO") && l.includes("skip")),
-    `outline should tell the user the SEO check is skipped: ${JSON.stringify(p.outline)}`,
-  );
+  // Mr. SEO stopped being a stub on 2026-08-27, so the real plan gained its check. There is
+  // still no image agent, and the plan does not invent one — an absent agent produces no step
+  // rather than a placeholder.
+  assert.deepEqual(shape(p.steps), ["1:keyword.find_keywords", "2:writer.write_article", "3:seo.check_seo"]);
+  assert.equal(p.estimated_seconds, 360);
+  assert.equal(p.cost_units, 51);
+  assert.ok(!p.steps.some((s) => s.agent_id === "image"), "no image agent exists, so no image step is planned");
 });
 
 // ══ ROW 4 · "article likh ke publish karo" → write_article + publish → 5 ═════════════════
@@ -193,8 +191,28 @@ test("row 3 vs row 4 · the only difference between them is the publish step", (
   );
 });
 
-test("row 4 · asking to publish today refuses, in one sentence, before spending a credit", () => {
-  const res = failed(plan(intent("write_article", { topic: "solar" }, "publish"), TODAY));
+test("row 4 · asking to publish today plans the whole chain, ending at the live site", () => {
+  // This is the plan's Phase 1 exit criterion, and as of 2026-08-27 it resolves for real:
+  // Mr. SEO became a real agent and Mr. Publish got a worker, a queue and a route, so nothing
+  // in this chain is a stub any more.
+  const p = okPlan(plan(intent("write_article", { topic: "solar" }, "publish"), TODAY));
+
+  assert.deepEqual(shape(p.steps), [
+    "1:keyword.find_keywords",
+    "2:writer.write_article",
+    "3:seo.check_seo",
+    "4:publish.publish_article",
+  ]);
+  const publish = p.steps[3];
+  assert.deepEqual([...publish.needs].sort(), ["article", "seo_passed"], "nothing goes live unmeasured");
+  assert.equal(publish.optional, false);
+});
+
+test("row 4 · with Mr. SEO down, publishing is refused in one sentence before a credit is spent", () => {
+  // The refusal still has to be right, because an agent can be down at any moment. Forcing
+  // seo into the stub set reproduces exactly that.
+  const withoutSeo = buildRegistry(MANIFESTS, { stubs: new Set(["seo", "social", "leads"]), notRouted: new Set() });
+  const res = failed(plan(intent("write_article", { topic: "solar" }, "publish"), withoutSeo));
 
   assert.deepEqual(res.failure, { kind: "agent_unhealthy", agent_id: "seo", required: true });
   assert.equal(

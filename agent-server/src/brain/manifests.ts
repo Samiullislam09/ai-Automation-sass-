@@ -248,10 +248,12 @@ export const MANIFESTS: Manifest[] = [
 /** Which of the above are real today. Everything else is registered but disabled, so the intent
  *  engine is never offered a tool whose agent would answer "stub — Phase N wires in…".
  *  Move an id out of here the day its agent stops being a stub. */
-export const STUB_AGENTS = new Set(["seo", "social", "leads"]);
+export const STUB_AGENTS = new Set(["social", "leads"]);
 
-/** `publish` has no worker of its own yet — today the writer auto-publishes when a schedule
- *  says so (`agents/writer.ts` → `maybeAutoPublish`). The manifest is here because the planner
- *  needs to know publishing is irreversible and needs a measured article; the adapter that
- *  routes `publish_article` to real code lands with agent-publish in Phase 2. */
-export const NOT_YET_ROUTED = new Set(["publish"]);
+/** Agents with a manifest but no code behind them yet. Registered so the planner can reason
+ *  about what they would provide, but never offered to a user.
+ *
+ *  Empty as of 2026-08-27: `publish` moved out when `agents/publish.ts` landed with its queue,
+ *  its worker and its adapter route. Keep the set — the next agent to get a manifest before it
+ *  gets an implementation belongs here rather than in a comment somewhere. */
+export const NOT_YET_ROUTED = new Set<string>([]);
