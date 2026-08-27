@@ -82,12 +82,16 @@ jobs:
           if [[ "$f" == *.gpg ]]; then
             echo "encrypted — skipping content check"; exit 0
           fi
+          # Decompress once instead of piping into grep -q: with pipefail, grep closing early
+          # gives gzip a SIGPIPE and the pipeline "fails" even though the table was found
+          # (run #3 reported content_items missing from a perfectly good dump).
+          gunzip -c "$f" | grep -o "CREATE TABLE public\.[a-z_]*" | sort > tables.txt
           for t in content_items schedules jobs_log; do
-            if ! gunzip -c "$f" | grep -q "CREATE TABLE public.${t}"; then
-              echo "::error::table ${t} missing from dump"; exit 1
+            if ! grep -qx "CREATE TABLE public.${t}" tables.txt; then
+              echo "::error::table ${t} missing from dump"; cat tables.txt; exit 1
             fi
           done
-          echo "ok"
+          echo "ok — $(wc -l < tables.txt) tables in dump"; rm tables.txt
 
       - uses: actions/upload-artifact@v4
         with:
