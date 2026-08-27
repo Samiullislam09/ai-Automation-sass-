@@ -1,6 +1,7 @@
 import type { Job } from "pg-boss";
 import { Agent, type AgentJobData } from "./base.js";
 import { supabase } from "../supabase.js";
+import { loadActiveProfile } from "../lib/siteProfile.js";
 import { completeJson } from "../lib/llm.js";
 import { enqueue } from "../queues.js";
 import { loadInsights, planningBlock } from "../lib/insights.js";
@@ -46,12 +47,22 @@ export class BossAgent extends Agent {
     // it no-ops when Google isn't connected, and a failure must not stop the plan.
     await syncGoogleInsights(tenantId);
 
-    const [{ data: tenant }, { data: pages }, { data: existing }, insights] = await Promise.all([
+    const [{ data: tenant }, { data: pages }, { data: existing }, insights, profileRow] = await Promise.all([
       supabase.from("tenants").select("name, website_url, niche, tone_profile").eq("id", tenantId).single(),
       supabase.from("site_pages").select("title").eq("tenant_id", tenantId).limit(40),
       supabase.from("content_items").select("title").eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(30),
       loadInsights(tenantId),
+      // The Site Brain, if Mr. Analyst has run. Absent is normal and costs nothing: without
+      // it this agent plans exactly as it did before (§25.3).
+      loadActiveProfile(tenantId).catch((e: any) => {
+        console.warn("[boss] site profile unavailable, planning from titles only:", e?.message);
+        return null;
+      }),
     ]);
+
+    // loadActiveProfile hands back the row (version, sources, built_from); the planning below
+    // only wants what the analyst concluded.
+    const profile = profileRow?.profile ?? null;
 
     const pageTitles = (pages ?? []).map((p: any) => p.title).filter(Boolean);
     const alreadyWritten = (existing ?? []).map((c: any) => c.title).filter(Boolean);
@@ -67,18 +78,64 @@ export class BossAgent extends Agent {
       };
     }
 
+    // ── What to write about next, in the order the plan puts it (§25.3, §25.4) ───────────
+    //
+    //  1. CONTENT GAPS — searches this site is already shown for with no page answering them.
+    //     Not a guess: Google is reporting demand this business is failing to meet, so the
+    //     article has a measured audience before a word is written.
+    //  2. CLUSTER ROTATION — round-robin across the site's own subjects, so coverage spreads
+    //     instead of piling onto whatever the model finds most interesting. The offset comes
+    //     from how much has already been written, so consecutive runs continue the rotation
+    //     rather than restarting it every time.
+    //  3. Whatever the model adds from the niche and the page titles — the old behaviour,
+    //     which is still exactly what happens when there is no profile at all.
+    const gaps = (profile?.content_gaps ?? []).slice().sort((a, b) => b.impressions - a.impressions);
+    const clusters = (profile?.topic_clusters ?? []).slice().sort((a, b) => b.size - a.size);
+    const rotationOffset = alreadyWritten.length;
+    const rotated = clusters.length
+      ? Array.from({ length: clusters.length }, (_, i) => clusters[(rotationOffset + i) % clusters.length])
+      : [];
+
+    const gapBlock = gaps.length
+      ? [
+          "SEARCHES GOOGLE ALREADY SHOWS THIS SITE FOR, WITH NO PAGE ANSWERING THEM.",
+          "These are the strongest candidates there are, because the demand is measured, not guessed:",
+          ...gaps
+            .slice(0, 8)
+            .map((g) => `- ${g.query} (${g.impressions} impressions${g.position != null ? `, currently position ${g.position.toFixed(1)}` : ""})`),
+        ].join("\n")
+      : "";
+
+    const clusterBlock = rotated.length
+      ? [
+          "SUBJECTS THIS SITE COVERS, least-recently-served first. Spread the topics across these",
+          "rather than putting them all into one:",
+          ...rotated.slice(0, 6).map((c) => `- ${c.name} (${c.size} page${c.size === 1 ? "" : "s"})`),
+        ].join("\n")
+      : "";
+
     const prompt = [
       "You plan blog topics for a small business's content team.",
       `Business: ${tenant?.name ?? "unknown"}${tenant?.website_url ? ` (${tenant.website_url})` : ""}`,
-      tenant?.niche ? `Niche: ${tenant.niche}` : "",
+      profile?.what_they_do ? `What they do: ${profile.what_they_do}` : tenant?.niche ? `Niche: ${tenant.niche}` : "",
+      profile?.audience ? `Their customers: ${profile.audience}` : "",
+      profile?.geo ? `Where they work: ${profile.geo}` : "",
+      profile?.goals?.primary ? `What this content is FOR: ${profile.goals.primary}` : "",
+      gapBlock,
+      clusterBlock,
       pageTitles.length ? `Existing pages on their site:\n- ${pageTitles.slice(0, 25).join("\n- ")}` : "",
       alreadyWritten.length ? `Already written (DO NOT repeat these):\n- ${alreadyWritten.join("\n- ")}` : "",
       "",
       `Choose exactly ${count} NEW blog topics this business should publish next.`,
       "Rules: each topic must be something their real customers would search for; specific, not generic;",
       "no topic may duplicate or closely paraphrase anything listed above.",
-      insights.connected
+      gaps.length
+        ? "PRIORITY: take topics from the gap list first, quoted closely enough that the article can target that exact search. Only invent new ones once the gaps are used up."
+        : insights.connected
         ? "Because real search data is given above, at least half the topics MUST come from the striking-distance or high-impression lists, quoted closely enough that the article can target that exact query."
+        : "",
+      profile?.goals?.primary
+        ? "For each topic, the `why` must say how it serves the goal above — not why the subject is interesting."
         : "",
       "",
       'Reply with ONLY JSON: {"topics":[{"topic":"...","why":"one short sentence"}]}',
