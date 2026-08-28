@@ -686,8 +686,9 @@ export default function MrLxwaDashboard() {
         className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
         style={{ width: 420, height: 220, background: "radial-gradient(ellipse at center,rgba(124,58,237,.22),transparent 65%)" }}
       />
-      {/* chip */}
-      {workingAgent && (
+      {/* chip — only in the spread-out resting layout; the compact single-line row has no
+          room for it and it would float on top of the agent pills */}
+      {workingAgent && !panelOpen && (
         <div className="lx-card2 absolute left-4 top-4 z-10 hidden items-center gap-2.5 px-3 py-2 md:flex">
           <span className="h-2 w-2 rounded-full lx-pulse" style={{ background: "#22c55e", boxShadow: "0 0 8px #22c55e" }} />
           <span>
@@ -1178,35 +1179,33 @@ export default function MrLxwaDashboard() {
   /* ---------------------------------------------------------------------- */
 
   const BottomBar = (
-    <footer className="flex shrink-0 flex-wrap items-center gap-3 border-t px-4 py-2.5" style={{ borderColor: "var(--lx-border)", background: "var(--lx-panel)" }}>
+    <div className="flex flex-wrap items-center gap-2 rounded-xl border px-3 py-1.5" style={{ borderColor: "var(--lx-border)", background: "var(--lx-panel)" }}>
       <button className="lx-icobtn rounded-full" aria-label="New task">
-        <Plus size={15} />
+        <Plus size={13} />
       </button>
-      <div className="min-w-0">
-        <div className="lx-12 truncate">
-          <span className="lx-mut">Current Task: </span>
-          <span className="font-semibold">Solar Panel Benefits for Homes</span>
-        </div>
-        <div className="lx-10 lx-mut">Step 3 of 6: Writing Article</div>
+      <div className="min-w-0 lx-11">
+        <span className="lx-mut">Current: </span>
+        <span className="font-semibold">Solar Panel Benefits for Homes</span>
+        <span className="lx-mut"> · Step 3 of 6</span>
       </div>
 
-      <div className="hidden min-w-0 flex-1 items-center gap-3 sm:flex" style={{ maxWidth: 460 }}>
+      <div className="hidden min-w-0 flex-1 items-center gap-2 sm:flex" style={{ maxWidth: 260 }}>
         <div className="lx-track flex-1">
           <div className="lx-fill" style={{ width: "42%" }} />
         </div>
-        <span className="lx-12 font-bold">42%</span>
+        <span className="lx-11 font-bold">42%</span>
       </div>
 
-      <div className="ml-auto flex items-center gap-3">
-        <span className="lx-11 lx-mut hidden md:inline">
-          Elapsed <span className="lx-mono font-semibold" style={{ color: "#e6e6f2" }}>{fmt(sec)}</span> / Est. 00:12:30
+      <div className="ml-auto flex items-center gap-2">
+        <span className="lx-10 lx-mut hidden md:inline">
+          <span className="lx-mono font-semibold" style={{ color: "#e6e6f2" }}>{fmt(sec)}</span> / 00:12:30
         </span>
         <button className="lx-icobtn rounded-full" onClick={() => setPaused((p) => !p)} aria-label={paused ? "Resume" : "Pause"}>
-          {paused ? <Play size={13} /> : <Pause size={13} />}
+          {paused ? <Play size={12} /> : <Pause size={12} />}
         </button>
         <button
           className="lx-pill red"
-          style={{ cursor: "pointer", padding: "7px 14px", background: "rgba(239,68,68,.08)" }}
+          style={{ cursor: "pointer", padding: "5px 11px", background: "rgba(239,68,68,.08)" }}
         >
           <span className="relative flex h-3 w-3 items-center justify-center rounded-full border" style={{ borderColor: "#f87171" }}>
             <span className="h-1 w-1 rounded-sm" style={{ background: "#f87171" }} />
@@ -1214,7 +1213,7 @@ export default function MrLxwaDashboard() {
           Stop Task
         </button>
       </div>
-    </footer>
+    </div>
   );
 
   /* ---------------------------------------------------------------------- */
@@ -1251,22 +1250,12 @@ export default function MrLxwaDashboard() {
           </button>
         </div>
 
-        {/* header */}
-        <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b px-4 py-3" style={{ borderColor: "var(--lx-border)" }}>
-          <h1 className="min-w-0 truncate text-base font-bold">Solar Panel Benefits for Homes – Write &amp; Publish</h1>
-          <span className="lx-pill purple">In Progress</span>
-          <div className="ml-auto flex items-center gap-4">
-            <span className="lx-mono lx-13 font-bold">{fmt(sec)}</span>
-          </div>
-        </header>
-
         {/* scrollable content */}
         <main className="lx-scroll flex-1 space-y-4 overflow-y-auto p-3 sm:p-4">
           {Workflow}
           <AnimatePresence initial={false}>{panelOpen && AgentPanel}</AnimatePresence>
+          {BottomBar}
         </main>
-
-        {BottomBar}
       </div>
 
       {Assistant}
