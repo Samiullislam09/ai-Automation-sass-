@@ -32,7 +32,7 @@
  */
 
 import React, { useEffect, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import {
   LayoutDashboard,
   MessageSquare,
@@ -114,7 +114,9 @@ const CSS = `
 .lx-panelR{background:var(--lx-panel);border-left:1px solid var(--lx-border)}
 
 /* ---- type helpers ---------------------------------------------------- */
-.lx-10{font-size:10px}.lx-11{font-size:11px}.lx-12{font-size:12px}.lx-13{font-size:13px}
+/* bumped up from the original 10/11/12/13px scale — read as too small ("bahut chota") once
+   the network cards had real names/roles/status packed into them, not just icons */
+.lx-10{font-size:11.5px}.lx-11{font-size:13px}.lx-12{font-size:14.5px}.lx-13{font-size:16px}
 .lx-mut{color:var(--lx-mut)}.lx-dim{color:var(--lx-dim)}
 .lx-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 
@@ -189,7 +191,7 @@ const CSS = `
   .lx-net{grid-template-columns:repeat(12,1fr);grid-template-rows:repeat(4,auto);
     grid-template-areas:
       "t1 t1 t1 t2 t2 t2 t3 t3 t3 t4 t4 t4"
-      "l1 l1 l1 b  b  b  b  b  b  r1 r1 r1"
+      "l1 l1 l1 l1 b  b  b  b  r1 r1 r1 r1"
       "o1 o1 o1 o2 o2 o2 o3 o3 o3 o4 o4 o4"}
   /* side cards sit centred on the brain, single-card height; the brain card itself does
      not stretch to fill the row — it keeps the reference's compact size */
@@ -198,33 +200,40 @@ const CSS = `
 }
 
 .lx-net-card{position:relative;z-index:1;background:#0b0b14;border:1px solid rgba(255,255,255,.08);
-  border-radius:14px;padding:14px;text-align:left;display:flex;flex-direction:column;width:100%;
-  min-height:112px;transition:.18s;box-shadow:0 4px 18px rgba(0,0,0,.35)}
+  border-radius:14px;padding:15px;text-align:left;display:flex;flex-direction:column;width:100%;
+  min-height:126px;transition:.18s;box-shadow:0 4px 18px rgba(0,0,0,.35)}
 .lx-net-card:not(:disabled):hover{border-color:rgba(56,189,248,.45);background:#0e0e19}
-.lx-net-icon{width:44px;height:44px;border-radius:11px;display:flex;align-items:center;
+.lx-net-icon{width:46px;height:46px;border-radius:11px;display:flex;align-items:center;
   justify-content:center;flex-shrink:0}
 
-/* glowing wires from each card to the brain — SVG overlay under the cards (z-index 0 vs 1) */
-.lx-wires{position:absolute;inset:0;z-index:0;pointer-events:none;overflow:visible}
-.lx-wire-dash{animation:lxWireFlow 1.6s linear infinite}
-@keyframes lxWireFlow{to{stroke-dashoffset:-22}}
+/* smooth open/close of blocks of unknown height — see the Collapse component. A gentle
+   decelerate-only curve (no fast front-load) so a large height swing (compact strip ↔ full
+   network, ~700px) reads as one settled glide instead of a lurch. */
+.lx-collapse{display:grid;grid-template-rows:0fr;opacity:0;visibility:hidden;
+  transition:grid-template-rows .5s cubic-bezier(.16,1,.3,1),opacity .35s ease,visibility 0s linear .5s}
+.lx-collapse.open{grid-template-rows:1fr;opacity:1;visibility:visible;
+  transition:grid-template-rows .5s cubic-bezier(.16,1,.3,1),opacity .35s ease .1s,visibility 0s}
+.lx-collapse>div{min-height:0;overflow:hidden}
 
-/* brain "command center" card — matches the reference (jhhhhhhhh.png) exactly: fill is the
-   reference's own sampled background (#060a18, so the cropped 3D brain render sits on it
-   seamlessly), a 1px purple→cyan gradient border (painted via the two-layer background
-   trick, since a gradient can't be a border-color), and a soft, low-intensity glow — not
-   the loud cyan halo it had before. Compact: it does NOT stretch to the row height. */
+/* brain "command center" card — TRANSPARENT fill (the workflow card shows through), a 1px
+   purple→cyan gradient ring as the border, the same quiet shadow every other agent card has.
+   The ring is a ::before layer masked down to its 1px edge (mask-composite) — NOT the
+   two-layer-background trick, which can't do a transparent fill: with a transparent top
+   layer the gradient underneath filled the whole box (that was the solid purple/cyan card). */
 .lx-hex{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
-  padding:18px 16px 16px;text-align:center;border-radius:18px;border:1px solid transparent;
-  background:linear-gradient(#060a18,#060a18) padding-box,
-             linear-gradient(160deg,#a855f7,#6366f1 45%,#22d3ee) border-box;
-  box-shadow:0 0 18px rgba(99,102,241,.28),0 0 40px rgba(34,211,238,.10)}
-/* the render is a rectangular crop of the reference; a radial mask fades its edges into the
-   card so no crop box is visible, only the brain */
-.lx-hex img{width:124px;height:auto;display:block;
-  -webkit-mask:radial-gradient(ellipse 52% 50% at 50% 50%,#000 58%,transparent 100%);
-  mask:radial-gradient(ellipse 52% 50% at 50% 50%,#000 58%,transparent 100%);
-  filter:drop-shadow(0 0 14px rgba(129,140,248,.55))}
+  padding:13px 11px;text-align:center;border-radius:16px;background:transparent;
+  box-shadow:0 4px 18px rgba(0,0,0,.35)}
+.lx-hex::before{content:"";position:absolute;inset:0;border-radius:inherit;padding:1px;pointer-events:none;
+  background:linear-gradient(160deg,#a855f7,#6366f1 45%,#22d3ee);
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+  -webkit-mask-composite:xor;mask-composite:exclude}
+/* the render is a rectangular crop of the reference: a radial mask fades its edges, and
+   screen blending makes its dark #060a18 background vanish against the card while the bright
+   brain stays — so only the brain is visible, no crop box, on a transparent card */
+.lx-hex img{width:84px;height:auto;display:block;mix-blend-mode:screen;
+  -webkit-mask:radial-gradient(ellipse 46% 46% at 50% 50%,#000 52%,transparent 100%);
+  mask:radial-gradient(ellipse 46% 46% at 50% 50%,#000 52%,transparent 100%);
+  filter:drop-shadow(0 0 8px rgba(129,140,248,.35))}
 
 /* ---- robot avatar (pure CSS — [ASSET] swap point) ---------------------- */
 .lx-robo{position:relative;border-radius:26%;flex-shrink:0;
@@ -324,6 +333,10 @@ const NAV: NavItem[] = [
   { label: "Settings", icon: Settings },
 ];
 
+/** A chat bubble. `live` = still streaming in (the loop below keeps appending to `text`);
+ *  `failed` = the request/stream broke and `text` is whatever partial reply had arrived. */
+type ThreadMsg = { who: "user" | "ai"; text: string; time: string; live?: boolean; failed?: boolean };
+
 type AgentStatus = "Completed" | "Working" | "Waiting" | "Planned";
 type Agent = { name: string; role: string; status: AgentStatus; icon: React.ElementType; color: string };
 
@@ -392,15 +405,6 @@ const KEY_POINTS = [
   "Lowers air pollution",
   "Sustainable & renewable energy source",
   "Long-term environmental impact",
-];
-
-const PLAN: { label: string; s: "done" | "current" | "pending" }[] = [
-  { label: "Keyword research", s: "done" },
-  { label: "Outline & writing", s: "done" },
-  { label: "Writing article", s: "current" },
-  { label: "Creating images", s: "pending" },
-  { label: "SEO optimization", s: "pending" },
-  { label: "Publishing", s: "pending" },
 ];
 
 const TABS = ["Live Activity", "Research", "Writing", "References", "Output Preview"];
@@ -637,63 +641,23 @@ const StatTile = ({
   </div>
 );
 
-type Wire = { x1: number; y1: number; x2: number; y2: number };
+/** Smooth show/hide for a block of unknown height — CSS `grid-template-rows: 0fr → 1fr`, which
+ *  the browser can transition natively (unlike `height: auto`). This replaced framer-motion's
+ *  `height: "auto"` + `layout` animation on the agent panel and workflow, which visibly
+ *  stuttered: the panel's height was being animated by framer while the workflow's `layout`
+ *  prop re-measured it every frame AND the elapsed-time timer re-rendered the whole tree every
+ *  second, so the two fought each other and the collapse looked broken. Children stay mounted
+ *  (so nothing remounts or flashes); when closed the block is also `visibility:hidden` so it
+ *  can't be tabbed into. */
+const Collapse = ({ open, children }: { open: boolean; children: React.ReactNode }) => (
+  <div className={`lx-collapse ${open ? "open" : ""}`} aria-hidden={!open}>
+    <div>{children}</div>
+  </div>
+);
 
-/** Where a ray from a rect's center toward `to` leaves the rect — so the wire starts at
- *  the card's edge, not under it. */
-const edgePoint = (r: DOMRect, cx: number, cy: number, tx: number, ty: number) => {
-  const dx = tx - cx;
-  const dy = ty - cy;
-  if (!dx && !dy) return { x: cx, y: cy };
-  const sx = dx ? (r.width / 2) / Math.abs(dx) : Infinity;
-  const sy = dy ? (r.height / 2) / Math.abs(dy) : Infinity;
-  const t = Math.min(sx, sy);
-  return { x: cx + dx * t, y: cy + dy * t };
-};
-
-/** The resting-state "AI Agent Network": cards around a hexagonal brain, glowing wires from
- *  each card to the brain. Wires are an SVG overlay whose endpoints are measured from the
- *  real rendered card/brain boxes (ResizeObserver), so they follow the grid at any width —
- *  they are hidden under 900px where the grid collapses to a plain 2-column stack. */
+/** The resting-state "AI Agent Network": color-coded agent cards arranged around the brain
+ *  "command center" card. */
 const AgentNetwork = ({ workingAgent, onOpen }: { workingAgent: Agent | null; onOpen: (a: Agent) => void }) => {
-  const ref = useRef<HTMLDivElement>(null);
-  const [wires, setWires] = useState<Wire[]>([]);
-  const [box, setBox] = useState({ w: 0, h: 0 });
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const measure = () => {
-      const host = el.getBoundingClientRect();
-      const brain = el.querySelector<HTMLElement>("[data-net='b']");
-      if (!brain || host.width < 440) {
-        setWires([]);
-        setBox({ w: host.width, h: host.height });
-        return;
-      }
-      const b = brain.getBoundingClientRect();
-      const bx = b.left - host.left + b.width / 2;
-      const by = b.top - host.top + b.height / 2;
-      // the hexagon's visible edge is inset from its box: stop wires at ~46% of its half-width
-      const hexR = Math.min(b.width, b.height) * 0.46;
-      const next: Wire[] = [];
-      el.querySelectorAll<HTMLElement>("[data-net]:not([data-net='b'])").forEach((card) => {
-        const r = card.getBoundingClientRect();
-        const cx = r.left - host.left + r.width / 2;
-        const cy = r.top - host.top + r.height / 2;
-        const start = edgePoint(new DOMRect(0, 0, r.width, r.height), cx, cy, bx, by);
-        const ang = Math.atan2(cy - by, cx - bx);
-        next.push({ x1: start.x, y1: start.y, x2: bx + Math.cos(ang) * hexR, y2: by + Math.sin(ang) * hexR });
-      });
-      setWires(next);
-      setBox({ w: host.width, h: host.height });
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
   return (
     <div className="p-4 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -715,28 +679,7 @@ const AgentNetwork = ({ workingAgent, onOpen }: { workingAgent: Agent | null; on
         </div>
       )}
 
-      <div ref={ref} className="lx-net-host relative mt-4">
-        {wires.length > 0 && (
-          <svg className="lx-wires" width={box.w} height={box.h} viewBox={`0 0 ${box.w} ${box.h}`} aria-hidden>
-            <defs>
-              <filter id="lxWireGlow" x="-20%" y="-20%" width="140%" height="140%">
-                <feGaussianBlur stdDeviation="2.2" result="b" />
-                <feMerge>
-                  <feMergeNode in="b" />
-                  <feMergeNode in="SourceGraphic" />
-                </feMerge>
-              </filter>
-            </defs>
-            {wires.map((w, i) => (
-              <g key={i} filter="url(#lxWireGlow)">
-                <line x1={w.x1} y1={w.y1} x2={w.x2} y2={w.y2} stroke="rgba(56,189,248,.55)" strokeWidth="1.4" strokeDasharray="5 6" className="lx-wire-dash" />
-                <circle cx={w.x1} cy={w.y1} r="3" fill="#38bdf8" />
-                <circle cx={w.x2} cy={w.y2} r="2.5" fill="#60a5fa" />
-              </g>
-            ))}
-          </svg>
-        )}
-
+      <div className="lx-net-host relative mt-4">
         <div className="lx-net">
           {NET_TOP.map((a, i) => (
             <NetCard key={a.name} a={a} area={`t${i + 1}`} onClick={() => onOpen(a)} />
@@ -752,10 +695,10 @@ const AgentNetwork = ({ workingAgent, onOpen }: { workingAgent: Agent | null; on
           <div className="lx-hex lx-net-brain" data-net="b" style={{ gridArea: "b" }}>
             {/* eslint-disable-next-line @next/next/no-img-element -- static brand asset, fixed size */}
             <img src="/brand/brain-boss.png" alt="" width={156} height={124} />
-            <div className="text-base font-bold mt-2">Mr. Lxwa</div>
-            <div className="lx-11 lx-mut">Command Center</div>
-            <div className="lx-10 lx-mut mt-0.5">Plan · Coordinate · Execute</div>
-            <div className="mt-2 flex items-center gap-1.5 lx-11 font-semibold" style={{ color: "#22c55e" }}>
+            <div className="lx-13 font-bold mt-1">Mr. Lxwa</div>
+            <div className="lx-10 lx-mut">Command Center</div>
+            <div className="lx-10 lx-mut">Plan · Coordinate · Execute</div>
+            <div className="mt-1.5 flex items-center gap-1.5 lx-10 font-semibold" style={{ color: "#22c55e" }}>
               <span className="h-1.5 w-1.5 rounded-full lx-pulse" style={{ background: "#22c55e" }} />
               Online
             </div>
@@ -792,6 +735,21 @@ const fmt = (s: number) => {
 const nowTime = () =>
   new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }).toUpperCase();
 
+/** Mr. Lxwa's real replies use markdown bold (`**word**`) — this renders just that, nothing
+ *  fancier, matching components/kit.tsx's own `inline()` helper. */
+const boldText = (text: string, key: string): React.ReactNode[] => {
+  const out: React.ReactNode[] = [];
+  const re = /\*\*(.+?)\*\*/g;
+  let i = 0, n = 0, m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    if (m.index > i) out.push(text.slice(i, m.index));
+    out.push(<b key={`${key}-b${n++}`}>{m[1]}</b>);
+    i = m.index + m[0].length;
+  }
+  if (i < text.length) out.push(text.slice(i));
+  return out;
+};
+
 /* ========================================================================== */
 /*  MAIN COMPONENT                                                            */
 /* ========================================================================== */
@@ -804,9 +762,13 @@ export default function MrLxwaDashboard() {
   const [botOpen, setBotOpen] = useState(false); // <lg drawer
   const [paused, setPaused] = useState(false);
   const [msg, setMsg] = useState("");
-  const [thread, setThread] = useState<{ who: "user" | "ai"; text: string; time: string }[]>([]);
+  const [thread, setThread] = useState<ThreadMsg[]>([]);
+  const [chatBusy, setChatBusy] = useState(false);
   const [sec, setSec] = useState(272); // 00:04:32
   const chatRef = useRef<HTMLDivElement>(null);
+  const convId = useRef<string | null>(null);
+  const helloSent = useRef(false); // React 18 strict-mode double-invokes effects in dev — without
+  // this the real /api/chat "__hello__" greeting was requested twice on one mount.
 
   // The agent panel (live activity, timeline, search results) exists to show ONE agent's
   // live work — it only makes sense while an agent is actually working. `workingAgent` is
@@ -838,19 +800,74 @@ export default function MrLxwaDashboard() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [thread, aTab]);
 
+  /** Real chat — POSTs to the same /api/chat the production BossChat uses (components/kit.tsx),
+   *  and relays the streamed token chunks into the last bubble as they arrive. No ctx (plan,
+   *  tokens, memory) and no system-event cards yet — those read from the old dashboard's
+   *  zustand store (useStore()), which this component doesn't have; a plain reply is still a
+   *  REAL model turn, persisted server-side to chat_conversations/chat_messages. */
+  const stream = async (q: string) => {
+    setChatBusy(true);
+    setThread((p) => [...p, { who: "ai", text: "", time: nowTime(), live: true }]);
+    let full = "";
+    try {
+      const history = thread
+        .filter((m) => m.text.trim() && !m.live && !m.failed)
+        .slice(-8)
+        .map((m) => ({ role: m.who === "user" ? "user" : "assistant", content: m.text.slice(0, 700) }));
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ q, ctx: {}, history, conversationId: convId.current }),
+      });
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+      const returned = res.headers.get("X-Conversation-Id");
+      if (returned) convId.current = returned;
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        full += dec.decode(value, { stream: true });
+        setThread((p) => {
+          const next = [...p];
+          next[next.length - 1] = { ...next[next.length - 1], text: full };
+          return next;
+        });
+      }
+      setThread((p) => {
+        const next = [...p];
+        next[next.length - 1] = { ...next[next.length - 1], text: full, live: false };
+        return next;
+      });
+    } catch {
+      // Whatever streamed in stays on screen; an empty bubble forever (with no way to retry)
+      // was worse than showing a plain, honest failure line.
+      setThread((p) => {
+        const next = [...p];
+        const partial = full.trim();
+        next[next.length - 1] = partial
+          ? { ...next[next.length - 1], text: partial, live: false, failed: true }
+          : { who: "ai", text: "Couldn't reach Mr. Lxwa — check you're signed in and try again.", time: nowTime(), failed: true };
+        return next;
+      });
+    } finally {
+      setChatBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (helloSent.current) return;
+    helloSent.current = true;
+    void stream("__hello__");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const send = () => {
     const t = msg.trim();
-    if (!t) return;
+    if (!t || chatBusy) return;
     setThread((p) => [...p, { who: "user", text: t, time: nowTime() }]);
     setMsg("");
-    setTimeout(
-      () =>
-        setThread((p) => [
-          ...p,
-          { who: "ai", text: "Got it! I have shared this with the team and queued it up. 👍", time: nowTime() },
-        ]),
-      900
-    );
+    void stream(t);
   };
 
   /* ---------------------------------------------------------------------- */
@@ -966,20 +983,19 @@ export default function MrLxwaDashboard() {
   };
 
   const Workflow = (
-    <motion.section layout transition={{ layout: { duration: 0.45, ease: "easeInOut" } }} className="lx-card relative overflow-hidden">
+    <section className="lx-card relative overflow-hidden">
       {/* ambient glow */}
       <div
         className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
         style={{ width: 420, height: 220, background: "radial-gradient(ellipse at center,rgba(124,58,237,.22),transparent 65%)" }}
       />
-      {/* compact/full swap — plain CSS remount (key change), not framer-motion's
-          AnimatePresence: the same nested-AnimatePresence-inside-a-frequently-re-rendering-tree
-          bug documented above for Live Visual (opacity stuck at 0, confirmed via computed
-          style) reproduced here too once this became a second AnimatePresence sharing the
-          tree with the `sec` timer's every-second re-render. */}
-      {panelOpen ? (
-        // ---- compact: every agent sorted into one line, once a panel is open ----
-        <div key="compact" className="lx-live-anim lx-scroll overflow-x-auto">
+      {/* compact/full swap — both stay mounted and cross-collapse (see Collapse), so the
+          card's height glides between the one-line strip and the full network instead of
+          jumping. No framer-motion here: its layout/AnimatePresence animations fought the
+          every-second timer re-render and stuttered (and once got stuck at opacity 0). */}
+      {/* ---- compact: every agent sorted into one line, once a panel is open ---- */}
+      <Collapse open={panelOpen}>
+        <div className="lx-scroll overflow-x-auto">
           <div className="flex min-w-max items-center gap-2 px-4 py-3">
             {AGENTS_LEFT.map((a) => (
               <AgentNode key={a.name} a={a} compact onClick={() => openAgentPanel(a)} />
@@ -990,32 +1006,19 @@ export default function MrLxwaDashboard() {
             ))}
           </div>
         </div>
-      ) : (
-        // ---- full: "AI Agent Network" — pixel-matched to the reference mockup (ChatGPT
-        // Image Aug 29, 2026): title+subtitle+active pill header, agents in their own
-        // color-coded cards arranged around a hexagonal brain "command center", a bottom
-        // stats strip. CSS grid-area layout (see .lx-net below), not absolute positioning —
-        // it collapses to a clean 2-column auto-flow (brain first) under 900px, so it stays
-        // fully responsive instead of a fixed pixel diagram. ----
-        <div key="full" className="lx-live-anim">
-          <AgentNetwork workingAgent={workingAgent} onOpen={openAgentPanel} />
-        </div>
-      )}
-    </motion.section>
+      </Collapse>
+      {/* ---- full: "AI Agent Network" — the resting state. CSS grid-area layout (see
+          .lx-net), collapsing to a 2-column auto-flow (brain first) in a narrow column. ---- */}
+      <Collapse open={!panelOpen}>
+        <AgentNetwork workingAgent={workingAgent} onOpen={openAgentPanel} />
+      </Collapse>
+    </section>
   );
 
   /* ---------------------------------------------------------------------- */
 
   const AgentPanel = (
-    <motion.section
-      layout
-      initial={{ opacity: 0, height: 0, y: -12 }}
-      animate={{ opacity: 1, height: "auto", y: 0 }}
-      exit={{ opacity: 0, height: 0, y: -12 }}
-      transition={{ duration: 0.35, ease: "easeInOut" }}
-      style={{ overflow: "hidden" }}
-      className="lx-card p-4"
-    >
+    <section className="lx-card mt-4 p-4">
       {/* panel toolbar — agent identity moved in here (small, inline) since the old left
           column's "Agent Status" card was dropped, and "Back to Workflow" / "Minimize Agent"
           dropped too (per request, to give Live Visual more room) — Close (X) already does
@@ -1226,7 +1229,7 @@ export default function MrLxwaDashboard() {
           </div>
         </div>
       </div>
-    </motion.section>
+    </section>
   );
 
   /* ---------------------------------------------------------------------- */
@@ -1294,75 +1297,14 @@ export default function MrLxwaDashboard() {
 
       {aTab === "assistant" ? (
         <div ref={chatRef} className="lx-scroll flex-1 space-y-3 overflow-y-auto px-3 py-3">
-          <div className="lx-10 lx-dim text-right">09:30 AM</div>
-
-          {/* user msg */}
-          <div className="flex justify-end">
-            <div className="lx-me lx-12 max-w-xs px-3 py-2.5 leading-relaxed">
-              Write a detailed article on solar panel benefits for homes and publish it on my website.
+          {/* real conversation with /api/chat (same endpoint components/kit.tsx's BossChat
+              uses) — the opening line above is the model's actual "__hello__" reply, not a
+              scripted mock, and everything below is genuinely sent/received. */}
+          {thread.length === 0 && (
+            <div className="flex items-center gap-2 lx-11 lx-mut">
+              <Robo size={24} /> Connecting to Mr. Lxwa…
             </div>
-          </div>
-
-          {/* ai voice reply */}
-          <div>
-            <div className="flex items-center gap-2">
-              <Robo size={24} />
-              <span className="lx-11 font-semibold">Mr. Lxwa</span>
-              <span className="lx-10 lx-dim ml-auto">09:30 AM</span>
-            </div>
-            <div className="lx-ai mt-1.5 flex items-center gap-2.5 px-3 py-2.5" style={{ marginLeft: 30 }}>
-              <Wave n={26} h={16} color="var(--lx-cyan)" />
-              <span className="ml-auto flex items-center gap-1 lx-10 lx-mut">
-                <Clock size={11} /> 00:08
-              </span>
-            </div>
-
-            {/* ai text + plan */}
-            <div className="lx-ai lx-12 mt-2 px-3 py-2.5 leading-relaxed" style={{ marginLeft: 30 }}>
-              <p>Got it! I&apos;ll organize my team and get this done for you.</p>
-              <p className="mt-2">Here&apos;s the plan:</p>
-              <ul className="mt-2 space-y-1.5">
-                {PLAN.map((p) => (
-                  <li key={p.label} className="flex items-center gap-2">
-                    {p.s === "done" ? (
-                      <CheckCircle2 size={14} style={{ color: "#22c55e" }} />
-                    ) : p.s === "current" ? (
-                      <ArrowRight size={14} style={{ color: "#60a5fa" }} />
-                    ) : (
-                      <Circle size={13} style={{ color: "#4a4a60" }} />
-                    )}
-                    <span style={{ color: p.s === "current" ? "#93c5fd" : p.s === "done" ? "#e2e2ee" : "var(--lx-mut)" }}>
-                      {p.label}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              <p className="mt-2">You can watch the live progress on the dashboard.</p>
-              <p className="mt-1">Let&apos;s get started! 🚀</p>
-            </div>
-          </div>
-
-          <div className="lx-10 lx-dim text-right">09:31 AM</div>
-          <div className="flex justify-end">
-            <div className="lx-me lx-12 px-3.5 py-2">Show me live</div>
-          </div>
-
-          <div>
-            <div className="flex items-center gap-2">
-              <Robo size={24} />
-              <span className="lx-11 font-semibold">Mr. Lxwa</span>
-              <span className="lx-10 lx-dim ml-auto">09:31 AM</span>
-            </div>
-            <div className="lx-ai lx-12 mt-1.5 px-3 py-2.5 leading-relaxed" style={{ marginLeft: 30 }}>
-              Sure! You can watch Mr. Writer working on your article.
-            </div>
-          </div>
-
-          <button className="lx-grad lx-12 w-full py-2.5">
-            <LayoutDashboard size={14} /> View Live Workflow
-          </button>
-
-          {/* dynamic messages */}
+          )}
           {thread.map((m, i) =>
             m.who === "user" ? (
               <div key={i} className="flex justify-end">
@@ -1375,8 +1317,11 @@ export default function MrLxwaDashboard() {
                   <span className="lx-11 font-semibold">Mr. Lxwa</span>
                   <span className="lx-10 lx-dim ml-auto">{m.time}</span>
                 </div>
-                <div className="lx-ai lx-12 mt-1.5 px-3 py-2.5 leading-relaxed" style={{ marginLeft: 30 }}>
-                  {m.text}
+                <div
+                  className="lx-ai lx-12 mt-1.5 px-3 py-2.5 leading-relaxed"
+                  style={{ marginLeft: 30, color: m.failed ? "#f87171" : undefined, whiteSpace: "pre-wrap" }}
+                >
+                  {m.text ? boldText(m.text, `m${i}`) : m.live ? "…" : ""}
                 </div>
               </div>
             )
@@ -1403,15 +1348,17 @@ export default function MrLxwaDashboard() {
             value={msg}
             onChange={(e) => setMsg(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && send()}
-            placeholder="Type your message..."
-            className="lx-12 w-full bg-transparent py-1.5 outline-none"
+            placeholder={chatBusy ? "Mr. Lxwa is replying…" : "Type your message..."}
+            disabled={chatBusy}
+            className="lx-12 w-full bg-transparent py-1.5 outline-none disabled:opacity-60"
             style={{ border: "none", color: "var(--lx-text)" }}
           />
           <button
             onClick={send}
+            disabled={chatBusy || !msg.trim()}
             aria-label="Send"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white"
-            style={{ background: "linear-gradient(135deg,#4f46e5,#8b5cf6)", border: "none", cursor: "pointer", boxShadow: "0 0 12px rgba(124,58,237,.5)" }}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white disabled:opacity-50"
+            style={{ background: "linear-gradient(135deg,#4f46e5,#8b5cf6)", border: "none", cursor: chatBusy ? "default" : "pointer", boxShadow: "0 0 12px rgba(124,58,237,.5)" }}
           >
             <Send size={14} />
           </button>
@@ -1423,7 +1370,7 @@ export default function MrLxwaDashboard() {
   /* ---------------------------------------------------------------------- */
 
   const BottomBar = (
-    <div className="flex flex-wrap items-center gap-2 rounded-xl border px-3 py-1.5" style={{ borderColor: "var(--lx-border)", background: "var(--lx-panel)" }}>
+    <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl border px-3 py-1.5" style={{ borderColor: "var(--lx-border)", background: "var(--lx-panel)" }}>
       <button className="lx-icobtn rounded-full" aria-label="New task">
         <Plus size={13} />
       </button>
@@ -1495,9 +1442,13 @@ export default function MrLxwaDashboard() {
         </div>
 
         {/* scrollable content */}
-        <main className="lx-scroll flex-1 space-y-4 overflow-y-auto p-3 sm:p-4">
+        {/* scrollbar-gutter: stable — the panel opening/closing pushes the content past/under
+            the fold, so the vertical scrollbar appears and disappears; without a reserved
+            gutter that changes the column's content width and every card lurches sideways
+            each time (measured: the "whole page jolts" complaint). */}
+        <main className="lx-scroll flex-1 overflow-y-auto p-3 sm:p-4" style={{ scrollbarGutter: "stable" }}>
           {Workflow}
-          <AnimatePresence initial={false}>{panelOpen && AgentPanel}</AnimatePresence>
+          <Collapse open={panelOpen}>{AgentPanel}</Collapse>
           {BottomBar}
         </main>
       </div>
