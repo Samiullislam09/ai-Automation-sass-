@@ -5,14 +5,19 @@
  *  MR. LXWA — AI Automation System · Dashboard
  *  Pixel-match rebuild of the reference mockup, 100% code (no image crops).
  * ============================================================================
- *  Dropped in verbatim from the user-supplied mockup (Downloads/MrLxwaDashboard.tsx,
- *  2026-08-28) for a rendered preview at /dashboard-preview — see that route for why it
- *  is NOT mounted under /app/** (AppShell already renders its own sidebar/topbar; this
- *  component is a full standalone page shell and the two would nest).
+ *  Grew out of a user-supplied mockup (Downloads/MrLxwaDashboard.tsx, 2026-08-28), first
+ *  shown at /dashboard-preview, then approved and routed at /dashboard (app/dashboard/
+ *  page.tsx) 2026-08-29. NOT mounted under app/app/** — AppShell already renders its own
+ *  sidebar/topbar/chat; this component is a full standalone page shell and the two would
+ *  nest.
  *
- *  Self-contained: no backend wiring yet. NAV/AGENTS_LEFT/AGENTS_RIGHT/TIMELINE/RESULTS/
- *  KEY_POINTS/PLAN below are the mockup's own placeholder data, unchanged — this is a UI
- *  preview to react to before any of it gets wired to real tasks/agents/chat.
+ *  REAL, as of 2026-08-29: the Assistant chat panel (`stream()` below, POSTs /api/chat —
+ *  same backend as production's BossChat) and the agent network's per-agent status
+ *  (`useLiveEvents` from lib/live.ts — the same Realtime task/step feed components/
+ *  Workspace.tsx already uses). AGENT_META_LEFT/RIGHT below are just identity (name, role,
+ *  icon, color) — status is always derived from the real current task, never hardcoded.
+ *  NAV and a few cosmetic bits (TABS) are still mockup placeholders; nothing renders a
+ *  status/progress claim that isn't backed by a real task_steps/task_events row.
  *
  *  DEPS: lucide-react (already a project dependency). Tailwind CSS (core layout classes
  *  only — every color/glow/animation lives in the embedded <style> below, scoped to
@@ -32,7 +37,10 @@
  */
 
 import React, { useEffect, useRef, useState } from "react";
-import { motion } from "framer-motion";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useLiveEvents, type TaskState } from "@/lib/live";
+import { useStore, PLANS } from "@/lib/store";
 import {
   LayoutDashboard,
   MessageSquare,
@@ -45,6 +53,7 @@ import {
   UserRound,
   TrendingUp,
   Settings,
+  Link2,
   ChevronDown,
   Bot,
   Maximize2,
@@ -56,20 +65,14 @@ import {
   Mic,
   MoreVertical,
   CheckCircle2,
-  Circle,
-  ArrowRight,
-  Eye,
   BookOpen,
   PenLine,
   Menu,
   Plus,
-  FileSearch,
-  Brain,
   BarChart3,
   KeyRound,
   Search,
   ShieldCheck,
-  UploadCloud,
   Megaphone,
   Loader2,
   Image as ImageIcon,
@@ -318,19 +321,24 @@ const CSS = `
 /*  DATA (verbatim from the mockup)                                           */
 /* ========================================================================== */
 
-type NavItem = { label: string; icon: React.ElementType; badge?: number };
+/** `href` is a REAL route under app/app/** (unaffected by the /app dashboard-home retirement
+ *  — only that one page moved, every other /app/** page is still live). Items with no href
+ *  (Chat opens the built-in Assistant panel; Office/Tasks/Leads have no dedicated real page
+ *  yet) stay a local nav highlight only — never a link to a page that doesn't exist. */
+type NavItem = { label: string; icon: React.ElementType; badge?: number; href?: string };
 const NAV: NavItem[] = [
-  { label: "Dashboard", icon: LayoutDashboard },
+  { label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
   { label: "Chat", icon: MessageSquare },
-  { label: "Office (Agents)", icon: Users },
+  { label: "Office (Agents)", icon: Users, href: "/app/workspace" },
   { label: "Tasks", icon: ClipboardList },
-  { label: "Approvals", icon: ListChecks, badge: 3 },
-  { label: "Schedule", icon: CalendarDays },
-  { label: "Content", icon: FileText },
-  { label: "Site Brain", icon: Globe },
+  { label: "Approvals", icon: ListChecks, badge: 3, href: "/app/approvals" },
+  { label: "Connect", icon: Link2, href: "/app/connect" },
+  { label: "Schedule", icon: CalendarDays, href: "/app/schedule" },
+  { label: "Content", icon: FileText, href: "/app/content" },
+  { label: "Site Brain", icon: Globe, href: "/app/site-brain" },
   { label: "Leads", icon: UserRound },
-  { label: "SEO & Insights", icon: TrendingUp },
-  { label: "Settings", icon: Settings },
+  { label: "SEO & Insights", icon: TrendingUp, href: "/app/audit" },
+  { label: "Settings", icon: Settings, href: "/app/billing" },
 ];
 
 /** A chat bubble. `live` = still streaming in (the loop below keeps appending to `text`);
@@ -338,46 +346,38 @@ const NAV: NavItem[] = [
 type ThreadMsg = { who: "user" | "ai"; text: string; time: string; live?: boolean; failed?: boolean };
 
 type AgentStatus = "Completed" | "Working" | "Waiting" | "Planned";
-type Agent = { name: string; role: string; status: AgentStatus; icon: React.ElementType; color: string };
+type Agent = { id: string; name: string; role: string; status: AgentStatus; icon: React.ElementType; color: string };
+/** Static per-agent identity (name/role/icon/color/id). `status` is NOT here — it's derived
+ *  at render time from the real current task's steps (see `statusForAgent` in the main
+ *  component), except `fixedStatus` agents which are always "Planned" regardless. */
+type AgentMeta = Omit<Agent, "status"> & { fixedStatus?: "Planned" };
 
-/** The full roster per MASTER_PLAN.html: the 9 real agents (agent-server/src/queues.ts's
- *  AGENT_TYPES minus "boss" — boss IS the brain node in the middle, not a 10th orbiting icon)
- *  PLUS the 2 named-but-not-yet-built agents from §19 ("19 · Mr. Image aur Mr. Story — naye
- *  agents"), status "Planned" — shown on the network (the plan names them) but never counted
- *  as active/staffed anywhere (header pill, stats strip), since they don't run yet. Left-to-
- *  right order tells the real pipeline story: gather (Crawler → Analyst) → plan (Keyword →
- *  Writer → Image) → [[brain]] → check/ship (SEO → Story → Audit) → distribute (Social →
- *  Leads). Each agent has its own icon + accent color (per the reference "AI Agent Network"
- *  mockup), not one shared Bot icon.
+/** The full roster per MASTER_PLAN.html: the 9 real agents (`id` matches agent-server's
+ *  AGENT_TYPES/task_steps.agent_id — boss IS the brain node in the middle, not a 10th
+ *  orbiting icon) PLUS the 2 named-but-not-yet-built agents from §19 ("19 · Mr. Image aur
+ *  Mr. Story — naye agents"), always "Planned" — shown on the network (the plan names them)
+ *  but never counted as active/staffed anywhere (header pill, stats strip), since they don't
+ *  run yet. Left-to-right order tells the real pipeline story: gather (Crawler → Analyst) →
+ *  plan (Keyword → Writer → Image) → [[brain]] → check/ship (SEO → Story → Audit) →
+ *  distribute (Social → Leads). Each agent has its own icon + accent color (per the reference
+ *  "AI Agent Network" mockup), not one shared Bot icon.
  *
  *  Mr. Publish is a REAL backend agent (agent-server AGENT_TYPES includes "publish") — it is
  *  hidden from this diagram only, per an explicit request, not because it doesn't exist. */
-const AGENTS_LEFT: Agent[] = [
-  { name: "Mr. Crawler", role: "Site Crawler", status: "Completed", icon: Globe, color: "#22d3ee" },
-  { name: "Mr. Analyst", role: "Site Brain", status: "Completed", icon: BarChart3, color: "#3b82f6" },
-  { name: "Mr. Keyword", role: "Keyword Research", status: "Completed", icon: KeyRound, color: "#f59e0b" },
-  { name: "Mr. Writer", role: "Content Writer", status: "Working", icon: PenLine, color: "#8b5cf6" },
-  { name: "Mr. Image", role: "Image Generation", status: "Planned", icon: ImageIcon, color: "#facc15" },
+const AGENT_META_LEFT: AgentMeta[] = [
+  { id: "crawler", name: "Mr. Crawler", role: "Site Crawler", icon: Globe, color: "#22d3ee" },
+  { id: "analyst", name: "Mr. Analyst", role: "Site Brain", icon: BarChart3, color: "#3b82f6" },
+  { id: "keyword", name: "Mr. Keyword", role: "Keyword Research", icon: KeyRound, color: "#f59e0b" },
+  { id: "writer", name: "Mr. Writer", role: "Content Writer", icon: PenLine, color: "#8b5cf6" },
+  { id: "image", name: "Mr. Image", role: "Image Generation", icon: ImageIcon, color: "#facc15", fixedStatus: "Planned" },
 ];
-const AGENTS_RIGHT: Agent[] = [
-  { name: "Mr. SEO", role: "SEO Checks", status: "Waiting", icon: Search, color: "#22c55e" },
-  { name: "Mr. Story", role: "Web Stories", status: "Planned", icon: BookOpen, color: "#6366f1" },
-  { name: "Mr. Audit", role: "Site Audit", status: "Waiting", icon: ShieldCheck, color: "#a855f7" },
-  { name: "Miss Social", role: "Social Drafts", status: "Waiting", icon: Megaphone, color: "#ec4899" },
-  { name: "Mr. Leads", role: "Lead Discovery", status: "Waiting", icon: UserRound, color: "#f97316" },
+const AGENT_META_RIGHT: AgentMeta[] = [
+  { id: "seo", name: "Mr. SEO", role: "SEO Checks", icon: Search, color: "#22c55e" },
+  { id: "story", name: "Mr. Story", role: "Web Stories", icon: BookOpen, color: "#6366f1", fixedStatus: "Planned" },
+  { id: "audit", name: "Mr. Audit", role: "Site Audit", icon: ShieldCheck, color: "#a855f7" },
+  { id: "social", name: "Miss Social", role: "Social Drafts", icon: Megaphone, color: "#ec4899" },
+  { id: "leads", name: "Mr. Leads", role: "Lead Discovery", icon: UserRound, color: "#f97316" },
 ];
-const ALL_AGENTS: Agent[] = [...AGENTS_LEFT, ...AGENTS_RIGHT];
-/** Real, built agents only — what "N Agents Active" / "Total Agents" count. The 2 Planned
- *  ones are visible on the network diagram but never counted as staffed, so the numbers stay
- *  honest (MASTER_PLAN itself calls out never showing state that isn't real). */
-const REAL_AGENTS = ALL_AGENTS.filter((a) => a.status !== "Planned");
-
-/** How the 10 agents are grouped around the brain in the "AI Agent Network" resting layout —
- *  3 across the top, 2 stacked on each side of the brain, 3 across the bottom. */
-const NET_TOP = AGENTS_LEFT.slice(0, 4);
-const NET_LEFT = AGENTS_LEFT.slice(4, 5);
-const NET_RIGHT = AGENTS_RIGHT.slice(0, 1);
-const NET_BOTTOM = AGENTS_RIGHT.slice(1, 5);
 
 const STATUS_COLOR: Record<AgentStatus, string> = {
   Completed: "#22c55e",
@@ -386,54 +386,7 @@ const STATUS_COLOR: Record<AgentStatus, string> = {
   Planned: "#71717a",
 };
 
-const TIMELINE: { t: string; txt: string; s: "Completed" | "In Progress" | null }[] = [
-  { t: "00:00", txt: "Analyzing user requirement", s: "Completed" },
-  { t: "00:15", txt: "Understanding topic: Solar Panel Benefits", s: "Completed" },
-  { t: "00:28", txt: "Generating content outline", s: "Completed" },
-  { t: "00:45", txt: "Researching: Environmental benefits of solar panels", s: "In Progress" },
-  { t: "00:45", txt: "Searching Google for relevant information...", s: null },
-];
-
-const RESULTS = [
-  { n: 1, title: "EPA – Solar Energy Environmental Benefits", url: "www.epa.gov/solar-energy-benefits" },
-  { n: 2, title: "Energy.gov – Solar Benefits", url: "www.energy.gov/eere/solar/solar-benefits" },
-  { n: 3, title: "NRDC – Clean Energy, Solar Power", url: "www.nrdc.org/stories/solar-power-benefits" },
-];
-
-const KEY_POINTS = [
-  "Reduces greenhouse gas emissions",
-  "Lowers air pollution",
-  "Sustainable & renewable energy source",
-  "Long-term environmental impact",
-];
-
 const TABS = ["Live Activity", "Research", "Writing", "References", "Output Preview"];
-
-/** Live Visual is ONE section, not four stacked cards — whatever the agent is actually doing
- *  right now (search, reading a page, pulling out key points, writing) is what shows, and it
- *  crossfades to the next thing smoothly instead of everything being visible at once. This
- *  preview cycles through them on a timer since there's no real backend driving it yet; once
- *  wired to real agent events, `liveMode` is simply whatever the latest event says. */
-type LiveMode = "search" | "reading" | "keypoints" | "writing";
-const LIVE_MODE_ORDER: LiveMode[] = ["search", "reading", "keypoints", "writing"];
-const LIVE_MODE_META: Record<LiveMode, { label: string; icon: React.ElementType }> = {
-  search: { label: "Google Search", icon: Eye },
-  reading: { label: "Reading Web Pages", icon: BookOpen },
-  keypoints: { label: "Extracting Key Points", icon: FileSearch },
-  writing: { label: "Writing Section", icon: PenLine },
-};
-
-/** The "reading" mode's page content — scrolled continuously (not swapped frame to frame) so
- *  it reads as one real page being read, not a slideshow. Short and generic on purpose: this
- *  is UI-mock filler text, not copied from any real source. */
-const READING_LINES = [
-  "Solar panels convert sunlight directly into electricity, producing no exhaust or combustion byproducts at the point of use.",
-  "A typical home system offsets several tons of carbon dioxide every year compared to grid electricity from fossil fuels.",
-  "Because panels have no moving parts, they need very little maintenance beyond occasional cleaning and periodic inspection.",
-  "Local air quality improves as fewer fossil-fuel power plants are needed to run at full output during peak demand.",
-  "Most residential systems pay back their installation cost within seven to ten years through reduced utility bills.",
-  "Panel materials are largely recyclable at end of life, and recycling programs are expanding across most regions.",
-];
 
 /* ========================================================================== */
 /*  SMALL PIECES                                                              */
@@ -453,25 +406,6 @@ const LogoMark = ({ size = 28 }: { size?: number }) => (
     ))}
     <circle cx={16} cy={16} r={3.4} fill="#06060b" />
     <circle cx={16} cy={16} r={2} fill="url(#lxLime)" />
-  </svg>
-);
-
-/** Google "G". */
-const GoogleG = ({ size = 14 }: { size?: number }) => (
-  <svg width={size} height={size} viewBox="0 0 48 48" aria-hidden>
-    <path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3C33.7 32.7 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3l5.7-5.7C34.5 6.1 29.5 4 24 4 13 4 4 13 4 24s9 20 20 20 20-9 20-20c0-1.3-.1-2.7-.4-3.9z" />
-    <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.9 1.2 8 3l5.7-5.7C34.5 6.1 29.5 4 24 4 16.3 4 9.7 8.3 6.3 14.7z" />
-    <path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z" />
-    <path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C36.9 39.2 44 34 44 24c0-1.3-.1-2.7-.4-3.9z" />
-  </svg>
-);
-
-/** Minimal 6-petal AI-model mark (stands in for the model-provider logo). */
-const AiMark = ({ size = 13 }: { size?: number }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden>
-    {[0, 60, 120, 180, 240, 300].map((r) => (
-      <rect key={r} x={10.6} y={2.5} width={2.8} height={9} rx={1.4} fill="#e8e8f2" transform={`rotate(${r} 12 12)`} />
-    ))}
   </svg>
 );
 
@@ -657,7 +591,27 @@ const Collapse = ({ open, children }: { open: boolean; children: React.ReactNode
 
 /** The resting-state "AI Agent Network": color-coded agent cards arranged around the brain
  *  "command center" card. */
-const AgentNetwork = ({ workingAgent, onOpen }: { workingAgent: Agent | null; onOpen: (a: Agent) => void }) => {
+const AgentNetwork = ({
+  top,
+  left,
+  right,
+  bottom,
+  totalActive,
+  running,
+  completed,
+  workingAgent,
+  onOpen,
+}: {
+  top: Agent[];
+  left: Agent[];
+  right: Agent[];
+  bottom: Agent[];
+  totalActive: number;
+  running: number;
+  completed: number;
+  workingAgent: Agent | null;
+  onOpen: (a: Agent) => void;
+}) => {
   return (
     <div className="p-4 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -667,7 +621,7 @@ const AgentNetwork = ({ workingAgent, onOpen }: { workingAgent: Agent | null; on
         </div>
         <span className="lx-pill green">
           <span className="h-1.5 w-1.5 rounded-full lx-pulse" style={{ background: "#22c55e" }} />
-          {REAL_AGENTS.length + 1} Agents Active
+          {totalActive} Agents Active
         </span>
       </div>
 
@@ -681,11 +635,11 @@ const AgentNetwork = ({ workingAgent, onOpen }: { workingAgent: Agent | null; on
 
       <div className="lx-net-host relative mt-4">
         <div className="lx-net">
-          {NET_TOP.map((a, i) => (
-            <NetCard key={a.name} a={a} area={`t${i + 1}`} onClick={() => onOpen(a)} />
+          {top.map((a, i) => (
+            <NetCard key={a.id} a={a} area={`t${i + 1}`} onClick={() => onOpen(a)} />
           ))}
-          {NET_LEFT.map((a, i) => (
-            <NetCard key={a.name} a={a} area={`l${i + 1}`} onClick={() => onOpen(a)} />
+          {left.map((a, i) => (
+            <NetCard key={a.id} a={a} area={`l${i + 1}`} onClick={() => onOpen(a)} />
           ))}
 
           {/* [ASSET] Mr. Lxwa — "command center" brain card, matching the reference
@@ -704,21 +658,22 @@ const AgentNetwork = ({ workingAgent, onOpen }: { workingAgent: Agent | null; on
             </div>
           </div>
 
-          {NET_RIGHT.map((a, i) => (
-            <NetCard key={a.name} a={a} area={`r${i + 1}`} onClick={() => onOpen(a)} />
+          {right.map((a, i) => (
+            <NetCard key={a.id} a={a} area={`r${i + 1}`} onClick={() => onOpen(a)} />
           ))}
-          {NET_BOTTOM.map((a, i) => (
-            <NetCard key={a.name} a={a} area={`o${i + 1}`} onClick={() => onOpen(a)} />
+          {bottom.map((a, i) => (
+            <NetCard key={a.id} a={a} area={`o${i + 1}`} onClick={() => onOpen(a)} />
           ))}
         </div>
       </div>
 
       {/* stats strip — real, built agents only (the 2 Planned ones above are shown on the
-          network because the plan names them, but never counted here as staffed/active) */}
+          network because the plan names them, but never counted here as staffed/active).
+          Success Rate / Time Saved stay illustrative — there's no real source for either yet. */}
       <div className="lx-card2 mt-4 flex flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3">
-        <StatTile icon={Users} color="#3b82f6" label="Total Agents" value={String(REAL_AGENTS.length + 1)} sub="Active" />
-        <StatTile icon={Loader2} color="#3b82f6" label="Tasks Running" value={String(REAL_AGENTS.filter((a) => a.status === "Working").length)} sub="In Progress" spin />
-        <StatTile icon={CheckCircle2} color="#a855f7" label="Tasks Completed" value={String(REAL_AGENTS.filter((a) => a.status === "Completed").length)} sub="Today" />
+        <StatTile icon={Users} color="#3b82f6" label="Total Agents" value={String(totalActive)} sub="Active" />
+        <StatTile icon={Loader2} color="#3b82f6" label="Tasks Running" value={String(running)} sub="In Progress" spin />
+        <StatTile icon={CheckCircle2} color="#a855f7" label="Tasks Completed" value={String(completed)} sub="Today" />
         <StatTile icon={TrendingUp} color="#22c55e" label="Success Rate" value="98.6%" sub="This Week" />
         <StatTile icon={Clock} color="#f59e0b" label="Time Saved" value="32.4h" sub="This Week" />
       </div>
@@ -754,7 +709,44 @@ const boldText = (text: string, key: string): React.ReactNode[] => {
 /*  MAIN COMPONENT                                                            */
 /* ========================================================================== */
 
-export default function MrLxwaDashboard() {
+export default function MrLxwaDashboard({ tenantId = null }: { tenantId?: string | null }) {
+  const pathname = usePathname();
+  // Real account/plan/sign-out — the same lib/store.tsx StoreProvider AppShell reads from,
+  // mounted globally in app/layout.tsx, so it's already live here without any extra fetch.
+  const { s: account, signOut } = useStore();
+
+  // Real per-agent status: the newest task for this tenant (Realtime-subscribed, falls back
+  // to polling — see lib/live.ts), and each agent's status is read off that task's own
+  // task_steps snapshot. No task, or no tenant (not signed in) → everyone's honestly Waiting,
+  // not a fabricated "in progress" — see statusForAgent below.
+  const live = useLiveEvents(tenantId);
+  const task: TaskState | null = live.tasks[0] ?? null;
+  const statusForAgent = (m: AgentMeta): AgentStatus => {
+    if (m.fixedStatus) return m.fixedStatus;
+    const step = task?.steps.find((s) => s.agent_id === m.id);
+    if (!step) return "Waiting";
+    if (step.status === "running") return "Working";
+    if (step.status === "done") return "Completed";
+    // pending / failed / skipped / cancelled all collapse to "Waiting" here — this roster
+    // only has 3 real states (STATUS_COLOR), and "waiting for its turn" is the closest honest
+    // read for a step that isn't actively running or finished.
+    return "Waiting";
+  };
+  const agentsLeft: Agent[] = AGENT_META_LEFT.map((m) => ({ ...m, status: statusForAgent(m) }));
+  const agentsRight: Agent[] = AGENT_META_RIGHT.map((m) => ({ ...m, status: statusForAgent(m) }));
+  const allAgents: Agent[] = [...agentsLeft, ...agentsRight];
+  const realAgents = allAgents.filter((a) => a.status !== "Planned");
+  const netTop = agentsLeft.slice(0, 4);
+  const netLeft = agentsLeft.slice(4, 5);
+  const netRight = agentsRight.slice(0, 1);
+  const netBottom = agentsRight.slice(1, 5);
+
+  const [acctOpen, setAcctOpen] = useState(false);
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
+  const userName = account.user?.name || account.user?.email?.split("@")[0] || "Signed out";
+  const userInitial = userName.charAt(0).toUpperCase() || "?";
+  const planName = PLANS[account.plan]?.name ?? account.plan;
+
   const [nav, setNav] = useState("Dashboard");
   const [tab, setTab] = useState("Live Activity");
   const [aTab, setATab] = useState<"assistant" | "voice">("assistant");
@@ -774,20 +766,17 @@ export default function MrLxwaDashboard() {
   // live work — it only makes sense while an agent is actually working. `workingAgent` is
   // that fact; `showPanel` is the user's own choice to look at it or step back to the whole
   // team (the "Back to Workflow" button), independent of whether anyone is still working.
-  const workingAgent = ALL_AGENTS.find((a) => a.status === "Working") ?? null;
+  const workingAgent = allAgents.find((a) => a.status === "Working") ?? null;
   const [showPanel, setShowPanel] = useState(!!workingAgent);
   const panelOpen = showPanel && !!workingAgent;
-
-  // Live Visual's one current mode — cycles on a timer here only because this preview has no
-  // real agent events to drive it yet (see the type's own comment above).
-  const [liveMode, setLiveMode] = useState<LiveMode>("search");
+  // Auto-open only on the rising edge (nobody→somebody working) — e.g. a real task just
+  // started from chat. It never forces the panel back open after the user closes it while
+  // work continues; `panelOpen` above already hides it on its own once nobody is working.
+  const hadWorkingAgent = useRef(!!workingAgent);
   useEffect(() => {
-    if (paused || !panelOpen) return;
-    const id = setInterval(() => {
-      setLiveMode((m) => LIVE_MODE_ORDER[(LIVE_MODE_ORDER.indexOf(m) + 1) % LIVE_MODE_ORDER.length]);
-    }, 4000);
-    return () => clearInterval(id);
-  }, [paused, panelOpen]);
+    if (workingAgent && !hadWorkingAgent.current) setShowPanel(true);
+    hadWorkingAgent.current = !!workingAgent;
+  }, [workingAgent]);
 
   useEffect(() => {
     if (paused) return;
@@ -890,22 +879,35 @@ export default function MrLxwaDashboard() {
         </button>
       </div>
 
-      {/* nav */}
+      {/* nav — items with a real href (see NAV's own comment) are real next/link navigation
+          to the still-live app/app/** pages; the rest stay a local highlight only. */}
       <nav className="lx-scroll flex-1 space-y-1 overflow-y-auto px-3">
-        {NAV.map((it) => (
-          <button key={it.label} className={`lx-nav ${nav === it.label ? "on" : ""}`} onClick={() => setNav(it.label)}>
-            <it.icon size={16} strokeWidth={1.8} />
-            <span className="truncate">{it.label}</span>
-            {it.badge ? (
-              <span
-                className="ml-auto flex h-5 w-5 items-center justify-center rounded-full lx-10 font-bold text-white"
-                style={{ background: "linear-gradient(135deg,#7c3aed,#8b5cf6)", boxShadow: "0 0 10px rgba(139,92,246,.6)" }}
-              >
-                {it.badge}
-              </span>
-            ) : null}
-          </button>
-        ))}
+        {NAV.map((it) => {
+          const active = it.href ? pathname === it.href : nav === it.label;
+          const inner = (
+            <>
+              <it.icon size={16} strokeWidth={1.8} />
+              <span className="truncate">{it.label}</span>
+              {it.badge ? (
+                <span
+                  className="ml-auto flex h-5 w-5 items-center justify-center rounded-full lx-10 font-bold text-white"
+                  style={{ background: "linear-gradient(135deg,#7c3aed,#8b5cf6)", boxShadow: "0 0 10px rgba(139,92,246,.6)" }}
+                >
+                  {it.badge}
+                </span>
+              ) : null}
+            </>
+          );
+          return it.href ? (
+            <Link key={it.label} href={it.href} className={`lx-nav ${active ? "on" : ""}`}>
+              {inner}
+            </Link>
+          ) : (
+            <button key={it.label} className={`lx-nav ${active ? "on" : ""}`} onClick={() => setNav(it.label)}>
+              {inner}
+            </button>
+          );
+        })}
 
         {/* system status */}
         <div className="lx-card2 mt-4 p-3">
@@ -954,21 +956,33 @@ export default function MrLxwaDashboard() {
         </div>
       </nav>
 
-      {/* user ([ASSET] user photo → gradient initial) */}
+      {/* user — real name/plan from lib/store.tsx (the same source AppShell's account chip
+          reads), real sign-out. [ASSET] user photo → gradient initial, unchanged. */}
       <div className="p-3">
-        <button className="lx-card2 flex w-full items-center gap-3 p-2.5 text-left">
+        <button className="lx-card2 flex w-full items-center gap-3 p-2.5 text-left" onClick={() => setAcctOpen((o) => !o)}>
           <span
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white"
             style={{ background: "linear-gradient(135deg,#f59e0b,#ef4444 60%,#7c3aed)" }}
           >
-            U
+            {userInitial}
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block truncate lx-13 font-semibold">Umar</span>
-            <span className="block lx-10 lx-mut">Pro Plan</span>
+            <span className="block truncate lx-13 font-semibold">{userName}</span>
+            <span className="block lx-10 lx-mut">{planName}</span>
           </span>
           <ChevronDown size={15} className="lx-mut" />
         </button>
+        {acctOpen && (
+          <button
+            className="lx-ghost mt-1.5 w-full justify-center"
+            onClick={() => {
+              if (!confirmSignOut) { setConfirmSignOut(true); return; }
+              void signOut();
+            }}
+          >
+            {confirmSignOut ? "Click again to sign out" : "Sign out"}
+          </button>
+        )}
       </div>
     </aside>
   );
@@ -997,12 +1011,12 @@ export default function MrLxwaDashboard() {
       <Collapse open={panelOpen}>
         <div className="lx-scroll overflow-x-auto">
           <div className="flex min-w-max items-center gap-2 px-4 py-3">
-            {AGENTS_LEFT.map((a) => (
-              <AgentNode key={a.name} a={a} compact onClick={() => openAgentPanel(a)} />
+            {agentsLeft.map((a) => (
+              <AgentNode key={a.id} a={a} compact onClick={() => openAgentPanel(a)} />
             ))}
             <span className="lx-brain shrink-0" style={{ fontSize: 26 }}>🧠</span>
-            {AGENTS_RIGHT.map((a) => (
-              <AgentNode key={a.name} a={a} compact onClick={() => openAgentPanel(a)} />
+            {agentsRight.map((a) => (
+              <AgentNode key={a.id} a={a} compact onClick={() => openAgentPanel(a)} />
             ))}
           </div>
         </div>
@@ -1010,12 +1024,39 @@ export default function MrLxwaDashboard() {
       {/* ---- full: "AI Agent Network" — the resting state. CSS grid-area layout (see
           .lx-net), collapsing to a 2-column auto-flow (brain first) in a narrow column. ---- */}
       <Collapse open={!panelOpen}>
-        <AgentNetwork workingAgent={workingAgent} onOpen={openAgentPanel} />
+        <AgentNetwork
+          top={netTop}
+          left={netLeft}
+          right={netRight}
+          bottom={netBottom}
+          totalActive={realAgents.length + 1}
+          running={realAgents.filter((a) => a.status === "Working").length}
+          completed={realAgents.filter((a) => a.status === "Completed").length}
+          workingAgent={workingAgent}
+          onOpen={openAgentPanel}
+        />
       </Collapse>
     </section>
   );
 
   /* ---------------------------------------------------------------------- */
+
+  // Real data for the panel below — all derived from `task` (the newest live task for this
+  // tenant). `workingAgent` only exists when some step is genuinely "running", so everywhere
+  // below that reads `task` inside AgentPanel is only ever reached with a real task present.
+  const runningStep = task?.steps.find((s) => s.status === "running") ?? null;
+  const stepNo = task && runningStep ? task.steps.findIndex((s) => s.key === runningStep.key) + 1 : null;
+  const totalSteps = task?.totalSteps ?? task?.steps.length ?? null;
+  const producedItems = task ? task.agents.flatMap((p) => p.items).sort((a, b) => a.at - b.at) : [];
+  const itemLabel = (it: (typeof producedItems)[number]) => {
+    // The writer's real event kinds (agent-server/src/agents/writer.ts) — anything else
+    // (from other agents in the same task) falls back to a generic "<kind>" line rather than
+    // guessing at a payload shape it doesn't recognize.
+    if (it.kind === "section") return `Section written: "${it.payload?.h2 ?? "untitled"}" (${it.payload?.words ?? "?"} words)`;
+    if (it.kind === "research") return it.payload?.used ? `Research used — ${it.payload?.sources ?? "?"} sources` : "No research needed for this topic";
+    if (it.kind === "score") return `Quality score: ${it.payload?.quality ?? "?"}/100 ${it.payload?.passed ? "— passed" : "— needs another pass"}`;
+    return it.kind;
+  };
 
   const AgentPanel = (
     <section className="lx-card mt-4 p-4">
@@ -1054,137 +1095,55 @@ export default function MrLxwaDashboard() {
           </div>
 
           <div className="lx-card2 mt-3 overflow-hidden p-3" style={{ minHeight: 360 }}>
-            <div key={liveMode} className="lx-live-anim">
-                <div className="flex items-center gap-2 lx-11 font-semibold">
-                  {(() => {
-                    const Icon = LIVE_MODE_META[liveMode].icon;
-                    return <Icon size={13} className="lx-mut" />;
-                  })()}
-                  {LIVE_MODE_META[liveMode].label}
+            <div key={runningStep?.key ?? "idle"} className="lx-live-anim">
+              <div className="flex items-center gap-2 lx-11 font-semibold">
+                <PenLine size={13} className="lx-mut" />
+                {runningStep?.progressLabel || runningStep?.label || "Working…"}
+              </div>
+
+              {/* real produced work — sections written, research used, the quality score —
+                  as it actually arrives (agent-server's writer emits these as ctx.data()
+                  events; see lib/live.ts's AgentPane.items). No fake per-word "typing". */}
+              {producedItems.length === 0 ? (
+                <div className="mt-3 flex items-center gap-2.5">
+                  <Wave n={26} h={18} anim color="var(--lx-purple)" />
+                  <span className="lx-shimmer lx-10 font-medium">Working…</span>
                 </div>
-
-                {/* search: the real query the agent is actually running, and the real results —
-                    this used to be duplicated in the center column; it lives only here now. */}
-                {liveMode === "search" && (
-                  <div className="lx-in mt-2 p-2.5">
-                    <div className="flex items-center gap-2">
-                      <GoogleG size={12} />
-                      <span className="lx-11 flex-1 truncate" style={{ color: "#cfcfdd" }}>
-                        environmental benefits of solar panels
-                      </span>
-                    </div>
-                    <div className="mt-2.5 space-y-2">
-                      {RESULTS.map((r, i) => (
-                        <motion.div
-                          key={r.n}
-                          initial={{ opacity: 0, x: -8 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: i * 0.12, duration: 0.3 }}
-                          className="flex items-center gap-2.5 rounded-lg px-2 py-1.5"
-                          style={{ background: "rgba(255,255,255,.03)" }}
-                        >
-                          <span className="lx-num" style={{ width: 17, height: 17, fontSize: 9 }}>{r.n}</span>
-                          <span className="min-w-0">
-                            <span className="block truncate lx-11 font-medium" style={{ color: "#7db4fd" }}>{r.title}</span>
-                            <span className="block truncate lx-10" style={{ color: "#34d399" }}>{r.url}</span>
-                          </span>
-                        </motion.div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* reading: a real page, continuously auto-scrolling in place — one section,
-                    one animation, not a slideshow of static snapshots. */}
-                {liveMode === "reading" && (
-                  <div className="lx-in mt-2 p-2.5">
-                    <div className="lx-10 lx-mut mb-2 truncate">www.epa.gov/solar-energy-benefits</div>
-                    <div style={{ height: 130, overflow: "hidden", position: "relative", borderRadius: 8 }}>
-                      <motion.div
-                        animate={{ y: [0, -170] }}
-                        transition={{ duration: 10, repeat: Infinity, repeatType: "loop", ease: "linear" }}
-                      >
-                        {READING_LINES.map((line, i) => (
-                          <p key={i} className="lx-10 mb-2.5" style={{ color: "rgba(226,226,238,.65)", lineHeight: 1.6 }}>
-                            {line}
-                          </p>
-                        ))}
-                      </motion.div>
-                      {/* top/bottom fade so the loop reads as a clipped viewport, not text cut off mid-line */}
-                      <div
-                        className="pointer-events-none absolute inset-0"
-                        style={{ background: "linear-gradient(180deg, var(--lx-in) 0%, transparent 18%, transparent 82%, var(--lx-in) 100%)" }}
-                      />
-                    </div>
-                    <div className="mt-2 flex items-center gap-1.5">
-                      <span className="lx-shimmer lx-10 font-medium">Reading…</span>
-                    </div>
-                  </div>
-                )}
-
-                {liveMode === "keypoints" && (
-                  <ul className="mt-2 space-y-1.5">
-                    {KEY_POINTS.map((k, i) => (
-                      <motion.li
-                        key={k}
-                        initial={{ opacity: 0, x: -6 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: i * 0.15, duration: 0.3 }}
-                        className="flex items-start gap-2 lx-10"
-                        style={{ color: "#b9b9cc" }}
-                      >
-                        <span className="mt-1 h-1 w-1 shrink-0 rounded-full" style={{ background: "#22d3ee", boxShadow: "0 0 4px #22d3ee" }} />
-                        {k}
-                      </motion.li>
-                    ))}
-                  </ul>
-                )}
-
-                {liveMode === "writing" && (
-                  <>
-                    <div className="lx-shimmer lx-10 mt-2 font-medium">Generating content...</div>
-                    <div className="mt-2">
-                      <Wave n={26} h={18} anim color="var(--lx-purple)" />
-                    </div>
-                  </>
-                )}
+              ) : (
+                <ul className="mt-3 space-y-2">
+                  {producedItems.map((it) => (
+                    <li key={it.key} className="lx-in flex items-start gap-2 rounded-lg px-2.5 py-2 lx-11" style={{ color: "#cfcfdd" }}>
+                      <CheckCircle2 size={14} style={{ color: "#22c55e", marginTop: 1, flexShrink: 0 }} />
+                      {itemLabel(it)}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
-          </div>
-
-          {/* which of the 4 the panel is currently showing, and a way to jump straight to one */}
-          <div className="mt-2 flex items-center justify-center gap-1.5">
-            {LIVE_MODE_ORDER.map((m) => (
-              <button
-                key={m}
-                aria-label={LIVE_MODE_META[m].label}
-                onClick={() => setLiveMode(m)}
-                className="rounded-full"
-                style={{
-                  width: 6,
-                  height: 6,
-                  border: "none",
-                  cursor: "pointer",
-                  background: m === liveMode ? "var(--lx-cyan)" : "rgba(255,255,255,.15)",
-                  boxShadow: m === liveMode ? "0 0 6px var(--lx-cyan)" : "none",
-                }}
-              />
-            ))}
           </div>
         </div>
 
-        {/* writer progress — secondary, below the live visual */}
+        {/* writer progress — secondary, below the live visual. Real: the task's own echo
+            (what was actually asked for), the running step's real label/fraction if it
+            reported one, and real step-of-total position — nothing here is invented. */}
         <div className="min-w-0">
-          <div className="text-lg font-bold leading-tight">Writing Section 2 of 5</div>
-          <div className="lx-12 lx-mut mt-0.5">Title: Environmental Benefits of Solar Panels</div>
+          <div className="text-lg font-bold leading-tight">{task?.echo || workingAgent?.role}</div>
+          {runningStep?.label && <div className="lx-12 lx-mut mt-0.5">{runningStep.label}</div>}
 
-          <div className="mt-4 flex items-center justify-between">
-            <span className="lx-11 lx-mut">Overall Progress</span>
-            <span className="lx-12 font-bold">42%</span>
-          </div>
-          <div className="lx-track mt-1.5">
-            <div className="lx-fill" style={{ width: "42%" }} />
-          </div>
-          <div className="lx-11 lx-mut mt-1.5">Step 3 of 6: Writing Article</div>
+          {runningStep?.fraction != null && (
+            <>
+              <div className="mt-4 flex items-center justify-between">
+                <span className="lx-11 lx-mut">Overall Progress</span>
+                <span className="lx-12 font-bold">{Math.round(runningStep.fraction * 100)}%</span>
+              </div>
+              <div className="lx-track mt-1.5">
+                <div className="lx-fill" style={{ width: `${Math.round(runningStep.fraction * 100)}%` }} />
+              </div>
+            </>
+          )}
+          {stepNo != null && totalSteps != null && (
+            <div className="lx-11 lx-mut mt-1.5">Step {stepNo} of {totalSteps}</div>
+          )}
 
           {/* tabs */}
           <div className="lx-scroll mt-3 flex gap-6 overflow-x-auto border-b" style={{ borderColor: "var(--lx-border)" }}>
@@ -1197,32 +1156,21 @@ export default function MrLxwaDashboard() {
 
           <div className="lx-13 mt-4 font-semibold">What I&apos;m doing right now</div>
 
-          {/* timeline */}
+          {/* timeline — task.lines: real, human-readable events (lib/live.ts's userMessage()),
+              never a raw prompt/error string. */}
           <div className="lx-tl mt-1">
-            {TIMELINE.map((r, i) => {
-              const done = r.s === "Completed";
-              const prog = r.s === "In Progress";
+            {(task?.lines ?? []).length === 0 && <div className="lx-11 lx-mut py-2">No activity yet.</div>}
+            {(task?.lines ?? []).slice(-8).map((ln) => {
+              const color = ln.tone === "ok" ? "#22c55e" : ln.tone === "err" ? "#ef4444" : ln.tone === "warn" ? "#f59e0b" : "#3b82f6";
               return (
-                <div className="lx-row" key={i}>
-                  <span className="lx-10 lx-mono lx-dim text-right">{r.t}</span>
-                  <span
-                    className={`lx-dot ${prog ? "lx-pulse" : ""}`}
-                    style={{
-                      background: done ? "#22c55e" : prog ? "#3b82f6" : "#3d3d52",
-                      boxShadow: done ? "0 0 8px rgba(34,197,94,.9)" : prog ? "0 0 8px rgba(59,130,246,.9)" : "none",
-                    }}
-                  />
-                  <span className="lx-12 truncate" style={{ color: prog ? "#93c5fd" : done ? "#d9d9e6" : "var(--lx-mut)" }}>
-                    {r.txt}
+                <div className="lx-row" key={ln.key}>
+                  <span className="lx-10 lx-mono lx-dim text-right">
+                    {new Date(ln.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                   </span>
-                  <span className="lx-10 font-semibold" style={{ color: done ? "#4ade80" : prog ? "#60a5fa" : "transparent" }}>
-                    {r.s ?? "·"}
-                  </span>
-                  {r.s ? (
-                    <CheckCircle2 size={14} style={{ color: done ? "#22c55e" : "rgba(96,165,250,.7)" }} />
-                  ) : (
-                    <span style={{ width: 14 }} />
-                  )}
+                  <span className="lx-dot" style={{ background: color, boxShadow: `0 0 8px ${color}` }} />
+                  <span className="lx-12 truncate" style={{ color: "#d9d9e6" }}>{ln.text}</span>
+                  <span style={{ width: 14 }} />
+                  <span style={{ width: 14 }} />
                 </div>
               );
             })}
