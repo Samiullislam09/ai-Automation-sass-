@@ -86,6 +86,7 @@ small{color:var(--ink-3)}
 
 <div class="toc">
   <a href="#verdict">0 · Ek line me faisla</a>
+  <a href="#tracker"><strong>0.1 · Progress tracker — kaunsa section complete</strong></a>
   <a href="#today">1 · Aaj kya hai (aur kyun user confuse hota hai)</a>
   <a href="#repos">2 · Repo reality check</a>
   <a href="#principles">3 · Paanch usool jo kabhi nahi tootenge</a>
@@ -128,6 +129,45 @@ small{color:var(--ink-3)}
   <p>2. Router hardcoded nahi hoga; har agent apna manifest deta hai (“main ye kar sakta hun, mujhe ye chahiye”) aur router usi se banta hai. Naya agent = naya repo + manifest, router me ek line bhi nahi badalti.</p>
   <p>3. Har jawab jo “ho gaya” kehta hai, wo database ki ek row se aata hai — model ke munh se nahi. Ye rule code me hai, prompt me nahi.</p>
 </div>
+
+<!-- ============================================================ -->
+<h2 id="tracker">0.1 · Progress tracker — kaunsa section complete, kaunsa baaki</h2>
+<p>Owner ki maang (2026-08-28): §0 se §26 tak, ek line me — kaunsa section <em>ban chuka</em> hai, kaunsa
+<em>doc/analysis-only</em> hai (koi code nahi banana tha), aur kaunsa abhi tak <em>adhoora/baaki</em> hai. Ye
+har section ke andar diye gaye pills se alag hai — wo line-by-line claims verify karte hain, ye ek
+hi jagah top-level status deta hai. <strong>Naya kaam pura ho to yahan pill update karo</strong> — yehi rule
+§26 ke build log pe bhi laagu hota hai.</p>
+<div class="tablewrap"><table>
+<tr><th>#</th><th>Section</th><th>Status</th><th>Sabooth (evidence)</th></tr>
+<tr><td class="num">0</td><td>Ek line me faisla</td><td><span class="pill ok">Done</span></td><td>Verdict statement — sequential audit (§0→§26, commit <code>9dc5f3a</code>) se verify hua, code se match karta hai</td></tr>
+<tr><td class="num">1</td><td>Aaj kya hai</td><td><span class="pill ok">Done</span></td><td>Current-state description, verified</td></tr>
+<tr><td class="num">2</td><td>Repo reality check</td><td><span class="pill ok">Done</span></td><td>§17.7 ke final faislon se match</td></tr>
+<tr><td class="num">3</td><td>Paanch usool</td><td><span class="pill info">Doc-only</span></td><td>Principles — koi code item nahi, follow ho rahe hain</td></tr>
+<tr><td class="num">4</td><td>Nayi architecture</td><td><span class="pill ok">Done</span></td><td>Registry + planner + orchestrator + manifest — sab live</td></tr>
+<tr><td class="num">5</td><td>Ek dimaag (brain: intent/conversation/planner/orchestrator/§5.5)</td><td><span class="pill ok">Done</span></td><td><code>BRAIN_ENABLED</code> default-on (commit <code>8648211</code>), 68+ brain tests</td></tr>
+<tr><td class="num">6</td><td>Agent contract</td><td><span class="pill ok">Done</span></td><td>Contract package, 3 endpoints, manifest — 29 tests</td></tr>
+<tr><td class="num">7</td><td>Agent-by-agent spec (7.1–7.8)</td><td><span class="pill ok">Done</span></td><td>Keyword/Writer/SEO/Audit/Publish/Leads/Social/Crawler — sab asli code me hain (<code>agent-server/src/agents/*.ts</code>); Social draft-only hai jaanbujh ke (Postiz auto-publish baaki, §17.5)</td></tr>
+<tr><td class="num">8</td><td>Article pipeline state machine</td><td><span class="pill ok">Done</span></td><td><code>tasks</code>/<code>task_steps</code> (migration 017) + orchestrator resume/retry</td></tr>
+<tr><td class="num">9</td><td>Supabase schema</td><td><span class="pill warn">Code done, DB apply baaki</span></td><td>Migrations 001–020 repo me hain; 018/019/020 Supabase pe <strong>run nahi hui</strong> (MANUAL_STEPS.md item 1)</td></tr>
+<tr><td class="num">10</td><td>Chat UX rules (9 rules)</td><td><span class="pill ok">Done</span></td><td>Echo-before-irreversible, ek sawaal, receipt — chat-brain.ts me laagu</td></tr>
+<tr><td class="num">11</td><td>Repo aur deploy layout</td><td><span class="pill ok">Done</span></td><td>FINAL: 1 Railway service (Upgrade D, 2026-08-28)</td></tr>
+<tr><td class="num">12</td><td>1000 articles/day hisaab</td><td><span class="pill info">Doc-only</span></td><td>Capacity analysis — koi build item nahi</td></tr>
+<tr><td class="num">13</td><td>Phases aur exit criteria</td><td><span class="pill warn">Chal raha hai</span></td><td>Phase 2 exit ~poora (unpublish 2026-08-28 se band); 20-article numbers test baaki</td></tr>
+<tr><td class="num">14</td><td>Acceptance tests</td><td><span class="pill warn">Partial</span></td><td>330+ agent-server / 140+ web unit tests hain; is section ke sab literal “user ne X kaha” scripts alag se verify nahi hue</td></tr>
+<tr><td class="num">15</td><td>Faisle jo owner ko lene hain</td><td><span class="pill warn">Partial</span></td><td>Kai resolve ho chuke (§17.8); LLM comparison harness bana par <code>--confirm</code> se chalaya nahi (owner permission chahiye)</td></tr>
+<tr><td class="num">16</td><td>Self-audit + 11 upgrades (16.1–16.5)</td><td><span class="pill warn">Partial</span></td><td>A/B/C/D/E/F <span class="pill ok">done</span> (E: gpt-researcher aaj real jud gaya); G (prompt registry) <span class="pill bad">nahi bana</span> — prompts abhi bhi code files me; H (feedback loop) DB table hai, code use partial; I (trust ramp) verify nahi hui; J (injection defense) sirf leads ke fire-enrich me; K (positive prompt) chhota, ho sakta hai</td></tr>
+<tr><td class="num">17</td><td>Har agent: behtar repo + kaam ka flow (17.1–17.8)</td><td><span class="pill ok">Done</span></td><td>§17.7 ka final table — is poori session ka core kaam</td></tr>
+<tr><td class="num">18</td><td>Chat speed / free AI (18.1–18.6)</td><td><span class="pill warn">Code done, prod baaki</span></td><td>Groq local verified (~1ms first byte); Vercel prod env var + 2nd key abhi baaki (MANUAL_STEPS item 12)</td></tr>
+<tr><td class="num">19</td><td>Mr. Image aur Mr. Story</td><td><span class="pill bad">Nahi bana</span></td><td>Jaanbujh ke deferred — koi <code>agents/image.ts</code> ya <code>story.ts</code> nahi</td></tr>
+<tr><td class="num">20</td><td>Agent anatomy (deep)</td><td><span class="pill ok">Done</span></td><td>Doc, built agents se match karta hai</td></tr>
+<tr><td class="num">21</td><td>Undiscussed risks (infra/security/legal/product/ops)</td><td><span class="pill warn">Chal raha hai</span></td><td>Zyada MANUAL_STEPS.md ke items hain (key rotation, DB password) — kuch abhi bhi khule</td></tr>
+<tr><td class="num">22</td><td>Is plan ke cons — aur fix</td><td><span class="pill ok">Done</span></td><td>Har con ka status doc me pill se update hai (Upgrade D wale resolve ho chuke)</td></tr>
+<tr><td class="num">23</td><td>UI audit</td><td><span class="pill warn">Partial</span></td><td>Landing page “Apex” redesign hua; login/signup/onboarding/dashboard UI abhi purani</td></tr>
+<tr><td class="num">24</td><td>Live events (video jaisa)</td><td><span class="pill ok">Done</span></td><td>Agent Workspace (§24.4b, commits <code>910a389</code>/<code>bc30418</code>), <code>chat_events</code> migration 013</td></tr>
+<tr><td class="num">25</td><td>Site Brain (25.1–25.9)</td><td><span class="pill warn">Partial</span></td><td>Crawl/profile/duplicate-locks/onboarding <span class="pill ok">done</span>; Mr. Support chatbot widget (25.6) <span class="pill bad">nahi bana</span>; migration 018/019/020 DB-apply (25.9) baaki (item 9 dekho)</td></tr>
+<tr><td class="num">26</td><td>Build log</td><td><span class="pill info">Chalta rehta hai</span></td><td>Ye khud hi living log hai — har commit pe row jodi jaati hai</td></tr>
+</table></div>
+<p><small>Legend: <span class="pill ok">Done</span> = code+wired, verify ho chuka. <span class="pill warn">Partial</span> = kuch hissa bana, kuch baaki. <span class="pill bad">Nahi bana</span> = jaanbujh ke deferred ya abhi tak start nahi hua. <span class="pill info">Doc-only/ongoing</span> = ismein “complete” ka matlab hi nahi (analysis section, ya kabhi na-khatam hone wala log).</small></p>
 
 <!-- ============================================================ -->
 <h2 id="today">1 · Aaj kya hai, aur user kyun confuse hota hai</h2>
@@ -1763,13 +1803,14 @@ aur commit ke saath &mdash; taaki kal koi (aap, main, ya 10 saal baad koi employ
 <tr><td>2026-08-28</td><td><code>9e2e33a</code></td><td><code>extractIntent</code> (brain ka apna classification call, har message pe pehle chalta hai) bhi ab fast provider pehle try karta hai &mdash; naya <code>openFastCompletion</code>, live verify 535-826ms (pehle NIM pe up to 19s+12s timeout)</td><td>141 web green (+5)</td></tr>
 <tr><td>2026-08-28</td><td><code>1418d08</code></td><td>Asal 40-70s wali wajah: <code>fastChat.ts</code> me <code>dns-fix</code> import missing tha (fixed), aur ek atka hua dev server process (restart se theek). Screen pe timing badge (<code>components/kit.tsx</code>) &mdash; har reply ke neeche real seconds, owner ki maang</td><td>build clean</td></tr>
 <tr><td>2026-08-28</td><td><code>42ba4eb</code>..<code>8f371ec</code></td><td>Plan-accuracy audit, do pass: Mr. SEO manifest version stale (real hai, disabled nahi), &sect;11 repo table &sect;22 ke revision se reconcile, Site Brain page ka galat &ldquo;BAAKI&rdquo;, leads repo license/spec purana (permission mil chuki thi, TS nikla LangGraph nahi), Phase 0 ke 2 bullet apni hi list se contradict kar rahe the</td><td>doc-only</td></tr>
-<tr><td>2026-08-28</td><td>(is commit)</td><td>Mr. Audit: real Core Web Vitals &mdash; <code>lib/audit/performance.ts</code>, <code>lighthouse</code> seedha (unlighthouse ka apna dashboard/crawler nahi), top 10 pages, <code>nixpacks.toml</code> Railway ke liye. Local verify: example.com score 100, LCP 883ms</td><td>330 agent-server (+37)</td></tr>
+<tr><td>2026-08-28</td><td><code>0e5f1a2</code></td><td>Mr. Audit: real Core Web Vitals &mdash; <code>lib/audit/performance.ts</code>, <code>lighthouse</code> seedha (unlighthouse ka apna dashboard/crawler nahi), top 10 pages, <code>nixpacks.toml</code> Railway ke liye. Local verify: example.com score 100, LCP 883ms</td><td>330 agent-server (+37)</td></tr>
+<tr><td>2026-08-28</td><td>(is commit)</td><td><strong>gpt-researcher asal me jud gaya</strong> (&sect;16.3 Upgrade E ka baaki hissa): <code>lib/research/conduct_research.py</code> (sirf <code>conduct_research()</code>, <code>write_report()</code> nahi) + <code>lib/research/gptResearcher.ts</code> Python subprocess wrapper &mdash; ek hi Railway service ke andar (2026-08-28 "one service" faisla), alag deploy unit nahi. Research sirf outline step ko subtopics/questions batata hai, business facts abhi bhi sirf Site Brain se (WRITING_RULES rule 4). <code>nixpacks.toml</code> me <code>python3</code> + <code>requirements.txt</code> pip install phase joda. Research fail/missing ho to pipeline waise hi chalta hai jaise pehle (graceful skip, Chrome-missing wale pattern jaisa)</td><td>19 writerPipeline (+4)</td></tr>
 </table></div>
 
 <h3>26.1 Abhi kya baaki hai (is order me)</h3>
 <ol>
 <li><strong>LLM comparison chalao</strong> &mdash; harness ban chuka hai, par kisi ne <code>--confirm</code> ke saath chalaya nahi (real NIM calls, isliye aapka faisla)</li>
-<li><strong>agent-writer Python + gpt-researcher</strong> &mdash; jaanbujh ke deferred, wajah &sect;26 Phase 2 row me. Upgrade E ka substance TS me ban chuka hai</li>
+<li><strong>gpt-researcher Railway pe verify</strong> &mdash; local pe sirf syntax/wiring check hui; <code>pip install gpt-researcher</code> aur real subprocess call abhi Railway deploy ke baad hi verify ho sakti hai (Chrome/Lighthouse jaisa hi pattern — manual step aayega)</li>
 <li><strong>Groq/Cerebras key</strong> &mdash; code ready hai (<code>lib/ai/fastChat.ts</code>), inert hai bina key ke (manual step 12)</li>
 <li><strong>Phase 4</strong> &mdash; writer &times;4-8, schedule jitter, cost dashboard, load test, runbook</li>
 </ol>

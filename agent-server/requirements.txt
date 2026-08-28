@@ -1,0 +1,5 @@
+# Only used by src/lib/research/conduct_research.py (Mr. Writer's research step, MASTER_PLAN
+# §16.3 Upgrade E). Nothing else in agent-server is Python — this file exists purely so
+# nixpacks.toml's pip install has something pinned to install. Upgrade deliberately: the plan's
+# own note is "pip package use karo, fork mat karo. Upgrades free milenge."
+gpt-researcher==0.16.0

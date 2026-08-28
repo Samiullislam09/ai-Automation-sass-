@@ -78,6 +78,20 @@ test("more than 6 sections from the model is capped, not passed through", async 
   assert.equal(outline.sections.length, 6);
 });
 
+test("research context reaches the outline prompt, with an explicit no-facts-from-here instruction", async () => {
+  const { fn, seen } = fakeComplete({ "writer.outline": () => JSON.stringify(OUTLINE) });
+  const research = { context: "Open web says emergency plumbers typically respond within 60 minutes.", sources: [{ url: "https://x.test", title: "Plumbing 101" }] };
+  await buildOutline(TOPIC, undefined, undefined, fn, research);
+  assert.match(seen[0].prompt, /60 minutes/);
+  assert.match(seen[0].prompt, /do NOT copy any fact.*into the outline/i);
+});
+
+test("no research given is the normal case — outline still builds, no research section in the prompt", async () => {
+  const { fn, seen } = fakeComplete({ "writer.outline": () => JSON.stringify(OUTLINE) });
+  await buildOutline(TOPIC, undefined, undefined, fn);
+  assert.doesNotMatch(seen[0].prompt, /WHAT THE OPEN WEB COVERS/);
+});
+
 /* ---------------------------------------------------------------- sections --------------- */
 
 test("writeSection's prompt names only its own slot, never a sibling's", async () => {
@@ -194,4 +208,53 @@ test("a failure in any one section fails the whole article rather than publishin
     },
   });
   await assert.rejects(() => writeArticlePipeline(TOPIC, undefined, undefined, fn), /model timed out/);
+});
+
+/* ---------------------------------------------------------------- research --------------- */
+
+test("with no researcher injected, the pipeline runs exactly as before (no research in the outline prompt)", async () => {
+  const { fn, seen } = fakeComplete({
+    "writer.outline": () => JSON.stringify(OUTLINE),
+    "writer.section": () => "## S\n\ntext",
+    "writer.polish": () => `# ${OUTLINE.title}\n\npolished`,
+    "writer.meta": () => JSON.stringify({ metaTitle: "T", metaDescription: "D", slug: "s", jsonLd: "{}" }),
+  });
+  await writeArticlePipeline(TOPIC, undefined, undefined, fn);
+  const outlinePrompt = seen.find((s) => s.label === "writer.outline")!.prompt;
+  assert.doesNotMatch(outlinePrompt, /WHAT THE OPEN WEB COVERS/);
+});
+
+test("a researcher's result reaches the outline step, and onResearch fires with it before the outline call", async () => {
+  const { fn } = fakeComplete({
+    "writer.outline": () => JSON.stringify(OUTLINE),
+    "writer.section": () => "## S\n\ntext",
+    "writer.polish": () => `# ${OUTLINE.title}\n\npolished`,
+    "writer.meta": () => JSON.stringify({ metaTitle: "T", metaDescription: "D", slug: "s", jsonLd: "{}" }),
+  });
+  const research = { context: "Background from the open web.", sources: [{ url: "https://x.test", title: "Source" }] };
+  let reported: typeof research | null | undefined;
+  await writeArticlePipeline(TOPIC, undefined, undefined, fn, {
+    researcher: async (topic) => {
+      assert.equal(topic, TOPIC);
+      return research;
+    },
+    onResearch: (r) => (reported = r),
+  });
+  assert.deepEqual(reported, research);
+});
+
+test("a researcher that resolves null (skipped) does not stop the pipeline or the outline call", async () => {
+  const { fn } = fakeComplete({
+    "writer.outline": () => JSON.stringify(OUTLINE),
+    "writer.section": () => "## S\n\ntext",
+    "writer.polish": () => `# ${OUTLINE.title}\n\npolished`,
+    "writer.meta": () => JSON.stringify({ metaTitle: "T", metaDescription: "D", slug: "s", jsonLd: "{}" }),
+  });
+  let reported: unknown = "not called";
+  const result = await writeArticlePipeline(TOPIC, undefined, undefined, fn, {
+    researcher: async () => null,
+    onResearch: (r) => (reported = r),
+  });
+  assert.equal(reported, null);
+  assert.equal(result.title, OUTLINE.title);
 });

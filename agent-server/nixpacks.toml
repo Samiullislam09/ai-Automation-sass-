@@ -7,5 +7,15 @@
 # chrome-launcher searches PATH itself for "chromium", "chromium-browser", "google-chrome",
 # etc. — a nix package on PATH is enough, no PUPPETEER_EXECUTABLE_PATH env var required. Set
 # that var only if this ever needs pointing at a specific binary instead (docs/MANUAL_STEPS.md).
+#
+# python3 + pip are for src/lib/research/conduct_research.py (Mr. Writer's gpt-researcher
+# step, §16.3 Upgrade E) — same "one service" reasoning as chromium above: one more binary in
+# the same container, not a second Railway service. lib/research/gptResearcher.ts spawns it
+# with `python3`; if this nix package ever provides a different binary name on PATH, set
+# PYTHON_BIN in Railway's Variables to match (docs/MANUAL_STEPS.md) rather than editing code.
 [phases.setup]
-nixPkgs = ["chromium"]
+nixPkgs = ["chromium", "python3"]
+
+[phases.researchDeps]
+dependsOn = ["setup"]
+cmds = ["python3 -m pip install --break-system-packages -r requirements.txt"]

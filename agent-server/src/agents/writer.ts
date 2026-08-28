@@ -2,6 +2,7 @@ import type { Job } from "pg-boss";
 import { Agent, type AgentContext, type AgentJobData } from "./base.js";
 import type { WriterContext } from "../lib/writer.js";
 import { writeArticlePipeline, nimComplete } from "../lib/writerPipeline.js";
+import { researchTopic } from "../lib/research/gptResearcher.js";
 import { gateArticle, summarizeGate } from "../lib/qualityGate.js";
 import { supabase } from "../supabase.js";
 import { loadInsights, writerBlock } from "../lib/insights.js";
@@ -93,6 +94,8 @@ export class WriterAgent extends Agent {
     // draft — ctx.data below fires from writeArticlePipeline's onSection, mid-generation.
     const pipeline = await writeArticlePipeline(topic.trim(), blueprint, context, nimComplete, {
       onSection: (section) => ctx.data("section", { h2: section.h2, words: section.words }),
+      researcher: researchTopic,
+      onResearch: (result) => ctx.data("research", { used: !!result, sources: result?.sources.length ?? 0 }),
     });
     const body = pipeline.body;
     const title = pipeline.title;

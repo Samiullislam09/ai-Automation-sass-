@@ -26,15 +26,21 @@ import type { WriterContext } from "./writer.js";
  *      populated them, so those checks silently no-op'd on every single article. They stop
  *      no-opping the day this pipeline lands.
  *
- *  WHAT THIS FILE DELIBERATELY DOES NOT DO: it is not gpt-researcher, and it does not browse
- *  the open web. The plan's Upgrade E names gpt-researcher for its RESEARCH step specifically
- *  ("sirf conduct_research(), write_report() nahi") — but every fact this writer is allowed to
- *  state already has to come from the tenant's own Site Brain, its own crawled pages, or the
- *  keyword blueprint (`WRITING_RULES` rule 4: never invent a stat, price, award or name), so
- *  an open web search would produce paragraphs this writer is not permitted to keep anyway.
- *  Standing up gpt-researcher as a separate Python service is a real, larger, undone piece of
- *  the plan — a new deploy unit, a new runtime, a new monthly Railway cost for a solo/free-tier
- *  project — and MASTER_PLAN §26 says so plainly rather than pretending this file is that.
+ *  RESEARCH (2026-08-28, real gpt-researcher, not a stand-in): lib/research/gptResearcher.ts
+ *  spawns gpt-researcher's OWN Python `conduct_research()` — real web search, real source
+ *  fetching — as a subprocess inside THIS SAME Railway service ("one service" decision,
+ *  2026-08-28), never a separate deploy unit. It stops there: `write_report()` is never called,
+ *  matching the plan's own scope ("sirf conduct_research(), write_report() nahi"). Its output
+ *  (background context + source list) reaches only `buildOutline`'s prompt, as material for
+ *  deciding WHAT SUBTOPICS AND QUESTIONS a real article on this topic should cover — never as a
+ *  source of business-specific facts. Every fact the article states still has to come from the
+ *  tenant's own Site Brain, its crawled pages, or the keyword blueprint (`WRITING_RULES` rule 4:
+ *  never invent a stat, price, award or name) — the outline prompt says this explicitly, and
+ *  `writeSection`'s prompt (which never receives the research context at all) enforces it
+ *  structurally, not just by instruction. Research is an optional improvement, not a
+ *  prerequisite: missing Python, a missing package, or a timed-out crawl all resolve to `null`
+ *  (see gptResearcher.ts's own header) and the pipeline writes exactly as it did before this
+ *  step existed.
  *
  *  Every step below takes an injectable `complete` (or is `complete` itself), same convention
  *  as agents/social.ts's `draftPosts` — so the pipeline's SHAPE (parallel sections, one polish
@@ -51,6 +57,12 @@ export type PipelineResult = {
   sections: PipelineSection[];
   meta: WriterMeta;
 };
+
+/** What gpt-researcher's `conduct_research()` hands back — background/structure only, never a
+ *  business fact source. See gptResearcher.ts and this file's header for the scope. */
+export type ResearchResult = { context: string; sources: { url: string; title: string }[] };
+/** Injectable the same way `Completer` is — the real one shells out to Python, tests fake it. */
+export type Researcher = (topic: string) => Promise<ResearchResult | null>;
 
 /** The one thing every step needs and disagrees about how much of: raw text out, for a raw
  *  text prompt in. JSON-shaped steps (outline, meta) parse their own answer; prose steps
@@ -134,12 +146,18 @@ export async function buildOutline(
   topic: string,
   blueprint: string | undefined,
   context: WriterContext | undefined,
-  complete: Completer
+  complete: Completer,
+  research?: ResearchResult | null
 ): Promise<Outline> {
+  const researchLines = research?.context
+    ? `WHAT THE OPEN WEB COVERS ON THIS TOPIC (gpt-researcher, background only — use this only to decide which subtopics and reader questions are worth a section; do NOT copy any fact, number, name or claim from it into the outline or later into the article — every fact the article states must come from BUSINESS CONTEXT / BLUEPRINT above, not from here):\n${research.context.slice(0, 3000)}`
+    : "";
+
   const prompt = [
     `Plan the structure of an SEO article on "${topic}". Do not write the article — only the outline.`,
     contextLines(context),
     blueprint ? `BLUEPRINT (from real keyword research — use these related queries as section subjects, most-searched first):\n${blueprint}` : "",
+    researchLines,
     `Produce ${MIN_SECTIONS}-${MAX_SECTIONS} sections (H2s). For each: the heading, what it must accomplish (goal), the exact phrase it should place naturally (keyword — from the blueprint's related queries when there are enough, otherwise a natural variation of the topic), and the single reader question it answers.`,
     `The article title is separate from the topic — write a real title a reader would click, not the raw keyword.`,
     `Reply with ONLY JSON: {"title":"...","sections":[{"h2":"...","goal":"...","keyword":"...","readerQuestion":"..."}]}`,
@@ -263,6 +281,14 @@ export type WriteOptions = {
    *  the live workspace shows the article assembling itself section by section, for real,
    *  instead of the old post-hoc split of an already-finished one-shot draft. */
   onSection?: (section: PipelineSection) => void;
+  /** Real gpt-researcher, injected — writer.ts wires this to lib/research/gptResearcher.ts's
+   *  `researchTopic`. Omitted entirely in every existing test, which is deliberate: the
+   *  pipeline's shape must not depend on research being present. */
+  researcher?: Researcher;
+  /** Fires once, right after the research step resolves (found or skipped) — writer.ts wires
+   *  this to ctx.data("research", ...) so the live workspace can show whether gpt-researcher
+   *  actually ran for this article. */
+  onResearch?: (result: ResearchResult | null) => void;
 };
 
 export async function writeArticlePipeline(
@@ -272,7 +298,10 @@ export async function writeArticlePipeline(
   complete: Completer,
   opts: WriteOptions = {}
 ): Promise<PipelineResult> {
-  const outline = await buildOutline(topic, blueprint, context, complete);
+  const research = opts.researcher ? await opts.researcher(topic) : null;
+  opts.onResearch?.(research);
+
+  const outline = await buildOutline(topic, blueprint, context, complete, research);
 
   // Truly concurrent — see the file header for why this is the deliberate reading of the
   // plan's "parallel" against its "previous section's last 2 lines".

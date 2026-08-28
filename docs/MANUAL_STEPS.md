@@ -140,6 +140,20 @@ nahi hua: Railway → Variables → `PUPPETEER_EXECUTABLE_PATH` set karo (path b
 Agar report me LCP/CLS numbers aa rahe hain (skipped list me Core Web Vitals ka zikr nahi) — sab
 theek hai, kuch nahi karna.
 
+### 14. Mr. Writer ka naya gpt-researcher deploy check karo — [ ]
+**Kyun:** §16.3 Upgrade E ka baaki hissa — ab Mr. Writer ke outline step se pehle gpt-researcher
+ka `conduct_research()` (Python subprocess, `agent-server/src/lib/research/`) real web research
+karta hai, sirf outline ke subtopics/questions ke liye (business facts abhi bhi sirf Site Brain
+se). Chrome/Lighthouse jaisa hi pattern — `nixpacks.toml` ne `python3` + `requirements.txt` add
+kiya, par **Railway pe khud verify nahi kar sakta** (deploy alag machine hai, aur `pip install
+gpt-researcher` bhaari package hai, local pe run nahi kiya).
+**Kahan:** naya code deploy hone ke baad, chat me article likhwao ("X ke bare me article likho").
+**Kya check karna:** Railway → agent-server → Deployments → build logs me dekho `pip install`
+step pass hua ya nahi (`researchDeps` phase). Article ban jaaye to theek hai chahe research mile
+ya na mile (graceful skip) — par agar build log me pip install fail dikhe, ya server logs me
+baar-baar `[writer.research] skipped: could not spawn python3` aaye, to `PYTHON_BIN` variable
+check karo (Railway → Variables) ya mujhe build log ka aakhri 20 line bhej do.
+
 ---
 
 ## Status — main kya kar chuka hoon
