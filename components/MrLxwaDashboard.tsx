@@ -47,9 +47,7 @@ import {
   Settings,
   ChevronDown,
   Bot,
-  ArrowLeft,
   Maximize2,
-  Minimize2,
   X,
   Clock,
   Pause,
@@ -217,6 +215,14 @@ const CSS = `
   background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;
   animation:lxShimmer 1.6s linear infinite}
 @keyframes lxShimmer{from{background-position:200% 0}to{background-position:-200% 0}}
+
+/* Live Visual's mode crossfade — plain CSS keyed to React's own key-remount (see
+   components/MrLxwaDashboard.tsx), not framer-motion: a nested AnimatePresence here got
+   stuck with opacity permanently at 0 in dev (confirmed via computed style), most likely a
+   React-18-strict-mode double-invoke interaction. A CSS animation restarts reliably on every
+   real DOM mount, which a key change always causes, so there is no state to get stuck in. */
+.lx-live-anim{animation:lxLiveFade .4s ease-out both}
+@keyframes lxLiveFade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 
 /* waveform */
 .lx-wv{display:flex;align-items:center;height:18px}
@@ -764,14 +770,11 @@ export default function MrLxwaDashboard() {
       className="lx-card p-4"
     >
       {/* panel toolbar — agent identity moved in here (small, inline) since the old left
-          column's "Agent Status" card was dropped: Started/Running Time/Tokens/Model was
-          taking a whole column away from the live activity + live visuals, which are the
-          actual point of this panel. */}
+          column's "Agent Status" card was dropped, and "Back to Workflow" / "Minimize Agent"
+          dropped too (per request, to give Live Visual more room) — Close (X) already does
+          exactly what "Back to Workflow" did (setShowPanel(false)), so nothing was lost. */}
       <div className="flex items-center gap-3">
-        <button className="lx-ghost" onClick={() => setShowPanel(false)}>
-          <ArrowLeft size={14} /> Back to Workflow
-        </button>
-        <div className="flex min-w-0 items-center gap-2 border-l pl-3" style={{ borderColor: "var(--lx-border)" }}>
+        <div className="flex min-w-0 items-center gap-2">
           <Robo size={26} />
           <div className="min-w-0 leading-tight">
             <div className="truncate text-sm font-bold">{workingAgent?.name ?? "Mr. Writer"}</div>
@@ -779,13 +782,10 @@ export default function MrLxwaDashboard() {
           </div>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <button className="lx-ghost hidden sm:inline-flex">
-            <Minimize2 size={13} /> Minimize Agent
-          </button>
           <button className="lx-icobtn" aria-label="Expand">
             <Maximize2 size={14} />
           </button>
-          <button className="lx-icobtn" aria-label="Close" onClick={() => setShowPanel(false)}>
+          <button className="lx-icobtn" aria-label="Back to workflow" onClick={() => setShowPanel(false)}>
             <X size={14} />
           </button>
         </div>
@@ -863,14 +863,7 @@ export default function MrLxwaDashboard() {
           </div>
 
           <div className="lx-card2 mt-3 overflow-hidden p-3" style={{ minHeight: 260 }}>
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={liveMode}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.35, ease: "easeInOut" }}
-              >
+            <div key={liveMode} className="lx-live-anim">
                 <div className="flex items-center gap-2 lx-11 font-semibold">
                   {(() => {
                     const Icon = LIVE_MODE_META[liveMode].icon;
@@ -964,8 +957,7 @@ export default function MrLxwaDashboard() {
                     </div>
                   </>
                 )}
-              </motion.div>
-            </AnimatePresence>
+            </div>
           </div>
 
           {/* which of the 4 the panel is currently showing, and a way to jump straight to one */}
@@ -1010,7 +1002,7 @@ export default function MrLxwaDashboard() {
 
   const Assistant = (
     <aside
-      className={`lx-panelR fixed inset-y-0 right-0 z-50 flex w-72 shrink-0 flex-col transition-transform duration-300 lg:static lg:translate-x-0 ${
+      className={`lx-panelR fixed inset-y-0 right-0 z-50 flex w-64 shrink-0 flex-col transition-transform duration-300 lg:static lg:translate-x-0 ${
         botOpen ? "translate-x-0" : "translate-x-full"
       }`}
     >
@@ -1264,12 +1256,6 @@ export default function MrLxwaDashboard() {
           <h1 className="min-w-0 truncate text-base font-bold">Solar Panel Benefits for Homes – Write &amp; Publish</h1>
           <span className="lx-pill purple">In Progress</span>
           <div className="ml-auto flex items-center gap-4">
-            <span className="lx-11 lx-mut hidden md:inline">
-              Task ID: <span className="lx-mono" style={{ color: "#c9c9da" }}>LXW-250526-0487</span>
-            </span>
-            <span className="lx-pill red">
-              <span className="lx-pulse h-1.5 w-1.5 rounded-full" style={{ background: "#ef4444" }} /> LIVE
-            </span>
             <span className="lx-mono lx-13 font-bold">{fmt(sec)}</span>
           </div>
         </header>
