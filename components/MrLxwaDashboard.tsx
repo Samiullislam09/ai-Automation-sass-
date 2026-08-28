@@ -64,6 +64,15 @@ import {
   Menu,
   Plus,
   FileSearch,
+  Brain,
+  BarChart3,
+  KeyRound,
+  Search,
+  ShieldCheck,
+  UploadCloud,
+  Megaphone,
+  Loader2,
+  Image as ImageIcon,
 } from "lucide-react";
 
 /* ========================================================================== */
@@ -160,24 +169,60 @@ const CSS = `
   flex-shrink:0}
 .lx-agent.glow{box-shadow:0 0 16px color-mix(in srgb,var(--ac) 60%,transparent),
   inset 0 0 10px color-mix(in srgb,var(--ac) 25%,transparent)}
-.lx-conn{position:relative;height:2px;flex:1;min-width:16px;opacity:.8;
-  background-image:repeating-linear-gradient(90deg,var(--cc) 0 4px,transparent 4px 9px)}
-.lx-conn i{position:absolute;top:-2px;left:0;width:5px;height:5px;border-radius:50%;
-  background:var(--cc);box-shadow:0 0 6px var(--cc);animation:lxTravel 2.4s linear infinite}
-@keyframes lxTravel{0%{left:0;opacity:0}12%{opacity:1}88%{opacity:1}100%{left:calc(100% - 5px);opacity:0}}
 
-/* [ASSET] brain — emoji + hue-rotate stands in for the 3D render */
+/* [ASSET] brain emoji — used only in the compact single-line row (panel open); the resting
+   "AI Agent Network" state uses the lucide Brain icon inside .lx-hex instead. */
 .lx-brain{font-size:56px;line-height:1;user-select:none;
   filter:hue-rotate(255deg) saturate(2.4) brightness(1.12)
          drop-shadow(0 0 16px rgba(168,85,247,.9)) drop-shadow(0 0 44px rgba(124,58,237,.55));
   animation:lxFloat 3.6s ease-in-out infinite}
 @keyframes lxFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
-.lx-platform{position:relative;width:128px;height:26px;margin-top:-4px}
-.lx-platform::before{content:"";position:absolute;inset:0;border-radius:50%;
-  border:1.5px solid rgba(34,211,238,.55);box-shadow:0 0 14px rgba(34,211,238,.45)}
-.lx-platform::after{content:"";position:absolute;left:14%;right:14%;top:22%;bottom:22%;border-radius:50%;
-  background:radial-gradient(ellipse at center,rgba(139,92,246,.55),rgba(139,92,246,.06) 70%);
-  filter:blur(2px)}
+
+/* ---- AI Agent Network (resting-state layout, matches the reference mockup) ------------ */
+/* breakpoint is on the CONTAINER (the center column), not the viewport — the column is
+   ~480px wide even on a 1024px screen once the sidebar and assistant take their share, and
+   the JS that measures wire endpoints uses the same 440px container threshold. */
+.lx-net-host{container-type:inline-size}
+.lx-net{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+.lx-net-brain{order:-1;grid-column:1 / -1}
+@container (min-width:440px){
+  .lx-net{grid-template-columns:repeat(12,1fr);grid-template-rows:repeat(4,auto);
+    grid-template-areas:
+      "t1 t1 t1 t1 t2 t2 t2 t2 t3 t3 t3 t3"
+      "l1 l1 l1 l1 b  b  b  b  r1 r1 r1 r1"
+      "l2 l2 l2 l2 b  b  b  b  r2 r2 r2 r2"
+      "o1 o1 o1 o2 o2 o2 o3 o3 o3 o4 o4 o4"}
+  .lx-net-brain{order:0;grid-column:auto}
+}
+
+.lx-net-card{position:relative;z-index:1;background:#0b0b14;border:1px solid rgba(255,255,255,.08);
+  border-radius:14px;padding:14px;text-align:left;display:flex;flex-direction:column;width:100%;
+  min-height:112px;transition:.18s;box-shadow:0 4px 18px rgba(0,0,0,.35)}
+.lx-net-card:not(:disabled):hover{border-color:rgba(56,189,248,.45);background:#0e0e19}
+.lx-net-icon{width:44px;height:44px;border-radius:11px;display:flex;align-items:center;
+  justify-content:center;flex-shrink:0}
+
+/* glowing wires from each card to the brain — SVG overlay under the cards (z-index 0 vs 1) */
+.lx-wires{position:absolute;inset:0;z-index:0;pointer-events:none;overflow:visible}
+.lx-wire-dash{animation:lxWireFlow 1.6s linear infinite}
+@keyframes lxWireFlow{to{stroke-dashoffset:-22}}
+
+/* hexagonal brain: the clip-path removes the box's border, so the hex outline is drawn by a
+   second, slightly larger clipped layer behind it (::before) in the glow color. Fill is a
+   real navy-blue, not a fade to near-black, to match the reference's saturated hex interior. */
+.lx-hex{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  min-height:200px;padding:22px 26px;text-align:center;
+  clip-path:polygon(25% 3%,75% 3%,100% 50%,75% 97%,25% 97%,0% 50%);
+  background:linear-gradient(180deg,#60a5fa,#3b82f6 50%,#22d3ee)}
+.lx-hex::before{content:"";position:absolute;inset:1.5px;z-index:-1;
+  clip-path:polygon(25% 3%,75% 3%,100% 50%,75% 97%,25% 97%,0% 50%);
+  background:radial-gradient(circle at 50% 36%,#1e3a8a,#0c1a4d 65%,#080f30 100%)}
+/* the glow can't live on the clipped element itself (clip-path cuts shadows), so the grid
+   cell that holds it carries the drop-shadow filter instead */
+.lx-net-brain{filter:drop-shadow(0 0 18px rgba(59,130,246,.5)) drop-shadow(0 0 40px rgba(59,130,246,.25))}
+.lx-hex-badge{position:absolute;right:-8px;bottom:-6px;width:24px;height:24px;border-radius:50%;
+  background:#06060b;border:2px solid #1e3a8a;display:flex;align-items:center;justify-content:center;
+  box-shadow:0 0 10px rgba(74,222,128,.5)}
 
 /* ---- robot avatar (pure CSS — [ASSET] swap point) ---------------------- */
 .lx-robo{position:relative;border-radius:26%;flex-shrink:0;
@@ -277,34 +322,52 @@ const NAV: NavItem[] = [
   { label: "Settings", icon: Settings },
 ];
 
-type AgentStatus = "Completed" | "Working" | "Waiting";
-type Agent = { name: string; role: string; status: AgentStatus };
+type AgentStatus = "Completed" | "Working" | "Waiting" | "Planned";
+type Agent = { name: string; role: string; status: AgentStatus; icon: React.ElementType; color: string };
 
-/** The real 9 agents (agent-server/src/queues.ts's AGENT_TYPES minus "boss" — boss IS the
- *  brain node in the middle of the workflow, not a 10th orbiting icon). The original mockup
- *  had 8 placeholders including "Mr. Image" and "Mr. Story", neither of which exist —
- *  MASTER_PLAN §19 names them as deliberately-not-built. Left-to-right order tells the real
- *  pipeline story: gather (Crawler → Analyst) → plan (Keyword → Writer) → [[brain]] →
- *  check/ship (SEO → Audit → Publish) → distribute (Social → Leads). */
+/** The full roster per MASTER_PLAN.html: the 9 real agents (agent-server/src/queues.ts's
+ *  AGENT_TYPES minus "boss" — boss IS the brain node in the middle, not a 10th orbiting icon)
+ *  PLUS the 2 named-but-not-yet-built agents from §19 ("19 · Mr. Image aur Mr. Story — naye
+ *  agents"), status "Planned" — shown on the network (the plan names them) but never counted
+ *  as active/staffed anywhere (header pill, stats strip), since they don't run yet. Left-to-
+ *  right order tells the real pipeline story: gather (Crawler → Analyst) → plan (Keyword →
+ *  Writer → Image) → [[brain]] → check/ship (SEO → Story → Audit → Publish) → distribute
+ *  (Social → Leads). Each agent has its own icon + accent color (per the reference "AI Agent
+ *  Network" mockup), not one shared Bot icon. */
 const AGENTS_LEFT: Agent[] = [
-  { name: "Mr. Crawler", role: "Site Crawler", status: "Completed" },
-  { name: "Mr. Analyst", role: "Site Brain", status: "Completed" },
-  { name: "Mr. Keyword", role: "Keyword Research", status: "Completed" },
-  { name: "Mr. Writer", role: "Content Writer", status: "Working" },
+  { name: "Mr. Crawler", role: "Site Crawler", status: "Completed", icon: Globe, color: "#22d3ee" },
+  { name: "Mr. Analyst", role: "Site Brain", status: "Completed", icon: BarChart3, color: "#3b82f6" },
+  { name: "Mr. Keyword", role: "Keyword Research", status: "Completed", icon: KeyRound, color: "#f59e0b" },
+  { name: "Mr. Writer", role: "Content Writer", status: "Working", icon: PenLine, color: "#8b5cf6" },
+  { name: "Mr. Image", role: "Image Generation", status: "Planned", icon: ImageIcon, color: "#facc15" },
 ];
 const AGENTS_RIGHT: Agent[] = [
-  { name: "Mr. SEO", role: "SEO Checks", status: "Waiting" },
-  { name: "Mr. Audit", role: "Site Audit", status: "Waiting" },
-  { name: "Mr. Publish", role: "Publisher", status: "Waiting" },
-  { name: "Miss Social", role: "Social Drafts", status: "Waiting" },
-  { name: "Mr. Leads", role: "Lead Discovery", status: "Waiting" },
+  { name: "Mr. SEO", role: "SEO Checks", status: "Waiting", icon: Search, color: "#22c55e" },
+  { name: "Mr. Story", role: "Web Stories", status: "Planned", icon: BookOpen, color: "#6366f1" },
+  { name: "Mr. Audit", role: "Site Audit", status: "Waiting", icon: ShieldCheck, color: "#a855f7" },
+  { name: "Mr. Publish", role: "Publisher", status: "Waiting", icon: UploadCloud, color: "#06b6d4" },
+  { name: "Miss Social", role: "Social Drafts", status: "Waiting", icon: Megaphone, color: "#ec4899" },
+  { name: "Mr. Leads", role: "Lead Discovery", status: "Waiting", icon: UserRound, color: "#f97316" },
 ];
 const ALL_AGENTS: Agent[] = [...AGENTS_LEFT, ...AGENTS_RIGHT];
+/** Real, built agents only — what "N Agents Active" / "Total Agents" count. The 2 Planned
+ *  ones are visible on the network diagram but never counted as staffed, so the numbers stay
+ *  honest (MASTER_PLAN itself calls out never showing state that isn't real). */
+const REAL_AGENTS = ALL_AGENTS.filter((a) => a.status !== "Planned");
+
+/** How the 11 agents are grouped around the brain in the "AI Agent Network" resting layout
+ *  (reference: ChatGPT Image Aug 29, 2026 mockup) — 3 across the top, 2 stacked on each side
+ *  of the brain, 4 across the bottom. */
+const NET_TOP = AGENTS_LEFT.slice(0, 3);
+const NET_LEFT = AGENTS_LEFT.slice(3, 5);
+const NET_RIGHT = AGENTS_RIGHT.slice(0, 2);
+const NET_BOTTOM = AGENTS_RIGHT.slice(2, 6);
 
 const STATUS_COLOR: Record<AgentStatus, string> = {
   Completed: "#22c55e",
   Working: "#3b82f6",
   Waiting: "#6a6a80",
+  Planned: "#71717a",
 };
 
 const TIMELINE: { t: string; txt: string; s: "Completed" | "In Progress" | null }[] = [
@@ -443,6 +506,7 @@ const AgentNode = ({ a, compact = false, onClick }: { a: Agent; compact?: boolea
   const iconSize = compact ? 30 : 46;
   const clickable = !!onClick;
 
+  const Icon = a.icon;
   const icon = (
     <span
       className={`lx-agent ${a.status !== "Waiting" ? "glow" : ""}`}
@@ -453,7 +517,7 @@ const AgentNode = ({ a, compact = false, onClick }: { a: Agent; compact?: boolea
         color: a.status === "Waiting" ? "#8b8ba0" : c,
       }}
     >
-      <Bot size={compact ? 14 : 20} />
+      <Icon size={compact ? 14 : 20} />
     </span>
   );
 
@@ -487,6 +551,234 @@ const AgentNode = ({ a, compact = false, onClick }: { a: Agent; compact?: boolea
       <span className="lx-11 font-medium text-center" style={{ color: "#d7d7e4" }}>{a.name}</span>
       <span className="lx-10" style={{ color: c }}>{a.status}</span>
     </button>
+  );
+};
+
+/** One "AI Agent Network" card — agent's own icon + accent color (not the shared status
+ *  color), matching the reference mockup where every agent has a distinct color-coded icon
+ *  square. `area` is the CSS grid-area name it occupies in the network layout (see .lx-net
+ *  below); on narrow screens that named area doesn't exist so the card just auto-flows. */
+const NetCard = ({ a, area, onClick }: { a: Agent; area: string; onClick?: () => void }) => {
+  const Icon = a.icon;
+  const working = a.status === "Working";
+  const planned = a.status === "Planned";
+  const statusColor = STATUS_COLOR[a.status];
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!working}
+      className="lx-net-card"
+      data-net={area}
+      style={{ gridArea: area, cursor: working ? "pointer" : "default", opacity: planned ? 0.68 : 1, borderStyle: planned ? "dashed" : "solid" }}
+    >
+      <div className="flex w-full items-start justify-between">
+        {/* tinted-dark square with the agent's colored icon + a soft matching glow — the
+            reference's icon treatment (not a solid color fill) */}
+        <span
+          className="lx-net-icon"
+          style={{
+            background: `linear-gradient(145deg, ${a.color}33, ${a.color}10)`,
+            border: `1px solid ${a.color}66`,
+            color: a.color,
+            boxShadow: planned ? "none" : `0 0 18px ${a.color}55, inset 0 0 10px ${a.color}22`,
+          }}
+        >
+          <Icon size={20} />
+        </span>
+        {planned ? (
+          <span className="lx-10 font-semibold" style={{ color: statusColor }}>Planned</span>
+        ) : (
+          <MoreVertical size={14} style={{ color: "var(--lx-mut)", opacity: 0.6 }} />
+        )}
+      </div>
+      <div className="mt-2.5 w-full">
+        <div className="lx-12 font-bold">{a.name}</div>
+        <div className="lx-10 lx-mut">{a.role}</div>
+        {!planned && (
+          <div className="mt-1.5 flex items-center gap-1.5 lx-10 font-semibold" style={{ color: statusColor }}>
+            <span className={`h-1.5 w-1.5 rounded-full ${working ? "lx-pulse" : ""}`} style={{ background: statusColor }} />
+            {a.status}
+          </div>
+        )}
+      </div>
+    </button>
+  );
+};
+
+/** One tile in the network's bottom stats strip. */
+const StatTile = ({
+  icon: Icon,
+  color,
+  label,
+  value,
+  sub,
+  spin = false,
+}: {
+  icon: React.ElementType;
+  color: string;
+  label: string;
+  value: string;
+  sub: string;
+  spin?: boolean;
+}) => (
+  <div className="flex items-center gap-2.5">
+    <span className="lx-net-icon" style={{ width: 34, height: 34, background: `${color}22`, color, boxShadow: "none" }}>
+      <Icon size={16} className={spin ? "animate-spin" : ""} />
+    </span>
+    <span>
+      <span className="block lx-10 lx-mut">{label}</span>
+      <span className="block lx-13 font-bold leading-tight">{value}</span>
+      <span className="block lx-10 font-medium" style={{ color }}>● {sub}</span>
+    </span>
+  </div>
+);
+
+type Wire = { x1: number; y1: number; x2: number; y2: number };
+
+/** Where a ray from a rect's center toward `to` leaves the rect — so the wire starts at
+ *  the card's edge, not under it. */
+const edgePoint = (r: DOMRect, cx: number, cy: number, tx: number, ty: number) => {
+  const dx = tx - cx;
+  const dy = ty - cy;
+  if (!dx && !dy) return { x: cx, y: cy };
+  const sx = dx ? (r.width / 2) / Math.abs(dx) : Infinity;
+  const sy = dy ? (r.height / 2) / Math.abs(dy) : Infinity;
+  const t = Math.min(sx, sy);
+  return { x: cx + dx * t, y: cy + dy * t };
+};
+
+/** The resting-state "AI Agent Network": cards around a hexagonal brain, glowing wires from
+ *  each card to the brain. Wires are an SVG overlay whose endpoints are measured from the
+ *  real rendered card/brain boxes (ResizeObserver), so they follow the grid at any width —
+ *  they are hidden under 900px where the grid collapses to a plain 2-column stack. */
+const AgentNetwork = ({ workingAgent, onOpen }: { workingAgent: Agent | null; onOpen: (a: Agent) => void }) => {
+  const ref = useRef<HTMLDivElement>(null);
+  const [wires, setWires] = useState<Wire[]>([]);
+  const [box, setBox] = useState({ w: 0, h: 0 });
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => {
+      const host = el.getBoundingClientRect();
+      const brain = el.querySelector<HTMLElement>("[data-net='b']");
+      if (!brain || host.width < 440) {
+        setWires([]);
+        setBox({ w: host.width, h: host.height });
+        return;
+      }
+      const b = brain.getBoundingClientRect();
+      const bx = b.left - host.left + b.width / 2;
+      const by = b.top - host.top + b.height / 2;
+      // the hexagon's visible edge is inset from its box: stop wires at ~46% of its half-width
+      const hexR = Math.min(b.width, b.height) * 0.46;
+      const next: Wire[] = [];
+      el.querySelectorAll<HTMLElement>("[data-net]:not([data-net='b'])").forEach((card) => {
+        const r = card.getBoundingClientRect();
+        const cx = r.left - host.left + r.width / 2;
+        const cy = r.top - host.top + r.height / 2;
+        const start = edgePoint(new DOMRect(0, 0, r.width, r.height), cx, cy, bx, by);
+        const ang = Math.atan2(cy - by, cx - bx);
+        next.push({ x1: start.x, y1: start.y, x2: bx + Math.cos(ang) * hexR, y2: by + Math.sin(ang) * hexR });
+      });
+      setWires(next);
+      setBox({ w: host.width, h: host.height });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  return (
+    <div className="p-4 sm:p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-base font-bold">AI Agent Network</div>
+          <div className="lx-11 lx-mut mt-0.5">All agents working together to achieve your goals.</div>
+        </div>
+        <span className="lx-pill green">
+          <span className="h-1.5 w-1.5 rounded-full lx-pulse" style={{ background: "#22c55e" }} />
+          {REAL_AGENTS.length + 1} Agents Active
+        </span>
+      </div>
+
+      {workingAgent && (
+        <div className="lx-card2 mt-3 flex items-center gap-2.5 px-3 py-2">
+          <span className="h-2 w-2 shrink-0 rounded-full lx-pulse" style={{ background: "#22c55e", boxShadow: "0 0 8px #22c55e" }} />
+          <span className="lx-11 font-semibold">Planning &amp; Orchestrating</span>
+          <span className="lx-10 lx-mut">— delegated to {workingAgent.name}</span>
+        </div>
+      )}
+
+      <div ref={ref} className="lx-net-host relative mt-4">
+        {wires.length > 0 && (
+          <svg className="lx-wires" width={box.w} height={box.h} viewBox={`0 0 ${box.w} ${box.h}`} aria-hidden>
+            <defs>
+              <filter id="lxWireGlow" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="2.2" result="b" />
+                <feMerge>
+                  <feMergeNode in="b" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+            </defs>
+            {wires.map((w, i) => (
+              <g key={i} filter="url(#lxWireGlow)">
+                <line x1={w.x1} y1={w.y1} x2={w.x2} y2={w.y2} stroke="rgba(56,189,248,.55)" strokeWidth="1.4" strokeDasharray="5 6" className="lx-wire-dash" />
+                <circle cx={w.x1} cy={w.y1} r="3" fill="#38bdf8" />
+                <circle cx={w.x2} cy={w.y2} r="2.5" fill="#60a5fa" />
+              </g>
+            ))}
+          </svg>
+        )}
+
+        <div className="lx-net">
+          {NET_TOP.map((a, i) => (
+            <NetCard key={a.name} a={a} area={`t${i + 1}`} onClick={() => onOpen(a)} />
+          ))}
+          {NET_LEFT.map((a, i) => (
+            <NetCard key={a.name} a={a} area={`l${i + 1}`} onClick={() => onOpen(a)} />
+          ))}
+
+          {/* [ASSET] Mr. Lxwa — hexagonal "command center" brain, matching the reference.
+              Brand mark badged bottom-right of the big brain icon, like an app icon overlay. */}
+          <div className="lx-hex lx-net-brain" data-net="b" style={{ gridArea: "b" }}>
+            <div className="relative">
+              <Brain size={40} style={{ color: "#bfdbfe", filter: "drop-shadow(0 0 14px rgba(191,219,254,.9))" }} />
+              <span className="lx-hex-badge">
+                <LogoMark size={13} />
+              </span>
+            </div>
+            <div className="text-base font-bold mt-2">Mr. Lxwa</div>
+            <div className="lx-11 lx-mut">Command Center</div>
+            <div className="lx-10 lx-mut mt-0.5">Plan · Coordinate · Execute</div>
+            <div className="mt-2 flex items-center gap-1.5 lx-11 font-semibold" style={{ color: "#22c55e" }}>
+              <span className="h-1.5 w-1.5 rounded-full lx-pulse" style={{ background: "#22c55e" }} />
+              Online
+            </div>
+          </div>
+
+          {NET_RIGHT.map((a, i) => (
+            <NetCard key={a.name} a={a} area={`r${i + 1}`} onClick={() => onOpen(a)} />
+          ))}
+          {NET_BOTTOM.map((a, i) => (
+            <NetCard key={a.name} a={a} area={`o${i + 1}`} onClick={() => onOpen(a)} />
+          ))}
+        </div>
+      </div>
+
+      {/* stats strip — real, built agents only (the 2 Planned ones above are shown on the
+          network because the plan names them, but never counted here as staffed/active) */}
+      <div className="lx-card2 mt-4 flex flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3">
+        <StatTile icon={Users} color="#3b82f6" label="Total Agents" value={String(REAL_AGENTS.length + 1)} sub="Active" />
+        <StatTile icon={Loader2} color="#3b82f6" label="Tasks Running" value={String(REAL_AGENTS.filter((a) => a.status === "Working").length)} sub="In Progress" spin />
+        <StatTile icon={CheckCircle2} color="#a855f7" label="Tasks Completed" value={String(REAL_AGENTS.filter((a) => a.status === "Completed").length)} sub="Today" />
+        <StatTile icon={TrendingUp} color="#22c55e" label="Success Rate" value="98.6%" sub="This Week" />
+        <StatTile icon={Clock} color="#f59e0b" label="Time Saved" value="32.4h" sub="This Week" />
+      </div>
+    </div>
   );
 };
 
@@ -698,59 +990,14 @@ export default function MrLxwaDashboard() {
           </div>
         </div>
       ) : (
-        // ---- full: a real team roster — one card per agent (icon, name, role, status),
-        // in a grid that fills the same height as Live Visual gets in the panel (~360px),
-        // so the resting state reads as a staffed AI team, not a few icons floating in a
-        // mostly-empty card. Grid (not flex-wrap of bare icons), so it fills width and
-        // height evenly at any screen size with no dead space and no scrollbar. ----
-        <div key="full" className="lx-live-anim p-4 sm:p-6">
-          {workingAgent && (
-              <div className="lx-card2 mb-4 flex items-center gap-2.5 px-3 py-2">
-                <span className="h-2 w-2 shrink-0 rounded-full lx-pulse" style={{ background: "#22c55e", boxShadow: "0 0 8px #22c55e" }} />
-                <span className="lx-11 font-semibold">Planning &amp; Orchestrating</span>
-                <span className="lx-10 lx-mut">— delegated to {workingAgent.name}</span>
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5" style={{ minHeight: 300 }}>
-              {/* [ASSET] Mr. Lxwa — the boss, styled as the team lead's card */}
-              <div
-                className="lx-card2 flex flex-col items-center justify-center gap-1 p-4 text-center"
-                style={{ background: "linear-gradient(160deg,rgba(139,92,246,.16),rgba(34,211,238,.05))", borderColor: "rgba(139,92,246,.45)" }}
-              >
-                <span className="lx-brain" style={{ fontSize: 32 }}>🧠</span>
-                <span className="lx-12 font-bold">Mr. Lxwa</span>
-                <span className="lx-10 lx-mut">AI Brain · Boss</span>
-                <span className="lx-pill purple mt-1" style={{ padding: "2px 9px" }}>Orchestrating</span>
-              </div>
-
-              {ALL_AGENTS.map((a) => {
-                const c = STATUS_COLOR[a.status];
-                const working = a.status === "Working";
-                return (
-                  <button
-                    key={a.name}
-                    type="button"
-                    onClick={() => openAgentPanel(a)}
-                    disabled={!working}
-                    className="lx-card2 flex flex-col items-center justify-center gap-1 p-4 text-center"
-                    style={{ cursor: working ? "pointer" : "default", borderColor: working ? "rgba(59,130,246,.5)" : undefined }}
-                  >
-                    <span
-                      className={`lx-agent ${a.status !== "Waiting" ? "glow" : ""}`}
-                      style={{ width: 40, height: 40, ["--ac" as string]: a.status === "Waiting" ? "rgba(255,255,255,.16)" : c, color: a.status === "Waiting" ? "#8b8ba0" : c }}
-                    >
-                      <Bot size={18} />
-                    </span>
-                    <span className="lx-12 font-semibold">{a.name}</span>
-                    <span className="lx-10 lx-mut">{a.role}</span>
-                    <span className="lx-10 font-semibold" style={{ color: c }}>
-                      {a.status === "Working" ? "● Working" : a.status === "Completed" ? "✓ Completed" : "Waiting"}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+        // ---- full: "AI Agent Network" — pixel-matched to the reference mockup (ChatGPT
+        // Image Aug 29, 2026): title+subtitle+active pill header, agents in their own
+        // color-coded cards arranged around a hexagonal brain "command center", a bottom
+        // stats strip. CSS grid-area layout (see .lx-net below), not absolute positioning —
+        // it collapses to a clean 2-column auto-flow (brain first) under 900px, so it stays
+        // fully responsive instead of a fixed pixel diagram. ----
+        <div key="full" className="lx-live-anim">
+          <AgentNetwork workingAgent={workingAgent} onOpen={openAgentPanel} />
         </div>
       )}
     </motion.section>
