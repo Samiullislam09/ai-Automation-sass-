@@ -188,10 +188,12 @@ const CSS = `
 @container (min-width:440px){
   .lx-net{grid-template-columns:repeat(12,1fr);grid-template-rows:repeat(4,auto);
     grid-template-areas:
-      "t1 t1 t1 t1 t2 t2 t2 t2 t3 t3 t3 t3"
-      "l1 l1 l1 l1 b  b  b  b  r1 r1 r1 r1"
-      "l2 l2 l2 l2 b  b  b  b  r2 r2 r2 r2"
+      "t1 t1 t1 t2 t2 t2 t3 t3 t3 t4 t4 t4"
+      "l1 l1 l1 b  b  b  b  b  b  r1 r1 r1"
       "o1 o1 o1 o2 o2 o2 o3 o3 o3 o4 o4 o4"}
+  /* side cards sit centred on the brain, single-card height; the brain card itself does
+     not stretch to fill the row — it keeps the reference's compact size */
+  [data-net='l1'],[data-net='r1'],[data-net='b']{align-self:center}
   .lx-net-brain{order:0;grid-column:auto}
 }
 
@@ -207,22 +209,22 @@ const CSS = `
 .lx-wire-dash{animation:lxWireFlow 1.6s linear infinite}
 @keyframes lxWireFlow{to{stroke-dashoffset:-22}}
 
-/* hexagonal brain: the clip-path removes the box's border, so the hex outline is drawn by a
-   second, slightly larger clipped layer behind it (::before) in the glow color. Fill is a
-   real navy-blue, not a fade to near-black, to match the reference's saturated hex interior. */
+/* brain "command center" card — matches the reference (jhhhhhhhh.png) exactly: fill is the
+   reference's own sampled background (#060a18, so the cropped 3D brain render sits on it
+   seamlessly), a 1px purple→cyan gradient border (painted via the two-layer background
+   trick, since a gradient can't be a border-color), and a soft, low-intensity glow — not
+   the loud cyan halo it had before. Compact: it does NOT stretch to the row height. */
 .lx-hex{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
-  min-height:200px;padding:22px 26px;text-align:center;
-  clip-path:polygon(25% 3%,75% 3%,100% 50%,75% 97%,25% 97%,0% 50%);
-  background:linear-gradient(180deg,#60a5fa,#3b82f6 50%,#22d3ee)}
-.lx-hex::before{content:"";position:absolute;inset:1.5px;z-index:-1;
-  clip-path:polygon(25% 3%,75% 3%,100% 50%,75% 97%,25% 97%,0% 50%);
-  background:radial-gradient(circle at 50% 36%,#1e3a8a,#0c1a4d 65%,#080f30 100%)}
-/* the glow can't live on the clipped element itself (clip-path cuts shadows), so the grid
-   cell that holds it carries the drop-shadow filter instead */
-.lx-net-brain{filter:drop-shadow(0 0 18px rgba(59,130,246,.5)) drop-shadow(0 0 40px rgba(59,130,246,.25))}
-.lx-hex-badge{position:absolute;right:-8px;bottom:-6px;width:24px;height:24px;border-radius:50%;
-  background:#06060b;border:2px solid #1e3a8a;display:flex;align-items:center;justify-content:center;
-  box-shadow:0 0 10px rgba(74,222,128,.5)}
+  padding:18px 16px 16px;text-align:center;border-radius:18px;border:1px solid transparent;
+  background:linear-gradient(#060a18,#060a18) padding-box,
+             linear-gradient(160deg,#a855f7,#6366f1 45%,#22d3ee) border-box;
+  box-shadow:0 0 18px rgba(99,102,241,.28),0 0 40px rgba(34,211,238,.10)}
+/* the render is a rectangular crop of the reference; a radial mask fades its edges into the
+   card so no crop box is visible, only the brain */
+.lx-hex img{width:124px;height:auto;display:block;
+  -webkit-mask:radial-gradient(ellipse 52% 50% at 50% 50%,#000 58%,transparent 100%);
+  mask:radial-gradient(ellipse 52% 50% at 50% 50%,#000 58%,transparent 100%);
+  filter:drop-shadow(0 0 14px rgba(129,140,248,.55))}
 
 /* ---- robot avatar (pure CSS — [ASSET] swap point) ---------------------- */
 .lx-robo{position:relative;border-radius:26%;flex-shrink:0;
@@ -331,9 +333,12 @@ type Agent = { name: string; role: string; status: AgentStatus; icon: React.Elem
  *  agents"), status "Planned" — shown on the network (the plan names them) but never counted
  *  as active/staffed anywhere (header pill, stats strip), since they don't run yet. Left-to-
  *  right order tells the real pipeline story: gather (Crawler → Analyst) → plan (Keyword →
- *  Writer → Image) → [[brain]] → check/ship (SEO → Story → Audit → Publish) → distribute
- *  (Social → Leads). Each agent has its own icon + accent color (per the reference "AI Agent
- *  Network" mockup), not one shared Bot icon. */
+ *  Writer → Image) → [[brain]] → check/ship (SEO → Story → Audit) → distribute (Social →
+ *  Leads). Each agent has its own icon + accent color (per the reference "AI Agent Network"
+ *  mockup), not one shared Bot icon.
+ *
+ *  Mr. Publish is a REAL backend agent (agent-server AGENT_TYPES includes "publish") — it is
+ *  hidden from this diagram only, per an explicit request, not because it doesn't exist. */
 const AGENTS_LEFT: Agent[] = [
   { name: "Mr. Crawler", role: "Site Crawler", status: "Completed", icon: Globe, color: "#22d3ee" },
   { name: "Mr. Analyst", role: "Site Brain", status: "Completed", icon: BarChart3, color: "#3b82f6" },
@@ -345,7 +350,6 @@ const AGENTS_RIGHT: Agent[] = [
   { name: "Mr. SEO", role: "SEO Checks", status: "Waiting", icon: Search, color: "#22c55e" },
   { name: "Mr. Story", role: "Web Stories", status: "Planned", icon: BookOpen, color: "#6366f1" },
   { name: "Mr. Audit", role: "Site Audit", status: "Waiting", icon: ShieldCheck, color: "#a855f7" },
-  { name: "Mr. Publish", role: "Publisher", status: "Waiting", icon: UploadCloud, color: "#06b6d4" },
   { name: "Miss Social", role: "Social Drafts", status: "Waiting", icon: Megaphone, color: "#ec4899" },
   { name: "Mr. Leads", role: "Lead Discovery", status: "Waiting", icon: UserRound, color: "#f97316" },
 ];
@@ -355,13 +359,12 @@ const ALL_AGENTS: Agent[] = [...AGENTS_LEFT, ...AGENTS_RIGHT];
  *  honest (MASTER_PLAN itself calls out never showing state that isn't real). */
 const REAL_AGENTS = ALL_AGENTS.filter((a) => a.status !== "Planned");
 
-/** How the 11 agents are grouped around the brain in the "AI Agent Network" resting layout
- *  (reference: ChatGPT Image Aug 29, 2026 mockup) — 3 across the top, 2 stacked on each side
- *  of the brain, 4 across the bottom. */
-const NET_TOP = AGENTS_LEFT.slice(0, 3);
-const NET_LEFT = AGENTS_LEFT.slice(3, 5);
-const NET_RIGHT = AGENTS_RIGHT.slice(0, 2);
-const NET_BOTTOM = AGENTS_RIGHT.slice(2, 6);
+/** How the 10 agents are grouped around the brain in the "AI Agent Network" resting layout —
+ *  3 across the top, 2 stacked on each side of the brain, 3 across the bottom. */
+const NET_TOP = AGENTS_LEFT.slice(0, 4);
+const NET_LEFT = AGENTS_LEFT.slice(4, 5);
+const NET_RIGHT = AGENTS_RIGHT.slice(0, 1);
+const NET_BOTTOM = AGENTS_RIGHT.slice(1, 5);
 
 const STATUS_COLOR: Record<AgentStatus, string> = {
   Completed: "#22c55e",
@@ -742,15 +745,13 @@ const AgentNetwork = ({ workingAgent, onOpen }: { workingAgent: Agent | null; on
             <NetCard key={a.name} a={a} area={`l${i + 1}`} onClick={() => onOpen(a)} />
           ))}
 
-          {/* [ASSET] Mr. Lxwa — hexagonal "command center" brain, matching the reference.
-              Brand mark badged bottom-right of the big brain icon, like an app icon overlay. */}
+          {/* [ASSET] Mr. Lxwa — "command center" brain card, matching the reference
+              (jhhhhhhhh.png). The brain is the reference's own 3D render, cropped out of that
+              image into public/brand/brain-boss.png — a raster render can't be rebuilt in
+              CSS/SVG, and the request was to use exactly that artwork. */}
           <div className="lx-hex lx-net-brain" data-net="b" style={{ gridArea: "b" }}>
-            <div className="relative">
-              <Brain size={40} style={{ color: "#bfdbfe", filter: "drop-shadow(0 0 14px rgba(191,219,254,.9))" }} />
-              <span className="lx-hex-badge">
-                <LogoMark size={13} />
-              </span>
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element -- static brand asset, fixed size */}
+            <img src="/brand/brain-boss.png" alt="" width={156} height={124} />
             <div className="text-base font-bold mt-2">Mr. Lxwa</div>
             <div className="lx-11 lx-mut">Command Center</div>
             <div className="lx-10 lx-mut mt-0.5">Plan · Coordinate · Execute</div>
