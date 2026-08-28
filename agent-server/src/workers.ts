@@ -19,6 +19,18 @@ import { brainRefOf } from "./brain/adapter.js";
 import { onStepDone, onStepFailed } from "./brain/orchestrator.js";
 import { handleBrainDispatch } from "./brain/server.js";
 import { emit } from "./brain/events.js";
+import { withCostLedger, type CostSnapshot } from "./lib/costLedger.js";
+
+/** Folds a cost snapshot into an agent's result without assuming its shape — every agent's
+ *  run() returns `unknown` (base.ts), so this can't just spread onto it blindly. Every real
+ *  agent returns a plain object today; the fallback exists so a future agent returning
+ *  something else (a string, an array) still gets its cost recorded instead of silently
+ *  losing it. */
+export function withCost(result: unknown, cost: CostSnapshot): unknown {
+  const rounded = { tokens: cost.tokens, calls: cost.calls, usd: Number(cost.costUsd.toFixed(4)) };
+  if (result && typeof result === "object" && !Array.isArray(result)) return { ...(result as Record<string, unknown>), cost: rounded };
+  return { value: result, cost: rounded };
+}
 
 // queues.ts sets retryLimit: 2, i.e. the first run plus two retries.
 const MAX_ATTEMPTS = 3;
@@ -151,7 +163,12 @@ async function processJob(type: AgentType, job: JobWithMetadata<AgentJobData>) {
   // the whole of the strangler seam (brain/adapter.ts explains why a step rides the agent's
   // own queue instead of a new one).
   try {
-    const result = await AGENTS[type].run(job, ctx);
+    // withCostLedger: every NVIDIA call made anywhere inside AGENTS[type].run() — however many
+    // awaits deep — gets attributed here via AsyncLocalStorage (lib/costLedger.ts), not by
+    // threading a "record this" parameter through eight agents' own LLM calls. §13 Phase 4's
+    // cost dashboard, the capture half.
+    const { result: rawResult, ...cost } = await withCostLedger(() => AGENTS[type].run(job, ctx));
+    const result = withCost(rawResult, cost);
     await logJobFinish(logId, result);
     emitAgentStatus({ agent: type, tenant: tenantId, status: "idle", task: "Done" });
     if (brainRef) {
@@ -167,7 +184,11 @@ async function processJob(type: AgentType, job: JobWithMetadata<AgentJobData>) {
   } catch (err: any) {
     const durationMs = Date.now() - startedAt;
     const explained = explainAgentError(type, err, durationMs);
-    await logJobError(logId, { ...explained, attempt, attempts, durationMs, agent: type, at: new Date().toISOString() });
+    // A job that fails on its last LLM call still spent money on the ones before it —
+    // withCostLedger attaches whatever was actually spent to the error as `.costLedger`.
+    const partial = err?.costLedger as CostSnapshot | undefined;
+    const cost = partial ? { tokens: partial.tokens, calls: partial.calls, usd: Number(partial.costUsd.toFixed(4)) } : undefined;
+    await logJobError(logId, { ...explained, attempt, attempts, durationMs, agent: type, at: new Date().toISOString(), cost });
     if (brainRef) {
       // pg-boss owns the retrying (queues.ts: retryLimit 2). The brain is only told once the
       // last attempt is spent, so the two retry policies cannot multiply into nine tries.

@@ -1,4 +1,5 @@
 import { env } from "../env.js";
+import { recordUsage } from "./costLedger.js";
 
 /** One door for every NVIDIA call this server makes, with a speed limit on it.
  *
@@ -67,7 +68,13 @@ export async function nvidiaFetch(url: string, init: NvidiaFetchOptions = {}): P
     await reserve();
     const res = await fetch(url, rest);
 
-    if (res.status !== 429 && res.status < 500) return res;
+    if (res.status !== 429 && res.status < 500) {
+      // Fire-and-forget on a CLONE — the real `res` is handed back untouched (its body is a
+      // single-use stream, and every caller here reads it themselves via res.json()). Never
+      // lets a cost-tracking hiccup affect, slow down or fail the actual LLM call.
+      if (res.ok) void captureUsage(res.clone(), label);
+      return res;
+    }
     if (attempt > retries) return res;
 
     // Retry-After is authoritative when the provider sends it; otherwise back off, because
@@ -78,6 +85,20 @@ export async function nvidiaFetch(url: string, init: NvidiaFetchOptions = {}): P
     // The body has to be drained or the socket leaks.
     await res.text().catch(() => "");
     await sleep(waitMs);
+  }
+}
+
+/** Every OpenAI-compatible NIM response carries `usage.total_tokens` — this is the only place
+ *  that ever reads it, feeding MASTER_PLAN §13 Phase 4's cost dashboard via costLedger.ts.
+ *  Swallows everything: a non-JSON body, a missing usage field, a parse error — recording cost
+ *  is strictly additive and must never be the reason an LLM call's caller sees a problem. */
+async function captureUsage(res: Response, label: string): Promise<void> {
+  try {
+    const data: any = await res.json();
+    const tokens = data?.usage?.total_tokens;
+    if (typeof tokens === "number" && tokens > 0) recordUsage(tokens);
+  } catch (e: any) {
+    console.error(`[${label}] cost capture failed (article/response unaffected):`, e?.message);
   }
 }
 

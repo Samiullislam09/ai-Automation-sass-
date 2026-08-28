@@ -50,6 +50,9 @@ export type JobErrorDetail = {
   durationMs?: number;
   agent?: string;
   at?: string;
+  /** Whatever was spent (lib/costLedger.ts) before the failure — a job that dies on its last
+   *  LLM call still paid for the ones before it. */
+  cost?: { tokens: number; calls: number; usd: number };
 };
 
 export async function logJobError(id: string | undefined, detail: JobErrorDetail) {

@@ -475,3 +475,62 @@ export async function getRecentJobs(supabase: SupabaseClient, tenantId: string, 
     ...describeJob(j.agent, j.status, j.detail),
   })) as AgentJobRow[];
 }
+
+/** MASTER_PLAN §13 Phase 4's cost dashboard. agent-server/src/workers.ts (via
+ *  lib/costLedger.ts) folds `{ tokens, calls, usd }` onto every job's own jobs_log.detail —
+ *  on a failed job too, since a run that dies on its last LLM call still spent money on the
+ *  ones before it (jobsLog.ts's JobErrorDetail.cost). Summing happens here rather than in
+ *  Postgres because Supabase's REST layer has no easy jsonb-path SUM(); at today's per-tenant
+ *  job volume that is a non-issue, and it keeps this consistent with every other stat on this
+ *  page (getDashboardStats above sums plain rows in JS the same way). */
+export type CostSummary = {
+  totalUsd: number;
+  totalTokens: number;
+  jobsWithCost: number;
+  byAgent: Record<string, { usd: number; tokens: number; jobs: number }>;
+  sinceIso: string;
+};
+
+/** The actual aggregation, pulled out of getCostSummary so it's testable without a Supabase
+ *  client — every other pure decision in this codebase (scheduler.ts's isDue, workers.ts's
+ *  concurrencyFor/withCost) gets the same treatment, and nothing in this repo yet unit-tests
+ *  a function that takes a SupabaseClient (there is no fake query builder to reuse), so this
+ *  is the boundary that keeps the untested part to "one query, no branching". */
+export function summarizeCostRows(rows: { agent: string; detail: unknown }[]): Omit<CostSummary, "sinceIso"> {
+  const byAgent: Record<string, { usd: number; tokens: number; jobs: number }> = {};
+  let totalUsd = 0;
+  let totalTokens = 0;
+  let jobsWithCost = 0;
+
+  for (const row of rows) {
+    const cost = (row.detail as any)?.cost;
+    if (!cost || typeof cost.usd !== "number") continue; // older rows, or an agent that made no LLM calls
+    jobsWithCost++;
+    totalUsd += cost.usd;
+    totalTokens += cost.tokens ?? 0;
+    const agent = row.agent || "unknown";
+    const bucket = (byAgent[agent] ??= { usd: 0, tokens: 0, jobs: 0 });
+    bucket.usd += cost.usd;
+    bucket.tokens += cost.tokens ?? 0;
+    bucket.jobs += 1;
+  }
+
+  for (const agent of Object.keys(byAgent)) byAgent[agent].usd = Number(byAgent[agent].usd.toFixed(4));
+
+  return { totalUsd: Number(totalUsd.toFixed(4)), totalTokens, jobsWithCost, byAgent };
+}
+
+export async function getCostSummary(supabase: SupabaseClient, tenantId: string, days = 7): Promise<CostSummary> {
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+  const { data, error } = await supabase
+    .from("jobs_log")
+    .select("agent, detail")
+    .eq("tenant_id", tenantId)
+    .in("status", ["success", "error"])
+    .gte("created_at", since.toISOString())
+    .limit(5000);
+
+  const summary = summarizeCostRows(!error && data ? (data as { agent: string; detail: unknown }[]) : []);
+  return { ...summary, sinceIso: since.toISOString() };
+}
