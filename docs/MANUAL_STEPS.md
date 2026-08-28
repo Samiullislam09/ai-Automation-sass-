@@ -37,9 +37,11 @@ wali nayi string (naye password ke saath) → Update. Phir Actions → db-backup
 Vercel/Railway pe kuch nahi badalta (wo API keys use karte hain, DB password nahi).
 
 ### 4. Railway ka deploy check karo (naya code atka hua hai) — [ ]
-**Kyun:** live agent-server abhi commit `ec5d154` chala raha hai, par naya keyword code `e4036b3`
-me hai. Maine local pe build chala kar dekh liya — **build bilkul theek hai**, matlab Railway ne
-deploy uthaya hi nahi (webhook miss, ya deploy fail/queued).
+**Note 2026-08-28:** neeche wale commit hash purane hain (bohot kuch badal chuka hai tab se, aur
+aaj hi 22 commits GitHub pe push hue). Wahi cheez dobara check karo — is baar `/version` ka commit
+match hona chahiye HEAD se, purane <code>ec5d154</code>/<code>e4036b3</code> se nahi.
+**Kyun (original):** live agent-server tab commit `ec5d154` chala raha tha, par naya keyword code `e4036b3`
+me tha. Local build check theek tha, matlab Railway ne deploy uthaya hi nahi tha (webhook miss, ya deploy fail/queued).
 **Kahan:** Railway → project → agent-server service → **Deployments** tab.
 **Kya:** sabse upar wale deploy ka status dekho.
 - "Success" par purana commit → sabse upar **⋮ → Redeploy** (ya Settings → GitHub → repo dobara connect).
