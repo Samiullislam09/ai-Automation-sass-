@@ -158,6 +158,10 @@ export class WriterAgent extends Agent {
         // there was nothing to put here — every row's slug stayed null, and the unique index
         // migration 019 added had nothing to enforce. It has something now.
         slug: pipeline.meta.slug || null,
+        // migration 021 — the exact string rank-tracking (lib/rankTracking.ts) checks against,
+        // captured here because this is the one place it is known exactly, not guessed back
+        // out of the title or blueprint prose later.
+        primary_keyword: topic.trim(),
         blueprint: blueprint ? { text: blueprint } : {},
         meta,
       })

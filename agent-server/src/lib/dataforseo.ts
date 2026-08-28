@@ -53,3 +53,50 @@ export async function keywordSuggestions(seed: string, limit = 15): Promise<Keyw
     cpc: it.keyword_info?.cpc ?? null,
   }));
 }
+
+export type RankResult = { position: number | null; url: string | null };
+
+/** MASTER_PLAN §17.1/§17.8's "SerpBear rank tracking", built as a live SERP check against the
+ *  DataForSEO account every other keyword feature already uses — not the SerpBear app itself
+ *  (a separate self-hosted Next.js service + its own DB), same "real engine, no bundled
+ *  dashboard" substitution already made for Mr. Audit's Lighthouse (§17.3). Same optional-
+ *  provider convention as keywordSuggestions: absent without an account, present once a
+ *  customer's account is configured (dataForSeoConfigured()).
+ *
+ *  `domain` should be a bare host (no scheme, no path) — normalizeHost() below handles a full
+ *  URL being passed in by mistake. Only the first 100 organic results are ever fetched: a page
+ *  ranking below that is, for this product's purposes, not ranking. */
+export async function checkRank(keyword: string, domain: string): Promise<RankResult> {
+  const result = await dfsPost("/serp/google/organic/live/regular", [
+    { keyword, location_code: 2840, language_code: "en", device: "desktop", depth: 100 },
+  ]);
+  return findRank(result?.items ?? [], domain);
+}
+
+/** The matching logic pulled out of checkRank so it's testable without a live DataForSEO
+ *  account — same treatment scheduler.ts's isDue and workers.ts's concurrencyFor/withCost get.
+ *  Exported for that reason alone. */
+export function findRank(items: any[], domain: string): RankResult {
+  const target = normalizeHost(domain);
+  const hit = (items ?? []).find((it) => it?.type === "organic" && normalizeHost(it?.domain ?? it?.url ?? "") === target);
+  if (!hit) return { position: null, url: null };
+
+  return {
+    position: typeof hit.rank_absolute === "number" ? hit.rank_absolute : null,
+    url: typeof hit.url === "string" ? hit.url : null,
+  };
+}
+
+/** "https://Www.Example.com/blog" and "example.com" have to compare equal — DataForSEO
+ *  returns bare domains for `it.domain` but this also has to survive a tenant's website_url
+ *  (which does carry a scheme) being passed in directly. */
+export function normalizeHost(value: string): string {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) return "";
+  try {
+    const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    return new URL(withScheme).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return trimmed.toLowerCase().replace(/^www\./, "").split("/")[0];
+  }
+}

@@ -11,7 +11,7 @@ process.env.DATABASE_URL ||= "postgres://unit-test/none";
 process.env.SUPABASE_URL ||= "http://unit-test.invalid";
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= "unit-test";
 
-const { isDue, jitterMinutes } = await import("./scheduler.js");
+const { isDue, jitterMinutes, pickDueKeyword } = await import("./scheduler.js");
 
 const UTC = "UTC";
 
@@ -94,4 +94,45 @@ test("weekly frequency still gates on day_of_week, jitter does not bypass it", (
 test("an invalid timezone is refused, not thrown", () => {
   const r = row({ timezone: "Not/ARealZone" });
   assert.equal(isDue(r, new Date()), false);
+});
+
+/* ---------------------------------------------------------------- pickDueKeyword --------- */
+
+const NOW = new Date("2026-08-28T12:00:00Z");
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+test("a keyword never checked before is due", () => {
+  const articles = [{ id: "a1", primary_keyword: "emergency plumber leeds" }];
+  const due = pickDueKeyword(articles, new Map(), NOW);
+  assert.equal(due?.id, "a1");
+});
+
+test("a keyword checked less than a week ago is not due", () => {
+  const articles = [{ id: "a1", primary_keyword: "emergency plumber leeds" }];
+  const lastCheckedAt = new Map([["emergency plumber leeds", NOW.getTime() - WEEK_MS / 2]]);
+  assert.equal(pickDueKeyword(articles, lastCheckedAt, NOW), undefined);
+});
+
+test("a keyword checked more than a week ago is due again", () => {
+  const articles = [{ id: "a1", primary_keyword: "emergency plumber leeds" }];
+  const lastCheckedAt = new Map([["emergency plumber leeds", NOW.getTime() - WEEK_MS - 1000]]);
+  const due = pickDueKeyword(articles, lastCheckedAt, NOW);
+  assert.equal(due?.id, "a1");
+});
+
+test("picks the first due keyword in the given (oldest-first) order, not just any", () => {
+  const articles = [
+    { id: "recent", primary_keyword: "kw-recent" },
+    { id: "overdue", primary_keyword: "kw-overdue" },
+  ];
+  const lastCheckedAt = new Map([
+    ["kw-recent", NOW.getTime() - 1000],
+    ["kw-overdue", NOW.getTime() - WEEK_MS - 1000],
+  ]);
+  const due = pickDueKeyword(articles, lastCheckedAt, NOW);
+  assert.equal(due?.id, "overdue");
+});
+
+test("an empty article list has nothing due", () => {
+  assert.equal(pickDueKeyword([], new Map(), NOW), undefined);
 });

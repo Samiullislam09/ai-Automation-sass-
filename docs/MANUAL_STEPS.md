@@ -11,16 +11,17 @@ Jo ho jaye uske aage `[x]` laga dena.
 
 ## 🔴 Abhi ke abhi (inke bina naya code live nahi hoga)
 
-### 1. Migration 018 + 019 + 020 chalao — [ ]
-**Kyun:** eval set (`intent_eval`), Site Brain (`site_profiles`, duplicate locks) aur site audit (`site_audits`) ke tables.
+### 1. Migration 018 + 019 + 020 + 021 chalao — [ ]
+**Kyun:** eval set (`intent_eval`), Site Brain (`site_profiles`, duplicate locks), site audit (`site_audits`) aur ab rank tracking (`keyword_ranks`, `content_items.primary_keyword`) ke tables.
 Inke bina `/app/eval` page aur naya keyword/writer flow DB error dega.
 **Kahan:** Supabase → aapka project → **SQL Editor** → New query.
 **Kya:** repo se ye files kholo aur poora content paste karke **Run**, ek-ek karke, isi order me:
 1. `supabase/migrations/018_intent_eval.sql`
 2. `supabase/migrations/019_site_brain.sql`
 3. `supabase/migrations/020_site_audits.sql` *(Mr. Audit ki report yahan jaati hai — iske bina "site audit karo" chalega to sahi par report save nahi hogi)*
+4. `supabase/migrations/021_keyword_ranks.sql` *(rank tracking — iske bina writer ka `primary_keyword` save nahi hoga aur rank check silently DB error dega, `[rankTracking]` log me)*
 
-Dono idempotent hain — galti se dobara chala do to kuch nahi bigdega.
+Sab idempotent hain — galti se dobara chala do to kuch nahi bigdega.
 
 ### 2. Encryption key rotate karo — [ ]
 **Kyun:** purani `CREDENTIALS_ENCRYPTION_KEY` chat me paste hui thi = leaked. Wo key har customer

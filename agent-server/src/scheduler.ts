@@ -4,6 +4,8 @@ import { enqueue } from "./queues.js";
 import { publishContentItem } from "./lib/publish.js";
 import { logJobStart, logJobFinish } from "./jobsLog.js";
 import { brainTick } from "./brain/server.js";
+import { dataForSeoConfigured, normalizeHost } from "./lib/dataforseo.js";
+import { recordRank } from "./lib/rankTracking.js";
 
 /** The thing that makes this product actually automatic.
  *
@@ -52,7 +54,7 @@ export function startScheduler() {
  *  everything booked before the brain existed — the old table drains, it is not migrated
  *  (plan §22 con #10). */
 async function sweep() {
-  await Promise.allSettled([tick(), tickOrders(), brainSweep(), tickAudits()]);
+  await Promise.allSettled([tick(), tickOrders(), brainSweep(), tickAudits(), tickRanks()]);
 }
 
 async function brainSweep() {
@@ -125,6 +127,93 @@ export async function tickAudits(now: Date = new Date()): Promise<number> {
       console.log(`[scheduler] tenant ${t.id}: weekly site audit enqueued`);
     } catch (e: any) {
       console.error(`[scheduler] weekly audit for tenant ${t.id} failed:`, e?.message);
+    }
+  }
+  return started;
+}
+
+/* ── Rank tracking (§17.1/§17.8's "SerpBear", settled into Phase 4) ──────────────────────── */
+
+/** Weekly, same cadence and same reasoning as tickAudits just above: a real rank number is
+ *  worth having precisely when nobody remembered to check it by hand. `dataForSeoConfigured()`
+ *  makes this whole function a no-op on every install without a DataForSEO account — which is
+ *  every install today (MANUAL_STEPS.md #5) — rather than erroring once a minute forever. */
+const RANK_CHECK_EVERY_MS = 7 * 24 * 60 * 60 * 1000;
+const RANK_CHECKS_PER_TICK = 3;
+
+/** Pulled out of tickRanks so the "who's due" decision is testable without Supabase — the
+ *  same treatment isDue itself gets. Oldest-published-first order (the caller's own query
+ *  ordering) plus "first entry not checked in RANK_CHECK_EVERY_MS" is the whole rotation:
+ *  no separate priority scheme, just whichever eligible article comes first in the batch. */
+export function pickDueKeyword(
+  articles: { id: string; primary_keyword: string }[],
+  lastCheckedAt: Map<string, number>,
+  now: Date
+): { id: string; primary_keyword: string } | undefined {
+  return articles.find((a) => {
+    const last = lastCheckedAt.get(a.primary_keyword);
+    return !last || now.getTime() - last >= RANK_CHECK_EVERY_MS;
+  });
+}
+
+export async function tickRanks(now: Date = new Date()): Promise<number> {
+  if (!dataForSeoConfigured()) return 0;
+
+  const { data: tenants, error } = await supabase.from("tenants").select("id, website_url").not("website_url", "is", null).limit(500);
+  if (error) {
+    console.error("[scheduler] could not read tenants for rank tracking:", error.message);
+    return 0;
+  }
+  if (!tenants?.length) return 0;
+
+  let started = 0;
+  for (const t of tenants) {
+    if (started >= RANK_CHECKS_PER_TICK) break;
+    try {
+      const domain = normalizeHost((t as any).website_url ?? "");
+      if (!domain) continue;
+
+      // A rotating batch, not "all of them" — a tenant with 300 published articles must not
+      // starve a tenant with 3. Oldest-published-first so every article eventually gets its
+      // turn rather than the same handful being checked forever.
+      const { data: articles, error: artErr } = await supabase
+        .from("content_items")
+        .select("id, primary_keyword")
+        .eq("tenant_id", t.id)
+        .eq("status", "published")
+        .not("primary_keyword", "is", null)
+        .order("created_at", { ascending: true })
+        .limit(20);
+
+      // Migration 021 not applied: primary_keyword doesn't exist yet. Same treatment as the
+      // audit sweep's own migration-020 guard — stop the whole sweep, don't error per tenant.
+      if (artErr) {
+        console.error("[scheduler] rank tracking paused:", artErr.message);
+        return started;
+      }
+      if (!articles?.length) continue;
+
+      const keywords = [...new Set(articles.map((a: any) => a.primary_keyword).filter(Boolean))];
+      const { data: recentChecks } = await supabase
+        .from("keyword_ranks")
+        .select("keyword, checked_at")
+        .eq("tenant_id", t.id)
+        .in("keyword", keywords)
+        .order("checked_at", { ascending: false });
+
+      const lastCheckedAt = new Map<string, number>();
+      for (const row of (recentChecks ?? []) as any[]) {
+        if (!lastCheckedAt.has(row.keyword)) lastCheckedAt.set(row.keyword, new Date(row.checked_at).getTime());
+      }
+
+      const due = pickDueKeyword(articles as { id: string; primary_keyword: string }[], lastCheckedAt, now);
+      if (!due) continue; // every keyword for this tenant was checked within the last week
+
+      await recordRank(t.id, due.primary_keyword, domain, due.id);
+      started++;
+      console.log(`[scheduler] tenant ${t.id}: rank checked for "${due.primary_keyword}"`);
+    } catch (e: any) {
+      console.error(`[scheduler] rank check for tenant ${t.id} failed:`, e?.message);
     }
   }
   return started;
