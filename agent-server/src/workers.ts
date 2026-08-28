@@ -51,7 +51,10 @@ const AGENTS: Record<AgentType, Agent> = {
   audit: new AuditAgent(),
 };
 
-async function process(type: AgentType, job: JobWithMetadata<AgentJobData>) {
+// Named processJob, not process — a module-scope function called `process` shadows Node's
+// global `process` (process.env included) for every line in this file, which is exactly the
+// bug concurrencyFor's own env var read tripped over below until this was renamed.
+async function processJob(type: AgentType, job: JobWithMetadata<AgentJobData>) {
   const { tenantId } = job.data;
 
   const attempt = (job.retryCount ?? 0) + 1;
@@ -185,16 +188,35 @@ async function process(type: AgentType, job: JobWithMetadata<AgentJobData>) {
   }
 }
 
+// Every agent's queue gets 2 concurrent workers (mirrors the old BullMQ `concurrency: 2`),
+// except Writer — MASTER_PLAN §13 Phase 4: "writer ×4-8 instances", because article
+// generation is the slowest, most LLM-heavy job and the one users wait on longest, so it is
+// the one queue worth widening before any other. Tunable per Railway plan's CPU/RAM via
+// WRITER_CONCURRENCY (default 4, the plan's own floor; the plan's own ceiling of 8 is
+// enforced here so a typo in the env var can't accidentally starve every other queue's share
+// of Postgres connections). Safe to raise: lib/nvidia.ts's rate limiter is a single in-process
+// gate shared by every concurrent call, so more writer instances only queue through it more —
+// they can never push the account over its requests-per-minute ceiling.
+const DEFAULT_CONCURRENCY = 2;
+const WRITER_CONCURRENCY_MIN = 4;
+const WRITER_CONCURRENCY_MAX = 8;
+
+export function concurrencyFor(type: AgentType): number {
+  if (type !== "writer") return DEFAULT_CONCURRENCY;
+  const requested = Number(process.env.WRITER_CONCURRENCY);
+  const fallback = Number.isFinite(requested) && requested > 0 ? requested : WRITER_CONCURRENCY_MIN;
+  return Math.min(WRITER_CONCURRENCY_MAX, Math.max(WRITER_CONCURRENCY_MIN, fallback));
+}
+
 export async function startWorkers() {
   await ensureBossStarted();
   for (const type of AGENT_TYPES) {
-    // batchSize:1 (default) — handler gets a 1-element array; localConcurrency:2 mirrors
-    // the old BullMQ `concurrency: 2` per queue.
+    // batchSize:1 (default) — handler gets a 1-element array.
     // includeMetadata gives the handler retryCount — without it a retry is indistinguishable
     // from a brand-new job, which is exactly why the dashboard looked like it was failing
     // and restarting for no reason.
-    await boss.work<AgentJobData>(type, { localConcurrency: 2, includeMetadata: true }, async ([job]) =>
-      process(type, job as JobWithMetadata<AgentJobData>)
+    await boss.work<AgentJobData>(type, { localConcurrency: concurrencyFor(type), includeMetadata: true }, async ([job]) =>
+      processJob(type, job as JobWithMetadata<AgentJobData>)
     );
   }
 
