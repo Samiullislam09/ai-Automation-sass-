@@ -435,13 +435,6 @@ const Wave = ({
   );
 };
 
-/** Dashed animated connector between agents. */
-const Conn = ({ color = "rgba(148,148,170,.55)" }: { color?: string }) => (
-  <span className="lx-conn" style={{ ["--cc" as string]: color }}>
-    <i />
-  </span>
-);
-
 /** One workflow agent node. `compact` is the single-line form shown once an agent panel is
  *  open (smaller icon, name+status stacked beside it instead of under it, no wasted vertical
  *  space) — same data, same colors, just laid out to fit a strip instead of a spacious grid. */
@@ -686,18 +679,6 @@ export default function MrLxwaDashboard() {
         className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
         style={{ width: 420, height: 220, background: "radial-gradient(ellipse at center,rgba(124,58,237,.22),transparent 65%)" }}
       />
-      {/* chip — only in the spread-out resting layout; the compact single-line row has no
-          room for it and it would float on top of the agent pills */}
-      {workingAgent && !panelOpen && (
-        <div className="lx-card2 absolute left-4 top-4 z-10 hidden items-center gap-2.5 px-3 py-2 md:flex">
-          <span className="h-2 w-2 rounded-full lx-pulse" style={{ background: "#22c55e", boxShadow: "0 0 8px #22c55e" }} />
-          <span>
-            <span className="block lx-11 font-semibold">Planning &amp; Orchestrating</span>
-            <span className="block lx-10 lx-mut">Delegated to {workingAgent.name}</span>
-          </span>
-        </div>
-      )}
-
       <AnimatePresence initial={false} mode="wait">
         {panelOpen ? (
           // ---- compact: every agent sorted into one line, once a panel is open ----
@@ -720,25 +701,35 @@ export default function MrLxwaDashboard() {
             </div>
           </motion.div>
         ) : (
-          // ---- full: the whole team spaced out, spotlighting the brain — the resting state ----
+          // ---- full: the whole team, spotlighting the brain — the resting state. flex-wrap
+          // (not a horizontally-scrolling single row) so every agent is visible on any screen
+          // width, with no cut-off nodes and no scrollbar to discover. ----
           <motion.div
             key="full"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.25 }}
-            className="lx-scroll overflow-x-auto"
           >
-            <div className="mx-auto flex min-w-max items-center gap-1 px-6 py-6">
-              {AGENTS_LEFT.map((a, i) => (
-                <React.Fragment key={a.name}>
-                  <AgentNode a={a} onClick={() => openAgentPanel(a)} />
-                  <Conn color={i === 0 ? "rgba(34,197,94,.8)" : i === 1 ? "rgba(59,130,246,.8)" : "rgba(148,148,170,.45)"} />
-                </React.Fragment>
+            {/* chip — normal flow, centered, so it never floats over an agent node at any
+                screen width */}
+            {workingAgent && (
+              <div className="lx-card2 mx-auto mt-4 flex w-fit items-center gap-2.5 px-3 py-2">
+                <span className="h-2 w-2 shrink-0 rounded-full lx-pulse" style={{ background: "#22c55e", boxShadow: "0 0 8px #22c55e" }} />
+                <span>
+                  <span className="block lx-11 font-semibold">Planning &amp; Orchestrating</span>
+                  <span className="block lx-10 lx-mut">Delegated to {workingAgent.name}</span>
+                </span>
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-start justify-center gap-x-5 gap-y-5 px-4 py-6 sm:gap-x-7">
+              {AGENTS_LEFT.map((a) => (
+                <AgentNode key={a.name} a={a} onClick={() => openAgentPanel(a)} />
               ))}
 
               {/* [ASSET] Mr. Lxwa brain */}
-              <div className="flex flex-col items-center px-3" style={{ minWidth: 150 }}>
+              <div className="flex flex-col items-center px-1" style={{ width: 74 }}>
                 <div className="lx-12 font-bold">Mr. Lxwa</div>
                 <div className="lx-10 lx-mut mb-1">AI Brain (Boss)</div>
                 <div className="lx-brain">🧠</div>
@@ -746,10 +737,7 @@ export default function MrLxwaDashboard() {
               </div>
 
               {AGENTS_RIGHT.map((a) => (
-                <React.Fragment key={a.name}>
-                  <Conn color="rgba(148,148,170,.45)" />
-                  <AgentNode a={a} onClick={() => openAgentPanel(a)} />
-                </React.Fragment>
+                <AgentNode key={a.name} a={a} onClick={() => openAgentPanel(a)} />
               ))}
             </div>
           </motion.div>
@@ -792,70 +780,11 @@ export default function MrLxwaDashboard() {
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-12">
-        {/* center — progress + live activity */}
-        <div className="min-w-0 lg:col-span-6 xl:col-span-5">
-          <div className="text-lg font-bold leading-tight">Writing Section 2 of 5</div>
-          <div className="lx-12 lx-mut mt-0.5">Title: Environmental Benefits of Solar Panels</div>
-
-          <div className="mt-4 flex items-center justify-between">
-            <span className="lx-11 lx-mut">Overall Progress</span>
-            <span className="lx-12 font-bold">42%</span>
-          </div>
-          <div className="lx-track mt-1.5">
-            <div className="lx-fill" style={{ width: "42%" }} />
-          </div>
-          <div className="lx-11 lx-mut mt-1.5">Step 3 of 6: Writing Article</div>
-
-          {/* tabs */}
-          <div className="lx-scroll mt-3 flex gap-6 overflow-x-auto border-b" style={{ borderColor: "var(--lx-border)" }}>
-            {TABS.map((t) => (
-              <button key={t} className={`lx-tab ${tab === t ? "on" : ""}`} onClick={() => setTab(t)}>
-                {t}
-              </button>
-            ))}
-          </div>
-
-          <div className="lx-13 mt-4 font-semibold">What I&apos;m doing right now</div>
-
-          {/* timeline */}
-          <div className="lx-tl mt-1">
-            {TIMELINE.map((r, i) => {
-              const done = r.s === "Completed";
-              const prog = r.s === "In Progress";
-              return (
-                <div className="lx-row" key={i}>
-                  <span className="lx-10 lx-mono lx-dim text-right">{r.t}</span>
-                  <span
-                    className={`lx-dot ${prog ? "lx-pulse" : ""}`}
-                    style={{
-                      background: done ? "#22c55e" : prog ? "#3b82f6" : "#3d3d52",
-                      boxShadow: done ? "0 0 8px rgba(34,197,94,.9)" : prog ? "0 0 8px rgba(59,130,246,.9)" : "none",
-                    }}
-                  />
-                  <span className="lx-12 truncate" style={{ color: prog ? "#93c5fd" : done ? "#d9d9e6" : "var(--lx-mut)" }}>
-                    {r.txt}
-                  </span>
-                  <span className="lx-10 font-semibold" style={{ color: done ? "#4ade80" : prog ? "#60a5fa" : "transparent" }}>
-                    {r.s ?? "·"}
-                  </span>
-                  {r.s ? (
-                    <CheckCircle2 size={14} style={{ color: done ? "#22c55e" : "rgba(96,165,250,.7)" }} />
-                  ) : (
-                    <span style={{ width: 14 }} />
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-        </div>
-
-        {/* right — live visual: ONE section, whatever the agent is doing right now — the
-            actual Google search / page-reading content used to be duplicated here in the
-            center column too; it now lives only in Live Visual (below), where the mode it's
-            showing matches what the timeline says is "In Progress". */}
-        <div className="lg:col-span-6 xl:col-span-7">
+      <div className="mt-4 flex flex-col gap-4">
+        {/* live visual — the primary, full-width focus. Whatever the agent is actually doing
+            right now (search / reading / key points / writing), one section, no duplication
+            of this content anywhere else in the panel. */}
+        <div className="min-w-0">
           <div className="flex items-center justify-between">
             <span className="lx-13 font-semibold">Live Visual</span>
             <span className="lx-pill red">
@@ -863,7 +792,7 @@ export default function MrLxwaDashboard() {
             </span>
           </div>
 
-          <div className="lx-card2 mt-3 overflow-hidden p-3" style={{ minHeight: 260 }}>
+          <div className="lx-card2 mt-3 overflow-hidden p-3" style={{ minHeight: 360 }}>
             <div key={liveMode} className="lx-live-anim">
                 <div className="flex items-center gap-2 lx-11 font-semibold">
                   {(() => {
@@ -979,6 +908,63 @@ export default function MrLxwaDashboard() {
                 }}
               />
             ))}
+          </div>
+        </div>
+
+        {/* writer progress — secondary, below the live visual */}
+        <div className="min-w-0">
+          <div className="text-lg font-bold leading-tight">Writing Section 2 of 5</div>
+          <div className="lx-12 lx-mut mt-0.5">Title: Environmental Benefits of Solar Panels</div>
+
+          <div className="mt-4 flex items-center justify-between">
+            <span className="lx-11 lx-mut">Overall Progress</span>
+            <span className="lx-12 font-bold">42%</span>
+          </div>
+          <div className="lx-track mt-1.5">
+            <div className="lx-fill" style={{ width: "42%" }} />
+          </div>
+          <div className="lx-11 lx-mut mt-1.5">Step 3 of 6: Writing Article</div>
+
+          {/* tabs */}
+          <div className="lx-scroll mt-3 flex gap-6 overflow-x-auto border-b" style={{ borderColor: "var(--lx-border)" }}>
+            {TABS.map((t) => (
+              <button key={t} className={`lx-tab ${tab === t ? "on" : ""}`} onClick={() => setTab(t)}>
+                {t}
+              </button>
+            ))}
+          </div>
+
+          <div className="lx-13 mt-4 font-semibold">What I&apos;m doing right now</div>
+
+          {/* timeline */}
+          <div className="lx-tl mt-1">
+            {TIMELINE.map((r, i) => {
+              const done = r.s === "Completed";
+              const prog = r.s === "In Progress";
+              return (
+                <div className="lx-row" key={i}>
+                  <span className="lx-10 lx-mono lx-dim text-right">{r.t}</span>
+                  <span
+                    className={`lx-dot ${prog ? "lx-pulse" : ""}`}
+                    style={{
+                      background: done ? "#22c55e" : prog ? "#3b82f6" : "#3d3d52",
+                      boxShadow: done ? "0 0 8px rgba(34,197,94,.9)" : prog ? "0 0 8px rgba(59,130,246,.9)" : "none",
+                    }}
+                  />
+                  <span className="lx-12 truncate" style={{ color: prog ? "#93c5fd" : done ? "#d9d9e6" : "var(--lx-mut)" }}>
+                    {r.txt}
+                  </span>
+                  <span className="lx-10 font-semibold" style={{ color: done ? "#4ade80" : prog ? "#60a5fa" : "transparent" }}>
+                    {r.s ?? "·"}
+                  </span>
+                  {r.s ? (
+                    <CheckCircle2 size={14} style={{ color: done ? "#22c55e" : "rgba(96,165,250,.7)" }} />
+                  ) : (
+                    <span style={{ width: 14 }} />
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
