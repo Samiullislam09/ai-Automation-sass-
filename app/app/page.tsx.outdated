@@ -1,4 +1,15 @@
 "use client";
+/** ============================================================================
+ *  OUTDATED — NOT ROUTED. Do not edit this thinking it's live.
+ *
+ *  Renamed from page.tsx to page.tsx.outdated on 2026-08-29 so Next.js's router stops
+ *  matching it — /app now 404s on purpose. The real dashboard is app/dashboard/page.tsx
+ *  (components/MrLxwaDashboard.tsx), decided by the owner ("is dashboard ko add karna hai,
+ *  /app ko hatana hai — delete nahi"). Kept here, unrouted, for reference only.
+ *
+ *  Everything else under app/app/** (billing, content, leads, workspace, etc.) is UNCHANGED
+ *  and still real — only this one page (the dashboard home) was retired.
+ * ============================================================================ */
 /** Dashboard root — the 2D isometric office (components/Office.tsx) plus the real stat row.
  *
  *  LIVE WIRING: the polling itself lives in components/LiveAgents.tsx (mounted once in
