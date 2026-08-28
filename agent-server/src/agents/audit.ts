@@ -2,7 +2,14 @@ import type { Job } from "pg-boss";
 import { Agent, type AgentContext, type AgentJobData } from "./base.js";
 import { auditSite, summarizeAudit, topIssues, type AuditIssue } from "../lib/audit/checks.js";
 import { auditTarget, chooseUrls, fetchAllPages, fetchSiteContext, DEFAULT_PAGE_LIMIT } from "../lib/audit/fetchSite.js";
+import { runPerformanceAudit, issuesFromVitals, type PerformanceRun } from "../lib/audit/performance.js";
 import { supabase } from "../supabase.js";
+
+/** §17.3's "top 10 pages" for the browser-based performance pass — the homepage plus a handful
+ *  of others, never the whole site: each page costs 10-20s of real Chrome time, and the
+ *  deterministic catalogue above already covers every page for everything a browser is not
+ *  needed for. */
+const PERFORMANCE_PAGE_LIMIT = 10;
 
 /** Mr. Audit — "is anything on my site broken or quietly costing me traffic?" (§7.4).
  *
@@ -14,16 +21,20 @@ import { supabase } from "../supabase.js";
  *    1. work out what to audit: the sitemap if the site has one (it is the site's own statement
  *       of what matters), otherwise the pages we already crawled, otherwise the home page;
  *    2. fetch them one at a time, politely, reporting each one to the workspace (§24);
- *    3. run the deterministic catalogue (lib/audit/checks.ts);
- *    4. write the whole report to `site_audits` with the previous score copied in, so a report
+ *    3. run the deterministic catalogue (lib/audit/checks.ts) on every page fetched;
+ *    4. run real Lighthouse (lib/audit/performance.ts) against a SAMPLE of them — real Chrome,
+ *       so this step is capped at §17.3's "top 10 pages", not every page;
+ *    5. write the whole report to `site_audits` with the previous score copied in, so a report
  *       renders identically in six months and the trend arrow needs no window function;
- *    5. return the top five issues in plain language — §7.4's exit criterion is "3 min me
+ *    6. return the top five issues in plain language — §7.4's exit criterion is "3 min me
  *       top-5 issues chat me", not a 40-row table nobody reads.
  *
  *  WHAT IT WILL NOT DO
- *   · It will not invent a performance score. Core Web Vitals need a real browser; until
- *     agent-site-audit has its own service with Playwright, the report says in words that it
- *     did not measure them (`skipped`), rather than deriving a plausible number from HTML size.
+ *   · It will not invent a performance score. Real Core Web Vitals come from step 4 (a real
+ *     headless Chrome, `lighthouse`); if that browser cannot be launched on this deploy, the
+ *     report says so in words (`skipped`) rather than deriving a plausible number from HTML
+ *     size — the gap moved from "nobody built it" (2026-08-27) to "this specific deploy has no
+ *     Chrome binary" (2026-08-28, see docs/MANUAL_STEPS.md), and both are told honestly.
  *   · It will not change anything. Every issue is a finding plus a fix; acting on one is a
  *     separate, human-approved decision.
  *   · It will not fail the run because the site is broken. An unreachable site IS the audit's
@@ -69,10 +80,28 @@ export class AuditAgent extends Agent {
       ctx.progress(0.1 + 0.75 * (done / Math.max(1, total)), `Checked ${done} of ${total} pages`);
     });
 
-    ctx.onProgress({ phase: "checks", label: "Looking for problems…" });
-    ctx.progress(0.9, "Looking for problems");
+    ctx.onProgress({ phase: "perf", label: "Measuring loading speed…" });
+    ctx.progress(0.9, "Measuring loading speed");
 
-    const result = auditSite(pages, site);
+    // Homepage first (always in the sample), then whichever other pages were already fetched —
+    // not necessarily "latest articles" (nothing here knows publish dates), but the same "the
+    // pages that matter most" bias fetchAllPages/chooseUrls already applied upstream.
+    const perfUrls = [target.origin, ...urls.filter((u) => u !== target.origin)].slice(0, PERFORMANCE_PAGE_LIMIT);
+    const perf: PerformanceRun = await runPerformanceAudit(perfUrls).catch((e: any) => ({
+      ran: false,
+      skippedReason: `Loading speed check crashed rather than measuring anything: ${e?.message ?? "unknown error"}.`,
+      pages: [],
+    }));
+    if (perf.ran) ctx.log(`Measured loading speed on ${perf.pages.length} page(s).`);
+    else if (perf.skippedReason) ctx.log(perf.skippedReason, "warn");
+
+    ctx.onProgress({ phase: "checks", label: "Looking for problems…" });
+    ctx.progress(0.95, "Looking for problems");
+
+    const result = auditSite(pages, site, {
+      issues: issuesFromVitals(perf.pages),
+      skippedReason: perf.ran ? null : perf.skippedReason,
+    });
     for (const issue of result.issues) ctx.data("issue", issue);
     ctx.data("score", { score: result.score, blocks: result.blocks, warns: result.warns, pages: result.pagesChecked });
 
@@ -90,7 +119,16 @@ export class AuditAgent extends Agent {
         blocks: result.blocks,
         warns: result.warns,
         issues: result.issues,
-        run: { started_at: startedAt, finished_at: new Date().toISOString(), seconds, limit, skipped: result.skipped },
+        run: {
+          started_at: startedAt,
+          finished_at: new Date().toISOString(),
+          seconds,
+          limit,
+          skipped: result.skipped,
+          // Per-page LCP/CLS/TBT — the derived issues are in `issues` above; this is the raw
+          // numbers behind them, for a future report page that wants to chart them per page.
+          performance: perf.pages,
+        },
         summary,
       })
       .select("id")

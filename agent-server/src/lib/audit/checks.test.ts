@@ -194,6 +194,28 @@ test("Core Web Vitals are declared as not measured, never estimated", () => {
   assert.equal(r.issues.some((i) => /vital|lcp|cls|performance/i.test(i.id)), false);
 });
 
+/* ---------------------------------------------------------------- performance (2026-08-28) --- */
+
+test("real performance issues fold into the report, and the 'not measured' line disappears", () => {
+  const perfIssue = { id: "slow-lcp", severity: "warn" as const, what: "1 page is slow", fix: "compress the hero image", pages: [`${ORIGIN}/`], count: 1 };
+  const r = auditSite([good(`${ORIGIN}/`, "Home")], CTX, { issues: [perfIssue], skippedReason: null });
+  assert.ok(r.issues.some((i) => i.id === "slow-lcp"));
+  assert.equal(r.skipped.some((s) => /Core Web Vitals/.test(s)), false, "it WAS measured this time — the old blanket line must not still show");
+  // The house formula counts it like any other warn — one extra warn is -5.
+  assert.equal(r.warns, 1);
+});
+
+test("a browser that could not launch this run is a different, honest sentence — not the old blanket one", () => {
+  const r = auditSite([good(`${ORIGIN}/`, "Home")], CTX, { issues: [], skippedReason: "No Chrome binary found on this server." });
+  assert.ok(r.skipped.includes("No Chrome binary found on this server."));
+  assert.equal(r.skipped.some((s) => /needs a real browser, which this check does not use/.test(s)), false);
+});
+
+test("performance measured with zero issues leaves no skipped line at all — the gap is genuinely closed", () => {
+  const r = auditSite([good(`${ORIGIN}/`, "Home")], CTX, { issues: [], skippedReason: null });
+  assert.equal(r.skipped.length, 0);
+});
+
 test("top issues put blocks first, then whatever affects the most pages", () => {
   const pages = [
     page(`${ORIGIN}/a`, "", { status: 404, html: null }),

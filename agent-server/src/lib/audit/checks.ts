@@ -17,17 +17,21 @@
  *
  *  WHAT IS DELIBERATELY NOT HERE, AND WHY
  *
- *  §7.4 names seomator + Playwright, one to two gigabytes of Chromium in its own Railway
- *  service. That service does not exist yet, and until it does, this file measures only what
- *  an HTTP fetch can prove: status codes, redirects, canonicals, titles, headings, alt text,
- *  internal links, robots.txt, sitemap.xml, mixed content, page weight, response time.
+ *  This file measures only what a plain HTTP fetch can prove: status codes, redirects,
+ *  canonicals, titles, headings, alt text, internal links, robots.txt, sitemap.xml, mixed
+ *  content, page weight, response time. No browser, on purpose — it is what makes every check
+ *  here testable from a fixture with nothing running behind it.
  *
- *  Core Web Vitals (LCP, CLS, INP) and anything a JavaScript-rendered page only shows after
- *  hydration are NOT approximated here. A "performance score" derived from HTML size would be
- *  a made-up number dressed as a measurement, which is the one thing this product cannot
- *  afford to ship. `skipped` says so in words, on every report, so the gap is visible rather
- *  than papered over. When agent-site-audit gets its own service, those checks land here as
- *  new entries in the catalogue and nothing else changes.
+ *  Core Web Vitals (LCP, CLS, an interactivity proxy) and anything a JavaScript-rendered page
+ *  only shows after hydration need a real browser, and are NOT approximated here — a
+ *  "performance score" derived from HTML size would be a made-up number dressed as a
+ *  measurement, which is the one thing this product cannot afford to ship. That real
+ *  measurement is lib/audit/performance.ts (2026-08-28, real `lighthouse`, not a stub); its
+ *  issues arrive here as the optional `performance` argument to `auditSite()` below, kept
+ *  separate so this file never has to import a browser to stay true to its own name.
+ *  `skipped` still says so in words on any report where the browser genuinely could not launch
+ *  — the gap moved from "nobody measures this" to "this specific deploy has no Chrome", and
+ *  both are told honestly rather than one silently standing in for the other.
  */
 
 import * as cheerio from "cheerio";
@@ -139,9 +143,16 @@ function issue(id: string, severity: AuditSeverity, pages: string[], what: (n: n
  *  Order is the order the customer reads them in: broken first, then invisible-to-Google, then
  *  the on-page work. Within a severity the list is stable, because a report whose rows move
  *  between runs cannot be compared to the last one. */
-export function auditSite(pages: AuditPage[], site: SiteContext): AuditResult {
+export function auditSite(
+  pages: AuditPage[],
+  site: SiteContext,
+  /** Real Core Web Vitals from lib/audit/performance.ts, when a browser was available to
+   *  measure them. Optional and last, so every existing caller/test (all network-free, all
+   *  built from fixtures with no Chrome anywhere near them) keeps compiling unchanged. */
+  performance?: { issues: AuditIssue[]; skippedReason: string | null }
+): AuditResult {
   const skipped: string[] = [];
-  const issues: (AuditIssue | null)[] = [];
+  const issues: (AuditIssue | null)[] = [...(performance?.issues ?? [])];
 
   const ok = pages.filter((p) => p.status !== null && p.status < 400 && p.html);
   const parsed = ok.map((p) => ({ page: p, $: cheerio.load(p.html as string) }));
@@ -405,9 +416,19 @@ export function auditSite(pages: AuditPage[], site: SiteContext): AuditResult {
     ),
   );
 
-  skipped.push(
-    "Loading speed as Google measures it (Core Web Vitals) needs a real browser, which this check does not use. Nothing here is an estimate of it.",
-  );
+  if (!performance) {
+    // No performance argument at all — an old caller, or a test — is the same honest gap this
+    // line has always described.
+    skipped.push(
+      "Loading speed as Google measures it (Core Web Vitals) needs a real browser, which this check does not use. Nothing here is an estimate of it.",
+    );
+  } else if (performance.skippedReason) {
+    // Measured, but the browser genuinely could not run this time — a different sentence from
+    // "we never try", because a deploy missing a Chrome binary is a fixable fact, not a design.
+    skipped.push(performance.skippedReason);
+  }
+  // performance.skippedReason === null (it ran) → no skipped line at all; the numbers are in
+  // performance.issues and the raw per-page data the caller (audit.ts) saves into run.performance.
 
   /* ── score ──────────────────────────────────────────────────────────────────────────── */
 

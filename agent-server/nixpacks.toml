@@ -1,0 +1,11 @@
+# Adds a real Chromium binary to the Railway build so lib/audit/performance.ts (real
+# Lighthouse, §17.3) has a browser to launch. Without this, Mr. Audit still runs — the
+# deterministic catalogue (lib/audit/checks.ts) needs no browser at all — but the
+# performance pass reports itself as skipped (see performance.ts's own chromePath()
+# fallback) instead of crashing the whole audit.
+#
+# chrome-launcher searches PATH itself for "chromium", "chromium-browser", "google-chrome",
+# etc. — a nix package on PATH is enough, no PUPPETEER_EXECUTABLE_PATH env var required. Set
+# that var only if this ever needs pointing at a specific binary instead (docs/MANUAL_STEPS.md).
+[phases.setup]
+nixPkgs = ["chromium"]

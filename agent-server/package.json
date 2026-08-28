@@ -16,9 +16,11 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.47.10",
     "cheerio": "^1.2.0",
+    "chrome-launcher": "^1.2.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "lighthouse": "^13.4.0",
     "pg-boss": "^12.27.0",
     "socket.io": "^4.8.1"
   },

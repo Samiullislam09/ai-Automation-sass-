@@ -124,6 +124,22 @@ ki gayi (first byte ~1ms, sahi jawab aaya). Do cheezein baaki:
 `openai/gpt-oss-120b` use karta hai (NIM ke primary jaisa he). Isi wajah se Cerebras ka default bhi
 `gpt-oss-120b` kar diya, par wahan abhi bhi 402 (no quota) hai us account pe.
 
+### 13. Mr. Audit ka naya Chrome deploy check karo — [ ]
+**Kyun:** &sect;17.3 ke hisaab se ab asli Core Web Vitals (LCP/CLS/loading speed) `lighthouse` se
+measure hote hain — pehle sirf "skipped, real browser nahi hai" likha aata tha. Isko real Chrome
+chahiye, jo `agent-server/nixpacks.toml` (naya file) Railway ke build me add karta hai. Maine local
+pe test kiya (example.com pe real numbers aaye — score 100, LCP 883ms), par **Railway pe khud
+verify nahi kar sakta** — deploy alag machine hai.
+**Kahan:** naya code deploy hone ke baad, chat me "site audit karo" bolo (ya `/app/audit` page pe
+"Run audit").
+**Kya check karna:** report ke "skipped" list me agar likha ho *"Loading speed could not be
+measured — no Chrome browser was found on this server..."* to Chrome nahi mila — Railway →
+agent-server service → Deployments → build logs me dekho `chromium` install hua ya nahi. Agar
+nahi hua: Railway → Variables → `PUPPETEER_EXECUTABLE_PATH` set karo (path build logs me
+`chromium` ke against milega, kuch aisa `/nix/store/.../bin/chromium`).
+Agar report me LCP/CLS numbers aa rahe hain (skipped list me Core Web Vitals ka zikr nahi) — sab
+theek hai, kuch nahi karna.
+
 ---
 
 ## Status — main kya kar chuka hoon
