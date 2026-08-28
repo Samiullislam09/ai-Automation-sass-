@@ -769,15 +769,9 @@ tenant_icp        tenant_id, icp jsonb, updated_at
 <h4>C · Function-calling, freeform JSON nahi <span class="pill warn">v2</span></h4>
 <p>Manifest ke actions ko OpenAI-style <code>tools</code> ke roop me model ko do (NIM ye support karta hai). Model “tool call” karta hai, schema enforce hota hai, params typed aate hain, <code>none</code> = no tool call. Ye freeform “reply with ONLY JSON” se zyada bharosemand hai — parse errors khatam, aur actions ki list model ke schema me hai, prompt ke text me nahi. Har action ke manifest me 3 few-shot examples honge (doc rule 5) jo tool description me jaate hain.</p>
 
-<h4>D · Repo alag, process alag nahi (shuru me) <span class="pill warn">v2</span></h4>
-<p>Aapka faisla (har agent apna repo) rehta hai. Par deploy 3 units me:</p>
-<div class="tablewrap"><table>
-<tr><th>Deploy unit</th><th>Andar</th><th>Kyun saath</th></tr>
-<tr><td><code>brain</code> (TS)</td><td>brain + keyword + publish + seo-checks (TS wale) — git submodule/npm dep se</td><td>Sab TS, halke, network hop bachta hai, ek cold start</td></tr>
-<tr><td><code>python-agents</code></td><td>writer (gpt-researcher) + leads (LangGraph) + seo LLM scoring</td><td>Ek Python image, ek dependency set</td></tr>
-<tr><td><code>browser-agents</code></td><td>site-audit + crawler (Playwright)</td><td>Bhaari (1-2GB), alag scale, baaki ko slow na kare</td></tr>
-</table></div>
-<p>Contract wahi rehta hai — in-process call ya HTTP, agent ko farq nahi padta (contract package dono adapter deta hai). Jab writer ko alag scale chahiye (Phase 4), ek env var se HTTP pe shift. <strong>Idle cost 9 services se 3, failure surface 1/3.</strong></p>
+<h4>D · Repo alag, process alag nahi <span class="pill ok">FINAL FAISLA 2026-08-28</span></h4>
+<p><strong>Sab kuch ek hi Railway service (<code>agent-server</code>) me — 3 alag units bhi nahi.</strong> Ye purane do socho (§11: 10 alag repo; is upgrade ka v1: 3 units — brain / python-agents / browser-agents) ki jagah le chuka hai. Wajah seedhi hai: kam se kam paisa, kam se kam complexity. Owner ne khud confirm kiya (2026-08-28) jab Mr. Audit ka Chrome/Lighthouse kaam banaya — usko alag "browser-agents" service me daalne ka option tha, jaan-boojh kar nahi liya.</p>
+<p>Contract package (in-process + HTTP dono adapter) abhi bhi maujood hai — agar kabhi ek agent ko sach me alag scale chahiye ho (bahut zyada users), ek env var se HTTP pe shift ho sakta hai, code badle bina. Par abhi ke liye: <strong>ek service, ek deploy, ek bill.</strong></p>
 
 <h4>E · Writer: research alag, likhna alag, sections me <span class="pill ok">DONE 2026-08-27 (TS scope)</span></h4>
 <ol>
