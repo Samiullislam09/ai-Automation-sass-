@@ -191,6 +191,11 @@ flowchart TD
 <!-- ============================================================ -->
 <h2 id="arch">4 · Nayi architecture</h2>
 
+<div class="callout warn">
+  <p class="t">Ye diagram original (v1) vision hai — &sect;16.3 Upgrade D ne ise revise kiya, phir owner ne 2026-08-28 ko FINAL faisla liya</p>
+  <p>Neeche ka diagram <code>mrlxwa-brain</code> ko ek alag service dikhata hai, aur har agent (<code>keyword-agent</code>, <code>writer-agent</code>, waghera) ko <strong>apni-apni alag Railway service</strong>, HTTP <code>/run</code> se juda hua. Ye kabhi bana hi nahi — pehle Upgrade D ne isse &ldquo;3 deploy units&rdquo; me badla, phir owner ne seedha <strong>ek hi service</strong> chuna (Mr. Audit banate waqt, 2026-08-28). Asal architecture: sab kuch (brain + har agent) <code>agent-server</code> naam ke ek hi Railway service ke andar, in-process function calls se — koi HTTP <code>/run</code> nahi, koi alag repo nahi. &sect;16.3 Upgrade D aur &sect;11 ka &ldquo;Aaj asal me&rdquo; column dekho current reality ke liye. Neeche ka diagram sirf ye samjhane ke liye rakha hai ki <em>concepts</em> (brain, registry, orchestrator, manifest-driven routing) kya hain — <em>deployment</em> ka hissa mat maano.</p>
+</div>
+
 <pre class="mermaid">
 flowchart LR
   subgraph Web["Vercel · Next.js"]
@@ -224,7 +229,7 @@ flowchart LR
 <tr><th>Cheez</th><th>Aaj</th><th>Naya</th></tr>
 <tr><td>Dimaag</td><td>2 (chat route + boss agent)</td><td>1 — <code>mrlxwa-brain</code>. Chat route sirf proxy hai.</td></tr>
 <tr><td>Router</td><td>Hardcoded 5 lafz</td><td>Har agent ke manifest se runtime pe banta hai</td></tr>
-<tr><td>Agent ka shape</td><td>pg-boss handler, sab ek process me</td><td>HTTP service, apna repo, apna language (Python/TS jo repo maange), ek hi contract</td></tr>
+<tr><td>Agent ka shape</td><td>pg-boss handler, sab ek process me</td><td><em>(v1 vision: HTTP service, apna repo)</em> — <strong>asal (2026-08-28):</strong> ek hi contract, par pg-boss handler jaisa hi, ek hi process me. Contract package HTTP adapter bhi deta hai, jis din alag hona zaroori ho</td></tr>
 <tr><td>Kaam ka record</td><td><code>jobs_log</code> (flat log)</td><td><code>tasks → task_steps → agent_runs</code> (state machine, resume-able)</td></tr>
 <tr><td>Confirmation</td><td>Model bhi bol sakta tha</td><td>Sirf code, sirf DB row se</td></tr>
 <tr><td>Naya agent jodna</td><td>Router, queue list, office map, dashboard — 5 jagah edit</td><td>Repo + manifest. Brain khud dekh leta hai.</td></tr>
@@ -262,7 +267,8 @@ flowchart LR
 
 <div class="callout">
   <p class="t">Model (tay, measured — §18.4b)</p>
-  <p>Intent Engine aur Conversation dono <strong><code>openai/gpt-oss-120b</code></strong> pe (NIM free, <code>reasoning_effort:"low"</code>), fallback Nemotron. Config ek jagah: <code>lib/chat-model.ts</code> — brain me ye file jaisi-ki-taisi jaati hai. Writer/judge ka model alag hai aur Phase 2 test se tay hoga.</p>
+  <p>Intent Engine aur Conversation dono <strong><code>openai/gpt-oss-120b</code></strong> pe (<code>reasoning_effort:"low"</code>), fallback Nemotron — <code>lib/chat-model.ts</code>. Writer/judge ka model alag hai aur Phase 2 test se tay hoga.</p>
+  <p><small><strong>Update 2026-08-28:</strong> ab config &ldquo;ek jagah&rdquo; nahi hai — <code>lib/ai/fastChat.ts</code> (Groq, phir Cerebras) ab <strong>pehle</strong> try hota hai, dono jagah (chat reply aur brain ka apna classification call), <code>lib/chat-model.ts</code>/NIM ab fallback hai jab fast provider configured na ho ya fail ho. Sahi jagah &sect;18 hai, &sect;18.6 ke saath.</small></p>
 </div>
 <h3>5.2 Conversation — Q&amp;A ka jawab kaun deta hai</h3>
 <p>Aapka sawaal tha: “maine koi bhi Q&amp;A diya to kaun answer dega?” Jawab: <strong>Mr Lxwa ka conversation model</strong> — par ab wo andha nahi hoga. Usko har turn pe ye milega:</p>
@@ -323,6 +329,7 @@ flowchart TD
 <tr><td class="num">5</td><td>Social / Story</td><td><em>Sirf agar</em> schedule me on ho — warna nahi</td><td>—</td><td>"3 posts Approvals me"</td></tr>
 </table></div>
 <p>Agar user ne sirf "article likho" bola (publish nahi): step 0 ka echo nahi (reversible), step 4 ki jagah <code>awaiting_approval</code>, aur step 5 kabhi nahi.</p>
+<p><small><strong>Diagram future-state hai, aaj ka nahi:</strong> upar ka needs-graph Mr. Image ko dependency maanta hai (<code>publish needs [article, images, seo_passed]</code>) — Mr. Image abhi bana hi nahi hai (&sect;19.1, 0% built), isliye aaj ke real manifest (<code>agent-server/src/brain/manifests.ts</code>) me <code>publish_article.needs = ["article", "seo_passed"]</code> hai, <code>images</code> nahi — code ka apna comment kehta hai kyun: &ldquo;a need nobody provides makes every publish plan fail... add it the same day agent-image gets a manifest, not before.&rdquo; Isi tarah <code>check_seo.needs = ["article"]</code> hai — <code>keywords</code> optional input hai, hard need nahi.</small></p>
 
 <h4>"Panga to nahi hoga?" — 6 jagah ho sakta tha, aur kaise roka</h4>
 <div class="tablewrap"><table>
@@ -547,6 +554,12 @@ site_audits       id, tenant_id, score, categories jsonb, issues jsonb, pages, a
 leads             id, tenant_id, company, contact jsonb, score, why, draft_message,
                   status ('new'|'approved'|'sent'|'replied'|'optout'), source
 tenant_icp        tenant_id, icp jsonb, updated_at
+conversation_state  conversation_id, tenant_id, pending_intent jsonb, asked_slot,
+                    expires_at, turn_no          -- Upgrade B (§16.3), migration 017
+prompts             id, name, version, body, model, params jsonb, active, note
+                    -- Upgrade G (§16.3), migration 017 — prompt-as-data, not code
+tenant_style        tenant_id, liked_examples jsonb, avoid jsonb, tone_notes
+                    -- Upgrade H (§16.3), migration 017 — Approvals feedback loop
 </code></pre>
 <ul>
   <li>RLS: sab tables pe <code>is_tenant_member(tenant_id)</code> — aaj ka pattern.</li>
@@ -715,8 +728,8 @@ tenant_icp        tenant_id, icp jsonb, updated_at
 <div class="tablewrap"><table>
 <tr><th>#</th><th>Faisla</th><th>Options</th><th>Meri raay</th><th>Kab tak</th></tr>
 <tr><td class="num">1</td><td>LLM</td><td>DeepSeek V3 / Nemotron 3 Super / Qwen 3 — sab NIM ya apne endpoint pe</td><td>Phase 2 me test karo, 5 topics, QA score + human read. Aaj Nemotron Lightning chat ke liye rahe (fast). Writer ke liye alag model ho sakta hai — gpt-researcher FAST/SMART alag leta hai.</td><td>Phase 2 hafta 1</td></tr>
-<tr><td class="num">2</td><td>Leads repo</td><td>Author se license maango / khud likho</td><td>Khud likho. 300 line hai, aur compliance rules waise bhi apne chahiye.</td><td>Phase 0</td></tr>
-<tr><td class="num">3</td><td>Social tool</td><td>Postiz (AGPL — SaaS me dhyan) / Mixpost (paid) / apna</td><td>Pehle Meta App Review file karo — tool baad me. Bina approval ke koi tool kaam nahi karega.</td><td>Phase 2 me file, Phase 3 me build</td></tr>
+<tr><td class="num">2</td><td>Leads repo</td><td>Author se license maango / khud likho</td><td><s>Khud likho. 300 line hai, aur compliance rules waise bhi apne chahiye.</s> <span class="pill ok">RESOLVED &sect;17.8</span> Author se permission maang li gayi (2026-08-27, likhit) — LangGraph skeleton (nodes/state shape) uthao, andar ka stack apna</td><td><span class="pill ok">DONE</span></td></tr>
+<tr><td class="num">3</td><td>Social tool</td><td>Postiz (AGPL — SaaS me dhyan) / Mixpost (paid) / apna</td><td><span class="pill ok">RESOLVED &sect;17.5/17.8</span> Postiz self-host (alag service, API se, AGPL patch nahi karte to safe) + apna generator. Meta App Review is hafte file karo — bina uske koi network live nahi jud sakta</td><td>Phase 2 me file, Phase 3 me build</td></tr>
 <tr><td class="num">4</td><td>Google Ads API</td><td>Apply karo / skip</td><td>Apply karo Phase 0 me (free, par lamba). Critical path pe mat rakho — DataForSEO + GSC kaafi hai.</td><td>Phase 0</td></tr>
 <tr><td class="num">5</td><td>Research retriever</td><td>Tavily paid / SearXNG self-host / DuckDuckGo</td><td>SearXNG self-host on Railway (free, 1000/day chalega). Tavily backup.</td><td>Phase 2</td></tr>
 <tr><td class="num">6</td><td>Brand rename</td><td>MrLxwa apply karo codebase me</td><td>Naye repos MrLxwa naam se hi banao — purana naam naye repos me na jaaye.</td><td>Phase 0</td></tr>
@@ -726,6 +739,7 @@ tenant_icp        tenant_id, icp jsonb, updated_at
 <div class="callout">
   <p class="t">Agla kadam</p>
   <p>Aap in 7 me se jo bhi tay kar do, batao. Phase 0 ke chaar kaam (016, keyword fix, contract package, schema) me se koi bhi kisi faisle pe nahi rukta — wo turant shuru ho sakte hain.</p>
+  <p><small><strong>Update 2026-08-28:</strong> #2 (leads repo) aur #3 (social tool) &sect;17.8 me resolve ho chuke hain, dono table rows me note hai. Baaki 5 abhi bhi khule hain.</small></p>
 </div>
 
 <!-- ============================================================ -->
@@ -759,7 +773,7 @@ tenant_icp        tenant_id, icp jsonb, updated_at
 <h3>16.3 Gyarah upgrades</h3>
 
 <h4>A · Eval-driven intent — daawa nahi, number <span class="pill warn">v2</span></h4>
-<p>Aapke DB me <strong>222 asli chat messages</strong> hain (<code>chat_messages</code>). Ye sona hai. Unko label karo (action, params, when, delivery) → golden set. Har prompt/regex change pe ye set chalega, per-action precision/recall niklega. <strong>Target: irreversible actions (publish, cancel-all) pe 99%+ precision, baaki pe 95%+.</strong> Har hafte naye real messages add hote rahenge. 16 acceptance tests rahenge, par ye 222+ ka set asli guard hai. Top companies “tests” nahi, “evals” chalati hain — yahi farq hai.</p>
+<p>Aapke DB me <strong>222 rows</strong> hain (<code>chat_messages</code>) — par label karne laayak sirf <strong>99 asli user messages</strong> (baaki assistant ke apne jawab hain, jo golden set ke kaam ke nahi). Ye sona hai. Unko label karo (action, params, when, delivery) → golden set. Har prompt/regex change pe ye set chalega, per-action precision/recall niklega. <strong>Target: irreversible actions (publish, cancel-all) pe 99%+ precision, baaki pe 95%+.</strong> Har hafte naye real messages add hote rahenge. 16 acceptance tests rahenge, par ye set asli guard hai. Top companies “tests” nahi, “evals” chalati hain — yahi farq hai. <span class="pill ok">DONE 2026-08-27</span> Ye set ban chuka hai — Phase 0 build log me exact number.</p>
 
 <h4>B · Conversation state machine <span class="pill warn">v2</span></h4>
 <pre><code>conversation_state   conversation_id, pending_intent jsonb, asked_slot text,
@@ -1092,6 +1106,10 @@ owner ki apni maang thi, kyunki server log koi customer nahi dekh sakta.</p>
 <tr><td>LLM comparison test</td><td>OpenRouter</td><td>koi bhi <code>:free</code></td><td>50 req/day</td><td>—</td></tr>
 </table></div>
 <p><strong>Gemini free mat lo</strong> customer data ke liye — free tier ka data training me jaata hai. Judge ke liye bhi nahi, kyunki article me business context hai.</p>
+<div class="callout">
+  <p class="t">Update 2026-08-28: Cerebras pehle nahi chala — Groq chala, aur code me Groq hi pehle try hota hai</p>
+  <p>Upar wali table (v4, research ke waqt) Cerebras ko chat/intent ka primary maanti hai, Groq fallback. Asal me ulta hua: &sect;18.4b ne Cerebras test kiya to 402 (no quota) mila; Groq ka free tier kaam kiya. <code>lib/ai/fastChat.ts</code> ka <code>FAST_PROVIDERS</code> array isi wajah se Groq ko pehle rakhta hai (code ka apna comment: &ldquo;Groq is the one with a reported-working free tier... so it tries first&rdquo;), Cerebras doosre number pe, dono jagah — chat reply ke liye bhi aur brain ke classification call ke liye bhi. Cerebras abhi bhi wired hai (agar kabhi quota mil jaye to khud kaam karne lagega), bas primary nahi hai.</p>
+</div>
 <h4>Free pe survive karne ke 5 rules</h4>
 <ol>
   <li><strong>Provider rotation</strong> — brain me ek chhota <code>llm()</code> wrapper: pehla provider 429 de to agla, sab ka daily counter DB me. Ek bhi provider ban nahi hota, koi user “limit” nahi dekhta.</li>
@@ -1378,7 +1396,7 @@ sequenceDiagram
 <tr><td class="num">2</td><td><strong>Big-bang rewrite.</strong> route.ts (890 lines) + agent-server ek saath replace = 2 hafte kuch kaam nahi karta.</td><td><span class="pill bad">HIGH</span></td><td><strong>Strangler pattern.</strong> Brain agent-server ke andar ugta hai; chat route ek-ek intent brain ko bhejta hai (pehle <code>schedule</code>, phir <code>write</code>…), baaki purana. Feature flag <code>BRAIN=legacy|new</code> per tenant — misbehave kare to ek env var se wapas. 85 tests har step pe chalte hain.</td></tr>
 <tr><td class="num">3</td><td><strong>NIM = single point of failure.</strong> Free, shared, models bina notice hat-te hain (kal 2 gaye). Ek din NIM down = poora product down.</td><td><span class="pill bad">HIGH</span></td><td>Provider rotation (§18) + <strong>degrade mode</strong>: LLM na mile to order queue hota hai, user ko “AI busy — 10 min me chalega” dikhta hai, kuch fail nahi hota. Weekly script model-list diff karke alert. Status page (free: Instatus/UptimeRobot).</td></tr>
 <tr><td class="num">4</td><td><strong>Async callback contract solo dev ke liye bhaari</strong> — HMAC, watchdog, idempotency, 3 repos me debug.</td><td><span class="pill warn">MED</span></td><td>Contract package <strong>do adapters</strong>: in-process (default, function call) aur HTTP. TS agents brain ke saath in-process — koi webhook nahi. HTTP sirf Python/Playwright units ke liye. Same manifest, same tests.</td></tr>
-<tr><td class="num">5</td><td><strong>222 messages label kaun karega?</strong> Eval set ka daawa bina labels ke khokhla hai.</td><td><span class="pill warn">MED</span></td><td>gpt-oss auto-label + aap 30 min me review (UI: ek screen, thumbs up/down). Phir har chat reply pe 👍/👎 → eval set khud badhta hai. Labeling ek baar ka kaam nahi, product ka hissa.</td></tr>
+<tr><td class="num">5</td><td><strong>222 messages label kaun karega?</strong> Eval set ka daawa bina labels ke khokhla hai. <span class="pill ok">DONE 2026-08-27</span> — asal set 99 user messages ka nikla (222 rows me se, baaki assistant ke jawab)</td><td><span class="pill warn">MED</span></td><td>gpt-oss auto-label + aap 30 min me review (UI: ek screen, thumbs up/down). Phir har chat reply pe 👍/👎 → eval set khud badhta hai. Labeling ek baar ka kaam nahi, product ka hissa.</td></tr>
 <tr><td class="num">6</td><td><strong>Langfuse/prompt registry = ek aur system chalana.</strong></td><td><span class="pill info">LOW</span></td><td>Shuru me sirf <code>prompts</code> table + <code>agent_runs</code> (traces). Langfuse tab jab 5+ paid users. Plan me “Phase 4 optional” tha — ab explicit “not before”.</td></tr>
 <tr><td class="num">7</td><td><strong>UI ka plan tha hi nahi.</strong> 21 sections backend, 0 UI. User professional UI maang raha hai.</td><td><span class="pill bad">HIGH</span></td><td>Section 23 (audit + fixes) aur 24 (live visualization). Phase 1 me UI ka apna exit criteria.</td></tr>
 <tr><td class="num">8</td><td><strong>Cost math contradictory.</strong> §12 1000 articles/day, §18 free tiers — dono ek saath nahi ho sakte.</td><td><span class="pill warn">MED</span></td><td>Do modes likhe: <strong>Student mode</strong> (free tiers, caps: 2 article/day/tenant, 20 tenants) aur <strong>Growth mode</strong> (paid, §12 ka hisaab). Switch = env + plan tier. §12 ab Growth-only hai.</td></tr>
@@ -1555,11 +1573,11 @@ ctx.done({ output })                                                 // STEP_FIN
 <h3>24.6 Phases me</h3>
 <ul>
   <li><strong>Phase 0:</strong> <code>task_events</code> table + <code>ctx.emit()</code> contract me + Broadcast channel — infrastructure, UI me sirf chat status card live line (view D)</li>
-  <li><strong>Phase 1:</strong> Office monitors events se (view A) — Keyword + Writer ke liye; Pipeline view (B) basic</li>
+  <li><strong>Phase 1:</strong> <span class="pill ok">DONE 2026-08-27</span> &sect;24.4b ke hisaab se — default view <strong>Agent Workspace</strong> hai, office nahi (theme toggle me office rehta hai). Keyword + Writer ke liye live panel; Pipeline view (B) basic</li>
   <li><strong>Phase 2:</strong> Writer section-wise → screen pe article banta dikhe; Image/SEO screens; Replay (C) basic</li>
   <li><strong>Phase 4:</strong> Share links, MP4 export</li>
 </ul>
-<p><strong>Exit test (Phase 1):</strong> ek user “solar pe article likho” bole aur bina chat padhe, sirf office dekh kar bata sake: abhi kaun kaam kar raha hai, kitna hua, agla kaun. Ye test insaan se karo, 5 log, bina bataye.</p>
+<p><strong>Exit test (Phase 1):</strong> ek user “solar pe article likho” bole aur bina chat padhe, sirf <strong>Workspace</strong> dekh kar bata sake: abhi kaun kaam kar raha hai, kitna hua, agla kaun (&sect;24.4b ka apna update: &ldquo;'office dekh kar' ki jagah 'workspace dekh kar'&rdquo;). Ye test insaan se karo, 5 log, bina bataye.</p>
 
 <!-- ============================================================ -->
 <h2 id="sitebrain">25 · Site Brain — crawl ka data kab, kahan, kaise use hoga</h2>
@@ -1682,7 +1700,7 @@ sequenceDiagram
   <li>Google connect (GSC/GA) — <em>aaj wala</em>, par ab isse profile me <code>content_gaps</code> turant bante hain → dashboard pehle din se “ye 5 quick wins” dikhata hai, khaali nahi</li>
 </ol>
 
-<h3>25.9 Brain taaza kaise rehta hai — naya article/page aaye to</h3>
+<h3>25.8 Brain taaza kaise rehta hai — naya article/page aaye to</h3>
 <div class="tablewrap"><table>
 <tr><th>Trigger</th><th>Kab</th><th>Kya hota hai</th><th>Kitna mehnga</th></tr>
 <tr><td><strong>Hamara apna publish</strong></td><td>Mr. Publish article site pe daale, usi second</td><td>Crawl nahi chahiye — article <code>content_items</code> me hai → embedding + <code>knowledge_chunks</code> + cluster turant. Chatbot agle sawaal se isse jawab de sakta hai; planner isko “already covered” maanta hai.</td><td>1 embed call</td></tr>
@@ -1692,7 +1710,7 @@ sequenceDiagram
 </table></div>
 <p>Har update = <code>site_profiles</code> ka <strong>naya version</strong> (purana rehta hai, diff dikhta hai, rollback ek click). Profile ke <em>text</em> fields (what_they_do, offerings, proof) sirf tab LLM se dobara likhe jaate hain jab diff me relevant page badla ho — warna sirf chunks/clusters update, taaki har hafte profile “hilta” na rahe aur user ki edits overwrite na hon (user-edited field ko agent kabhi nahi chhoota, sirf suggestion deta hai).</p>
 
-<h3>25.8 Schema (migration 018) aur phases</h3>
+<h3>25.9 Schema (migration 018) aur phases</h3>
 <div class="tablewrap"><table>
 <tr><th>Table/column</th><th>Kyun</th></tr>
 <tr><td><code>site_profiles</code> (tenant_id, version, profile jsonb, sources jsonb, built_from {pages, gsc_period}, created_by user/agent, active)</td><td>Versioned Site Brain</td></tr>
