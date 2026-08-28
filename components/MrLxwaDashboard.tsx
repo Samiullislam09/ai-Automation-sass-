@@ -679,70 +679,80 @@ export default function MrLxwaDashboard() {
         className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
         style={{ width: 420, height: 220, background: "radial-gradient(ellipse at center,rgba(124,58,237,.22),transparent 65%)" }}
       />
-      <AnimatePresence initial={false} mode="wait">
-        {panelOpen ? (
-          // ---- compact: every agent sorted into one line, once a panel is open ----
-          <motion.div
-            key="compact"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.25 }}
-            className="lx-scroll overflow-x-auto"
-          >
-            <div className="flex min-w-max items-center gap-2 px-4 py-3">
-              {AGENTS_LEFT.map((a) => (
-                <AgentNode key={a.name} a={a} compact onClick={() => openAgentPanel(a)} />
-              ))}
-              <span className="lx-brain shrink-0" style={{ fontSize: 26 }}>🧠</span>
-              {AGENTS_RIGHT.map((a) => (
-                <AgentNode key={a.name} a={a} compact onClick={() => openAgentPanel(a)} />
-              ))}
-            </div>
-          </motion.div>
-        ) : (
-          // ---- full: the whole team, spotlighting the brain — the resting state. flex-wrap
-          // (not a horizontally-scrolling single row) so every agent is visible on any screen
-          // width, with no cut-off nodes and no scrollbar to discover. ----
-          <motion.div
-            key="full"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.25 }}
-          >
-            {/* chip — normal flow, centered, so it never floats over an agent node at any
-                screen width */}
-            {workingAgent && (
-              <div className="lx-card2 mx-auto mt-4 flex w-fit items-center gap-2.5 px-3 py-2">
+      {/* compact/full swap — plain CSS remount (key change), not framer-motion's
+          AnimatePresence: the same nested-AnimatePresence-inside-a-frequently-re-rendering-tree
+          bug documented above for Live Visual (opacity stuck at 0, confirmed via computed
+          style) reproduced here too once this became a second AnimatePresence sharing the
+          tree with the `sec` timer's every-second re-render. */}
+      {panelOpen ? (
+        // ---- compact: every agent sorted into one line, once a panel is open ----
+        <div key="compact" className="lx-live-anim lx-scroll overflow-x-auto">
+          <div className="flex min-w-max items-center gap-2 px-4 py-3">
+            {AGENTS_LEFT.map((a) => (
+              <AgentNode key={a.name} a={a} compact onClick={() => openAgentPanel(a)} />
+            ))}
+            <span className="lx-brain shrink-0" style={{ fontSize: 26 }}>🧠</span>
+            {AGENTS_RIGHT.map((a) => (
+              <AgentNode key={a.name} a={a} compact onClick={() => openAgentPanel(a)} />
+            ))}
+          </div>
+        </div>
+      ) : (
+        // ---- full: a real team roster — one card per agent (icon, name, role, status),
+        // in a grid that fills the same height as Live Visual gets in the panel (~360px),
+        // so the resting state reads as a staffed AI team, not a few icons floating in a
+        // mostly-empty card. Grid (not flex-wrap of bare icons), so it fills width and
+        // height evenly at any screen size with no dead space and no scrollbar. ----
+        <div key="full" className="lx-live-anim p-4 sm:p-6">
+          {workingAgent && (
+              <div className="lx-card2 mb-4 flex items-center gap-2.5 px-3 py-2">
                 <span className="h-2 w-2 shrink-0 rounded-full lx-pulse" style={{ background: "#22c55e", boxShadow: "0 0 8px #22c55e" }} />
-                <span>
-                  <span className="block lx-11 font-semibold">Planning &amp; Orchestrating</span>
-                  <span className="block lx-10 lx-mut">Delegated to {workingAgent.name}</span>
-                </span>
+                <span className="lx-11 font-semibold">Planning &amp; Orchestrating</span>
+                <span className="lx-10 lx-mut">— delegated to {workingAgent.name}</span>
               </div>
             )}
 
-            <div className="flex flex-wrap items-start justify-center gap-x-5 gap-y-5 px-4 py-6 sm:gap-x-7">
-              {AGENTS_LEFT.map((a) => (
-                <AgentNode key={a.name} a={a} onClick={() => openAgentPanel(a)} />
-              ))}
-
-              {/* [ASSET] Mr. Lxwa brain */}
-              <div className="flex flex-col items-center px-1" style={{ width: 74 }}>
-                <div className="lx-12 font-bold">Mr. Lxwa</div>
-                <div className="lx-10 lx-mut mb-1">AI Brain (Boss)</div>
-                <div className="lx-brain">🧠</div>
-                <div className="lx-platform" />
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5" style={{ minHeight: 300 }}>
+              {/* [ASSET] Mr. Lxwa — the boss, styled as the team lead's card */}
+              <div
+                className="lx-card2 flex flex-col items-center justify-center gap-1 p-4 text-center"
+                style={{ background: "linear-gradient(160deg,rgba(139,92,246,.16),rgba(34,211,238,.05))", borderColor: "rgba(139,92,246,.45)" }}
+              >
+                <span className="lx-brain" style={{ fontSize: 32 }}>🧠</span>
+                <span className="lx-12 font-bold">Mr. Lxwa</span>
+                <span className="lx-10 lx-mut">AI Brain · Boss</span>
+                <span className="lx-pill purple mt-1" style={{ padding: "2px 9px" }}>Orchestrating</span>
               </div>
 
-              {AGENTS_RIGHT.map((a) => (
-                <AgentNode key={a.name} a={a} onClick={() => openAgentPanel(a)} />
-              ))}
+              {ALL_AGENTS.map((a) => {
+                const c = STATUS_COLOR[a.status];
+                const working = a.status === "Working";
+                return (
+                  <button
+                    key={a.name}
+                    type="button"
+                    onClick={() => openAgentPanel(a)}
+                    disabled={!working}
+                    className="lx-card2 flex flex-col items-center justify-center gap-1 p-4 text-center"
+                    style={{ cursor: working ? "pointer" : "default", borderColor: working ? "rgba(59,130,246,.5)" : undefined }}
+                  >
+                    <span
+                      className={`lx-agent ${a.status !== "Waiting" ? "glow" : ""}`}
+                      style={{ width: 40, height: 40, ["--ac" as string]: a.status === "Waiting" ? "rgba(255,255,255,.16)" : c, color: a.status === "Waiting" ? "#8b8ba0" : c }}
+                    >
+                      <Bot size={18} />
+                    </span>
+                    <span className="lx-12 font-semibold">{a.name}</span>
+                    <span className="lx-10 lx-mut">{a.role}</span>
+                    <span className="lx-10 font-semibold" style={{ color: c }}>
+                      {a.status === "Working" ? "● Working" : a.status === "Completed" ? "✓ Completed" : "Waiting"}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+        </div>
+      )}
     </motion.section>
   );
 
