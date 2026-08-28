@@ -356,6 +356,7 @@ async function publishOne(tenantId: string, itemId: string): Promise<string | nu
 }
 
 type Row = {
+  id: string;
   frequency: string;
   day_of_week: number;
   time_of_day: string;
@@ -363,8 +364,31 @@ type Row = {
   last_run_at: string | null;
 };
 
-/** True when `now`, expressed in the row's own timezone, has just passed its slot and that
- *  slot hasn't already been served. Exported for the sake of being testable in isolation. */
+// MASTER_PLAN §12's own fix for "sab ke schedule 9 AM = ek saath": "tenant ka slot ±30 min
+// jitter". A schedule's actual firing time is offset by a fixed, per-row amount so a hundred
+// tenants who all picked 9am don't all land in the very same 5-minute WINDOW_MINUTES sweep —
+// they spread across a full hour instead, still once a day, still close to what they asked
+// for. No new column, no migration 006 change: the offset is derived from the row's own id,
+// so it is stable across ticks (the same schedule always gets the same offset — otherwise
+// `isDue`'s WINDOW_MINUTES match could land in a different window each run and never fire, or
+// fire twice) without persisting anything new.
+const JITTER_MINUTES = 30;
+
+/** A small, fast, non-cryptographic hash (FNV-1a) — this only needs to scatter ids evenly
+ *  across a range, never to resist an attacker, so Node's crypto module would be overkill. */
+export function jitterMinutes(id: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  const unit = (h >>> 0) / 0xffffffff; // 0..1, deterministic for a given id
+  return Math.round((unit * 2 - 1) * JITTER_MINUTES); // -30..+30
+}
+
+/** True when `now`, expressed in the row's own timezone, has just passed its (jittered) slot
+ *  and that slot hasn't already been served. Exported for the sake of being testable in
+ *  isolation. */
 export function isDue(row: Row, now: Date): boolean {
   let local: ReturnType<typeof localParts>;
   try {
@@ -380,7 +404,15 @@ export function isDue(row: Row, now: Date): boolean {
   const [hh, mm] = row.time_of_day.split(":").map(Number);
   if (Number.isNaN(hh) || Number.isNaN(mm)) return false;
 
-  const minutesSinceSlot = local.hour * 60 + local.minute - (hh * 60 + mm);
+  // Wrapped into a single day (0-1439): a schedule within 30 minutes of midnight can jitter
+  // across the day boundary. The weekday/weekly check above still uses the UN-jittered `now`,
+  // so on that rare edge the slot and the day-of-week check can disagree by one day — accepted
+  // rather than engineered around, the same way the audit sweep above accepts "at most 3 per
+  // tick" instead of solving perfect fairness. last_run_at's same-local-day dedup still holds
+  // either way, so the worst case is firing a day earlier/later than the exact minute chosen,
+  // never twice and never silently dropped.
+  const slotMinutes = (((hh * 60 + mm + jitterMinutes(row.id)) % 1440) + 1440) % 1440;
+  const minutesSinceSlot = local.hour * 60 + local.minute - slotMinutes;
   if (minutesSinceSlot < 0 || minutesSinceSlot > WINDOW_MINUTES) return false;
 
   // Same local calendar day already ran → done. Comparing local dates (not "24h ago")
