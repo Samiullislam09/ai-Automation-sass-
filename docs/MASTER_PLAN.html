@@ -412,7 +412,7 @@ POST /run        → body: { run_id, tenant_id, action, input, context, callback
 <ul>
   <li>Brain → agent: shared secret header (<code>X-Agent-Token</code>), per-agent alag token</li>
   <li>Agent → brain callback: same token + <code>run_id</code> HMAC, taaki koi bahar se fake result na bhej sake</li>
-  <li>Agent ke paas Supabase ka <strong>service key nahi hoga</strong>. Sirf brain DB likhta hai. Agent ko jo data chahiye wo <code>input</code>/<code>context</code> me milta hai. (Aaj har agent service-role se DB chhoo sakta hai — ye 7 repo me phailne se pehle band hona chahiye.)</li>
+  <li>Agent ke paas Supabase ka <strong>service key nahi hoga</strong>. Sirf brain DB likhta hai. Agent ko jo data chahiye wo <code>input</code>/<code>context</code> me milta hai. <span class="pill warn">Abhi lagu nahi</span> — &sect;16.3 Upgrade D ke FINAL faisle (ek hi service) ke hisaab se har agent isi process me hai aur seedha <code>supabase.js</code> import karta hai (jaisa har <code>agent-server/src/agents/*.ts</code> me dikhta hai) — isolation ka ye faida sirf tab milega jab agents sach me alag services ban jayen.</li>
   <li>Credentials (WordPress password, social tokens) sirf publish/social agent ko, sirf us run ke liye, encrypted (aaj ka <code>lib/crypto.ts</code>)</li>
 </ul>
 
@@ -430,11 +430,12 @@ POST /run        → body: { run_id, tenant_id, action, input, context, callback
 <tr><td>Google Ads API</td><td><strong>Phase 2 ke baad</strong>, aur sirf tab jab developer token approve ho. Isko plan ki critical path pe mat rakho — approval hafton ka hai, aur doc me “free” likha hai par Basic access ke liye bhi review hai.</td></tr>
 <tr><td>Input</td><td><code>{ topic?: string, seed_keywords?: string[], site_context: {niche, pages[]}, country, language }</code></td></tr>
 <tr><td>Output</td><td><code>{ options: [{kw, volume, difficulty, intent, why}], recommended: kw }</code></td></tr>
-<tr><td>Pehla kaam</td><td><strong>58% failure ki jad nikalo.</strong> jobs_log ke 31 failed rows ka <code>detail.error</code> group karo. Andaza: DataForSEO 4xx/credits ya NIM timeout. Jab tak ye 95%+ success na ho, aage kuch mat banao — sab isi pe khada hai.</td></tr>
+<tr><td>Pehla kaam</td><td><span class="pill ok">DONE</span> <strong>58% failure ki jad nikalo.</strong> Jad mili: 30/31 = DataForSEO account unverified, sab 24 Aug ko fallback commit se pehle. Tab se 12/12 success (AI-fallback pe) — &sect;13 Phase 0 build log me.</td></tr>
 <tr><td>Test</td><td>Same topic 3 baar → same recommended (temperature 0). Bina DataForSEO key → fallback chale, fail na ho. “null” topic → 400, research nahi.</td></tr>
 </table></div>
 
-<h3>7.2 Mr. Writer (Research + Write) <span class="pill ok">Python · gpt-researcher</span></h3>
+<h3>7.2 Mr. Writer (Research + Write) <span class="pill ok">DONE 2026-08-27 (TS scope)</span></h3>
+<p><small>Ye spec table <strong>original plan</strong> hai (Python + gpt-researcher, FastAPI sidecar) — jaisa &sect;7.6 (Leads) me hua, asal implementation TypeScript nikli: <code>lib/writerPipeline.ts</code>, agent-server ke andar hi, outline &rarr; parallel sections &rarr; polish &rarr; meta (&sect;16.3 Upgrade E). gpt-researcher jaanbujh kar deferred hai — naya deploy unit, naya kharcha, aur har fact tenant ke apne Site Brain/crawl se aana zaroori hai (open-web research isi rule se takrata). Neeche ka spec history ke liye hai.</small></p>
 <div class="tablewrap"><table>
 <tr><th>Cheez</th><th>Spec</th></tr>
 <tr><td>Repo</td><td><code>assafelovic/gpt-researcher</code> — pip package use karo, fork mat karo. Upgrades free milenge.</td></tr>
@@ -448,22 +449,24 @@ POST /run        → body: { run_id, tenant_id, action, input, context, callback
 <tr><td>Test</td><td>Ek fixed topic → article 800+ words, 3+ sources, koi “[INSERT” / “As an AI” nahi, meta 60/160 char me. Timeout 10 min → failed with reason, hang nahi.</td></tr>
 </table></div>
 
-<h3>7.3 Mr. SEO (content-level) <span class="pill warn">Python · port karo, as-is nahi</span></h3>
+<h3>7.3 Mr. SEO (content-level) <span class="pill ok">DONE — TS, apna rubric</span></h3>
+<p><small><code>ai-seo-auditor</code> use nahi hua (isi table ke apne "Rukawat" row ki wajah se — sirf live URL leta hai, draft nahi). Asal: <code>agent-server/src/lib/seoChecks.ts</code>, TypeScript, <strong>24 checks</strong> (11 se zyada — &sect;17.7 ka final faisla: apna rubric + DataForSEO SERP). Loop max 2 orchestrator me hai jaisa neeche likha hai.</small></p>
 <div class="tablewrap"><table>
-<tr><th>Cheez</th><th>Spec</th></tr>
+<tr><th>Cheez</th><th>Spec (original)</th></tr>
 <tr><td>Doc ka plan</td><td>Draft ko publish se pehle audit, writer ko feedback loop.</td></tr>
 <tr><td>Rukawat</td><td><code>ai-seo-auditor</code> <strong>sirf live URL</strong> leta hai, interactive prompt se. Draft markdown usme jaata hi nahi. 9 stars, ek maintainer.</td></tr>
-<tr><td>Faisla</td><td>Uske 11 checks (schema, headings, E-E-A-T, OG tags, freshness, semantic clarity…) ko apne <code>seo-agent</code> me <strong>port</strong> karo — draft ko HTML render karke checks chalao, LLM scoring NIM pe. Repo ko clone karke chalane se ye aasaan aur bharosemand hai.</td></tr>
+<tr><td>Faisla (original)</td><td>Uske 11 checks (schema, headings, E-E-A-T, OG tags, freshness, semantic clarity…) ko apne <code>seo-agent</code> me <strong>port</strong> karo — draft ko HTML render karke checks chalao, LLM scoring NIM pe. Repo ko clone karke chalane se ye aasaan aur bharosemand hai.</td></tr>
 <tr><td>Loop</td><td>Score &lt; threshold (default 75) → issues writer ko → 1 re-write → dobara audit. <strong>Max 2 loops.</strong> Phir bhi kam → user ko dikhao, khud mat ghoomte raho (cost).</td></tr>
 <tr><td>Output</td><td><code>{ score, issues: [{severity, what, fix}], passed }</code> — <code>fix</code> writer-ready instruction ho, essay nahi.</td></tr>
 </table></div>
 
-<h3>7.4 Mr. Site Audit <span class="pill ok">TS · seo-audit-skill CLI</span></h3>
+<h3>7.4 Mr. Site Audit <span class="pill ok">DONE — apna catalogue, ek hi service</span></h3>
+<p><small><code>seomator</code> CLI as-is nahi chalaya — asal <code>agent-server/src/lib/audit/checks.ts</code> (26 tests, cheerio se fetch+parse, koi browser nahi) + <code>lib/audit/performance.ts</code> (2026-08-28, real <code>lighthouse</code> + Chrome, top 10 pages ke liye). "Alag service" bhi nahi bana — owner ne 2026-08-28 ko seedha decide kiya, sab agent-server ke ek hi process me (&sect;16.3 Upgrade D).</small></p>
 <div class="tablewrap"><table>
-<tr><th>Cheez</th><th>Spec</th></tr>
+<tr><th>Cheez</th><th>Spec (original)</th></tr>
 <tr><td>Repo</td><td><code>seo-skills/seo-audit-skill</code> — npm package, <code>seomator audit URL --format json --pages 50</code></td></tr>
 <tr><td>Kab</td><td>Scheduled: weekly default (user chat se “roz” bhi kar sakta hai). Per-article <strong>nahi</strong>. Connect ke waqt ek baar bhi.</td></tr>
-<tr><td>Bhaari hissa</td><td>Playwright + Chromium (~400MB). Railway pe alag service, 1GB RAM min. 50 pages ≈ 2-4 min.</td></tr>
+<tr><td>Bhaari hissa (original)</td><td>Playwright + Chromium (~400MB). Railway pe alag service, 1GB RAM min. 50 pages ≈ 2-4 min.</td></tr>
 <tr><td>Output</td><td>JSON → <code>site_audits</code> table; user ko top-5 issues plain language me, aur score trend (pichhle audit se +/-).</td></tr>
 <tr><td>Chat</td><td>“meri site ka audit karo” → manifest action <code>audit_site</code>. Report Insights page pe, chat me summary.</td></tr>
 </table></div>
@@ -475,7 +478,7 @@ POST /run        → body: { run_id, tenant_id, action, input, context, callback
 <tr><td>Irreversible</td><td>Manifest me <code>true</code>. Chat se publish = pehle echo (“‘Solar panels…’ ko abhi live karun?”).</td></tr>
 <tr><td>Validation (doc §5)</td><td>Publish se pehle code check: word count ≥ min, QA passed, SEO passed, meta present, koi placeholder/LLM-error text nahi. Ek bhi fail → publish nahi, wajah user ko.</td></tr>
 <tr><td>Proof</td><td>Output me <code>url</code> + HTTP 200 fetch of that URL. “Published” sirf tab jab URL sach me khulta hai.</td></tr>
-<tr><td>Rollback</td><td><code>unpublish</code> action (WP: status → draft). Chat: “wo wala hata do”. Undo = usool 4.</td></tr>
+<tr><td>Rollback</td><td><span class="pill ok">DONE 2026-08-28</span> <code>unpublish</code> action (WP: status → draft). Chat: “isko site se hata do” / “unpublish it”. Undo = usool 4.</td></tr>
 </table></div>
 
 <h3>7.6 Mr. Leads <span class="pill ok">DONE 2026-08-27 (TS scope)</span></h3>
@@ -493,11 +496,12 @@ POST /run        → body: { run_id, tenant_id, action, input, context, callback
 <p>Repo TBD (agent apne agent-server ke andar hi hai, brain ke doosre agents ki tarah). Meta Graph API App Review (Instagram/Facebook publish) 2-6 hafte leta hai aur business verification maangta hai — Pinterest API bhi approval, X paid, LinkedIn partner-only, sab abhi <span class="pill warn">AAPKA KAAM</span> (docs/MANUAL_STEPS.md). Isliye pehla version wahi hai jo yahan likha tha: ek model call se Facebook/Instagram/LinkedIn/X — chaaron ke liye ek-ek draft, Site Brain ki voice/offerings/proof se grounded (invented nahi), har ek ka <code>imageBrief</code> (Mr. Image abhi nahi bana isliye ek sentence instruction), Approvals me Copy button ke saath. <strong>Kahin auto-post nahi hota</strong> — har run ka note yahi kehta hai, aur approve karna sirf &ldquo;copy ke liye taiyar&rdquo; maarta hai, publishContentItem se kabhi nahi guzarta.</p>
 
 <h3>7.8 Crawler <span class="pill info">TS · aaj ka, aur deep</span></h3>
-<p>Aaj ka <code>agents/crawler.ts</code> agent ban jaata hai (<code>crawl_site</code> action). Memory me ek open requirement hai: connect pe <strong>full site analysis</strong> chahiye, aaj 15-page/titles-only sample hai. Naye me: 300 pages, headings + body summary + internal link graph → writer ko internal links milte hain, keyword ko niche milti hai. Site audit agent aur crawler ek hi Playwright service share kar sakte hain (dono browser chahte hain).</p>
+<p><code>agents/crawler.ts</code> (<code>crawl_site</code> action) — <span class="pill ok">DONE</span> full-site crawl ab default hai: <code>PAGE_LIMIT = CRAWL_PAGE_LIMIT env || 300</code> (<code>agent-server/src/agents/crawler.ts</code>). Onboarding ka <em>chhota</em> pehla crawl (15 pages, <code>.env.example</code> ka default) alag cheez hai — jaldi ek sample dikhane ke liye, background me poora 300-page crawl uske baad khud shuru hota hai (&sect;25.7). <span class="pill warn">Abhi bhi original spec se kam</span>: <code>extractPage()</code> sirf <code>title</code> + poora <code>text</code> nikalta hai — <strong>headings ka alag structure ya internal-link graph nahi banata</strong>, jaisa yahan socha gaya tha. Playwright/alag service wali baat bhi ab lagu nahi (&sect;16.3 Upgrade D: ek hi service, koi bhi agent apna alag service nahi maangta).</p>
 
 <!-- ============================================================ -->
 <h2 id="pipeline">8 · Article pipeline state machine</h2>
 <p>Har article ek <code>task</code> hai jo in states se guzarta hai. Har transition DB me likhi jaati hai. User ko har state ka ek plain-language naam dikhta hai (right column).</p>
+<p><small><strong>Concept-level hai, exact column values nahi:</strong> asal <code>tasks.status</code> (migration 017) sirf in values ko allow karta hai: <code>awaiting_confirm, queued, scheduled, running, choosing, awaiting_approval, done, published, failed, needs_attention, cancelled</code> — <code>researching/writing/qa/seo_check/publishing/rejected</code> literally exist nahi karte, wo sab <code>running</code> ke andar aate hain. Fine-grained "abhi kaun kaam kar raha hai" wala hissa <code>task_steps</code> (per-agent row, apna <code>status</code>) aur live events se aata hai, ek generic task-status enum se nahi. User ko dikhta kya hai — ye diagram sahi hai; DB column ka naam neeche wala nahi.</small></p>
 
 <pre class="mermaid">
 stateDiagram-v2
@@ -702,7 +706,7 @@ tenant_style        tenant_id, liked_examples jsonb, avoid jsonb, tone_notes
 
 <!-- ============================================================ -->
 <h2 id="tests">14 · Acceptance tests — “user ne X kaha to Y hi ho”</h2>
-<p>Ye suite brain ke CI me chalegi. Har row ek test. Fail = deploy nahi. Aaj ke 85 tests iske subset hain.</p>
+<p>Ye suite brain ke CI me chalegi. Har row ek test. Fail = deploy nahi. <span class="pill warn">Number stale tha</span> — "85 tests" us waqt (project shuru) ka number tha; &sect;26 build log ka aakhri row current asli count deta hai (2026-08-28 tak: 330 agent-server + 141+ web) — ye grow karta rehta hai, is line ko fix rakhna galat hoga.</p>
 <div class="tablewrap"><table>
 <tr><th>User kehta hai</th><th>Hona chahiye</th><th>Nahi hona chahiye</th></tr>
 <tr><td>“hello”</td><td>Greeting, 1 line</td><td>Status report, intro, koi task</td></tr>
@@ -896,7 +900,7 @@ traces    har task ka har LLM call: prompt_version, input, output, tokens, ms, c
 <ol>
   <li><strong>Input</strong> — draft markdown + primary keyword + cluster keywords (Mr. Keyword se)</li>
   <li><strong>SERP snapshot</strong> — top 10 for primary keyword (DataForSEO, cache 7 din per keyword) → har result ka word count, H2 list, entities (noun phrases), FAQ presence</li>
-  <li><strong>7-category score</strong> (content-optimizer ka rubric, 100 points): Keyword usage 20 · Word count vs SERP median 15 · Heading structure 15 · Readability 15 · Entity coverage 15 (competitors jo entities cover karte hain, aap kitne) · Content depth 10 · Internal structure 10</li>
+  <li><strong>7-category score</strong> (content-optimizer ka rubric, 100 points): Keyword usage 20 · Word count vs SERP median 15 · Heading structure 15 · Readability 15 · Entity coverage 15 (competitors jo entities cover karte hain, aap kitne) · Content depth 10 · Internal structure 10<br/><span class="pill warn">Asal formula simpler hai</span> — <code>lib/seoChecks.ts</code> (24 checks) 7-category weighted rubric nahi, site-audit jaisa hi deterministic <code>100 − blockers×penalty − warnings×penalty</code> use karta hai. SERP comparison (DataForSEO) real hai, optional (key na ho to skip), par score isse compute nahi hota — sirf title-length jaise checks ko SERP-aware banata hai.</li>
   <li><strong>Deterministic checks</strong> — Section 16 Upgrade F wale (meta, placeholder, clichés, keyword in title/H1/first-100)</li>
   <li><strong>Issues → fix instructions</strong> — “Add a section on ‘installation cost’ — 7/10 competitors cover it, aap nahi” — writer-ready, essay nahi</li>
   <li><strong>Loop</strong> — score &lt; 75 → writer polish pass with issues → re-score. Max 2. Phir user ko score + top-3 issues dikhao, khud mat ghoomo</li>
@@ -919,7 +923,7 @@ traces    har task ka har LLM call: prompt_version, input, output, tokens, ms, c
 <h4>Kaam ka flow</h4>
 <ol>
   <li><strong>Trigger</strong> — connect pe ek baar · weekly schedule (chat se badal sakta hai) · chat “site audit karo” · publish ke 24h baad sirf us page ka mini-audit</li>
-  <li><strong>Crawl</strong> — seomator <code>--pages 50 --format json</code> (Playwright, 2-4 min) — 108 rules</li>
+  <li><strong>Crawl</strong> — seomator <code>--pages 50 --format json</code> (Playwright, 2-4 min) — 108 rules <span class="pill warn">CLI as-is nahi chala</span> (&sect;7.4 dekho) — asal <code>lib/audit/checks.ts</code>, apna catalogue, cheerio se, koi Playwright/CLI nahi</li>
   <li><strong>Performance</strong> — unlighthouse top 10 pages (homepage + latest articles) — LCP/CLS/INP, mobile score</li>
   <li><strong>Merge + score</strong> — ek 0-100 site score, categories: Technical · Content · Performance · Mobile · AI-readiness. Pichhle audit se diff</li>
   <li><strong>Top-5 issues</strong> — severity × pages affected × fix effort. Har issue plain language + “kaise theek karein” + kya hum khud theek kar sakte hain (WordPress pe: missing alt text, meta — haan; server headers — nahi, user ko batao)</li>
@@ -1184,7 +1188,7 @@ ka text dekhta hai). Comment ab sahi wajah kehta hai.</p>
 <h4>Free image generation — jo aaj sach me chalta hai</h4>
 <div class="tablewrap"><table>
 <tr><th>Option</th><th>Free?</th><th>Test 2026-08-27</th><th>Faisla</th></tr>
-<tr><td><strong>HTML template → screenshot</strong> (Playwright, jo site-audit ke paas already hai)</td><td>₹0, unlimited</td><td>Deterministic, brand color + headline + logo, 200ms</td><td><span class="pill ok">THUMBNAIL/OG ke liye PRIMARY</span> — 20 top blogs aise hi karte hain; AI image se zyada consistent</td></tr>
+<tr><td><strong>HTML template → screenshot</strong> (Playwright) <span class="pill warn">Update</span> site-audit ke paas Playwright nahi hai (&sect;7.4/&sect;17.3 — cheerio se hi kaam chal gaya); Mr. Audit ke paas ab <code>chrome-launcher</code> + <code>lighthouse</code> zaroor hai (2026-08-28) — wahi Chrome yahan bhi reuse ho sakta hai, screenshot alag purpose hai isliye code alag hoga</td><td>₹0, unlimited</td><td>Deterministic, brand color + headline + logo, 200ms</td><td><span class="pill ok">THUMBNAIL/OG ke liye PRIMARY</span> — 20 top blogs aise hi karte hain; AI image se zyada consistent</td></tr>
 <tr><td><strong>Cloudflare Workers AI</strong> — <code>flux-1-schnell</code></td><td>10,000 neurons/day ≈ <strong>~600 images/day</strong>, no card</td><td>Docs verified; endpoint test baaki (account chahiye)</td><td><span class="pill ok">AI IMAGE ke liye PRIMARY</span></td></tr>
 <tr><td><strong>NIM</strong> — <code>black-forest-labs/flux.1-schnell</code></td><td>Free, same key</td><td>Endpoint hai, schema accept hua (sizes: 768-1344), par <strong>120s me image nahi aayi</strong> — free queue</td><td><span class="pill warn">FALLBACK</span>, sirf async</td></tr>
 <tr><td>Pollinations</td><td>Key chahiye ab, limits unclear</td><td>Docs</td><td><span class="pill info">Backup #2</span></td></tr>
@@ -1231,6 +1235,7 @@ ka text dekhta hai). Comment ab sahi wajah kehta hai.</p>
 
 <h3>20.1 Ek order ki poori zindagi</h3>
 <p>Example: user ne chat me likha <em>"Dubai ke 20 restaurant leads dhundo"</em>.</p>
+<p><small><span class="pill warn">Transport concept-level hai</span> — neeche ka diagram <code>POST /run</code> + async callback (agent apni alag service pe) dikhata hai, jaisa &sect;6 ka contract describe karta hai. Asal 2026-08-28 tak: sab kuch ek hi <code>agent-server</code> process me (&sect;16.3 Upgrade D FINAL), to ye HTTP hop nahi hota — function call hai. Leads agent LangGraph bhi nahi hai, plain TS (&sect;7.6). States/events/DB writes ka <em>logic</em> yahi hai; sirf "HTTP se doosri service ko call kiya" wala hissa abhi nahi.</small></p>
 <pre class="mermaid">
 sequenceDiagram
   autonumber
@@ -1294,6 +1299,7 @@ sequenceDiagram
 </ol>
 
 <h3>20.3 Mr. Leads — poora andar se</h3>
+<p><small><span class="pill warn">LangGraph nahi hai</span> — asal <code>agent-server/src/lib/leads/pipeline.ts</code> plain TypeScript hai, koi state graph library nahi (&sect;7.6). Neeche ka state shape (icp/raw/enriched/qualified/drafted) concept ke taur pe sahi hai — data isi tarah flow karta hai — bas <code>LeadState</code> jaisa koi LangGraph object literally exist nahi karta.</small></p>
 <h4>State (LangGraph)</h4>
 <pre><code>LeadState = {
   icp: { type:"local"|"b2b", area, industry, size_hint, product, usp, audience },
@@ -1333,7 +1339,7 @@ sequenceDiagram
 <div class="tablewrap"><table>
 <tr><th>Service</th><th>Free tier ka sach</th><th>Aapko kya karna hai</th></tr>
 <tr><td><strong>Supabase</strong></td><td>500MB DB, 1GB storage, 2 projects. <strong>7 din inactivity pe project PAUSE</strong> — customers ka data theek rehta hai par site down. Realtime connections 200.</td><td>Scheduler ka 60s tick inactivity rokta hai (achha). Storage: images WebP &lt;150KB. Backups: free tier me daily backup nahi — <strong>weekly pg_dump GitHub Action</strong> (private repo) zaroori.</td></tr>
-<tr><td><strong>Railway</strong></td><td>Trial $5 one-time; Hobby $5/mo. Free me service sleep nahi karti par credit khatam = sab band.</td><td>3 deploy units (Upgrade D) — 9 nahi. Playwright unit sabse mehnga (RAM). Monthly $5-15 realistic — ye ek kharcha hai jo free nahi hoga.</td></tr>
+<tr><td><strong>Railway</strong></td><td>Trial $5 one-time; Hobby $5/mo. Free me service sleep nahi karti par credit khatam = sab band.</td><td><span class="pill ok">Update 2026-08-28</span> Upgrade D ka FINAL faisla: <strong>1 deploy unit</strong> — 9 nahi, 3 bhi nahi. Ek hi <code>agent-server</code> service, ek hi bill. Monthly $5-15 realistic — ye ek kharcha hai jo free nahi hoga.</td></tr>
 <tr><td><strong>Vercel Hobby</strong></td><td>Serverless 10s default, streaming <code>maxDuration</code> 60s tak; <strong>commercial use Hobby pe allowed nahi</strong> (ToS). 100GB bandwidth.</td><td>Chat route <code>maxDuration=60</code> already. Paid users aate hi Pro ($20) — ya web ko bhi Railway pe.</td></tr>
 <tr><td><strong>NIM</strong></td><td>40 RPM, koi daily cap likha nahi, models bina notice hat-te hain (kal 2 gaye)</td><td>Provider rotation + har model ka fallback + weekly script jo model list diff kare</td></tr>
 <tr><td><strong>DataForSEO</strong></td><td>Free credits khatam hote hain</td><td>Cache 7 din; free plan pe keyword research 3/day</td></tr>
@@ -1342,8 +1348,8 @@ sequenceDiagram
 <h3>21.2 Security — jo abhi khula hai</h3>
 <ul>
   <li><strong><code>CREDENTIALS_ENCRYPTION_KEY</code> chat me paste hui thi</strong> — wo ab compromised maani jaaye. Rotate: nayi key, purane creds decrypt→re-encrypt migration, phir purani hatao. Customers ke WordPress passwords isi se lock hain.</li>
-  <li>Agents ke paas aaj <strong>service-role key</strong> hai (RLS bypass). Naye contract me nahi hogi (§6.3) — ye Phase 0 ka kaam hai, Phase 3 ka nahi.</li>
-  <li><code>/jobs/:type</code> endpoint bina <code>AGENT_SERVER_TOKEN</code> ke <strong>khula</strong> hai (code khud warn karta hai). Token set karo aaj.</li>
+  <li>Agents ke paas aaj <strong>service-role key</strong> hai (RLS bypass). <span class="pill warn">Update</span> Ye abhi bhi waisa hi hai — Upgrade D ke FINAL faisle (ek hi service, in-process) ke saath har agent isolation ka faida ab bhi nahi milta, &sect;6.3 dekho. Ye tabhi badlega jab agents sach me alag services ban jayen.</li>
+  <li><code>/jobs/:type</code> endpoint bina <code>AGENT_SERVER_TOKEN</code> ke khula tha. <span class="pill ok">DONE 2026-08-27</span> Token set ho chuka hai Railway + Vercel dono pe, live verify kiya — &sect;13 Phase 0 build log.</li>
   <li>Prompt injection (§16 J) — crawled sites customer ki nahi, kisi ki bhi ho sakti hain (leads enrich!). Isliye leads agent me sabse zaroori.</li>
   <li>Rate limit per user on /api/chat — aaj nahi hai; ek script 40 RPM poora kha sakti hai sabke liye.</li>
 </ul>
@@ -1378,13 +1384,13 @@ sequenceDiagram
 <h3>21.6 Aap — solo student dev</h3>
 <ul>
   <li>Plan 4 phases × 2-4 hafte = 3 mahine full-time. Part-time = 6+. <strong>Scope ka sabse bada dushman Phase 3 hai</strong> (leads + social + story + audit ek saath). Meri raay: Phase 2 ke baad <strong>10 asli users</strong> lo, phir Phase 3 ka order unse tay karo.</li>
-  <li>Har agent alag repo = 10 repos maintain. Contract package ka version bump 10 jagah. Isliye Upgrade D (3 deploy units) aur ek <code>mrlxwa-dev</code> script jo sab repos ek command me clone/update kare.</li>
-  <li>Tests jo aaj hain (85 + 16 acceptance + 222 eval) — ye aapka safety net hain jab aap 2 mahine baad khud ka code bhool jaoge. CI me chalte rahein, kabhi skip nahi.</li>
+  <li>Har agent alag repo = 10 repos maintain. Contract package ka version bump 10 jagah. <span class="pill ok">Update</span> Upgrade D ka FINAL faisla (ek hi service) isi wajah se hua — 10 repos maintain karne ka bojh hai hi nahi ab.</li>
+  <li>Tests — number badhta rehta hai, ek jagah mat rakho: &sect;26 build log ka aakhri row current count deta hai (2026-08-28: 330 agent-server + 141+ web + eval set 99 real messages ka). Ye aapka safety net hain jab aap 2 mahine baad khud ka code bhool jaoge. CI me chalte rahein, kabhi skip nahi.</li>
 </ul>
 
 <div class="callout">
   <p class="t">Agar sirf teen cheezein karni hain is section se</p>
-  <p>1. <code>CREDENTIALS_ENCRYPTION_KEY</code> rotate + <code>AGENT_SERVER_TOKEN</code> set — aaj. 2. Weekly DB backup GitHub Action — is hafte. 3. Onboarding me tone/brand/ICP — Phase 1, kyunki 10 agents isi pe khade hain.</p>
+  <p>1. <code>CREDENTIALS_ENCRYPTION_KEY</code> rotate — <span class="pill warn">abhi bhi baaki</span> (<code>docs/MANUAL_STEPS.md</code> #2); <code>AGENT_SERVER_TOKEN</code> set — <span class="pill ok">DONE</span>. 2. Weekly DB backup GitHub Action — <span class="pill ok">DONE</span>, 5 baar green chal chuka hai. 3. Onboarding me tone/brand/ICP — Phase 1, kyunki 10 agents isi pe khade hain.</p>
 </div>
 
 <!-- ============================================================ -->
@@ -1426,7 +1432,7 @@ sequenceDiagram
 <tr><td>Icons</td><td><strong>4 sets</strong> — stroke SVG, lucide, hand-drawn, aur <strong>~83 emoji</strong> as icons (stat row, content types, chat controls, agent roster)</td><td>1 set (lucide, already installed)</td></tr>
 <tr><td>Fonts</td><td>Manrope + Plus Jakarta download hote hain, <strong>use koi nahi karta</strong>; dashboard Segoe UI/system me chalta hai; landing Inter</td><td>1 pair, sab jagah</td></tr>
 <tr><td>Hardcoded hex</td><td>Office.tsx me <strong>51</strong> — light theme me office dark navy dabba rehta hai</td><td>0 (tokens)</td></tr>
-<tr><td>Confirm dialogs</td><td><strong>0</strong> (<code>grep confirm(</code> = 0 results). 8 destructive actions ek click — including <strong>auto-publish toggle</strong> (ek tap = live site pe bina review)</td><td>8/8</td></tr>
+<tr><td>Confirm dialogs</td><td><span class="pill ok">Update</span> Original grep <code>confirm(</code> ne <code>confirmAction(</code> (custom component) nahi pakda — asal me <strong>6 call-sites, 4 files</strong> me hai (<code>connect</code>, <code>memory</code>, <code>schedule</code>, <code>ArticleReview</code>) — auto-publish toggle ab confirm maangta hai, "Turn on auto-publish" + danger warning. Sab 8 destructive actions cover ho chuke hain ya nahi, re-count nahi kiya — par least-important claim (auto-publish) ab galat hai.</td><td>Re-verify</td></tr>
 <tr><td>focus-visible</td><td><strong>1 rule</strong> poore dashboard me; inputs pe <code>outline:none</code>. Keyboard user ko kuch nahi dikhta</td><td>Global ring</td></tr>
 <tr><td>Dead code</td><td>~57 lines purana isometric office CSS, 11 orphaned landing files, 1,635-line <code>AICommandCenter.tsx</code> jo kahin route nahi hota</td><td>0</td></tr>
 </table></div>
@@ -1436,7 +1442,7 @@ sequenceDiagram
 <tr><th>#</th><th>Bug</th><th>Kahan</th><th>User ko kya hota hai</th></tr>
 <tr><td class="num">1</td><td><strong>Chat ek network blip pe hamesha ke liye lock</strong> — <code>stream()</code> me try/catch nahi; fail pe <code>busy</code> true reh jaata hai, send button disabled, khaali bubble blinking cursor ke saath</td><td><code>kit.tsx:318-370</code></td><td>Reload ke bina chat mar gaya. Ye aapka “8 second” complaint ka ek hissa bhi ho sakta hai.</td></tr>
 <tr><td class="num">2</td><td><strong>Har failure success ki tarah dikhta hai</strong> — toast template me <code>✓</code> hardcoded; “✓ Publish failed: …” green border ke saath</td><td><code>store.tsx:347</code></td><td>Publish fail hua, user ne ✓ dekha, samjha ho gaya</td></tr>
-<tr><td class="num">3</td><td><strong>Auto-publish ON ek tap</strong>, koi confirm nahi</td><td><code>schedule/page.tsx:397</code></td><td>Galti se tap = live site pe bina review articles</td></tr>
+<tr><td class="num">3</td><td><span class="pill ok">FIXED (2026-08-27 se pehle, doc me update nahi hua tha)</span> Auto-publish ON ek tap, koi confirm nahi</td><td><code>schedule/page.tsx</code> — ab <code>confirmAction()</code> danger dialog hai turn-on se pehle</td><td>Ab safe hai — is row ka fix pehle se code me tha, doc stale tha</td></tr>
 <tr><td class="num">4</td><td><strong>Reject ek click, irreversible, koi feedback nahi</strong> — row bas gayab</td><td><code>approvals/page.tsx:103</code></td><td>“Kahan gaya?” Aur Approve pe “Publishing…” label bhi nahi — 3-8s frozen dikhta hai</td></tr>
 <tr><td class="num">5</td><td><strong>Office phone pe unreadable</strong> — 1200×800 viewBox 336px me = 0.28 scale; room naam <strong>~3.5px</strong>; upar se HUD + board + log 50% dhak dete hain</td><td><code>Office.tsx:415</code>, <code>page.tsx:203</code></td><td>Mobile pe sabse important screen bekaar</td></tr>
 <tr><td class="num">6</td><td><strong>Onboarding keyboard se chal hi nahi sakta</strong> — chips <code>&lt;span onClick&gt;</code>, method cards <code>&lt;div onClick&gt;</code>, Skip <code>&lt;a&gt;</code> bina href</td><td><code>OnboardingWizard.tsx:167,175,233</code></td><td>Accessibility fail + tab key se signup poora nahi hota</td></tr>
@@ -1527,6 +1533,7 @@ ctx.done({ output })                                                 // STEP_FIN
 <tr><td>Brain → live UI</td><td><strong>Supabase Realtime Broadcast</strong> channel per tenant (<code>tenant:{id}:live</code>) — DB row nahi, pure message</td><td>DB insert per event = slow + free-tier limits; broadcast = &lt;100ms, free tier 200 concurrent connections kaafi</td></tr>
 <tr><td>UI</td><td>Subscribe on dashboard mount; events → store → views</td><td>4s poll khatam; office turant hilta hai</td></tr>
 </table></div>
+<p><small><span class="pill warn">Ye design hai, aaj ka nahi</span> — asal <code>components/LiveAgents.tsx</code> abhi bhi <code>setInterval</code> se poll karta hai (busy hone pe tez, idle pe dheema), Supabase Realtime Broadcast subscribe nahi karta. &sect;13 Phase 4 ka apna item "Realtime subscribe (poll khatam)" isi gap ko sahi correctly abhi bhi khula batata hai — is table ko wahi status match karna chahiye tha.</small></p>
 
 <h3>24.4 Teen views — ek hi event stream se</h3>
 <div class="grid2">
@@ -1692,12 +1699,12 @@ sequenceDiagram
 <tr><td>Repo</td><td>Prebuilt nahi — widget 1 file hai, RAG hamare paas already (embeddings.ts). Reference: <code>langchain-ai/chat-langchain</code> (MIT) retrieval + citation pattern; <code>mckaywrigley/chatbot-ui</code> nahi (bloat).</td></tr>
 </table></div>
 
-<h3>25.7 Naya onboarding (2 screen extra, 1 minute)</h3>
+<h3>25.7 Naya onboarding (2 screen extra, 1 minute) <span class="pill ok">DONE 2026-08-27 (screens 1-3)</span></h3>
 <ol>
   <li>Site URL → crawl start (background, progress live §24) — <em>aaj wala</em></li>
   <li><strong>Naya:</strong> “Hamne aapki site padhi — ye samjha:” <code>what_they_do</code>, offerings, audience, proof — <strong>edit karo / haan sahi hai</strong>. (Galat samajh yahin pakdi jaati hai, article ke baad nahi.)</li>
   <li><strong>Naya:</strong> Goal: leads / traffic / sales, + “kaunse 3 offerings sabse zaroori?” → <code>goals</code></li>
-  <li>Google connect (GSC/GA) — <em>aaj wala</em>, par ab isse profile me <code>content_gaps</code> turant bante hain → dashboard pehle din se “ye 5 quick wins” dikhata hai, khaali nahi</li>
+  <li>Google connect (GSC/GA) — <em>aaj wala</em>, par ab isse profile me <code>content_gaps</code> turant bante hain → dashboard pehle din se “ye 5 quick wins” dikhata hai, khaali nahi <span class="pill warn">Ye hissa Phase 2 hai</span> — &sect;25.4/&sect;25.9 khud kehte hain "GSC quick-wins + outcome loop" abhi Phase 2 me hai, Phase 1 me nahi. Onboarding ke 3 naye screen DONE hain, par ye specific "din 1 se quick wins" wala outcome abhi nahi.</li>
 </ol>
 
 <h3>25.8 Brain taaza kaise rehta hai — naya article/page aaye to</h3>
