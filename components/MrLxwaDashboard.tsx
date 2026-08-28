@@ -32,6 +32,7 @@
  */
 
 import React, { useEffect, useRef, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard,
   MessageSquare,
@@ -50,7 +51,6 @@ import {
   Maximize2,
   Minimize2,
   X,
-  Search,
   Clock,
   Pause,
   Play,
@@ -272,19 +272,29 @@ const NAV: NavItem[] = [
 ];
 
 type AgentStatus = "Completed" | "Working" | "Waiting";
-type Agent = { name: string; status: AgentStatus };
+type Agent = { name: string; role: string; status: AgentStatus };
+
+/** The real 9 agents (agent-server/src/queues.ts's AGENT_TYPES minus "boss" — boss IS the
+ *  brain node in the middle of the workflow, not a 10th orbiting icon). The original mockup
+ *  had 8 placeholders including "Mr. Image" and "Mr. Story", neither of which exist —
+ *  MASTER_PLAN §19 names them as deliberately-not-built. Left-to-right order tells the real
+ *  pipeline story: gather (Crawler → Analyst) → plan (Keyword → Writer) → [[brain]] →
+ *  check/ship (SEO → Audit → Publish) → distribute (Social → Leads). */
 const AGENTS_LEFT: Agent[] = [
-  { name: "Mr. Keyword", status: "Completed" },
-  { name: "Mr. Writer", status: "Working" },
-  { name: "Mr. Image", status: "Waiting" },
-  { name: "Mr. SEO", status: "Waiting" },
+  { name: "Mr. Crawler", role: "Site Crawler", status: "Completed" },
+  { name: "Mr. Analyst", role: "Site Brain", status: "Completed" },
+  { name: "Mr. Keyword", role: "Keyword Research", status: "Completed" },
+  { name: "Mr. Writer", role: "Content Writer", status: "Working" },
 ];
 const AGENTS_RIGHT: Agent[] = [
-  { name: "Mr. Publish", status: "Waiting" },
-  { name: "Mr. Social", status: "Waiting" },
-  { name: "Mr. Story", status: "Waiting" },
-  { name: "Mr. Leads", status: "Waiting" },
+  { name: "Mr. SEO", role: "SEO Checks", status: "Waiting" },
+  { name: "Mr. Audit", role: "Site Audit", status: "Waiting" },
+  { name: "Mr. Publish", role: "Publisher", status: "Waiting" },
+  { name: "Miss Social", role: "Social Drafts", status: "Waiting" },
+  { name: "Mr. Leads", role: "Lead Discovery", status: "Waiting" },
 ];
+const ALL_AGENTS: Agent[] = [...AGENTS_LEFT, ...AGENTS_RIGHT];
+
 const STATUS_COLOR: Record<AgentStatus, string> = {
   Completed: "#22c55e",
   Working: "#3b82f6",
@@ -322,6 +332,32 @@ const PLAN: { label: string; s: "done" | "current" | "pending" }[] = [
 ];
 
 const TABS = ["Live Activity", "Research", "Writing", "References", "Output Preview"];
+
+/** Live Visual is ONE section, not four stacked cards — whatever the agent is actually doing
+ *  right now (search, reading a page, pulling out key points, writing) is what shows, and it
+ *  crossfades to the next thing smoothly instead of everything being visible at once. This
+ *  preview cycles through them on a timer since there's no real backend driving it yet; once
+ *  wired to real agent events, `liveMode` is simply whatever the latest event says. */
+type LiveMode = "search" | "reading" | "keypoints" | "writing";
+const LIVE_MODE_ORDER: LiveMode[] = ["search", "reading", "keypoints", "writing"];
+const LIVE_MODE_META: Record<LiveMode, { label: string; icon: React.ElementType }> = {
+  search: { label: "Google Search", icon: Eye },
+  reading: { label: "Reading Web Pages", icon: BookOpen },
+  keypoints: { label: "Extracting Key Points", icon: FileSearch },
+  writing: { label: "Writing Section", icon: PenLine },
+};
+
+/** The "reading" mode's page content — scrolled continuously (not swapped frame to frame) so
+ *  it reads as one real page being read, not a slideshow. Short and generic on purpose: this
+ *  is UI-mock filler text, not copied from any real source. */
+const READING_LINES = [
+  "Solar panels convert sunlight directly into electricity, producing no exhaust or combustion byproducts at the point of use.",
+  "A typical home system offsets several tons of carbon dioxide every year compared to grid electricity from fossil fuels.",
+  "Because panels have no moving parts, they need very little maintenance beyond occasional cleaning and periodic inspection.",
+  "Local air quality improves as fewer fossil-fuel power plants are needed to run at full output during peak demand.",
+  "Most residential systems pay back their installation cost within seven to ten years through reduced utility bills.",
+  "Panel materials are largely recyclable at end of life, and recycling programs are expanding across most regions.",
+];
 
 /* ========================================================================== */
 /*  SMALL PIECES                                                              */
@@ -400,20 +436,58 @@ const Conn = ({ color = "rgba(148,148,170,.55)" }: { color?: string }) => (
   </span>
 );
 
-/** One workflow agent node. */
-const AgentNode = ({ a }: { a: Agent }) => {
+/** One workflow agent node. `compact` is the single-line form shown once an agent panel is
+ *  open (smaller icon, name+status stacked beside it instead of under it, no wasted vertical
+ *  space) — same data, same colors, just laid out to fit a strip instead of a spacious grid. */
+const AgentNode = ({ a, compact = false, onClick }: { a: Agent; compact?: boolean; onClick?: () => void }) => {
   const c = STATUS_COLOR[a.status];
-  return (
-    <div className="flex flex-col items-center gap-1" style={{ width: 74 }}>
-      <span
-        className={`lx-agent ${a.status !== "Waiting" ? "glow" : ""}`}
-        style={{ ["--ac" as string]: a.status === "Waiting" ? "rgba(255,255,255,.16)" : c, color: a.status === "Waiting" ? "#8b8ba0" : c }}
+  const iconSize = compact ? 30 : 46;
+  const clickable = !!onClick;
+
+  const icon = (
+    <span
+      className={`lx-agent ${a.status !== "Waiting" ? "glow" : ""}`}
+      style={{
+        width: iconSize,
+        height: iconSize,
+        ["--ac" as string]: a.status === "Waiting" ? "rgba(255,255,255,.16)" : c,
+        color: a.status === "Waiting" ? "#8b8ba0" : c,
+      }}
+    >
+      <Bot size={compact ? 14 : 20} />
+    </span>
+  );
+
+  if (compact) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={!clickable}
+        className="flex shrink-0 items-center gap-1.5 rounded-full px-2 py-1"
+        style={{ background: "rgba(255,255,255,.03)", border: "1px solid var(--lx-border)", cursor: clickable ? "pointer" : "default" }}
       >
-        <Bot size={20} />
-      </span>
+        {icon}
+        <span className="flex flex-col items-start leading-tight">
+          <span className="lx-11 font-medium" style={{ color: "#d7d7e4" }}>{a.name}</span>
+          <span className="lx-10" style={{ color: c }}>{a.status}</span>
+        </span>
+      </button>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!clickable}
+      className="flex flex-col items-center gap-1 bg-transparent"
+      style={{ width: 74, border: "none", cursor: clickable ? "pointer" : "default" }}
+    >
+      {icon}
       <span className="lx-11 font-medium text-center" style={{ color: "#d7d7e4" }}>{a.name}</span>
       <span className="lx-10" style={{ color: c }}>{a.status}</span>
-    </div>
+    </button>
   );
 };
 
@@ -435,12 +509,31 @@ export default function MrLxwaDashboard() {
   const [tab, setTab] = useState("Live Activity");
   const [aTab, setATab] = useState<"assistant" | "voice">("assistant");
   const [sideOpen, setSideOpen] = useState(false); // <lg drawer
-  const [botOpen, setBotOpen] = useState(false); // <xl drawer
+  const [botOpen, setBotOpen] = useState(false); // <lg drawer
   const [paused, setPaused] = useState(false);
   const [msg, setMsg] = useState("");
   const [thread, setThread] = useState<{ who: "user" | "ai"; text: string; time: string }[]>([]);
   const [sec, setSec] = useState(272); // 00:04:32
   const chatRef = useRef<HTMLDivElement>(null);
+
+  // The agent panel (live activity, timeline, search results) exists to show ONE agent's
+  // live work — it only makes sense while an agent is actually working. `workingAgent` is
+  // that fact; `showPanel` is the user's own choice to look at it or step back to the whole
+  // team (the "Back to Workflow" button), independent of whether anyone is still working.
+  const workingAgent = ALL_AGENTS.find((a) => a.status === "Working") ?? null;
+  const [showPanel, setShowPanel] = useState(!!workingAgent);
+  const panelOpen = showPanel && !!workingAgent;
+
+  // Live Visual's one current mode — cycles on a timer here only because this preview has no
+  // real agent events to drive it yet (see the type's own comment above).
+  const [liveMode, setLiveMode] = useState<LiveMode>("search");
+  useEffect(() => {
+    if (paused || !panelOpen) return;
+    const id = setInterval(() => {
+      setLiveMode((m) => LIVE_MODE_ORDER[(LIVE_MODE_ORDER.indexOf(m) + 1) % LIVE_MODE_ORDER.length]);
+    }, 4000);
+    return () => clearInterval(id);
+  }, [paused, panelOpen]);
 
   useEffect(() => {
     if (paused) return;
@@ -472,7 +565,7 @@ export default function MrLxwaDashboard() {
 
   const Sidebar = (
     <aside
-      className={`lx-panelL fixed inset-y-0 left-0 z-50 flex w-56 shrink-0 flex-col transition-transform duration-300 lg:static lg:translate-x-0 ${
+      className={`lx-panelL fixed inset-y-0 left-0 z-50 flex w-48 shrink-0 flex-col transition-transform duration-300 lg:static lg:translate-x-0 ${
         sideOpen ? "translate-x-0" : "-translate-x-full"
       }`}
     >
@@ -573,59 +666,118 @@ export default function MrLxwaDashboard() {
 
   /* ---------------------------------------------------------------------- */
 
+  // Only a working agent is ever clickable — the panel shows real live activity for it, and
+  // there is no fake content to show for one that's idle. Clicking any of the other 9 icons
+  // does nothing, same as they'd be inert in the real dashboard until they actually start.
+  const openAgentPanel = (a: Agent) => {
+    if (a.status === "Working") setShowPanel(true);
+  };
+
   const Workflow = (
-    <section className="lx-card relative overflow-hidden">
+    <motion.section layout transition={{ layout: { duration: 0.45, ease: "easeInOut" } }} className="lx-card relative overflow-hidden">
       {/* ambient glow */}
       <div
         className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
         style={{ width: 420, height: 220, background: "radial-gradient(ellipse at center,rgba(124,58,237,.22),transparent 65%)" }}
       />
       {/* chip */}
-      <div className="lx-card2 absolute left-4 top-4 z-10 hidden items-center gap-2.5 px-3 py-2 md:flex">
-        <span className="h-2 w-2 rounded-full lx-pulse" style={{ background: "#22c55e", boxShadow: "0 0 8px #22c55e" }} />
-        <span>
-          <span className="block lx-11 font-semibold">Planning &amp; Orchestrating</span>
-          <span className="block lx-10 lx-mut">Delegated to Mr. Writer</span>
-        </span>
-      </div>
-
-      <div className="lx-scroll overflow-x-auto">
-        <div className="mx-auto flex min-w-max items-center gap-1 px-6 py-6">
-          {AGENTS_LEFT.map((a, i) => (
-            <React.Fragment key={a.name}>
-              <AgentNode a={a} />
-              <Conn color={i === 0 ? "rgba(34,197,94,.8)" : i === 1 ? "rgba(59,130,246,.8)" : "rgba(148,148,170,.45)"} />
-            </React.Fragment>
-          ))}
-
-          {/* [ASSET] Mr. Lxwa brain */}
-          <div className="flex flex-col items-center px-3" style={{ minWidth: 150 }}>
-            <div className="lx-12 font-bold">Mr. Lxwa</div>
-            <div className="lx-10 lx-mut mb-1">AI Brain (Boss)</div>
-            <div className="lx-brain">🧠</div>
-            <div className="lx-platform" />
-          </div>
-
-          {AGENTS_RIGHT.map((a) => (
-            <React.Fragment key={a.name}>
-              <Conn color="rgba(148,148,170,.45)" />
-              <AgentNode a={a} />
-            </React.Fragment>
-          ))}
+      {workingAgent && (
+        <div className="lx-card2 absolute left-4 top-4 z-10 hidden items-center gap-2.5 px-3 py-2 md:flex">
+          <span className="h-2 w-2 rounded-full lx-pulse" style={{ background: "#22c55e", boxShadow: "0 0 8px #22c55e" }} />
+          <span>
+            <span className="block lx-11 font-semibold">Planning &amp; Orchestrating</span>
+            <span className="block lx-10 lx-mut">Delegated to {workingAgent.name}</span>
+          </span>
         </div>
-      </div>
-    </section>
+      )}
+
+      <AnimatePresence initial={false} mode="wait">
+        {panelOpen ? (
+          // ---- compact: every agent sorted into one line, once a panel is open ----
+          <motion.div
+            key="compact"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.25 }}
+            className="lx-scroll overflow-x-auto"
+          >
+            <div className="flex min-w-max items-center gap-2 px-4 py-3">
+              {AGENTS_LEFT.map((a) => (
+                <AgentNode key={a.name} a={a} compact onClick={() => openAgentPanel(a)} />
+              ))}
+              <span className="lx-brain shrink-0" style={{ fontSize: 26 }}>🧠</span>
+              {AGENTS_RIGHT.map((a) => (
+                <AgentNode key={a.name} a={a} compact onClick={() => openAgentPanel(a)} />
+              ))}
+            </div>
+          </motion.div>
+        ) : (
+          // ---- full: the whole team spaced out, spotlighting the brain — the resting state ----
+          <motion.div
+            key="full"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.25 }}
+            className="lx-scroll overflow-x-auto"
+          >
+            <div className="mx-auto flex min-w-max items-center gap-1 px-6 py-6">
+              {AGENTS_LEFT.map((a, i) => (
+                <React.Fragment key={a.name}>
+                  <AgentNode a={a} onClick={() => openAgentPanel(a)} />
+                  <Conn color={i === 0 ? "rgba(34,197,94,.8)" : i === 1 ? "rgba(59,130,246,.8)" : "rgba(148,148,170,.45)"} />
+                </React.Fragment>
+              ))}
+
+              {/* [ASSET] Mr. Lxwa brain */}
+              <div className="flex flex-col items-center px-3" style={{ minWidth: 150 }}>
+                <div className="lx-12 font-bold">Mr. Lxwa</div>
+                <div className="lx-10 lx-mut mb-1">AI Brain (Boss)</div>
+                <div className="lx-brain">🧠</div>
+                <div className="lx-platform" />
+              </div>
+
+              {AGENTS_RIGHT.map((a) => (
+                <React.Fragment key={a.name}>
+                  <Conn color="rgba(148,148,170,.45)" />
+                  <AgentNode a={a} onClick={() => openAgentPanel(a)} />
+                </React.Fragment>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.section>
   );
 
   /* ---------------------------------------------------------------------- */
 
   const AgentPanel = (
-    <section className="lx-card p-4">
-      {/* panel toolbar */}
-      <div className="flex items-center gap-2">
-        <button className="lx-ghost">
+    <motion.section
+      layout
+      initial={{ opacity: 0, height: 0, y: -12 }}
+      animate={{ opacity: 1, height: "auto", y: 0 }}
+      exit={{ opacity: 0, height: 0, y: -12 }}
+      transition={{ duration: 0.35, ease: "easeInOut" }}
+      style={{ overflow: "hidden" }}
+      className="lx-card p-4"
+    >
+      {/* panel toolbar — agent identity moved in here (small, inline) since the old left
+          column's "Agent Status" card was dropped: Started/Running Time/Tokens/Model was
+          taking a whole column away from the live activity + live visuals, which are the
+          actual point of this panel. */}
+      <div className="flex items-center gap-3">
+        <button className="lx-ghost" onClick={() => setShowPanel(false)}>
           <ArrowLeft size={14} /> Back to Workflow
         </button>
+        <div className="flex min-w-0 items-center gap-2 border-l pl-3" style={{ borderColor: "var(--lx-border)" }}>
+          <Robo size={26} />
+          <div className="min-w-0 leading-tight">
+            <div className="truncate text-sm font-bold">{workingAgent?.name ?? "Mr. Writer"}</div>
+            <div className="lx-10 lx-mut truncate">{workingAgent?.role ?? "Content Writer"} Agent · {fmt(sec)}</div>
+          </div>
+        </div>
         <div className="ml-auto flex items-center gap-2">
           <button className="lx-ghost hidden sm:inline-flex">
             <Minimize2 size={13} /> Minimize Agent
@@ -633,56 +785,15 @@ export default function MrLxwaDashboard() {
           <button className="lx-icobtn" aria-label="Expand">
             <Maximize2 size={14} />
           </button>
-          <button className="lx-icobtn" aria-label="Close">
+          <button className="lx-icobtn" aria-label="Close" onClick={() => setShowPanel(false)}>
             <X size={14} />
           </button>
         </div>
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-12">
-        {/* left — agent identity + status */}
-        <div className="lg:col-span-4 xl:col-span-3">
-          <div className="flex items-center gap-3">
-            <Robo size={46} />
-            <div>
-              <div className="text-base font-bold leading-tight">Mr. Writer</div>
-              <div className="lx-11 lx-mut">AI Content Writer Agent</div>
-            </div>
-          </div>
-
-          <div className="lx-card2 mt-16 p-3.5">
-            <div className="flex items-center gap-2">
-              <Robo size={22} />
-              <div>
-                <div className="lx-12 font-semibold leading-tight">Agent Status</div>
-                <div className="lx-10 lx-mut">Working on your task...</div>
-              </div>
-            </div>
-            <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-3">
-              <div>
-                <div className="lx-10 lx-mut">Started</div>
-                <div className="lx-12 font-medium">2 mins ago</div>
-              </div>
-              <div>
-                <div className="lx-10 lx-mut">Running Time</div>
-                <div className="lx-12 lx-mono font-semibold">{fmt(sec)}</div>
-              </div>
-              <div>
-                <div className="lx-10 lx-mut">Tokens Used</div>
-                <div className="lx-12 font-medium">18,532</div>
-              </div>
-              <div>
-                <div className="lx-10 lx-mut">Model</div>
-                <div className="flex items-center gap-1.5 lx-12 font-medium">
-                  <AiMark size={12} /> GPT-4o
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
         {/* center — progress + live activity */}
-        <div className="min-w-0 lg:col-span-8 xl:col-span-6">
+        <div className="min-w-0 lg:col-span-6 xl:col-span-5">
           <div className="text-lg font-bold leading-tight">Writing Section 2 of 5</div>
           <div className="lx-12 lx-mut mt-0.5">Title: Environmental Benefits of Solar Panels</div>
 
@@ -737,127 +848,148 @@ export default function MrLxwaDashboard() {
             })}
           </div>
 
-          {/* live google search */}
-          <div className="lx-in mt-1 flex items-center gap-2.5 px-3 py-2.5">
-            <GoogleG size={15} />
-            <span className="lx-12 flex-1 truncate" style={{ color: "#cfcfdd" }}>
-              environmental benefits of solar panels
-            </span>
-            <Search size={14} className="lx-mut" />
-          </div>
-
-          <div className="lx-11 lx-mut mt-3">Found 12 relevant results</div>
-
-          <div className="mt-2 space-y-2">
-            {RESULTS.map((r) => (
-              <div key={r.n} className="lx-in flex items-center gap-3 px-3 py-2.5" style={{ cursor: "pointer" }}>
-                <span className="lx-num">{r.n}</span>
-                <span className="min-w-0">
-                  <span className="block truncate lx-12 font-medium" style={{ color: "#7db4fd" }}>
-                    {r.title}
-                  </span>
-                  <span className="block truncate lx-10" style={{ color: "#34d399" }}>
-                    {r.url}
-                  </span>
-                </span>
-              </div>
-            ))}
-          </div>
-          <button className="lx-11 lx-mut mt-2 bg-transparent" style={{ border: "none", cursor: "pointer" }}>
-            + 9 more results
-          </button>
         </div>
 
-        {/* right — live visuals */}
-        <div className="lg:col-span-12 xl:col-span-3">
+        {/* right — live visual: ONE section, whatever the agent is doing right now — the
+            actual Google search / page-reading content used to be duplicated here in the
+            center column too; it now lives only in Live Visual (below), where the mode it's
+            showing matches what the timeline says is "In Progress". */}
+        <div className="lg:col-span-6 xl:col-span-7">
           <div className="flex items-center justify-between">
-            <span className="lx-13 font-semibold">Live Visuals</span>
+            <span className="lx-13 font-semibold">Live Visual</span>
             <span className="lx-pill red">
               <span className="lx-pulse h-1.5 w-1.5 rounded-full" style={{ background: "#ef4444" }} /> LIVE
             </span>
           </div>
 
-          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-1">
-            {/* google search mock */}
-            <div className="lx-card2 p-3">
-              <div className="flex items-center gap-2 lx-11 font-semibold">
-                <Eye size={13} className="lx-mut" /> Google Search
-              </div>
-              <div className="lx-in mt-2 p-2.5">
-                <div className="flex items-center gap-2">
-                  <GoogleG size={12} />
-                  <span className="h-4 flex-1 rounded-full" style={{ background: "#141c2e", border: "1px solid rgba(255,255,255,.08)" }} />
+          <div className="lx-card2 mt-3 overflow-hidden p-3" style={{ minHeight: 260 }}>
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={liveMode}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.35, ease: "easeInOut" }}
+              >
+                <div className="flex items-center gap-2 lx-11 font-semibold">
+                  {(() => {
+                    const Icon = LIVE_MODE_META[liveMode].icon;
+                    return <Icon size={13} className="lx-mut" />;
+                  })()}
+                  {LIVE_MODE_META[liveMode].label}
                 </div>
-                {[0, 1, 2].map((i) => (
-                  <div key={i} className="mt-2.5 space-y-1">
-                    <div className="lx-bar w-3/4" style={{ background: "rgba(96,165,250,.85)" }} />
-                    <div className="lx-bar w-1/2" style={{ background: "rgba(52,211,153,.7)", height: 3 }} />
-                    <div className="lx-bar w-full" style={{ background: "rgba(255,255,255,.12)", height: 3 }} />
+
+                {/* search: the real query the agent is actually running, and the real results —
+                    this used to be duplicated in the center column; it lives only here now. */}
+                {liveMode === "search" && (
+                  <div className="lx-in mt-2 p-2.5">
+                    <div className="flex items-center gap-2">
+                      <GoogleG size={12} />
+                      <span className="lx-11 flex-1 truncate" style={{ color: "#cfcfdd" }}>
+                        environmental benefits of solar panels
+                      </span>
+                    </div>
+                    <div className="mt-2.5 space-y-2">
+                      {RESULTS.map((r, i) => (
+                        <motion.div
+                          key={r.n}
+                          initial={{ opacity: 0, x: -8 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: i * 0.12, duration: 0.3 }}
+                          className="flex items-center gap-2.5 rounded-lg px-2 py-1.5"
+                          style={{ background: "rgba(255,255,255,.03)" }}
+                        >
+                          <span className="lx-num" style={{ width: 17, height: 17, fontSize: 9 }}>{r.n}</span>
+                          <span className="min-w-0">
+                            <span className="block truncate lx-11 font-medium" style={{ color: "#7db4fd" }}>{r.title}</span>
+                            <span className="block truncate lx-10" style={{ color: "#34d399" }}>{r.url}</span>
+                          </span>
+                        </motion.div>
+                      ))}
+                    </div>
                   </div>
-                ))}
-              </div>
-            </div>
+                )}
 
-            <div className="hidden justify-center xl:flex">
-              <ChevronDown size={15} className="lx-dim" />
-            </div>
+                {/* reading: a real page, continuously auto-scrolling in place — one section,
+                    one animation, not a slideshow of static snapshots. */}
+                {liveMode === "reading" && (
+                  <div className="lx-in mt-2 p-2.5">
+                    <div className="lx-10 lx-mut mb-2 truncate">www.epa.gov/solar-energy-benefits</div>
+                    <div style={{ height: 130, overflow: "hidden", position: "relative", borderRadius: 8 }}>
+                      <motion.div
+                        animate={{ y: [0, -170] }}
+                        transition={{ duration: 10, repeat: Infinity, repeatType: "loop", ease: "linear" }}
+                      >
+                        {READING_LINES.map((line, i) => (
+                          <p key={i} className="lx-10 mb-2.5" style={{ color: "rgba(226,226,238,.65)", lineHeight: 1.6 }}>
+                            {line}
+                          </p>
+                        ))}
+                      </motion.div>
+                      {/* top/bottom fade so the loop reads as a clipped viewport, not text cut off mid-line */}
+                      <div
+                        className="pointer-events-none absolute inset-0"
+                        style={{ background: "linear-gradient(180deg, var(--lx-in) 0%, transparent 18%, transparent 82%, var(--lx-in) 100%)" }}
+                      />
+                    </div>
+                    <div className="mt-2 flex items-center gap-1.5">
+                      <span className="lx-shimmer lx-10 font-medium">Reading…</span>
+                    </div>
+                  </div>
+                )}
 
-            {/* reading web pages mock */}
-            <div className="lx-card2 p-3">
-              <div className="flex items-center gap-2 lx-11 font-semibold">
-                <BookOpen size={13} className="lx-mut" /> Reading Web Pages
-              </div>
-              <div className="lx-in mt-2 p-2.5">
-                <div className="space-y-1.5">
-                  <div className="lx-bar w-2/3" style={{ background: "rgba(255,255,255,.25)" }} />
-                  <div className="lx-bar w-full" style={{ background: "rgba(255,255,255,.1)", height: 3 }} />
-                  <div className="lx-bar w-full" style={{ background: "rgba(96,165,250,.45)", height: 6, borderRadius: 3 }} />
-                  <div className="lx-bar w-5/6" style={{ background: "rgba(255,255,255,.1)", height: 3 }} />
-                  <div className="lx-bar w-full" style={{ background: "rgba(255,255,255,.08)", height: 3 }} />
-                </div>
-                <div className="mt-2.5 flex items-center gap-2">
-                  <span className="lx-shimmer lx-10 font-medium">Reading...</span>
-                  <span className="lx-track h-1 flex-1" style={{ height: 3 }}>
-                    <span className="lx-fill block" style={{ width: "68%", height: "100%" }} />
-                  </span>
-                  <span className="lx-10 lx-mut">68%</span>
-                </div>
-              </div>
-            </div>
+                {liveMode === "keypoints" && (
+                  <ul className="mt-2 space-y-1.5">
+                    {KEY_POINTS.map((k, i) => (
+                      <motion.li
+                        key={k}
+                        initial={{ opacity: 0, x: -6 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: i * 0.15, duration: 0.3 }}
+                        className="flex items-start gap-2 lx-10"
+                        style={{ color: "#b9b9cc" }}
+                      >
+                        <span className="mt-1 h-1 w-1 shrink-0 rounded-full" style={{ background: "#22d3ee", boxShadow: "0 0 4px #22d3ee" }} />
+                        {k}
+                      </motion.li>
+                    ))}
+                  </ul>
+                )}
 
-            <div className="hidden justify-center xl:flex">
-              <ChevronDown size={15} className="lx-dim" />
-            </div>
+                {liveMode === "writing" && (
+                  <>
+                    <div className="lx-shimmer lx-10 mt-2 font-medium">Generating content...</div>
+                    <div className="mt-2">
+                      <Wave n={26} h={18} anim color="var(--lx-purple)" />
+                    </div>
+                  </>
+                )}
+              </motion.div>
+            </AnimatePresence>
+          </div>
 
-            {/* extracting key points */}
-            <div className="lx-card2 p-3">
-              <div className="flex items-center gap-2 lx-11 font-semibold">
-                <FileSearch size={13} className="lx-mut" /> Extracting Key Points
-              </div>
-              <ul className="mt-2 space-y-1.5">
-                {KEY_POINTS.map((k) => (
-                  <li key={k} className="flex items-start gap-2 lx-10" style={{ color: "#b9b9cc" }}>
-                    <span className="mt-1 h-1 w-1 shrink-0 rounded-full" style={{ background: "#22d3ee", boxShadow: "0 0 4px #22d3ee" }} />
-                    {k}
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            {/* writing section */}
-            <div className="lx-card2 p-3">
-              <div className="flex items-center gap-2 lx-11 font-semibold">
-                <PenLine size={13} className="lx-mut" /> Writing Section
-              </div>
-              <div className="lx-shimmer lx-10 mt-2 font-medium">Generating content...</div>
-              <div className="mt-2">
-                <Wave n={26} h={18} anim color="var(--lx-purple)" />
-              </div>
-            </div>
+          {/* which of the 4 the panel is currently showing, and a way to jump straight to one */}
+          <div className="mt-2 flex items-center justify-center gap-1.5">
+            {LIVE_MODE_ORDER.map((m) => (
+              <button
+                key={m}
+                aria-label={LIVE_MODE_META[m].label}
+                onClick={() => setLiveMode(m)}
+                className="rounded-full"
+                style={{
+                  width: 6,
+                  height: 6,
+                  border: "none",
+                  cursor: "pointer",
+                  background: m === liveMode ? "var(--lx-cyan)" : "rgba(255,255,255,.15)",
+                  boxShadow: m === liveMode ? "0 0 6px var(--lx-cyan)" : "none",
+                }}
+              />
+            ))}
           </div>
         </div>
       </div>
-    </section>
+    </motion.section>
   );
 
   /* ---------------------------------------------------------------------- */
@@ -878,7 +1010,7 @@ export default function MrLxwaDashboard() {
 
   const Assistant = (
     <aside
-      className={`lx-panelR fixed inset-y-0 right-0 z-50 flex w-80 shrink-0 flex-col transition-transform duration-300 xl:static xl:translate-x-0 ${
+      className={`lx-panelR fixed inset-y-0 right-0 z-50 flex w-72 shrink-0 flex-col transition-transform duration-300 lg:static lg:translate-x-0 ${
         botOpen ? "translate-x-0" : "translate-x-full"
       }`}
     >
@@ -899,7 +1031,7 @@ export default function MrLxwaDashboard() {
           Voice
         </button>
         <div className="ml-auto flex items-center gap-1">
-          <button className="lx-icobtn xl:hidden" onClick={() => setBotOpen(false)} aria-label="Close assistant">
+          <button className="lx-icobtn lg:hidden" onClick={() => setBotOpen(false)} aria-label="Close assistant">
             <X size={14} />
           </button>
           <button className="lx-icobtn" style={{ border: "none", background: "transparent" }} aria-label="More">
@@ -1102,7 +1234,7 @@ export default function MrLxwaDashboard() {
       {/* drawer overlays */}
       {(sideOpen || botOpen) && (
         <div
-          className="fixed inset-0 z-40 xl:hidden"
+          className="fixed inset-0 z-40 lg:hidden"
           style={{ background: "rgba(0,0,0,.6)", backdropFilter: "blur(2px)" }}
           onClick={() => {
             setSideOpen(false);
@@ -1116,7 +1248,7 @@ export default function MrLxwaDashboard() {
       {/* center column */}
       <div className="flex min-w-0 flex-1 flex-col">
         {/* mobile topbar */}
-        <div className="flex items-center gap-2 border-b px-3 py-2 xl:hidden" style={{ borderColor: "var(--lx-border)", background: "var(--lx-panel)" }}>
+        <div className="flex items-center gap-2 border-b px-3 py-2 lg:hidden" style={{ borderColor: "var(--lx-border)", background: "var(--lx-panel)" }}>
           <button className="lx-icobtn lg:hidden" onClick={() => setSideOpen(true)} aria-label="Open menu">
             <Menu size={16} />
           </button>
@@ -1145,7 +1277,7 @@ export default function MrLxwaDashboard() {
         {/* scrollable content */}
         <main className="lx-scroll flex-1 space-y-4 overflow-y-auto p-3 sm:p-4">
           {Workflow}
-          {AgentPanel}
+          <AnimatePresence initial={false}>{panelOpen && AgentPanel}</AnimatePresence>
         </main>
 
         {BottomBar}
