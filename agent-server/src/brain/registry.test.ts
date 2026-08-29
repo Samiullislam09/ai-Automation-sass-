@@ -204,20 +204,23 @@ test("baseUrls are attached; absent means in-process", () => {
 test("describeCapabilities is all CAN DO NOW once nothing is a stub", () => {
   const text = describeCapabilities(buildRegistry(MANIFESTS, REAL_OPTS));
   assert.match(text, /CAN DO NOW/);
-  assert.match(text, /Mr\. Keyword · find_keywords/);
-  assert.match(text, /Mr\. SEO · check_seo/);
-  assert.match(text, /Miss Social · draft_social/);
+  assert.match(text, /Mr\. Keyword \(.*\) — .*keyword/i);
+  assert.match(text, /Mr\. SEO/);
+  assert.match(text, /Miss Social/);
   assert.equal(text.includes("CANNOT DO YET"), false, "nothing is a stub, so there is nothing to be honest about not doing");
   assert.ok(text.length < 2000, "this block is prepended to every chat turn — keep it small");
+  // No internal registry key in customer-facing text (live 2026-08-27: the model read
+  // "build_site_profile" here as the action's name and repeated it verbatim to a customer).
+  assert.equal(/find_keywords|check_seo|draft_social|build_site_profile/.test(text), false, "action ids must never reach the model's context — phrases already say the same thing in plain language");
 });
 
 test("describeCapabilities puts a stub agent's action in CANNOT DO YET, not CAN DO NOW", () => {
   const text = describeCapabilities(buildRegistry(MANIFESTS, { stubs: new Set(["social"]), notRouted: NOT_YET_ROUTED }));
   assert.match(text, /CANNOT DO YET/);
   const [can, cannot] = text.split("CANNOT DO YET");
-  assert.ok(can.includes("check_seo"), "a real agent must be offered");
-  assert.ok(!cannot.includes("check_seo"));
-  assert.ok(cannot.includes("draft_social"), "a stub must be listed as something we cannot do");
+  assert.ok(can.includes("Mr. SEO"), "a real agent must be offered");
+  assert.ok(!cannot.includes("Mr. SEO"));
+  assert.ok(cannot.includes("Miss Social"), "a stub must be listed as something we cannot do");
 });
 
 // ── database sync ─────────────────────────────────────────────────────────────────────────

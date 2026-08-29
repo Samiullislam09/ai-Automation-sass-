@@ -269,7 +269,13 @@ export function isAvailable(registry: Registry, actionId: string): boolean {
 
 /** A compact text block for the conversation model's context (plan §5.2: "registry + live
  *  task list", so "kya tum leads dhund sakte ho?" gets a true answer). Deliberately short —
- *  it is prepended to every turn, so every line costs tokens on every message. */
+ *  it is prepended to every turn, so every line costs tokens on every message.
+ *
+ *  NO `spec.id` IN HERE. It used to be — "Mr. Analyst · build_site_profile (~2 min) — ..." —
+ *  and the model read that as the action's NAME and used it verbatim in a reply: "Mr. Analyst
+ *  ko build_site_profile karne ko kahun?" (live, 2026-08-29). An internal registry key is not
+ *  a word a customer has ever heard; the phrases already say the same thing in plain language,
+ *  which is the whole reason `phrases` exists. */
 export function describeCapabilities(registry: Registry): string {
   const can: string[] = [];
   const cannot: string[] = [];
@@ -278,9 +284,9 @@ export function describeCapabilities(registry: Registry): string {
     for (const spec of Object.values(agent.actions)) {
       const secs = spec.estimated_seconds;
       const time = secs < 90 ? `~${secs}s` : `~${Math.round(secs / 60)} min`;
-      const line = `  ${agent.manifest.name} · ${spec.id} (${time}) — ${spec.phrases.slice(0, 3).join(" / ")}`;
+      const line = `  ${agent.manifest.name} (${time}) — ${spec.phrases.slice(0, 3).join(" / ")}`;
       if (agent.enabled && agent.healthy) can.push(line);
-      else cannot.push(`  ${agent.manifest.name} · ${spec.id} — ${agent.enabled ? "abhi down hai" : "abhi ban raha hai"}`);
+      else cannot.push(`  ${agent.manifest.name} — ${agent.enabled ? "abhi down hai" : "abhi ban raha hai"}`);
     }
   }
 

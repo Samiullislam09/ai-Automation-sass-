@@ -39,12 +39,20 @@ export async function loadBusiness(supabase: SupabaseClient, tenantId: string | 
       supabase.from("site_profiles").select("profile").eq("tenant_id", tenantId).eq("active", true).maybeSingle(),
       supabase.from("site_pages").select("title").eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(6),
     ]);
-    if (!tenant || !tenant.onboarded) return null;
+    if (!tenant) return null;
+    const profile = (profileRow?.profile as Record<string, any> | undefined) ?? null;
+    // `onboarded` used to gate this whole function, on the assumption that nothing worth
+    // saying could exist before the onboarding wizard finished. Found live 2026-08-29: a
+    // tenant who connected WordPress from the Connect page (skipping the wizard) had a real,
+    // full Mr. Analyst profile — and still got "I don't know anything about your site",
+    // because this return happened before the profile was ever looked at. A real profile is
+    // real regardless of how the site got connected; the flag only still matters for the
+    // OLDER, thinner tenants.niche fallback below, which has nothing to say without it.
+    if (!tenant.onboarded && !profile) return null;
 
     const facts: string[] = [];
     if (tenant.website_url) facts.push(`website=${tenant.website_url}`);
 
-    const profile = (profileRow?.profile as Record<string, any> | undefined) ?? null;
     if (profile) {
       if (profile.what_they_do) facts.push(`what they do=${profile.what_they_do}`);
       if (profile.audience) facts.push(`audience=${profile.audience}`);
