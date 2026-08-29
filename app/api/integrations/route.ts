@@ -18,7 +18,7 @@ import { generateWebhookSecret, signPayload } from "@/lib/webhook";
  */
 
 // Not exported: a route module may only export route handlers and Next's own config keys.
-const SOCIAL_TYPES = ["social_x", "social_linkedin", "social_facebook", "social_instagram"] as const;
+const SOCIAL_TYPES = ["social_x", "social_linkedin", "social_facebook", "social_instagram", "social_youtube"] as const;
 const ALL_TYPES = ["wordpress", "webhook", ...SOCIAL_TYPES] as const;
 type IntegrationType = (typeof ALL_TYPES)[number];
 

@@ -135,7 +135,7 @@ const CSS = `
 /* ---- type helpers ---------------------------------------------------- */
 /* bumped up from the original 10/11/12/13px scale — read as too small ("bahut chota") once
    the network cards had real names/roles/status packed into them, not just icons */
-.lx-10{font-size:11.5px}.lx-11{font-size:13px}.lx-12{font-size:14.5px}.lx-13{font-size:16px}
+.lx-10{font-size:11px}.lx-11{font-size:12.5px}.lx-12{font-size:14px}.lx-13{font-size:15px}
 .lx-mut{color:var(--lx-mut)}.lx-dim{color:var(--lx-dim)}
 .lx-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 
@@ -1260,7 +1260,7 @@ export default function MrLxwaDashboard({
 
   const Assistant = (
     <aside
-      className={`lx-panelR fixed inset-y-0 right-0 z-50 flex w-64 shrink-0 flex-col transition-transform duration-300 lg:static lg:translate-x-0 ${
+      className={`lx-panelR fixed inset-y-0 right-0 z-50 flex w-56 shrink-0 flex-col transition-transform duration-300 lg:static lg:translate-x-0 ${
         botOpen ? "translate-x-0" : "translate-x-full"
       }`}
     >
