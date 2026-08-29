@@ -149,7 +149,7 @@ const CSS = `
    hidden by default (this dock only needs to read as "mic is live", not spell it
    out) and surfaces as a small tooltip on hover/focus. */
 .lx-listening{position:relative;background:var(--lx-card2);border:1px solid var(--lx-border);border-radius:12px;
-  display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:nowrap;overflow:visible;cursor:default}
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;flex-wrap:nowrap;overflow:visible;cursor:default}
 .lx-listening .lx-ltip{position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%) translateY(2px);
   background:#16161f;border:1px solid var(--lx-border);border-radius:6px;padding:3px 7px;
   font-size:10.5px;color:var(--lx-text);white-space:nowrap;opacity:0;pointer-events:none;
@@ -354,12 +354,12 @@ const CSS = `
 @keyframes lxWav{0%,100%{transform:scaleY(.35)}50%{transform:scaleY(1)}}
 
 /* mic ping */
-.lx-mic{position:relative;width:38px;height:38px;border-radius:50%;flex-shrink:0;
+.lx-mic{position:relative;width:26px;height:26px;border-radius:50%;flex-shrink:0;
   display:flex;align-items:center;justify-content:center;cursor:pointer;
   background:radial-gradient(circle at 35% 30%,#12202c,#070d13);
-  border:2px solid rgba(34,211,238,.8);box-shadow:0 0 12px rgba(34,211,238,.5)}
+  border:1.5px solid rgba(34,211,238,.8);box-shadow:0 0 8px rgba(34,211,238,.5)}
 .lx-mic::before,.lx-mic::after{content:"";position:absolute;inset:-2px;border-radius:50%;
-  border:2px solid rgba(34,211,238,.45);animation:lxPing 1.9s ease-out infinite}
+  border:1.5px solid rgba(34,211,238,.45);animation:lxPing 1.9s ease-out infinite}
 .lx-mic::after{animation-delay:.95s}
 @keyframes lxPing{from{transform:scale(1);opacity:.75}to{transform:scale(1.65);opacity:0}}
 
@@ -824,15 +824,24 @@ export default function MrLxwaDashboard({
   // mounted globally in app/layout.tsx, so it's already live here without any extra fetch.
   const { s: account, signOut } = useStore();
 
-  // Real per-agent status: the newest task for this tenant (Realtime-subscribed, falls back
-  // to polling — see lib/live.ts), and each agent's status is read off that task's own
-  // task_steps snapshot. No task, or no tenant (not signed in) → everyone's honestly Waiting,
-  // not a fabricated "in progress" — see statusForAgent below.
+  // Real per-agent status — was reading ONLY the single newest task's steps, so an agent that
+  // did real work a moment ago (in the task just before the newest one) still showed "Waiting"
+  // the instant any other task was placed — the "Agent Network doesn't look connected to what's
+  // actually happening" gap reported live 2026-08-29. Now every recently loaded task
+  // (Realtime-subscribed, falls back to polling — see lib/live.ts) is hydrated and scanned,
+  // newest first, so an agent's card reflects the last task it genuinely touched, not just
+  // whichever task happens to be the account's overall latest. No task, or no tenant (not
+  // signed in) → everyone's honestly Waiting, not a fabricated "in progress" — see
+  // statusForAgent below.
   const live = useLiveEvents(tenantId);
   const task: TaskState | null = live.tasks[0] ?? null;
+  useEffect(() => {
+    for (const t of live.tasks) live.loadTask(t.task_id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live.tasks.length]);
   const statusForAgent = (m: AgentMeta): AgentStatus => {
     if (m.fixedStatus) return m.fixedStatus;
-    const step = task?.steps.find((s) => s.agent_id === m.id);
+    const step = live.tasks.map((t) => t.steps.find((s) => s.agent_id === m.id)).find((s) => s != null);
     if (!step) return "Waiting";
     if (step.status === "running") return "Working";
     if (step.status === "done") return "Completed";
@@ -1385,16 +1394,16 @@ export default function MrLxwaDashboard({
 
   /* ---------------------------------------------------------------------- */
 
+  // shown only inside the Voice tab (see aTab === "voice" below) — a stray
+  // "listening" indicator made no sense while the user is text-chatting
   const VoiceDock = (
-    <div className="mx-3 mt-3">
-      <div className="lx-listening px-3 py-2">
-        <Wave n={6} h={12} anim color="rgba(139,92,246,.9)" />
-        <button className="lx-mic" aria-label="Stop listening">
-          <Mic size={14} style={{ color: "var(--lx-cyan)" }} />
-        </button>
-        <span className="lx-10 lx-mut font-medium whitespace-nowrap">Listening…</span>
-        <Wave n={6} h={12} anim color="rgba(34,211,238,.9)" />
-      </div>
+    <div className="lx-listening px-2 py-1.5" aria-label="Listening">
+      <Wave n={5} h={9} anim color="rgba(139,92,246,.9)" />
+      <button className="lx-mic" aria-label="Stop listening">
+        <Mic size={11} style={{ color: "var(--lx-cyan)" }} />
+      </button>
+      <Wave n={5} h={9} anim color="rgba(34,211,238,.9)" />
+      <span className="lx-ltip">Listening…</span>
     </div>
   );
 
@@ -1485,17 +1494,18 @@ export default function MrLxwaDashboard({
             <div className="text-base font-bold">Mr. Lxwa</div>
             <div className="lx-11 lx-mut">Voice mode — talk to your AI Brain</div>
           </div>
+          {VoiceDock}
         </div>
       )}
 
-      {/* voice dock */}
-      {VoiceDock}
-
-      {/* input — a soft glass pill (see .lx-chat-in) that grows gently for a longer
-          message (capped, then scrolls) instead of a hard black box */}
-      <div className="px-3 pb-3">
-        <div className="lx-chat-in flex items-end gap-2 px-3 py-1.5">
-          <Mic size={16} className="lx-mut shrink-0 mb-1.5" style={{ cursor: "pointer" }} />
+      {/* input — a soft glass pill (see .lx-chat-in); mic and send sit as matching
+          icon buttons either side so the row reads as one deliberate unit instead
+          of mismatched pieces */}
+      <div className="px-3 pb-3 pt-1">
+        <div className="lx-chat-in flex items-center gap-1 px-2 py-1">
+          <button className="lx-icobtn shrink-0" style={{ border: "none", background: "transparent" }} aria-label="Voice input">
+            <Mic size={15} />
+          </button>
           <textarea
             ref={msgInputRef}
             value={msg}
@@ -1506,7 +1516,7 @@ export default function MrLxwaDashboard({
                 send();
               }
             }}
-            placeholder={chatBusy ? "Mr. Lxwa is replying…" : "Type your message..."}
+            placeholder={chatBusy ? "Replying…" : "Message…"}
             disabled={chatBusy}
             rows={1}
             className="lx-11 w-full resize-none bg-transparent py-1.5 disabled:opacity-60"
@@ -1516,10 +1526,10 @@ export default function MrLxwaDashboard({
             onClick={send}
             disabled={chatBusy || !msg.trim()}
             aria-label="Send"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white disabled:opacity-50 mb-0.5"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-white disabled:opacity-50"
             style={{ background: "linear-gradient(135deg,#4f46e5,#8b5cf6)", border: "none", cursor: chatBusy ? "default" : "pointer", boxShadow: "0 0 12px rgba(124,58,237,.5)" }}
           >
-            <Send size={14} />
+            <Send size={13} />
           </button>
         </div>
       </div>

@@ -22,25 +22,50 @@ export type ChatContext = {
 };
 
 /** The tenant's saved profile plus a few real page titles — what "what do you know about my
- *  business?" has to be answered from. */
+ *  business?" has to be answered from.
+ *
+ *  PREFERS `site_profiles` (Mr. Analyst's real output, migration 019 — the same table the Site
+ *  Brain page reads) over the older `tenants.niche`/`tone_profile` fields. Found live 2026-08-29:
+ *  a tenant's Site Brain page showed a full, HIGH-CONFIDENCE profile ("ISO certification &
+ *  compliance...") while chat still answered "I don't know anything about your site" — because
+ *  this function had never been pointed at `site_profiles` at all. `tenants.niche` stays as the
+ *  fallback for a tenant that onboarded but whose analyst hasn't produced a profile yet (table
+ *  missing migration 019, or no active row) — better a thin answer than none. */
 export async function loadBusiness(supabase: SupabaseClient, tenantId: string | null): Promise<string | null> {
   if (!tenantId) return null;
   try {
-    const [{ data: tenant }, { data: samplePages }] = await Promise.all([
+    const [{ data: tenant }, { data: profileRow }, { data: samplePages }] = await Promise.all([
       supabase.from("tenants").select("website_url, niche, tone_profile, icp_profile, onboarded").eq("id", tenantId).single(),
+      supabase.from("site_profiles").select("profile").eq("tenant_id", tenantId).eq("active", true).maybeSingle(),
       supabase.from("site_pages").select("title").eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(6),
     ]);
     if (!tenant || !tenant.onboarded) return null;
 
-    const tone = (tenant.tone_profile as any) ?? {};
-    const icp = (tenant.icp_profile as any) ?? {};
     const facts: string[] = [];
     if (tenant.website_url) facts.push(`website=${tenant.website_url}`);
-    if (tenant.niche) facts.push(`niche=${tenant.niche}`);
-    if (icp.businessType) facts.push(`business type=${icp.businessType}`);
-    if (tone.audience) facts.push(`audience=${tone.audience}`);
-    if (tone.tone) facts.push(`brand tone=${tone.tone}`);
-    if (Array.isArray(tone.topics) && tone.topics.length) facts.push(`content topics=${tone.topics.join(", ")}`);
+
+    const profile = (profileRow?.profile as Record<string, any> | undefined) ?? null;
+    if (profile) {
+      if (profile.what_they_do) facts.push(`what they do=${profile.what_they_do}`);
+      if (profile.audience) facts.push(`audience=${profile.audience}`);
+      if (Array.isArray(profile.offerings) && profile.offerings.length) {
+        facts.push(`offerings=${profile.offerings.map((o: any) => o?.name).filter(Boolean).join(", ")}`);
+      }
+      if (profile.geo) facts.push(`location/service area=${profile.geo}`);
+      if (profile.voice?.tone) facts.push(`brand tone=${profile.voice.tone}`);
+      if (Array.isArray(profile.topic_clusters) && profile.topic_clusters.length) {
+        facts.push(`content topics=${profile.topic_clusters.map((t: any) => t?.name).filter(Boolean).slice(0, 10).join(", ")}`);
+      }
+    } else {
+      // No Mr. Analyst profile yet — the same fields chat always fell back to.
+      const tone = (tenant.tone_profile as any) ?? {};
+      const icp = (tenant.icp_profile as any) ?? {};
+      if (tenant.niche) facts.push(`niche=${tenant.niche}`);
+      if (icp.businessType) facts.push(`business type=${icp.businessType}`);
+      if (tone.audience) facts.push(`audience=${tone.audience}`);
+      if (tone.tone) facts.push(`brand tone=${tone.tone}`);
+      if (Array.isArray(tone.topics) && tone.topics.length) facts.push(`content topics=${tone.topics.join(", ")}`);
+    }
     if (samplePages?.length) facts.push(`recently read pages=${samplePages.map((p) => p.title).join(", ")}`);
 
     return facts.length ? facts.join(" · ") : null;
