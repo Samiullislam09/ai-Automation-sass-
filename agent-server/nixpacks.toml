@@ -29,12 +29,17 @@
 # (stdlib since Python 3.4, bundles its own pip wheel — no external package needed at all) now
 # bootstraps pip directly in phases.researchDeps below, so this no longer depends on nixPkgs
 # resolving pip correctly. python3Packages.pip stays in nixPkgs as a harmless belt-and-braces.
+#
+# `--break-system-packages` is a PIP INSTALL flag only (tells pip it's fine to write into a
+# nix-managed, "externally managed" Python environment, PEP 668). `ensurepip` doesn't have that
+# flag at all — passing it there is a plain CLI usage error (2026-08-29, third attempt), not a
+# PEP 668 problem. So it's on the `pip install` line only, never on `ensurepip`.
 [phases.setup]
 nixPkgs = ["nodejs_22", "chromium", "python3", "python3Packages.pip"]
 
 [phases.researchDeps]
 dependsOn = ["setup"]
 cmds = [
-  "python3 -m ensurepip --break-system-packages --upgrade",
+  "python3 -m ensurepip --upgrade",
   "python3 -m pip install --break-system-packages -r requirements.txt",
 ]
