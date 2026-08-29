@@ -76,6 +76,7 @@ import {
   Megaphone,
   Loader2,
   Image as ImageIcon,
+  BrainCircuit,
 } from "lucide-react";
 
 /* ========================================================================== */
@@ -348,27 +349,30 @@ const CSS = `
 /*  DATA (verbatim from the mockup)                                           */
 /* ========================================================================== */
 
-/** `href` is a real route — either rebuilt in this dashboard's own theme under /dashboard/**
- *  (Connect first, 2026-08-29; the rest of app/app/** get the same treatment over time, per
- *  the owner: every page in this theme, responsive, so navigating never jumps to a
- *  different-looking app) or, until migrated, still the real old-theme page under app/app/**
- *  (unaffected by the /app dashboard-HOME retirement — only that one page moved). Items with
- *  no href (Chat opens the built-in Assistant panel; Office/Tasks/Leads have no dedicated
- *  real page yet) stay a local nav highlight only — never a link to a page that doesn't
- *  exist. */
+/** `href` is a real route under /dashboard/**, one per real feature the product actually has
+ *  (MASTER_PLAN §7's agent roster + the pages built for them) — audited 2026-08-29 against a
+ *  sidebar that had drifted from that: "Tasks" pointed at nothing (Office/Workspace already
+ *  shows every live order, so a second entry for the same thing was clutter) and "Leads" was a
+ *  dead click (the leads agent has written real rows to the `leads` table since 2026-08-27, but
+ *  no page ever read them — see components/dashboard/LeadsSection.tsx's own header comment).
+ *  Reports and Memory existed as real converted pages but were never linked from here either.
+ *  Every remaining item with no href is a deliberate local action, not a missing page: Chat
+ *  opens the built-in Assistant panel. Nothing still-planned (Mr. Image/Mr. Story, Mr. Support)
+ *  gets a nav entry — they show as "Planned" in the agent network instead, same honesty rule. */
 type NavItem = { label: string; icon: React.ElementType; badge?: number; href?: string };
 const NAV: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
   { label: "Chat", icon: MessageSquare },
   { label: "Office (Agents)", icon: Users, href: "/dashboard/workspace" },
-  { label: "Tasks", icon: ClipboardList },
   { label: "Approvals", icon: ListChecks, href: "/dashboard/approvals" },
   { label: "Connect", icon: Link2, href: "/dashboard/connect" },
   { label: "Schedule", icon: CalendarDays, href: "/dashboard/schedule" },
   { label: "Content", icon: FileText, href: "/dashboard/content" },
+  { label: "Leads", icon: UserRound, href: "/dashboard/leads" },
   { label: "Site Brain", icon: Globe, href: "/dashboard/site-brain" },
-  { label: "Leads", icon: UserRound },
   { label: "SEO & Insights", icon: TrendingUp, href: "/dashboard/audit" },
+  { label: "Reports", icon: ClipboardList, href: "/dashboard/reports" },
+  { label: "Memory", icon: BrainCircuit, href: "/dashboard/memory" },
   { label: "Settings", icon: Settings, href: "/dashboard/settings" },
 ];
 
