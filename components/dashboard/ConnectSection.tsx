@@ -169,10 +169,10 @@ function Icon({ card }: { card: Card }) {
   const Glyph = card.icon;
   return (
     <span
-      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white"
+      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-white"
       style={{ background: card.markBg }}
     >
-      {Glyph ? <Glyph size={16} /> : <Globe size={17} />}
+      {Glyph ? <Glyph size={13} /> : <Globe size={14} />}
     </span>
   );
 }
@@ -180,7 +180,7 @@ function Icon({ card }: { card: Card }) {
 function StatusPill({ connected }: { connected: boolean }) {
   return (
     <span
-      className="lx-pill mt-1 inline-flex"
+      className="lx-pill mt-0.5 inline-flex"
       style={
         connected
           ? { color: "#4ade80", borderColor: "rgba(34,197,94,.4)", background: "rgba(34,197,94,.1)" }
@@ -351,10 +351,10 @@ export default function ConnectSection() {
             const liveItem = found(card.type);
             return (
               <div key={card.type} className="lx-card2 flex flex-col p-3 sm:p-3.5">
-                <div className="flex items-start gap-2.5">
+                <div className="flex items-center gap-2">
                   <Icon card={card} />
                   <div className="min-w-0 flex-1">
-                    <div className="lx-12 font-bold leading-tight">{card.name}</div>
+                    <div className="lx-11 font-bold leading-tight">{card.name}</div>
                     <StatusPill connected={!!liveItem} />
                   </div>
                   <button
@@ -366,7 +366,7 @@ export default function ConnectSection() {
                   </button>
                 </div>
 
-                <p className="lx-11 lx-mut mt-2">{card.blurb}</p>
+                <p className="lx-10 lx-mut mt-1.5">{card.blurb}</p>
 
                 {liveItem?.label && (
                   <p className="lx-11 mt-2 truncate" style={{ color: "var(--lx-cyan)" }}>{liveItem.label}</p>
@@ -582,10 +582,10 @@ function GoogleCard({ onToast, confirmAction, onStatusChange }: {
 
   return (
     <div className="lx-card2 flex flex-col p-3 sm:p-3.5">
-      <div className="flex items-start gap-2.5">
+      <div className="flex items-center gap-2">
         <Icon card={card} />
         <div className="min-w-0 flex-1">
-          <div className="lx-12 font-bold leading-tight">Google Analytics</div>
+          <div className="lx-11 font-bold leading-tight">Google Analytics</div>
           <StatusPill connected={!!g.connected} />
         </div>
         <button className="lx-icobtn shrink-0" aria-label="Manage Google Analytics" onClick={openModal}>
@@ -593,7 +593,7 @@ function GoogleCard({ onToast, confirmAction, onStatusChange }: {
         </button>
       </div>
 
-      <p className="lx-11 lx-mut mt-2">Track website performance and get insights automatically.</p>
+      <p className="lx-10 lx-mut mt-1.5">Track website performance and get insights automatically.</p>
 
       <div className="mt-auto pt-2.5">
         <button className="lx-grad lx-10 px-3 py-1.5" onClick={openModal}>{g.connected ? "Manage" : "Connect"}</button>
