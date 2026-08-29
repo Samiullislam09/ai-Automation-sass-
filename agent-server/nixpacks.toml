@@ -23,11 +23,18 @@
 # match package.json's "engines": { "node": ">=22.12.0" }.
 #
 # python3Packages.pip is separate from python3 itself in nixpkgs — the bare `python3` package
-# has no `pip` module, so `python3 -m pip install ...` in phases.researchDeps below fails with
-# "No module named pip" without this. Found 2026-08-29, same deploy as the nodejs_22 fix above.
+# has no `pip` module. Adding it to nixPkgs alone still left "No module named pip" (2026-08-29,
+# second attempt) — Nixpacks' nix python3 derivation and its python3Packages set didn't line up
+# on PATH as expected. Rather than chase the exact matching nix attribute name, `ensurepip`
+# (stdlib since Python 3.4, bundles its own pip wheel — no external package needed at all) now
+# bootstraps pip directly in phases.researchDeps below, so this no longer depends on nixPkgs
+# resolving pip correctly. python3Packages.pip stays in nixPkgs as a harmless belt-and-braces.
 [phases.setup]
 nixPkgs = ["nodejs_22", "chromium", "python3", "python3Packages.pip"]
 
 [phases.researchDeps]
 dependsOn = ["setup"]
-cmds = ["python3 -m pip install --break-system-packages -r requirements.txt"]
+cmds = [
+  "python3 -m ensurepip --break-system-packages --upgrade",
+  "python3 -m pip install --break-system-packages -r requirements.txt",
+]
