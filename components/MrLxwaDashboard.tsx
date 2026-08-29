@@ -105,6 +105,21 @@ const CSS = `
   color:var(--lx-text);
   font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
   -webkit-font-smoothing:antialiased;
+
+  /* ---- legacy /app/** theme bridge ------------------------------------
+     Some real pages (Site Brain's field editor, Workspace, Audit, Memory, Eval) are big,
+     logic-heavy components still styled with the OLD app/globals.css tokens (--card, --btn,
+     --pillst, --field, ...). Rewriting every one of them field-by-field risked breaking real
+     behaviour for a purely cosmetic pass. Instead: every one of those old tokens is redefined
+     right here to the new theme's own colours, scoped to .lx-root — so an old component dropped
+     into this dashboard's children slot (unmodified) already renders in the new palette instead
+     of clashing with it. New pages built directly against --lx-* are unaffected. */
+  --bg:var(--lx-bg); --bg2:var(--lx-panel); --panel:var(--lx-card); --panel2:var(--lx-card2);
+  --line:var(--lx-border); --line2:rgba(255,255,255,.16);
+  --ink:var(--lx-text); --mut:var(--lx-mut); --mut2:var(--lx-dim);
+  --ac:#7c3aed; --ac-d:#4f46e5; --amb:#fbbf24; --red:var(--lx-red); --blu:var(--lx-blue);
+  --vio:var(--lx-violet); --grn:var(--lx-green); --teal:var(--lx-cyan);
+  --tr:.18s ease;
 }
 .lx-root *{box-sizing:border-box}
 .lx-root ::selection{background:rgba(139,92,246,.35)}
@@ -347,14 +362,14 @@ const NAV: NavItem[] = [
   { label: "Chat", icon: MessageSquare },
   { label: "Office (Agents)", icon: Users, href: "/app/workspace" },
   { label: "Tasks", icon: ClipboardList },
-  { label: "Approvals", icon: ListChecks, badge: 3, href: "/app/approvals" },
+  { label: "Approvals", icon: ListChecks, href: "/dashboard/approvals" },
   { label: "Connect", icon: Link2, href: "/dashboard/connect" },
   { label: "Schedule", icon: CalendarDays, href: "/dashboard/schedule" },
-  { label: "Content", icon: FileText, href: "/app/content" },
-  { label: "Site Brain", icon: Globe, href: "/app/site-brain" },
+  { label: "Content", icon: FileText, href: "/dashboard/content" },
+  { label: "Site Brain", icon: Globe, href: "/dashboard/site-brain" },
   { label: "Leads", icon: UserRound },
   { label: "SEO & Insights", icon: TrendingUp, href: "/app/audit" },
-  { label: "Settings", icon: Settings, href: "/app/billing" },
+  { label: "Settings", icon: Settings, href: "/dashboard/settings" },
 ];
 
 /** A chat bubble. `live` = still streaming in (the loop below keeps appending to `text`);
@@ -774,6 +789,21 @@ export default function MrLxwaDashboard({
   const userInitial = userName.charAt(0).toUpperCase() || "?";
   const planName = PLANS[account.plan]?.name ?? account.plan;
 
+  // Real pending-approvals count for the sidebar badge — same /api/content endpoint the
+  // Approvals page itself reads. Polled, not fake: 0 means the badge doesn't render at all.
+  const [approvalsCount, setApprovalsCount] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    const load = () =>
+      fetch("/api/content?status=awaiting_approval")
+        .then((r) => r.json())
+        .then((d) => { if (alive && d.ok) setApprovalsCount(d.items?.length ?? 0); })
+        .catch(() => {});
+    load();
+    const t = setInterval(load, 60_000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+
   const [nav, setNav] = useState("Dashboard");
   const [tab, setTab] = useState("Live Activity");
   const [aTab, setATab] = useState<"assistant" | "voice">("assistant");
@@ -911,16 +941,17 @@ export default function MrLxwaDashboard({
       <nav className="lx-scroll flex-1 space-y-1 overflow-y-auto px-3">
         {NAV.map((it) => {
           const active = it.href ? pathname === it.href : nav === it.label;
+          const badge = it.label === "Approvals" ? approvalsCount : it.badge;
           const inner = (
             <>
               <it.icon size={16} strokeWidth={1.8} />
               <span className="truncate">{it.label}</span>
-              {it.badge ? (
+              {badge ? (
                 <span
                   className="ml-auto flex h-5 w-5 items-center justify-center rounded-full lx-10 font-bold text-white"
                   style={{ background: "linear-gradient(135deg,#7c3aed,#8b5cf6)", boxShadow: "0 0 10px rgba(139,92,246,.6)" }}
                 >
-                  {it.badge}
+                  {badge}
                 </span>
               ) : null}
             </>
