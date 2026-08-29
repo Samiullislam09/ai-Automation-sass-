@@ -523,7 +523,7 @@ function GoogleSection({ onToast, confirmAction }: {
 
             <p className="lx-10 lx-mut mt-3">
               Ye data{" "}
-              <Link href="/app/memory" className="underline" style={{ color: "var(--lx-cyan)" }}>Memory</Link> me dikhta hai aur har planning run se pehle
+              <Link href="/dashboard/memory" className="underline" style={{ color: "var(--lx-cyan)" }}>Memory</Link> me dikhta hai aur har planning run se pehle
               apne aap refresh hota hai. Kuch publish ya change nahi kiya jaata — sirf padha jaata hai.
             </p>
           </>
