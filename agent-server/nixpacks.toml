@@ -13,8 +13,16 @@
 # the same container, not a second Railway service. lib/research/gptResearcher.ts spawns it
 # with `python3`; if this nix package ever provides a different binary name on PATH, set
 # PYTHON_BIN in Railway's Variables to match (docs/MANUAL_STEPS.md) rather than editing code.
+#
+# nodejs_22 IS EXPLICIT HERE ON PURPOSE. Declaring [phases.setup] at all replaces Nixpacks'
+# auto-detected setup phase rather than extending it — so without listing the Node package
+# ourselves, the image that comes out has no npm at all, and the very next phase's `npm ci`
+# fails with "npm: command not found" (exit 127). Found 2026-08-29 after the deployed
+# agent-server had been stuck on a 2-day-old build because every push since this file started
+# declaring [phases.setup] had been silently failing at this exact step. Version pinned to
+# match package.json's "engines": { "node": ">=22.12.0" }.
 [phases.setup]
-nixPkgs = ["chromium", "python3"]
+nixPkgs = ["nodejs_22", "chromium", "python3"]
 
 [phases.researchDeps]
 dependsOn = ["setup"]
