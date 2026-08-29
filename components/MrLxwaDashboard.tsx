@@ -813,6 +813,15 @@ export default function MrLxwaDashboard({
   const [aTab, setATab] = useState<"assistant" | "voice">("assistant");
   const [sideOpen, setSideOpen] = useState(false); // <lg drawer
   const [botOpen, setBotOpen] = useState(false); // <lg drawer
+  // >=lg: the assistant panel is static, not a drawer, so it competes with the main content for
+  // width on every page it's open on. Per the owner (2026-08-29): default it open only on the
+  // main Dashboard/agent-network page, where it's the point; everywhere else default it closed
+  // (a small icon reopens it) so converted pages like Connect get the full width. Computed once
+  // per mount (each /dashboard/* route is its own page.tsx around <MrLxwaDashboard>, so this
+  // remounts on navigation and re-reads the new pathname correctly) rather than synced via an
+  // effect, so it never fights a click that already changed it this visit.
+  const [desktopAssistantOpen, setDesktopAssistantOpen] = useState(() => pathname === "/dashboard");
+  const closeAssistant = () => { setBotOpen(false); setDesktopAssistantOpen(false); };
   const [paused, setPaused] = useState(false);
   const [msg, setMsg] = useState("");
   const [thread, setThread] = useState<ThreadMsg[]>([]);
@@ -1260,9 +1269,9 @@ export default function MrLxwaDashboard({
 
   const Assistant = (
     <aside
-      className={`lx-panelR fixed inset-y-0 right-0 z-50 flex w-56 shrink-0 flex-col transition-transform duration-300 lg:static lg:translate-x-0 ${
+      className={`lx-panelR fixed inset-y-0 right-0 z-50 flex w-56 shrink-0 flex-col transition-transform duration-300 lg:static ${
         botOpen ? "translate-x-0" : "translate-x-full"
-      }`}
+      } ${desktopAssistantOpen ? "lg:flex lg:translate-x-0" : "lg:hidden"}`}
     >
       {/* tabs */}
       <div className="flex items-center gap-5 border-b px-4" style={{ borderColor: "var(--lx-border)" }}>
@@ -1281,7 +1290,7 @@ export default function MrLxwaDashboard({
           Voice
         </button>
         <div className="ml-auto flex items-center gap-1">
-          <button className="lx-icobtn lg:hidden" onClick={() => setBotOpen(false)} aria-label="Close assistant">
+          <button className="lx-icobtn" onClick={closeAssistant} aria-label="Close assistant">
             <X size={14} />
           </button>
           <button className="lx-icobtn" style={{ border: "none", background: "transparent" }} aria-label="More">
@@ -1468,6 +1477,20 @@ export default function MrLxwaDashboard({
       </div>
 
       {Assistant}
+
+      {/* >=lg only: the assistant collapses to just this icon on every page except Dashboard
+          (see desktopAssistantOpen above) — reopens the panel without eating main-content width
+          until the owner actually wants it. Mobile already has its own always-visible open
+          button in the topbar above, so this stays hidden there. */}
+      {!desktopAssistantOpen && (
+        <button
+          className="lx-icobtn fixed right-4 top-4 z-40 hidden lg:flex"
+          onClick={() => setDesktopAssistantOpen(true)}
+          aria-label="Open AI assistant"
+        >
+          <Bot size={16} />
+        </button>
+      )}
     </div>
   );
 }
