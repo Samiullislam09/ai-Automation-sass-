@@ -21,8 +21,12 @@
 # agent-server had been stuck on a 2-day-old build because every push since this file started
 # declaring [phases.setup] had been silently failing at this exact step. Version pinned to
 # match package.json's "engines": { "node": ">=22.12.0" }.
+#
+# python3Packages.pip is separate from python3 itself in nixpkgs — the bare `python3` package
+# has no `pip` module, so `python3 -m pip install ...` in phases.researchDeps below fails with
+# "No module named pip" without this. Found 2026-08-29, same deploy as the nodejs_22 fix above.
 [phases.setup]
-nixPkgs = ["nodejs_22", "chromium", "python3"]
+nixPkgs = ["nodejs_22", "chromium", "python3", "python3Packages.pip"]
 
 [phases.researchDeps]
 dependsOn = ["setup"]
