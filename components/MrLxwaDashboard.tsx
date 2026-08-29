@@ -138,6 +138,18 @@ const CSS = `
 .lx-pill.purple{color:#b9a5ff;border-color:rgba(139,92,246,.45);background:rgba(139,92,246,.12)}
 .lx-pill.red   {color:#f87171;border-color:rgba(239,68,68,.4);background:rgba(239,68,68,.12)}
 .lx-pill.green {color:#4ade80;border-color:rgba(34,197,94,.4);background:rgba(34,197,94,.1)}
+.lx-pill.amber {color:#fbbf24;border-color:rgba(251,191,36,.4);background:rgba(251,191,36,.1)}
+.lx-pill.blue  {color:#60a5fa;border-color:rgba(59,130,246,.4);background:rgba(59,130,246,.12)}
+.lx-pill.mut   {color:var(--lx-mut);border-color:var(--lx-border);background:rgba(255,255,255,.03)}
+
+/* ---- toggle switch — used anywhere a page has an on/off setting ------- */
+.lx-switch{width:44px;height:25px;border-radius:14px;border:1px solid var(--lx-border);background:var(--lx-in);
+  position:relative;cursor:pointer;flex-shrink:0;transition:background .18s,border-color .18s;padding:0}
+.lx-switch i{position:absolute;top:2px;left:2px;width:19px;height:19px;border-radius:50%;
+  background:#8b8ba0;transition:transform .18s,background .18s;display:block}
+.lx-switch.on{background:var(--lx-cyan);border-color:var(--lx-cyan)}
+.lx-switch.on i{transform:translateX(19px);background:#04101a}
+.lx-switch:disabled{opacity:.4;cursor:not-allowed}
 
 /* ---- buttons ---------------------------------------------------------- */
 .lx-ghost{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:10px;
@@ -337,7 +349,7 @@ const NAV: NavItem[] = [
   { label: "Tasks", icon: ClipboardList },
   { label: "Approvals", icon: ListChecks, badge: 3, href: "/app/approvals" },
   { label: "Connect", icon: Link2, href: "/dashboard/connect" },
-  { label: "Schedule", icon: CalendarDays, href: "/app/schedule" },
+  { label: "Schedule", icon: CalendarDays, href: "/dashboard/schedule" },
   { label: "Content", icon: FileText, href: "/app/content" },
   { label: "Site Brain", icon: Globe, href: "/app/site-brain" },
   { label: "Leads", icon: UserRound },

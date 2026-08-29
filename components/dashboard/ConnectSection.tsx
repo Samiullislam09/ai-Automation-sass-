@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useStore } from "@/lib/store";
+import { LxInput, LxSelect } from "./ui";
 
 /** /dashboard/connect — same real logic and API calls as the old app/app/connect/page.tsx
  *  (kept verbatim: /api/integrations, /api/integrations/google, the honesty rule that a card
@@ -109,23 +110,6 @@ const RETURN_MESSAGE: Record<string, string> = {
 
 const listOf = <T,>(v: T[] | { error: string } | undefined): T[] => (Array.isArray(v) ? v : []);
 const errorOf = (v: unknown): string | null => (v && !Array.isArray(v) && (v as any).error) || null;
-
-/** A themed text/password input matching the dashboard's chat-input look. */
-const LxInput = (props: React.InputHTMLAttributes<HTMLInputElement>) => (
-  <input
-    {...props}
-    className="lx-12 w-full rounded-lg px-3 py-2"
-    style={{ background: "var(--lx-in)", border: "1px solid var(--lx-border)", color: "var(--lx-text)" }}
-  />
-);
-
-const LxSelect = (props: React.SelectHTMLAttributes<HTMLSelectElement>) => (
-  <select
-    {...props}
-    className="lx-12 w-full rounded-lg px-3 py-2"
-    style={{ background: "var(--lx-in)", border: "1px solid var(--lx-border)", color: "var(--lx-text)" }}
-  />
-);
 
 export default function ConnectSection() {
   const { toast, confirmAction } = useStore();
