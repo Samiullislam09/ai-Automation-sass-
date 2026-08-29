@@ -321,10 +321,14 @@ const CSS = `
 /*  DATA (verbatim from the mockup)                                           */
 /* ========================================================================== */
 
-/** `href` is a REAL route under app/app/** (unaffected by the /app dashboard-home retirement
- *  — only that one page moved, every other /app/** page is still live). Items with no href
- *  (Chat opens the built-in Assistant panel; Office/Tasks/Leads have no dedicated real page
- *  yet) stay a local nav highlight only — never a link to a page that doesn't exist. */
+/** `href` is a real route — either rebuilt in this dashboard's own theme under /dashboard/**
+ *  (Connect first, 2026-08-29; the rest of app/app/** get the same treatment over time, per
+ *  the owner: every page in this theme, responsive, so navigating never jumps to a
+ *  different-looking app) or, until migrated, still the real old-theme page under app/app/**
+ *  (unaffected by the /app dashboard-HOME retirement — only that one page moved). Items with
+ *  no href (Chat opens the built-in Assistant panel; Office/Tasks/Leads have no dedicated
+ *  real page yet) stay a local nav highlight only — never a link to a page that doesn't
+ *  exist. */
 type NavItem = { label: string; icon: React.ElementType; badge?: number; href?: string };
 const NAV: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
@@ -332,7 +336,7 @@ const NAV: NavItem[] = [
   { label: "Office (Agents)", icon: Users, href: "/app/workspace" },
   { label: "Tasks", icon: ClipboardList },
   { label: "Approvals", icon: ListChecks, badge: 3, href: "/app/approvals" },
-  { label: "Connect", icon: Link2, href: "/app/connect" },
+  { label: "Connect", icon: Link2, href: "/dashboard/connect" },
   { label: "Schedule", icon: CalendarDays, href: "/app/schedule" },
   { label: "Content", icon: FileText, href: "/app/content" },
   { label: "Site Brain", icon: Globe, href: "/app/site-brain" },
@@ -709,7 +713,18 @@ const boldText = (text: string, key: string): React.ReactNode[] => {
 /*  MAIN COMPONENT                                                            */
 /* ========================================================================== */
 
-export default function MrLxwaDashboard({ tenantId = null }: { tenantId?: string | null }) {
+export default function MrLxwaDashboard({
+  tenantId = null,
+  children,
+}: {
+  tenantId?: string | null;
+  /** When provided (a real /dashboard/** sub-page's own content — e.g. Connect), this
+   *  replaces the default workflow/agent-network content in the main slot. The shell around
+   *  it (sidebar, mobile topbar, Assistant chat) stays exactly the same, so navigating
+   *  between sections never leaves this dashboard's own look — see NAV's real hrefs and
+   *  MASTER_PLAN comment above about "every page in this theme, responsive". */
+  children?: React.ReactNode;
+}) {
   const pathname = usePathname();
   // Real account/plan/sign-out — the same lib/store.tsx StoreProvider AppShell reads from,
   // mounted globally in app/layout.tsx, so it's already live here without any extra fetch.
@@ -1395,9 +1410,13 @@ export default function MrLxwaDashboard({ tenantId = null }: { tenantId?: string
             gutter that changes the column's content width and every card lurches sideways
             each time (measured: the "whole page jolts" complaint). */}
         <main className="lx-scroll flex-1 overflow-y-auto p-3 sm:p-4" style={{ scrollbarGutter: "stable" }}>
-          {Workflow}
-          <Collapse open={panelOpen}>{AgentPanel}</Collapse>
-          {BottomBar}
+          {children ?? (
+            <>
+              {Workflow}
+              <Collapse open={panelOpen}>{AgentPanel}</Collapse>
+              {BottomBar}
+            </>
+          )}
         </main>
       </div>
 
