@@ -39,7 +39,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useLiveEvents, type TaskState } from "@/lib/live";
+import { useLiveEvents, isTerminalTask, type TaskState } from "@/lib/live";
 import { useStore, PLANS } from "@/lib/store";
 import {
   LayoutDashboard,
@@ -129,8 +129,44 @@ const CSS = `
 .lx-card {background:var(--lx-card);border:1px solid var(--lx-border);border-radius:16px}
 .lx-card2{background:var(--lx-card2);border:1px solid var(--lx-border);border-radius:12px}
 .lx-in   {background:var(--lx-in);border:1px solid rgba(255,255,255,.06);border-radius:10px}
+
+/* chat composer — a translucent "glass" pill instead of a solid near-black slab,
+   so it reads as part of the dark panel rather than a hard black box once the
+   textarea grows past one line. Border brightens gently on focus instead of
+   relying on the browser's default focus ring (suppressed on the textarea itself
+   so only this one, deliberate outline shows). */
+.lx-chat-in{background:rgba(255,255,255,.035);border:1px solid var(--lx-border);
+  border-radius:20px;transition:border-color .15s,background .15s}
+.lx-chat-in:focus-within{border-color:rgba(167,139,250,.55);background:rgba(255,255,255,.05)}
+.lx-chat-in textarea{outline:none;box-shadow:none}
+/* placeholder reads smaller/dimmer than typed text and never wraps, so an empty
+   box stays a slim single line instead of growing to fit a two-line placeholder */
+.lx-chat-in textarea::placeholder{font-size:11px;opacity:.5;white-space:nowrap}
+
+/* "Listening…" dock — grounded in its own quiet card (matches .lx-card2) instead
+   of floating loose on the panel background, kept to a single row so it never
+   wraps into a multi-line block regardless of panel width. The label itself is
+   hidden by default (this dock only needs to read as "mic is live", not spell it
+   out) and surfaces as a small tooltip on hover/focus. */
+.lx-listening{position:relative;background:var(--lx-card2);border:1px solid var(--lx-border);border-radius:12px;
+  display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:nowrap;overflow:visible;cursor:default}
+.lx-listening .lx-ltip{position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%) translateY(2px);
+  background:#16161f;border:1px solid var(--lx-border);border-radius:6px;padding:3px 7px;
+  font-size:10.5px;color:var(--lx-text);white-space:nowrap;opacity:0;pointer-events:none;
+  transition:opacity .15s,transform .15s;z-index:5}
+.lx-listening:hover .lx-ltip{opacity:1;transform:translateX(-50%) translateY(0)}
 .lx-panelL{background:var(--lx-panel);border-right:1px solid var(--lx-border)}
-.lx-panelR{background:var(--lx-panel);border-left:1px solid var(--lx-border)}
+/* width scales with viewport (%) instead of a fixed px value, so it stays
+   proportionate on very large monitors without growing absurdly wide. Below
+   lg it's a full overlay (doesn't share space with the center column) so a
+   generous vw share is safe; at lg+ it sits statically next to the AI Agent
+   Network's container-query layout (.lx-net-host switches at 440px), so the
+   lower bound/slope here is kept small enough that a 1024px laptop still
+   leaves that column comfortably above 440px — don't raise the 220px floor
+   or the 24vw slope without re-checking the network cards at 1024–1366px. */
+.lx-panelR{background:var(--lx-panel);border-left:1px solid var(--lx-border);
+  width:min(92vw,380px)}
+@media (min-width:1024px){.lx-panelR{width:clamp(220px,24vw,420px)}}
 
 /* ---- type helpers ---------------------------------------------------- */
 /* bumped up from the original 10/11/12/13px scale — read as too small ("bahut chota") once
@@ -318,10 +354,10 @@ const CSS = `
 @keyframes lxWav{0%,100%{transform:scaleY(.35)}50%{transform:scaleY(1)}}
 
 /* mic ping */
-.lx-mic{position:relative;width:58px;height:58px;border-radius:50%;flex-shrink:0;
+.lx-mic{position:relative;width:38px;height:38px;border-radius:50%;flex-shrink:0;
   display:flex;align-items:center;justify-content:center;cursor:pointer;
   background:radial-gradient(circle at 35% 30%,#12202c,#070d13);
-  border:2px solid rgba(34,211,238,.8);box-shadow:0 0 18px rgba(34,211,238,.5)}
+  border:2px solid rgba(34,211,238,.8);box-shadow:0 0 12px rgba(34,211,238,.5)}
 .lx-mic::before,.lx-mic::after{content:"";position:absolute;inset:-2px;border-radius:50%;
   border:2px solid rgba(34,211,238,.45);animation:lxPing 1.9s ease-out infinite}
 .lx-mic::after{animation-delay:.95s}
@@ -344,6 +380,17 @@ const CSS = `
   .lx-root *,.lx-root *::before,.lx-root *::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
 }
 `;
+
+/** Memoized so this never re-renders after mount, no matter how often the dashboard itself
+ *  re-renders (chat streaming appends a token to `thread` per chunk, for one) — a plain
+ *  `<style dangerouslySetInnerHTML>` sitting inline in the component tree was being re-visited
+ *  on every parent re-render, and the resulting churn of this 16KB CSS block was the page-wide
+ *  blink diagnosed 2026-08-29 (root cause was the 1s elapsed-time ticker re-rendering the whole
+ *  tree — see ElapsedTimer below — but this component removes the class of bug entirely rather
+ *  than relying on no other frequent re-render ever reaching this node again). */
+const GlobalStyle = React.memo(function GlobalStyle() {
+  return <style dangerouslySetInnerHTML={{ __html: CSS }} />;
+});
 
 /* ========================================================================== */
 /*  DATA (verbatim from the mockup)                                           */
@@ -722,6 +769,22 @@ const fmt = (s: number) => {
   const ss = String(s % 60).padStart(2, "0");
   return `${h}:${m}:${ss}`;
 };
+
+/** The 1s-ticking elapsed-time readout, isolated in its own leaf component. It used to be a
+ *  single `sec` state on the top-level dashboard — every tick re-rendered the ENTIRE page
+ *  (including the 16KB embedded <style> block below), which the browser had to re-parse and
+ *  recalc every second, causing a whole-page blink (diagnosed 2026-08-29). Each mount ticks
+ *  independently from 272 (00:04:32) — this is mock elapsed time, not a shared clock, so two
+ *  on-screen readouts drifting by a few ms is invisible. */
+const ElapsedTimer = ({ paused = false }: { paused?: boolean }) => {
+  const [sec, setSec] = useState(272);
+  useEffect(() => {
+    if (paused) return;
+    const id = setInterval(() => setSec((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [paused]);
+  return <>{fmt(sec)}</>;
+};
 const nowTime = () =>
   new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }).toUpperCase();
 
@@ -826,11 +889,20 @@ export default function MrLxwaDashboard({
   const [msg, setMsg] = useState("");
   const [thread, setThread] = useState<ThreadMsg[]>([]);
   const [chatBusy, setChatBusy] = useState(false);
-  const [sec, setSec] = useState(272); // 00:04:32
   const chatRef = useRef<HTMLDivElement>(null);
+  const msgInputRef = useRef<HTMLTextAreaElement>(null);
   const convId = useRef<string | null>(null);
   const helloSent = useRef(false); // React 18 strict-mode double-invokes effects in dev — without
   // this the real /api/chat "__hello__" greeting was requested twice on one mount.
+
+  // The order the chat just placed (X-Run-Job — the real `tasks.id`, see lib/chat-brain.ts's
+  // `jobId: created.task_id`). "On it" was the whole reply this turn: the model cannot say what
+  // the team found because it hadn't happened yet. This is how the finished result gets back
+  // into the thread once `live` (Realtime, same feed the Workspace panel reads) says the task is
+  // done, instead of the bubble sitting on "On it" forever while the real answer only ever shows
+  // up in Workspace/Approvals.
+  const orderedTaskId = useRef<string | null>(null);
+  const reportedTaskIds = useRef<Set<string>>(new Set());
 
   // The agent panel (live activity, timeline, search results) exists to show ONE agent's
   // live work — it only makes sense while an agent is actually working. `workingAgent` is
@@ -849,15 +921,45 @@ export default function MrLxwaDashboard({
   }, [workingAgent]);
 
   useEffect(() => {
-    if (paused) return;
-    const id = setInterval(() => setSec((s) => s + 1), 1000);
-    return () => clearInterval(id);
-  }, [paused]);
-
-  useEffect(() => {
     const el = chatRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [thread, aTab]);
+
+  // grows the chat textarea to fit whatever's typed (capped, then it scrolls internally)
+  // instead of hiding the tail of a long message behind a fixed one-line box.
+  useEffect(() => {
+    const el = msgInputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 88)}px`;
+  }, [msg]);
+
+  // Typing anywhere on the dashboard (outside another input/textarea/editable element)
+  // drops the keystroke straight into the chat box instead of being lost on the page —
+  // opens the assistant panel if it's closed so the user can see what they're typing.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable) return;
+      const el = msgInputRef.current;
+      if (!el) return;
+      e.preventDefault();
+      setBotOpen(true);
+      setDesktopAssistantOpen(true);
+      setATab("assistant");
+      // focus synchronously — the next keydown (incl. an OS auto-repeat from a held
+      // key) then targets the textarea directly, so this handler never double-fires
+      // for the same keystroke. Falls back to a rAF focus only for the one-off case
+      // where the panel itself was still hidden/closed at the moment of this call.
+      el.focus();
+      if (document.activeElement !== el) requestAnimationFrame(() => msgInputRef.current?.focus());
+      setMsg((m) => m + e.key);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   /** Real chat — POSTs to the same /api/chat the production BossChat uses (components/kit.tsx),
    *  and relays the streamed token chunks into the last bubble as they arrive. No ctx (plan,
@@ -881,6 +983,8 @@ export default function MrLxwaDashboard({
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
       const returned = res.headers.get("X-Conversation-Id");
       if (returned) convId.current = returned;
+      const runJob = res.headers.get("X-Run-Job");
+      if (runJob) orderedTaskId.current = runJob;
       const reader = res.body.getReader();
       const dec = new TextDecoder();
       while (true) {
@@ -928,6 +1032,34 @@ export default function MrLxwaDashboard({
     setMsg("");
     void stream(t);
   };
+
+  /** Reports the order's real outcome back into the thread once `live` says it is over — see
+   *  `orderedTaskId` above. Fires at most once per task (`reportedTaskIds`), and everything it
+   *  writes is read straight off the task's own `lines`/`items` (the same honest sentences and
+   *  keyword rows the Workspace panel draws from `lib/live.ts`'s `foldEvents`) — never invented
+   *  here. A task with no ordered chat turn (e.g. one placed from Approvals) never touches the
+   *  thread, since `orderedTaskId` is only ever set by this chat's own `stream()`. */
+  useEffect(() => {
+    const id = orderedTaskId.current;
+    if (!id) return;
+    const t = live.byTask[id];
+    if (!t || !isTerminalTask(t.status) || reportedTaskIds.current.has(id)) return;
+    reportedTaskIds.current.add(id);
+
+    const finalLine = t.lines[t.lines.length - 1]?.text?.trim();
+    const keywords = t.items.filter((it) => it.kind === "keyword").slice(0, 12);
+    const keywordLines = keywords.length
+      ? keywords
+          .map((it) => {
+            const p = it.payload ?? {};
+            const vol = typeof p.searchVolume === "number" ? `${p.searchVolume}/mo` : "volume not measured";
+            return `• ${p.keyword ?? "?"} — ${vol}`;
+          })
+          .join("\n")
+      : "";
+    const text = [finalLine, keywordLines].filter(Boolean).join("\n\n");
+    if (text) setThread((p) => [...p, { who: "ai", text, time: nowTime() }]);
+  }, [live.byTask]);
 
   /* ---------------------------------------------------------------------- */
 
@@ -1140,7 +1272,7 @@ export default function MrLxwaDashboard({
           <Robo size={26} />
           <div className="min-w-0 leading-tight">
             <div className="truncate text-sm font-bold">{workingAgent?.name ?? "Mr. Writer"}</div>
-            <div className="lx-10 lx-mut truncate">{workingAgent?.role ?? "Content Writer"} Agent · {fmt(sec)}</div>
+            <div className="lx-10 lx-mut truncate">{workingAgent?.role ?? "Content Writer"} Agent · <ElapsedTimer paused={paused} /></div>
           </div>
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -1254,22 +1386,21 @@ export default function MrLxwaDashboard({
   /* ---------------------------------------------------------------------- */
 
   const VoiceDock = (
-    <div className="flex items-center justify-center gap-3 px-4 py-3">
-      <Wave n={12} h={22} anim color="rgba(139,92,246,.9)" />
-      <div className="flex flex-col items-center gap-1">
+    <div className="mx-3 mt-3">
+      <div className="lx-listening px-3 py-2">
+        <Wave n={6} h={12} anim color="rgba(139,92,246,.9)" />
         <button className="lx-mic" aria-label="Stop listening">
-          <Mic size={20} style={{ color: "var(--lx-cyan)" }} />
+          <Mic size={14} style={{ color: "var(--lx-cyan)" }} />
         </button>
-        <span className="lx-11 font-medium">Listening...</span>
-        <span className="lx-10 lx-dim">Tap to stop</span>
+        <span className="lx-10 lx-mut font-medium whitespace-nowrap">Listening…</span>
+        <Wave n={6} h={12} anim color="rgba(34,211,238,.9)" />
       </div>
-      <Wave n={12} h={22} anim color="rgba(34,211,238,.9)" />
     </div>
   );
 
   const Assistant = (
     <aside
-      className={`lx-panelR fixed inset-y-0 right-0 z-50 flex w-56 shrink-0 flex-col transition-transform duration-300 lg:static ${
+      className={`lx-panelR fixed inset-y-0 right-0 z-50 flex shrink-0 flex-col transition-transform duration-300 lg:static ${
         botOpen ? "translate-x-0" : "translate-x-full"
       } ${desktopAssistantOpen ? "lg:flex lg:translate-x-0" : "lg:hidden"}`}
     >
@@ -1299,15 +1430,16 @@ export default function MrLxwaDashboard({
         </div>
       </div>
 
-      {/* agent card */}
-      <div className="lx-card2 mx-3 mt-3 flex items-center gap-3 p-3">
-        <Robo size={38} />
-        <div className="min-w-0 flex-1">
-          <div className="lx-13 font-bold leading-tight">Mr. Lxwa</div>
-          <div className="lx-10 lx-mut">AI Brain</div>
-          <div className="flex items-center gap-1 lx-10" style={{ color: "#4ade80" }}>
+      {/* agent card — kept intentionally thin (single-line status) so it doesn't
+          eat vertical space the chat thread below needs */}
+      <div className="lx-card2 mx-3 mt-2 flex items-center gap-2 px-3 py-2">
+        <Robo size={26} />
+        <div className="min-w-0 flex-1 flex items-baseline gap-1.5">
+          <span className="lx-12 font-bold leading-tight">Mr. Lxwa</span>
+          <span className="lx-10 lx-mut">·</span>
+          <span className="flex items-center gap-1 lx-10" style={{ color: "#4ade80" }}>
             <span className="h-1.5 w-1.5 rounded-full" style={{ background: "#22c55e", boxShadow: "0 0 6px #22c55e" }} /> Online
-          </div>
+          </span>
         </div>
         <button className="lx-icobtn" aria-label="Expand agent">
           <Maximize2 size={13} />
@@ -1327,7 +1459,7 @@ export default function MrLxwaDashboard({
           {thread.map((m, i) =>
             m.who === "user" ? (
               <div key={i} className="flex justify-end">
-                <div className="lx-me lx-12 max-w-xs px-3 py-2.5 leading-relaxed">{m.text}</div>
+                <div className="lx-me lx-11 px-3 py-2.5 leading-relaxed" style={{ maxWidth: "85%" }}>{m.text}</div>
               </div>
             ) : (
               <div key={i}>
@@ -1337,7 +1469,7 @@ export default function MrLxwaDashboard({
                   <span className="lx-10 lx-dim ml-auto">{m.time}</span>
                 </div>
                 <div
-                  className="lx-ai lx-12 mt-1.5 px-3 py-2.5 leading-relaxed"
+                  className="lx-ai lx-11 mt-1.5 px-3 py-2.5 leading-relaxed"
                   style={{ marginLeft: 30, color: m.failed ? "#f87171" : undefined, whiteSpace: "pre-wrap" }}
                 >
                   {m.text ? boldText(m.text, `m${i}`) : m.live ? "…" : ""}
@@ -1359,24 +1491,32 @@ export default function MrLxwaDashboard({
       {/* voice dock */}
       {VoiceDock}
 
-      {/* input */}
+      {/* input — a soft glass pill (see .lx-chat-in) that grows gently for a longer
+          message (capped, then scrolls) instead of a hard black box */}
       <div className="px-3 pb-3">
-        <div className="flex items-center gap-2 rounded-full border px-3 py-1.5" style={{ borderColor: "var(--lx-border)", background: "var(--lx-in)" }}>
-          <Mic size={16} className="lx-mut shrink-0" style={{ cursor: "pointer" }} />
-          <input
+        <div className="lx-chat-in flex items-end gap-2 px-3 py-1.5">
+          <Mic size={16} className="lx-mut shrink-0 mb-1.5" style={{ cursor: "pointer" }} />
+          <textarea
+            ref={msgInputRef}
             value={msg}
             onChange={(e) => setMsg(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && send()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                send();
+              }
+            }}
             placeholder={chatBusy ? "Mr. Lxwa is replying…" : "Type your message..."}
             disabled={chatBusy}
-            className="lx-12 w-full bg-transparent py-1.5 outline-none disabled:opacity-60"
-            style={{ border: "none", color: "var(--lx-text)" }}
+            rows={1}
+            className="lx-11 w-full resize-none bg-transparent py-1.5 disabled:opacity-60"
+            style={{ border: "none", color: "var(--lx-text)", maxHeight: 88, overflowY: "auto" }}
           />
           <button
             onClick={send}
             disabled={chatBusy || !msg.trim()}
             aria-label="Send"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white disabled:opacity-50"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white disabled:opacity-50 mb-0.5"
             style={{ background: "linear-gradient(135deg,#4f46e5,#8b5cf6)", border: "none", cursor: chatBusy ? "default" : "pointer", boxShadow: "0 0 12px rgba(124,58,237,.5)" }}
           >
             <Send size={14} />
@@ -1408,7 +1548,7 @@ export default function MrLxwaDashboard({
 
       <div className="ml-auto flex items-center gap-2">
         <span className="lx-10 lx-mut hidden md:inline">
-          <span className="lx-mono font-semibold" style={{ color: "#e6e6f2" }}>{fmt(sec)}</span> / 00:12:30
+          <span className="lx-mono font-semibold" style={{ color: "#e6e6f2" }}><ElapsedTimer paused={paused} /></span> / 00:12:30
         </span>
         <button className="lx-icobtn rounded-full" onClick={() => setPaused((p) => !p)} aria-label={paused ? "Resume" : "Pause"}>
           {paused ? <Play size={12} /> : <Pause size={12} />}
@@ -1430,7 +1570,7 @@ export default function MrLxwaDashboard({
 
   return (
     <div className="lx-root flex h-screen w-full overflow-hidden">
-      <style dangerouslySetInnerHTML={{ __html: CSS }} />
+      <GlobalStyle />
 
       {/* drawer overlays */}
       {(sideOpen || botOpen) && (

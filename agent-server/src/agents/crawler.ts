@@ -110,15 +110,23 @@ export class CrawlerAgent extends Agent {
     // "connect your site" enough on its own: no second button, no manual step, and by the time
     // the user asks for a keyword the system already knows what the business does.
     //
+    // ALWAYS, brain-routed or not. This used to skip under the brain on the assumption that
+    // "the analyst is a planned step" there — false: `analyst.build_site_profile` in
+    // brain/manifests.ts declares `needs: []`, so nothing in the graph ever pulls it in after
+    // `crawl_site` (the planner only walks a target's needs BACKWARDS, per planner.ts's own
+    // header — it never chains forward from what a step produces). The result, live 2026-08-29:
+    // a WordPress connect crawled 155 pages and Site Brain still said "nothing understood yet"
+    // indefinitely, because no brain-routed crawl was ever followed by an analyst run. Fixing
+    // the graph properly (making find_keywords/write_article need site_profile) would re-run
+    // analyst on every single order, which is a bigger, riskier change; this restores the
+    // originally-intended "connect and forget" behaviour with the least risk.
+    //
     // Best effort on purpose: a crawl that succeeded must not be reported as failed because
     // the follow-up could not be queued. The profile can always be rebuilt later.
-    if (!(job.data as any).__brain) {
-      // Under the brain, the analyst is a planned step — chaining here too would run it twice.
-      try {
-        await enqueue("analyst", { tenantId, taskLabel: "Understanding your site" });
-      } catch (e: any) {
-        console.error("[crawler] could not queue Mr. Analyst:", e?.message);
-      }
+    try {
+      await enqueue("analyst", { tenantId, taskLabel: "Understanding your site" });
+    } catch (e: any) {
+      console.error("[crawler] could not queue Mr. Analyst:", e?.message);
     }
 
     return {
