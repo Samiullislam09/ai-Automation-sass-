@@ -3,7 +3,11 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useStore } from "@/lib/store";
 import { LxInput, LxSelect } from "./ui";
-import { Globe, LayoutGrid, Link2, Megaphone, MoreHorizontal, Monitor, Play } from "lucide-react";
+import { Globe, LayoutGrid, Link2, Megaphone, MoreHorizontal, Monitor } from "lucide-react";
+import type { IconType } from "react-icons";
+import { FaFacebookF, FaInstagram, FaLinkedinIn, FaYoutube } from "react-icons/fa";
+import { FaXTwitter } from "react-icons/fa6";
+import { SiGoogleanalytics, SiWordpress } from "react-icons/si";
 
 /** /dashboard/connect — same real logic and API calls as the old app/app/connect/page.tsx
  *  (kept verbatim: /api/integrations, /api/integrations/google, the honesty rule that a card
@@ -29,7 +33,7 @@ type Category = "cms" | "social";
 type Card = {
   type: string;
   name: string;
-  mark: string;
+  icon: IconType | null;
   markBg: string;
   category: Category;
   blurb: string;
@@ -41,8 +45,8 @@ const CARDS: Card[] = [
   {
     type: "wordpress",
     name: "WordPress",
-    mark: "W",
-    markBg: "#00669B",
+    icon: SiWordpress,
+    markBg: "#21759B",
     category: "cms",
     blurb: "Publish and manage content directly from your WordPress site.",
     live: true,
@@ -61,7 +65,7 @@ const CARDS: Card[] = [
   {
     type: "webhook",
     name: "Custom Website",
-    mark: "",
+    icon: null,
     markBg: "#3f3f52",
     category: "cms",
     blurb: "Connect your custom website and automate data exchange.",
@@ -71,7 +75,7 @@ const CARDS: Card[] = [
   {
     type: "social_x",
     name: "X (Twitter)",
-    mark: "𝕏",
+    icon: FaXTwitter,
     markBg: "#000000",
     category: "social",
     blurb: "Post updates, engage, and grow your audience on X automatically.",
@@ -81,7 +85,7 @@ const CARDS: Card[] = [
   {
     type: "social_linkedin",
     name: "LinkedIn",
-    mark: "in",
+    icon: FaLinkedinIn,
     markBg: "#0A66C2",
     category: "social",
     blurb: "Share articles, build your brand, and automate LinkedIn engagement.",
@@ -91,7 +95,7 @@ const CARDS: Card[] = [
   {
     type: "social_facebook",
     name: "Facebook",
-    mark: "f",
+    icon: FaFacebookF,
     markBg: "#1877F2",
     category: "social",
     blurb: "Schedule posts, manage pages, and track performance.",
@@ -101,7 +105,7 @@ const CARDS: Card[] = [
   {
     type: "social_instagram",
     name: "Instagram",
-    mark: "◎",
+    icon: FaInstagram,
     markBg: "linear-gradient(45deg,#f9ce34,#ee2a7b 50%,#6228d7)",
     category: "social",
     blurb: "Automate posts, stories, and manage your Instagram presence.",
@@ -111,7 +115,7 @@ const CARDS: Card[] = [
   {
     type: "social_youtube",
     name: "YouTube",
-    mark: "",
+    icon: FaYoutube,
     markBg: "#FF0000",
     category: "social",
     blurb: "Manage videos, playlists, and automate channel updates.",
@@ -162,12 +166,13 @@ function mask(v: string | null | undefined): string | null {
 }
 
 function Icon({ card }: { card: Card }) {
+  const Glyph = card.icon;
   return (
     <span
-      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-base font-extrabold text-white"
+      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white"
       style={{ background: card.markBg }}
     >
-      {card.mark || (card.type === "social_youtube" ? <Play size={16} fill="currentColor" /> : <Globe size={18} />)}
+      {Glyph ? <Glyph size={16} /> : <Globe size={17} />}
     </span>
   );
 }
@@ -190,8 +195,8 @@ function StatusPill({ connected }: { connected: boolean }) {
 /** Shared modal shell every "Manage"/"Connect" click opens into. */
 function Modal({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.6)" }} onClick={onClose}>
-      <div className="lx-card w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4" style={{ background: "rgba(0,0,0,.6)" }} onClick={onClose}>
+      <div className="lx-card w-full max-w-sm p-4 sm:p-5" onClick={(e) => e.stopPropagation()}>
         {children}
       </div>
     </div>
@@ -341,15 +346,15 @@ export default function ConnectSection() {
           <p className="lx-11 lx-mut">No integrations in this category yet.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 md:grid-cols-3">
           {filteredCards.map((card) => {
             const liveItem = found(card.type);
             return (
-              <div key={card.type} className="lx-card2 flex flex-col p-4">
+              <div key={card.type} className="lx-card2 flex flex-col p-3 sm:p-3.5">
                 <div className="flex items-start gap-2.5">
                   <Icon card={card} />
                   <div className="min-w-0 flex-1">
-                    <div className="lx-12 truncate font-bold">{card.name}</div>
+                    <div className="lx-12 font-bold leading-tight">{card.name}</div>
                     <StatusPill connected={!!liveItem} />
                   </div>
                   <button
@@ -361,17 +366,17 @@ export default function ConnectSection() {
                   </button>
                 </div>
 
-                <p className="lx-11 lx-mut mt-2.5">{card.blurb}</p>
+                <p className="lx-11 lx-mut mt-2">{card.blurb}</p>
 
                 {liveItem?.label && (
                   <p className="lx-11 mt-2 truncate" style={{ color: "var(--lx-cyan)" }}>{liveItem.label}</p>
                 )}
 
-                <div className="mt-auto pt-3">
+                <div className="mt-auto pt-2.5">
                   {liveItem ? (
-                    <button className="lx-grad lx-11 px-3.5 py-2" onClick={() => openManage(card)}>Manage</button>
+                    <button className="lx-grad lx-10 px-3 py-1.5" onClick={() => openManage(card)}>Manage</button>
                   ) : (
-                    <button className="lx-grad lx-11 px-3.5 py-2" onClick={() => openConnect(card)}>Connect</button>
+                    <button className="lx-grad lx-10 px-3 py-1.5" onClick={() => openConnect(card)}>Connect</button>
                   )}
                 </div>
               </div>
@@ -423,7 +428,7 @@ export default function ConnectSection() {
                 </p>
               )}
               {err[modalCard.type] && <p className="lx-11" style={{ color: "#f87171" }}>{err[modalCard.type]}</p>}
-              <div className="flex gap-2 pt-1">
+              <div className="flex flex-wrap gap-2 pt-1">
                 <button className="lx-grad lx-11 px-3.5 py-2" disabled={busy === modalCard.type} onClick={() => connect(modalCard)}>
                   {busy === modalCard.type ? "Testing…" : "Test & save"}
                 </button>
@@ -556,11 +561,11 @@ function GoogleCard({ onToast, confirmAction, onStatusChange }: {
     }
   };
 
-  const card: Card = { type: "google", name: "Google Analytics", mark: "G", markBg: "#1a1a24", category: "cms", blurb: "", live: true, fields: [] };
+  const card: Card = { type: "google", name: "Google Analytics", icon: SiGoogleanalytics, markBg: "#E37400", category: "cms", blurb: "", live: true, fields: [] };
 
   if (!g) {
     return (
-      <div className="lx-card2 flex flex-col p-4">
+      <div className="lx-card2 flex flex-col p-3 sm:p-3.5">
         <p className="lx-11 lx-mut">Checking Google status…</p>
       </div>
     );
@@ -576,11 +581,11 @@ function GoogleCard({ onToast, confirmAction, onStatusChange }: {
   const closeModal = () => { if (busy) return; setModalOpen(false); setSelecting(false); };
 
   return (
-    <div className="lx-card2 flex flex-col p-4">
+    <div className="lx-card2 flex flex-col p-3 sm:p-3.5">
       <div className="flex items-start gap-2.5">
         <Icon card={card} />
         <div className="min-w-0 flex-1">
-          <div className="lx-12 truncate font-bold">Google Analytics</div>
+          <div className="lx-12 font-bold leading-tight">Google Analytics</div>
           <StatusPill connected={!!g.connected} />
         </div>
         <button className="lx-icobtn shrink-0" aria-label="Manage Google Analytics" onClick={openModal}>
@@ -588,10 +593,10 @@ function GoogleCard({ onToast, confirmAction, onStatusChange }: {
         </button>
       </div>
 
-      <p className="lx-11 lx-mut mt-2.5">Track website performance and get insights automatically.</p>
+      <p className="lx-11 lx-mut mt-2">Track website performance and get insights automatically.</p>
 
-      <div className="mt-auto pt-3">
-        <button className="lx-grad lx-11 px-3.5 py-2" onClick={openModal}>{g.connected ? "Manage" : "Connect"}</button>
+      <div className="mt-auto pt-2.5">
+        <button className="lx-grad lx-10 px-3 py-1.5" onClick={openModal}>{g.connected ? "Manage" : "Connect"}</button>
       </div>
 
       {modalOpen && (
@@ -658,7 +663,7 @@ function GoogleCard({ onToast, confirmAction, onStatusChange }: {
                   <a className="underline" style={{ color: "var(--lx-cyan)" }} href="/api/integrations/google/start?gbp=1">Connect it →</a>
                 </p>
               )}
-              <div className="flex gap-2 pt-1">
+              <div className="flex flex-wrap gap-2 pt-1">
                 <button className="lx-grad lx-11 px-3.5 py-2" disabled={!!busy} onClick={saveSelection}>{busy === "save" ? "Saving…" : "Save & sync"}</button>
                 <button className="lx-ghost" onClick={() => setSelecting(false)}>Cancel</button>
               </div>
