@@ -8,38 +8,37 @@
 # etc. — a nix package on PATH is enough, no PUPPETEER_EXECUTABLE_PATH env var required. Set
 # that var only if this ever needs pointing at a specific binary instead (docs/MANUAL_STEPS.md).
 #
-# python3 + pip are for src/lib/research/conduct_research.py (Mr. Writer's gpt-researcher
-# step, §16.3 Upgrade E) — same "one service" reasoning as chromium above: one more binary in
-# the same container, not a second Railway service. lib/research/gptResearcher.ts spawns it
-# with `python3`; if this nix package ever provides a different binary name on PATH, set
-# PYTHON_BIN in Railway's Variables to match (docs/MANUAL_STEPS.md) rather than editing code.
+# python3 is for src/lib/research/conduct_research.py (Mr. Writer's gpt-researcher step,
+# §16.3 Upgrade E) — same "one service" reasoning as chromium above: one more binary in the
+# same container, not a second Railway service.
 #
 # nodejs_22 IS EXPLICIT HERE ON PURPOSE. Declaring [phases.setup] at all replaces Nixpacks'
 # auto-detected setup phase rather than extending it — so without listing the Node package
 # ourselves, the image that comes out has no npm at all, and the very next phase's `npm ci`
 # fails with "npm: command not found" (exit 127). Found 2026-08-29 after the deployed
-# agent-server had been stuck on a 2-day-old build because every push since this file started
-# declaring [phases.setup] had been silently failing at this exact step. Version pinned to
-# match package.json's "engines": { "node": ">=22.12.0" }.
-#
-# python3Packages.pip is separate from python3 itself in nixpkgs — the bare `python3` package
-# has no `pip` module. Adding it to nixPkgs alone still left "No module named pip" (2026-08-29,
-# second attempt) — Nixpacks' nix python3 derivation and its python3Packages set didn't line up
-# on PATH as expected. Rather than chase the exact matching nix attribute name, `ensurepip`
-# (stdlib since Python 3.4, bundles its own pip wheel — no external package needed at all) now
-# bootstraps pip directly in phases.researchDeps below, so this no longer depends on nixPkgs
-# resolving pip correctly. python3Packages.pip stays in nixPkgs as a harmless belt-and-braces.
-#
-# `--break-system-packages` is a PIP INSTALL flag only (tells pip it's fine to write into a
-# nix-managed, "externally managed" Python environment, PEP 668). `ensurepip` doesn't have that
-# flag at all — passing it there is a plain CLI usage error (2026-08-29, third attempt), not a
-# PEP 668 problem. So it's on the `pip install` line only, never on `ensurepip`.
+# agent-server had been stuck 2+ days on a stale build because every push since this file
+# started declaring [phases.setup] had been silently failing at this exact step. Version
+# pinned to match package.json's "engines": { "node": ">=22.12.0" }.
 [phases.setup]
-nixPkgs = ["nodejs_22", "chromium", "python3", "python3Packages.pip"]
+nixPkgs = ["nodejs_22", "chromium", "python3"]
 
+# Nix's python3 lives under the immutable /nix/store and is PEP 668 "externally managed" —
+# neither `pip install` nor `ensurepip` are allowed to write packages into it (both tried and
+# failed here, 2026-08-29: "No module named pip", then "externally-managed-environment"). The
+# fix every guide for this recommends and the only one that actually worked: build a venv
+# (a normal, non-nix-managed directory) and install requirements.txt into THAT instead.
 [phases.researchDeps]
 dependsOn = ["setup"]
 cmds = [
-  "python3 -m ensurepip --upgrade",
-  "python3 -m pip install --break-system-packages -r requirements.txt",
+  "python3 -m venv /opt/venv",
+  "/opt/venv/bin/pip install --upgrade pip",
+  "/opt/venv/bin/pip install -r requirements.txt",
 ]
+
+# lib/research/gptResearcher.ts spawns `process.env.PYTHON_BIN || "python3"` — pointing it at
+# the venv's interpreter (which has gpt-researcher installed) instead of the bare nix python3
+# (which doesn't) is what actually makes the research step work at runtime, not just the build
+# succeed. Set here rather than as a manual Railway Variable so it can't be forgotten on a
+# redeploy or a fresh environment.
+[variables]
+PYTHON_BIN = "/opt/venv/bin/python3"
