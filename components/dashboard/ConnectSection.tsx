@@ -303,7 +303,7 @@ export default function ConnectSection() {
 
       <p className="lx-11 lx-mut">
         Kab kya publish ho — wo{" "}
-        <Link href="/app/schedule" className="underline" style={{ color: "var(--lx-cyan)" }}>Schedule</Link> me set hota hai.
+        <Link href="/dashboard/schedule" className="underline" style={{ color: "var(--lx-cyan)" }}>Schedule</Link> me set hota hai.
       </p>
     </div>
   );

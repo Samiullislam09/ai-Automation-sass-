@@ -360,7 +360,7 @@ type NavItem = { label: string; icon: React.ElementType; badge?: number; href?: 
 const NAV: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
   { label: "Chat", icon: MessageSquare },
-  { label: "Office (Agents)", icon: Users, href: "/app/workspace" },
+  { label: "Office (Agents)", icon: Users, href: "/dashboard/workspace" },
   { label: "Tasks", icon: ClipboardList },
   { label: "Approvals", icon: ListChecks, href: "/dashboard/approvals" },
   { label: "Connect", icon: Link2, href: "/dashboard/connect" },
@@ -368,7 +368,7 @@ const NAV: NavItem[] = [
   { label: "Content", icon: FileText, href: "/dashboard/content" },
   { label: "Site Brain", icon: Globe, href: "/dashboard/site-brain" },
   { label: "Leads", icon: UserRound },
-  { label: "SEO & Insights", icon: TrendingUp, href: "/app/audit" },
+  { label: "SEO & Insights", icon: TrendingUp, href: "/dashboard/audit" },
   { label: "Settings", icon: Settings, href: "/dashboard/settings" },
 ];
 

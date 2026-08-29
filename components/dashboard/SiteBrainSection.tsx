@@ -179,7 +179,7 @@ export default function SiteBrainSection() {
           <button className="lx-ghost" disabled={refreshing} onClick={() => refresh("crawler")} title="Read the site again and rebuild the profile">
             {refreshing ? "Starting…" : "↻ Refresh"}
           </button>
-          <Link href="/app/workspace" className="lx-ghost">Watch it work →</Link>
+          <Link href="/dashboard/workspace" className="lx-ghost">Watch it work →</Link>
         </div>
       }
     >
