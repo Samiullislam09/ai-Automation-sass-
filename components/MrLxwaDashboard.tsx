@@ -1308,10 +1308,15 @@ export default function MrLxwaDashboard({
             </div>
           )}
 
-          {/* The five-tab strip ("Live Activity / Research / Writing / References / Output
-              Preview") was removed 2026-08-31: every tab rendered the same content — only a
-              `tab` state changed — so it was a control that looked functional and did nothing.
-              The one real view it claimed to offer is the timeline directly below. */}
+          {/* tabs — kept at the owner's request (2026-08-31). Note for whoever wires these up:
+              they are still presentational, every tab renders the same panel below. */}
+          <div className="lx-scroll mt-3 flex gap-6 overflow-x-auto border-b" style={{ borderColor: "var(--lx-border)" }}>
+            {TABS.map((t) => (
+              <button key={t} className={`lx-tab ${tab === t ? "on" : ""}`} onClick={() => setTab(t)}>
+                {t}
+              </button>
+            ))}
+          </div>
 
           <div className="lx-13 mt-4 font-semibold">
             {panelAgent ? `What ${panelAgent.name} is doing` : "What the team is doing"}
