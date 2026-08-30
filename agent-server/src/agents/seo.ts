@@ -258,6 +258,10 @@ async function saveToContentItem(tenantId: string, itemId: string, result: SeoRe
             score: result.score,
             passed: result.passed,
             issues: result.issues,
+            // The dashboard's per-category checklist (Keyword Usage, Readability, ...) needs to
+            // know what PASSED too, not just what failed — `issues` alone can't tell "checked
+            // and fine" from "never measured". Full checklist, same one summarizeSeo() prints.
+            checks: result.checks,
             serpCompared: result.serpCompared,
             checkedAt: new Date().toISOString(),
           },

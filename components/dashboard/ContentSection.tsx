@@ -3,10 +3,11 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 /** /dashboard/content — same real logic as the old app/app/content/page.tsx: reads
- *  content_items from the database via /api/content?status=..., every row opens the real
- *  reviewer at /app/content/[id]. Restyled to the new dashboard theme per the owner's standing
- *  instruction (2026-08-29). Rendered inside <MrLxwaDashboard> as its `children` — see
- *  app/dashboard/content/page.tsx. */
+ *  content_items from the database via /api/content?status=..., every row opens the "Article
+ *  Approval" reviewer at /dashboard/content/[id] (components/dashboard/ArticleApprovalSection.tsx,
+ *  added 2026-08-29 — replaces the old /app/content/[id]). Restyled to the new dashboard theme
+ *  per the owner's standing instruction (2026-08-29). Rendered inside <MrLxwaDashboard> as its
+ *  `children` — see app/dashboard/content/page.tsx. */
 
 type Item = {
   id: string;
@@ -83,7 +84,7 @@ export default function ContentSection() {
           return (
             <Link
               key={c.id}
-              href={`/app/content/${c.id}`}
+              href={`/dashboard/content/${c.id}`}
               className="lx-card2 flex flex-wrap items-center gap-3 p-3.5 transition hover:brightness-110"
             >
               <span

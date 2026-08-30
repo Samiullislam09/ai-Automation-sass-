@@ -49,12 +49,21 @@ export class WriterAgent extends Agent {
     }
 
     let chosenBy: "user" | "auto" | null = null;
+    // Mr. Keyword's own researched cluster (real search-data siblings of the primary keyword,
+    // NOT invented) — the only source the reviewer UI has for "Tags" on an article. Only set
+    // when a keyword choice actually resolved; a topic handed straight to this job (chat,
+    // direct API call) has no research behind it, and an empty list is the honest answer then.
+    let relatedKeywords: string[] = [];
     if (choiceId) {
       const resolved = await resolveChoice(tenantId, choiceId);
       if (!resolved) throw new Error(`The keyword choice ${choiceId} is gone — nothing was written.`);
       topic = resolved.keyword;
       blueprint = buildBlueprint(resolved.keyword, resolved.research, profile);
       chosenBy = resolved.chosenBy;
+      relatedKeywords = (resolved.research.relatedKeywords ?? [])
+        .map((r) => r.keyword?.trim())
+        .filter((k): k is string => !!k && k.toLowerCase() !== resolved.keyword.toLowerCase())
+        .slice(0, 8);
       ctx.onProgress({ label: `Writing "${resolved.keyword}" (${chosenBy === "user" ? "you picked it" : "auto-picked"})` });
     }
 
@@ -123,6 +132,11 @@ export class WriterAgent extends Agent {
       qualityGate: gate,
       qualityScore: gate.score,
       scheduleRunId: scheduleRunId ?? null,
+      // Who picked the topic, and what else Mr. Keyword's research turned up for it — the
+      // reviewer UI's "Assigned By" and "Tags" (Article Approval page). Real, or absent: never
+      // a guessed agent name, never an invented tag.
+      chosenBy,
+      relatedKeywords,
       // Mr. Writer's own meta step (§16.3 Upgrade E) — read by Mr. Publish and Mr. SEO instead
       // of falling back to the H1 and nothing.
       metaTitle: pipeline.meta.metaTitle,
