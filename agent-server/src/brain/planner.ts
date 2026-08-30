@@ -97,6 +97,7 @@ const NOUN: Record<string, string> = {
   site_pages: "site ka content",
   site_profile: "site profile",
   topics: "topics",
+  topic: "topic",
   social_posts: "social posts",
   leads: "leads",
 };
@@ -112,6 +113,7 @@ const VERB: Record<string, string> = {
   site_pages: "site padhega",
   site_profile: "site profile banayega",
   topics: "topics chunega",
+  topic: "best topic chunega",
   social_posts: "social posts banayega",
   leads: "leads dhundega",
 };

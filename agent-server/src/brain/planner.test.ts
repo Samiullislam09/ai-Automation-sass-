@@ -292,10 +292,31 @@ test("rows 8-9 · anything the registry does not know is refused, never guessed"
 
 // ══ failure modes ════════════════════════════════════════════════════════════════════════
 
-test("a required slot the model could not fill → missing_slots, one readable sentence", () => {
-  const res = failed(plan(intent("write_article", {}), TODAY));
-  assert.deepEqual(res.failure, { kind: "missing_slots", slots: ["topic"] });
-  assert.match(res.message, /Ek cheez batani baaki hai: topic/);
+test("2026-08-31 · 'article likho' with no topic no longer dead-ends on 'which topic?' — Mr Lxwa picks one", () => {
+  // Was: missing_slots asking the user for a topic. The owner asked for autonomous picking
+  // instead (site memory + duplicate locks, no confirmation step) — `topic` moved from a
+  // required INPUT slot to a NEED, so the planner's own "the user already handed us this one"
+  // rule still short-circuits it the instant a literal topic IS given (see the next test), and
+  // only pulls Mr Lxwa's pick_topic in when it is genuinely blank.
+  const p = okPlan(plan(intent("write_article", {}), TODAY));
+  assert.deepEqual(shape(p.steps), ["1:boss.pick_topic", "2:keyword.find_keywords", "3:writer.write_article", "4:seo.check_seo"]);
+});
+
+test("a topic literally given still skips Mr Lxwa entirely — no picking step for the common case", () => {
+  const p = okPlan(plan(intent("write_article", { topic: "solar panels" }), TODAY));
+  assert.equal(p.steps.some((s) => s.agent_id === "boss"), false, "the topic was given — nothing needed picking");
+  assert.deepEqual(shape(p.steps), ["1:keyword.find_keywords", "2:writer.write_article", "3:seo.check_seo"]);
+});
+
+test("'sirf keywords do' with no topic also gets Mr Lxwa's pick, same as an article order", () => {
+  const p = okPlan(plan(intent("find_keywords", {}), TODAY));
+  assert.deepEqual(shape(p.steps), ["1:boss.pick_topic", "2:keyword.find_keywords"]);
+});
+
+test("a required slot the model could not fill (not 'topic') → missing_slots, one readable sentence", () => {
+  const res = failed(plan(intent("find_leads", {}), TODAY));
+  assert.deepEqual(res.failure, { kind: "missing_slots", slots: ["query"] });
+  assert.match(res.message, /Ek cheez batani baaki hai: query/);
   assert.match(res.message, /guess nahi karunga/);
 });
 

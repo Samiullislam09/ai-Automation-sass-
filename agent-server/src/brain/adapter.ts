@@ -68,6 +68,11 @@ function translate(agentId: string, action: string, input: Record<string, unknow
     case "boss.plan_topics":
       return { queue: "boss", data: { count: input.count ?? null, taskLabel: "Planning topics" } };
 
+    case "boss.pick_topic":
+      // Same worker (boss.ts), routed by `pickOne` rather than a separate queue — the same
+      // pattern writer.write_article/research_brief already uses below.
+      return { queue: "boss", data: { pickOne: true, taskLabel: "Choosing the best topic" } };
+
     case "crawler.crawl_site":
       return { queue: "crawler", data: { limit: input.limit ?? null, taskLabel: "Reading your site" } };
 

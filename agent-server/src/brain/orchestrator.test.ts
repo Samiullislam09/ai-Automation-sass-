@@ -70,13 +70,19 @@ const intent = (over: Partial<Intent> = {}): Intent => ({
   ...over,
 });
 
-/** keyword → writer → (image ‖ seo): the plan's own example, with a parallel pair. */
+/** keyword → writer → (image ‖ seo): the plan's own example, with a parallel pair.
+ *
+ *  `input` shape matches planner.ts's real output exactly: literal fields flat, every `__from`
+ *  reference nested under its own `__from` key, keyed by "step:<no>:<agent_id>" — not the flat
+ *  top-level `"step:<provides>"` fields this fixture used until 2026-08-31, which matched an
+ *  orchestrator.ts that had drifted away from what `plan()` actually emits. Keeping this fixture
+ *  in the planner's real shape is what makes these tests catch that kind of drift again. */
 const articlePlan = (): Plan => ({
   steps: [
     { no: 1, agent_id: "keyword", action: "find_keywords", needs: [], provides: "keywords", optional: false, input: { topic: "solar panels" } },
-    { no: 2, agent_id: "writer", action: "write_article", needs: ["keywords"], provides: "article", optional: false, input: { topic: "solar panels", keywords: `${FROM_STEP}keywords` } },
-    { no: 3, agent_id: "image", action: "make_images", needs: ["article"], provides: "images", optional: true, input: { article: `${FROM_STEP}article` } },
-    { no: 3, agent_id: "seo", action: "check_seo", needs: ["article"], provides: "seo_passed", optional: false, input: { article: `${FROM_STEP}article` } },
+    { no: 2, agent_id: "writer", action: "write_article", needs: ["keywords"], provides: "article", optional: false, input: { topic: "solar panels", __from: { keywords: `${FROM_STEP}1:keyword` } } },
+    { no: 3, agent_id: "image", action: "make_images", needs: ["article"], provides: "images", optional: true, input: { __from: { article: `${FROM_STEP}2:writer` } } },
+    { no: 3, agent_id: "seo", action: "check_seo", needs: ["article"], provides: "seo_passed", optional: false, input: { __from: { article: `${FROM_STEP}2:writer` } } },
   ],
   outline: ["Mr. Keyword", "Mr. Writer", "Mr. Image ‖ Mr. SEO"],
   estimated_seconds: 360,

@@ -176,13 +176,22 @@ test('§14 "mere liye TikTok video banao" · an unregistered action is refused, 
   assert.equal(res.failure.kind, "unknown_action");
 });
 
-test("§14 · a topic of 'null' or 'undefined' is a missing slot, not a subject to research", () => {
+test("§14 · a topic of 'null', 'undefined' or blank is never sent to Mr. Keyword as a literal string — Mr Lxwa picks a real one instead", () => {
+  // 2026-08-31: `topic` moved from a required slot to a `need` so "article likho" (no topic)
+  // does not dead-end asking the user — but the ORIGINAL point of this test still has to hold:
+  // an empty/whitespace string must never reach find_keywords as if it were a real topic.
   const { registry } = world();
   for (const bad of [undefined, "", "   "]) {
     const res = makePlan(harden(intent({ action: "find_keywords", params: bad === undefined ? {} : { topic: bad } }), registry), registry);
-    assert.equal(res.ok, false, `topic ${JSON.stringify(bad)} must not plan a run`);
-    if (res.ok) continue;
-    assert.equal(res.failure.kind, "missing_slots");
+    assert.equal(res.ok, true, `topic ${JSON.stringify(bad)} should now plan a Mr Lxwa pick, not fail`);
+    if (!res.ok) continue;
+    assert.equal(res.plan.steps[0].agent_id, "boss", "Mr Lxwa picks first, before Mr. Keyword ever runs");
+    const kw = res.plan.steps.find((s) => s.agent_id === "keyword")!;
+    // The plan's own literal field can still carry whatever blank string came in (it is only
+    // ever read as a fallback) — what actually matters is that a real __from reference is
+    // present too, which is what makes the orchestrator overwrite it with Mr Lxwa's real pick
+    // at dispatch time (see orchestrator.ts's resolveInput).
+    assert.equal((kw.input as any).__from?.topic, `step:1:boss`);
   }
 });
 

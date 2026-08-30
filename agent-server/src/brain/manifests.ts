@@ -83,6 +83,28 @@ export const MANIFESTS: Manifest[] = [
         estimated_seconds: 25, // measured: boss runs 18-30s
         cost_units: 6,
       },
+      // Same site-analysis + duplicate locks as plan_topics, count fixed to 1 and the topic
+      // returned as this step's output instead of being enqueued itself — see needs on
+      // find_keywords and write_article below. Added 2026-08-31 so "article likho" (no topic
+      // given) does not dead-end on "which topic?": the planner's own backward-closure pulls
+      // this step in automatically whenever `topic` is a `need` and the intent left it blank
+      // (the existing "user already gave us this one" rule in planner.ts skips it the instant
+      // a literal topic IS given, so this changes nothing for the common case).
+      {
+        id: "pick_topic",
+        phrases: ["best topic for me", "aap he decide karo", "khud topic chuno", "which topic should i write"],
+        input: {},
+        // The step's own output IS the topic string — see boss.ts's run() for why (resolveInput
+        // threads a provider's whole output in under the need's name, so the value here has to
+        // be exactly what a consumer's `topic` field expects). `why` goes out as a live "data"
+        // event instead, not through this return value.
+        output: { topic: "string" },
+        provides: "topic",
+        needs: [],
+        irreversible: false,
+        estimated_seconds: 25, // GUESS — same call shape as plan_topics, never timed alone
+        cost_units: 6,
+      },
     ],
     office: { room: "boss", ico: "🧠", color: "#f0abfc" },
   },
@@ -102,7 +124,11 @@ export const MANIFESTS: Manifest[] = [
         input: { topic: "string", count: "number?" },
         output: { relatedKeywords: "object[]", recommended: "string", source: "string" },
         provides: "keywords",
-        needs: [],
+        // "topic" only turns into a real step when the user did not give one — see boss's
+        // pick_topic above. When a topic IS given ("keywords do X"), the planner's own rule
+        // ("the user already handed us this one") satisfies the need from the literal param
+        // and no Boss step is added — this plan stays exactly the 1-step plan it always was.
+        needs: ["topic"],
         irreversible: false,
         estimated_seconds: 20, // measured: 12-30s, autocomplete path ~6s cold
         cost_units: 3,
@@ -130,7 +156,11 @@ export const MANIFESTS: Manifest[] = [
         input: { topic: "string", keywords: "string[]", tone: "string?", words: "number?" },
         output: { title: "string", body: "string", wordCount: "number", qualityGate: "object" },
         provides: "article",
-        needs: ["keywords"],
+        // "topic" here for the same reason as find_keywords above: given → satisfied literally,
+        // no extra step; blank → Boss picks one, grounded in the site's own crawled pages and
+        // what has already been written, and the SAME picked topic reaches both this step and
+        // the keyword step it depends on (the planner adds boss.pick_topic once, shared).
+        needs: ["keywords", "topic"],
         irreversible: false,
         estimated_seconds: 300, // measured: 3-8 min with research
         cost_units: 40,

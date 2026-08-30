@@ -292,26 +292,39 @@ export async function dispatchReady(taskId: string, tenantId: string): Promise<v
   }
 }
 
-/** Turn `"step:keywords"` placeholders into the actual output of the step that provided it.
- *  Resolution happens at dispatch time, not plan time, because the value does not exist until
- *  the earlier step has run. */
+/** Resolve a step's real input: its literal fields, with every name in its `__from` overwritten
+ *  by the actual output of the step that produced it. Resolution happens at dispatch time, not
+ *  plan time, because the value does not exist until the earlier step has run.
+ *
+ *  planner.ts's `__from` is a NESTED object, not flat fields — `{ topic: "solar", __from: {
+ *  keywords: "step:1:keyword" } }` (see its own header comment) — and each reference is keyed by
+ *  `(no, agent_id)`, migration 017's own unique key on `task_steps`, NOT by `provides`: `no`
+ *  alone is not unique (parallel steps share it), and two DIFFERENT steps in the same plan can
+ *  legitimately share a `provides` value across separate branches, so `(no, agent_id)` is the
+ *  only collision-free lookup.
+ *
+ *  Found live 2026-08-31 while wiring a new step: this function had drifted to scanning `raw`'s
+ *  own TOP-LEVEL values for a flat `"step:…"` string (and keying the lookup by `provides`) —
+ *  which matched orchestrator.test.ts's own hand-built fixtures (they used that older, flatter
+ *  shape) but not what `plan()` actually emits, where every reference sits inside `__from`. So
+ *  `wanted` was always empty against a real plan, `raw` was returned completely unresolved, and
+ *  every real multi-step chain (keyword → writer, writer → seo, …) silently handed the NEXT
+ *  agent a stray `__from` key instead of the value it needed — nothing in the test suite ran the
+ *  real planner's output through this function to catch it. */
 async function resolveInput(taskId: string, step: any): Promise<Record<string, unknown>> {
   const { db } = need();
   const raw = (step.input ?? {}) as Record<string, unknown>;
-  const wanted = Object.values(raw).filter((v): v is string => typeof v === "string" && v.startsWith(FROM_STEP));
-  if (!wanted.length) return raw;
+  const { __from, ...literal } = raw as { __from?: Record<string, string> } & Record<string, unknown>;
+  if (!__from || !Object.keys(__from).length) return literal;
 
-  const { data: done } = await db.from("task_steps").select("provides, output").eq("task_id", taskId).eq("status", "done");
-  const byProvides = new Map<string, unknown>((done ?? []).map((d: any) => [d.provides, d.output]));
+  const { data: done } = await db.from("task_steps").select("no, agent_id, output").eq("task_id", taskId).eq("status", "done");
+  const byStep = new Map<string, unknown>((done ?? []).map((d: any) => [`${d.no}:${d.agent_id}`, d.output]));
 
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(raw)) {
-    if (typeof v === "string" && v.startsWith(FROM_STEP)) {
-      const key = v.slice(FROM_STEP.length);
-      out[k] = byProvides.get(key) ?? null;
-    } else {
-      out[k] = v;
-    }
+  const out: Record<string, unknown> = { ...literal };
+  for (const [need, ref] of Object.entries(__from)) {
+    if (typeof ref !== "string" || !ref.startsWith(FROM_STEP)) continue;
+    const key = ref.slice(FROM_STEP.length);
+    out[need] = byStep.get(key) ?? null;
   }
   return out;
 }
