@@ -319,6 +319,27 @@ async function resolveInput(taskId: string, step: any): Promise<Record<string, u
 /** An agent finished. Record it, then see what that unblocks. */
 export async function onStepDone(taskId: string, tenantId: string, stepId: string, output: unknown): Promise<void> {
   const { db, now } = need();
+
+  // A step can return without throwing and still not have done its job — Mr. Writer's
+  // duplicate locks (lib/dedupe.ts §25.5) decline to write rather than error, and say so with
+  // `written: false`. Marking that "done" is how a task with no article ever produced still
+  // finished as "awaiting_approval" and told the user "Done" (found live 2026-08-31: SEO then
+  // skipped for lack of an article, and the whole task reported success over nothing). Treated
+  // the same as `failStep` treats a real failure — skipped if optional, otherwise the task
+  // stops honestly in `needs_attention` with the real reason — rather than inventing a new
+  // status. Generic on purpose (`output.written === false`), not writer-specific: any agent
+  // that adopts the same "I checked, I chose not to" convention gets the same honesty for free.
+  const declined = !!output && typeof output === "object" && (output as any).written === false;
+  if (declined) {
+    const { data: step } = await db.from("task_steps").select("*").eq("id", stepId).maybeSingle();
+    if (step) {
+      const reason = typeof (output as any).reason === "string" ? (output as any).reason : "Kaam nahi hua — koi wajah nahi di gayi.";
+      await db.from("task_steps").update({ output: output ?? null }).eq("id", stepId);
+      await failStep(step, tenantId, reason, { retryable: false });
+      return;
+    }
+  }
+
   await db
     .from("task_steps")
     .update({ status: "done", output: output ?? null, finished_at: iso(now()) })

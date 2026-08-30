@@ -10,6 +10,7 @@ import { buildBlueprint, matchOfferings, nearestCluster, type Research } from ".
 import { publishContentItem } from "../lib/publish.js";
 import { loadActiveProfile, profileBlock, type SiteProfile } from "../lib/siteProfile.js";
 import { checkDuplicate, type DuplicateVerdict } from "../lib/dedupe.js";
+import { brainRefOf } from "../brain/adapter.js";
 
 /** Build Guide Step 11 — Mr. Writer drafts the article.
  *  Currently runs on NVIDIA (Lightning tier) as a temporary stand-in for the
@@ -65,7 +66,11 @@ export class WriterAgent extends Agent {
     // the same subject twice. "exists" is NOT a failure — the right answer to "write about ISO
     // 9001 cost" when /iso-9001-cost is already live is to offer to update it, and the update
     // mode itself is Phase 2. We stop, we name the page, we hand the choice back.
-    const verdict = await checkDuplicate(tenantId, { title: topic.trim(), topic: topic.trim() });
+    // Exclude THIS job's own task row: the brain flips a task to "running" as soon as its
+    // first step starts, so without this a brain-routed order always found itself already
+    // "in progress" and refused to write — see dedupe.ts's own comment on findRunningTaskFor.
+    const ownTaskId = brainRefOf(job.data)?.task_id ?? null;
+    const verdict = await checkDuplicate(tenantId, { title: topic.trim(), topic: topic.trim(), excludeTaskId: ownTaskId });
     if (verdict.status !== "free") {
       const reason = duplicateSentence(verdict);
       ctx.onProgress({ label: reason });

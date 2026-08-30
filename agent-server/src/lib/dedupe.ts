@@ -208,13 +208,20 @@ export type RunningMatch = {
  *  reason. jobs_log's `action` wraps the topic in other words, so containment (either way
  *  round) is the test there; tasks.params.topic is the topic itself, so it is compared whole.
  */
-export async function findRunningTaskFor(tenantId: string, topic: string): Promise<RunningMatch | null> {
+export async function findRunningTaskFor(tenantId: string, topic: string, excludeTaskId?: string | null): Promise<RunningMatch | null> {
   const wanted = slugify(topic);
   if (!wanted) return null;
   const since = new Date(Date.now() - RUNNING_WINDOW_MS).toISOString();
 
   // 1 · tasks — the real idempotency lock (§9). Missing table = 017 not applied; not an error.
-  const { data: tasks, error: tasksError } = await supabase
+  // `excludeTaskId` is the task this very step is running inside of, via the brain: its own row
+  // is already `status='running'` by the time the writer's step executes (the orchestrator
+  // flips a task to "running" as soon as its first step starts), so without this exclusion
+  // EVERY brain-routed article found itself "already in progress" and refused to write, 100%
+  // of the time (found live 2026-08-31 — chat-ordered articles never wrote a single word,
+  // Approvals only ever filled from scheduled/legacy runs that never created a `tasks` row to
+  // begin with, so they never collided with themselves).
+  let query = supabase
     .from("tasks")
     .select("id, kind, params, status, echo, created_at")
     .eq("tenant_id", tenantId)
@@ -222,6 +229,8 @@ export async function findRunningTaskFor(tenantId: string, topic: string): Promi
     .gte("created_at", since)
     .order("created_at", { ascending: false })
     .limit(50);
+  if (excludeTaskId) query = query.neq("id", excludeTaskId);
+  const { data: tasks, error: tasksError } = await query;
 
   if (tasksError) {
     console.error("[dedupe] tasks lookup skipped:", tasksError.message);
@@ -280,13 +289,13 @@ export type DuplicateVerdict =
  *  for (used for the in-flight match). When only one is known, pass it as both. */
 export async function checkDuplicate(
   tenantId: string,
-  { title, topic }: { title?: string | null; topic?: string | null }
+  { title, topic, excludeTaskId }: { title?: string | null; topic?: string | null; excludeTaskId?: string | null }
 ): Promise<DuplicateVerdict> {
   const forSlug = String(title ?? topic ?? "").trim();
   const forTopic = String(topic ?? title ?? "").trim();
 
   if (forTopic) {
-    const running = await findRunningTaskFor(tenantId, forTopic);
+    const running = await findRunningTaskFor(tenantId, forTopic, excludeTaskId);
     if (running) return { status: "in_progress", task_id: running.task_id, source: running.source, label: running.label };
   }
 
