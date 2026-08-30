@@ -40,25 +40,41 @@ export function brainRefOf(data: unknown): BrainJobRef | null {
 /** Manifest action → the job body today's worker expects.
  *
  *  Anything not listed is refused loudly. A silent "close enough" translation is how an agent
- *  ends up researching the string "undefined". */
-function translate(agentId: string, action: string, input: Record<string, unknown>): { queue: AgentType; data: Record<string, unknown> } {
+ *  ends up researching the string "undefined".
+ *
+ *  Exported for adapter.test.ts's own regression test on `topicOf()` — the shape mismatch it
+ *  guards (a step's `__from`-resolved output being an object, not the bare value an agent's
+ *  job data expects) was found live 2026-08-31 with nothing in the test suite able to catch it,
+ *  because nothing exercised this function against workers.ts's real withCost() wrapping. */
+export function translate(agentId: string, action: string, input: Record<string, unknown>): { queue: AgentType; data: Record<string, unknown> } {
   const t = (v: unknown) => (typeof v === "string" ? v.trim() : v);
+  // `input.topic` is either the literal string the user typed, or — when it was blank —
+  // boss.pick_topic's resolved output, `{ topic, why }` (see boss.ts's own comment on why that
+  // is an object, not a bare string: workers.ts's withCost() only merges `cost` into a plain
+  // object, it wraps anything else as `{ value, cost }`). Unwrap both shapes here, in the one
+  // place every consumer of `topic` goes through, rather than teaching each agent the two
+  // possible shapes of its own input.
+  const topicOf = (v: unknown): string | undefined => {
+    if (typeof v === "string") return v.trim();
+    if (v && typeof v === "object" && typeof (v as any).topic === "string") return (v as any).topic.trim();
+    return undefined;
+  };
 
   switch (`${agentId}.${action}`) {
     case "keyword.find_keywords":
       // chain:false is the whole difference between "sirf keyword do" and "article likho" —
       // in the brain, chaining is the planner's job, so the agent must never chain itself.
-      return { queue: "keyword", data: { topic: t(input.topic), chain: false, taskLabel: `Keywords for "${t(input.topic)}"` } };
+      return { queue: "keyword", data: { topic: topicOf(input.topic), chain: false, taskLabel: `Keywords for "${topicOf(input.topic)}"` } };
 
     case "writer.write_article":
       return {
         queue: "writer",
         data: {
-          topic: t(input.topic),
+          topic: topicOf(input.topic),
           blueprint: input.blueprint ?? blueprintFromKeywords(input.keywords),
           // The brain decides publishing with its own step; the writer must not also publish.
           autoPublish: false,
-          taskLabel: `Writing "${t(input.topic)}"`,
+          taskLabel: `Writing "${topicOf(input.topic)}"`,
         },
       };
 

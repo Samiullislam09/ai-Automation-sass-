@@ -178,18 +178,20 @@ export class BossAgent extends Agent {
     // convention brain/orchestrator.ts's onStepDone() already reads for Mr. Writer's declines,
     // so a tenant with nothing to plan from gets an honest `needs_attention`, not a false "Done".
     //
-    // The step's OWN output must be the topic string itself — nothing wrapped around it — since
-    // resolveInput() threads a provider's whole output in under the need's name (the same rule
-    // that gives Mr. Writer the keyword step's whole object for `keywords`); wrapping it in
-    // `{topic, why}` here would hand Mr. Keyword an object where it expects a string. `why` (the
-    // grounding a human would want to see on the live panel) goes out as its own live event
-    // instead — real data the UI can show, not a field silently dropped to keep the type honest.
+    // Returned as `{ topic }`, an object — NOT a bare string. Every agent's return value passes
+    // through workers.ts's withCost() before it is stored, and withCost() only MERGES `cost` in
+    // when the result is already a plain object; a bare string gets silently wrapped as
+    // `{ value: <string>, cost }` instead. Returning a string here (2026-08-31's first attempt)
+    // meant Mr. Keyword's own `topic` field resolved to that `{ value, cost }` object at
+    // dispatch time, not the string — "topic?.trim is not a function", found live, task
+    // `needs_attention` with 0 steps ever completing past Mr Lxwa's own. adapter.ts's `topicOf()`
+    // is the one place that unwraps `{ topic }` back to a plain string for every consumer.
     if ((job.data as any).pickOne === true) {
       const result = await planTopics(tenantId, 1);
       if (!result.ok) return { written: false, reason: result.reason };
       const picked = result.kept[0];
       ctx.data("topic_picked", { topic: picked.topic, why: picked.why, groundedIn: result.groundedIn });
-      return picked.topic;
+      return { topic: picked.topic, why: picked.why };
     }
 
     // How many articles to plan this run. Kept small on purpose: writer's daily cap is 10
