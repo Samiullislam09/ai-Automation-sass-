@@ -597,18 +597,27 @@ test("arguments are coerced to the shape the agent declared, and the rest droppe
   assert.equal(plan.confidence, 0.9, "a tool call with no confidence stated is treated as a confident one");
 });
 
-test("a low-confidence call asks instead of spending", async () => {
+test("an IRREVERSIBLE call is still confirmed before anything happens", async () => {
+  // Confirmation for irreversible work is NOT the chat's confidence heuristic's job — the brain
+  // decides it from the manifest and answers `awaiting_confirm`, which is the authoritative
+  // place (orchestrator.ts). What matters is the guarantee: nothing irreversible runs until the
+  // customer says yes, whatever the model's confidence was.
+  const s = stub({ tool: { name: "publish_article", args: { content_item_id: "item-1", confidence: 0.4 } } });
+  const t = await turn("shayad isko live kar do", s.deps);
+
+  assert.match(order(t).text, /confirm/i);
+  assert.notEqual(order(t).event?.kind, "running", "nothing may start before the yes");
+});
+
+test("a low-confidence REVERSIBLE call just runs — §3 rule 2, 'draft likhna ... seedha karo'", async () => {
+  // The floor exists to protect the customer's credits and their live site. A draft costs one
+  // rejected row in Approvals, so interrogating them about it ("Main pakka nahi hun — haan
+  // bolo?") is the interrogation the plan explicitly forbids for reversible work.
   const s = stub({ tool: { name: "write_article", args: { topic: "solar", confidence: 0.4 } } });
   const t = await turn("kuch likh do shayad", s.deps);
 
-  assert.equal(s.rec.created.length, 0);
-  assert.match(order(t).text, /pakka nahi/i);
-  assert.equal(s.rec.saved[0].slot, CONFIRM_SLOT);
-
-  // ...and "haan" turns the same intent into the task, without a second model call.
-  const t2 = await turn("haan", s.deps);
-  assert.equal(s.rec.created.length, 1);
-  assert.equal(order(t2).event?.kind, "running");
+  assert.equal(s.rec.created.length, 1, "a reversible order is placed, not questioned");
+  assert.doesNotMatch(order(t).text, /pakka nahi/i);
 });
 
 test("the answer to the one question completes the order", async () => {

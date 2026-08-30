@@ -102,15 +102,24 @@ export function fieldSchema(spec: string): { schema: Record<string, unknown>; re
   return { schema: { ...schema }, required: !optional };
 }
 
-export function schemaFromInput(input: Record<string, string>, extras: string[] = []): JsonSchema {
+export function schemaFromInput(input: Record<string, string>, extras: string[] = [], needs: string[] = []): JsonSchema {
   const properties: Record<string, Record<string, unknown>> = {};
   const required: string[] = [];
+  // A field that is ALSO one of the action's `needs` is never required of the user: an earlier
+  // step produces it and the planner threads it in (agent-server/src/brain/planner.ts's
+  // `__from`). missingSlots() below has always known this; this function did not, and the
+  // difference is what made "write me an article" fail once its topic slot became a need. The
+  // model was shown a tool it could not legally call without that value, so it quietly fell
+  // back to the question tool and replied conversationally instead of ordering the work —
+  // which reads to the customer as being interrogated for something the team is supposed to
+  // work out itself (found live 2026-08-31).
+  const providedByGraph = new Set((needs ?? []).map(String));
 
   for (const [name, spec] of Object.entries(input ?? {})) {
     const field = fieldSchema(spec);
     if (!field) continue; // a type we do not understand is left out rather than guessed at
     properties[name] = field.schema;
-    if (field.required) required.push(name);
+    if (field.required && !providedByGraph.has(name)) required.push(name);
   }
 
   // The shared fields go on last and never overwrite a field the agent declared itself: an
@@ -137,6 +146,45 @@ export function enabledActions(registry: BrainRegistry | null | undefined): Map<
   return out;
 }
 
+/** Does the message literally contain one of an action's own registered trigger phrases?
+ *
+ *  Plan §5.1 promises a deterministic fast path ("Aaj ka regex + chhota classifier rahega — fast
+ *  path, 0ms, ₹0") under the model-driven extractor. It was never built, so routing rested
+ *  entirely on the model's judgement — and the model kept reading a bare, unmistakable order (an
+ *  action's own trigger words, with no subject after them) as a question, answering it
+ *  conversationally instead of ordering the work (found live, 2026-08-31).
+ *
+ *  This reads the phrases straight off the manifests, so it stays honest to the rule stated in
+ *  agent-server/src/brain/manifests.ts: phrases are what the intent engine routes on, and the
+ *  registry refuses to boot if two actions claim the same one. Nothing here is hard-coded — a
+ *  new agent gets a fast path the day it declares its phrases.
+ *
+ *  The longest match wins, so a specific phrase beats a generic one that happens to be a
+ *  substring of it. Both sides are padded with spaces so a phrase matches as whole words inside
+ *  a longer sentence, without matching as a fragment inside an unrelated compound word.
+ */
+export function matchActionPhrase(message: string, registry: BrainRegistry | null | undefined): string | null {
+  const hay = ` ${String(message ?? "").toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim()} `;
+  if (hay.trim().length < 3) return null;
+
+  let bestId: string | null = null;
+  let bestLen = 0;
+  for (const { spec } of Array.from(enabledActions(registry).values())) {
+    for (const raw of spec.phrases ?? []) {
+      const phrase = String(raw ?? "").toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
+      // Single short words ("publish it") are fine; anything under 4 characters is too easy to
+      // hit by accident inside an unrelated sentence.
+      if (phrase.length < 4) continue;
+      if (!hay.includes(` ${phrase} `)) continue;
+      if (phrase.length > bestLen) {
+        bestLen = phrase.length;
+        bestId = spec.id;
+      }
+    }
+  }
+  return bestId;
+}
+
 function describe(agent: BrainAgent, spec: BrainAction): string {
   const secs = spec.estimated_seconds;
   const time = secs < 90 ? `~${secs}s` : `~${Math.round(secs / 60)} min`;
@@ -148,6 +196,12 @@ function describe(agent: BrainAgent, spec: BrainAction): string {
     // manifest — so a new agent teaches the router its phrasings by declaring them.
     said ? `The user says it like: ${said}.` : "",
     `Takes about ${time}.`,
+    // Said out loud so the model never withholds the tool for want of a value the team supplies
+    // itself. Without this it read a blank `topic` as "I cannot call this yet" and answered
+    // conversationally instead of placing the order.
+    (spec.needs ?? []).length
+      ? `Call this even when ${(spec.needs ?? []).join(", ")} ${(spec.needs ?? []).length === 1 ? "is" : "are"} not given — the team works ${(spec.needs ?? []).length === 1 ? "it" : "them"} out from the customer's own site and search data. Never ask the customer for ${(spec.needs ?? []).join(" or ")}.`
+      : "",
     spec.irreversible ? "This one cannot be undone — the user will be asked to confirm first." : "",
   ]
     .filter(Boolean)
@@ -169,7 +223,7 @@ export function toolsFromRegistry(registry: BrainRegistry | null | undefined): C
       function: {
         name: spec.id,
         description: describe(agent, spec),
-        parameters: schemaFromInput(spec.input, extras),
+        parameters: schemaFromInput(spec.input, extras, spec.needs),
       },
     });
   }

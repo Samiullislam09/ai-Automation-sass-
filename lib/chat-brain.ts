@@ -20,7 +20,7 @@
 import type { SystemEventPayload } from "@/lib/chat-events";
 import type { BrainRegistry, BrainResult, BrainTaskCreated, BrainIntent } from "@/lib/brain";
 import { BRAIN_UNREACHABLE } from "@/lib/brain";
-import { ANSWER_QUESTION, capabilitiesPrompt, enabledActions } from "@/lib/chat-tools";
+import { ANSWER_QUESTION, capabilitiesPrompt, coerceParams, enabledActions, matchActionPhrase } from "@/lib/chat-tools";
 import { CONFIDENCE_FLOOR, type IntentPlan } from "@/lib/chat-brain-intent";
 import { CONFIRM_SLOT, resolveFollowUp, type ConversationState, type PendingIntent, type StateResult } from "@/lib/chat-conversation";
 import { describeWhen, parseWhen } from "@/lib/when";
@@ -291,17 +291,43 @@ export async function brainTurn(input: BrainTurnInput, deps: BrainTurnDeps): Pro
 
   /* 5 ─ What did they ask for? --------------------------------------------------------- */
   const intent = await deps.extractIntent(message, registry, { tz: input.tz, history: input.history, now });
-  if (intent.action === ANSWER_QUESTION || !enabledActions(registry).has(intent.action)) {
-    return conversation(capabilities, intent.action);
+
+  // THE MANIFEST'S OWN PHRASES OVERRULE A "this is just a question" READING.
+  //
+  // The model kept classifying a bare "ek article likho" as a question and answering it
+  // conversationally — no task, no work, and to the customer it looks like the product is
+  // interviewing them instead of doing the job (owner, 2026-08-31: "user se kuch nahi
+  // puchega"). When someone types an action's own registered trigger phrase, that is not a
+  // question, whatever the model decided; §5.1's deterministic fast path exists precisely so
+  // routing does not rest on the model's mood.
+  //
+  // Deliberately one-directional: a phrase match can turn a QUESTION into work, never the
+  // reverse, and it cannot redirect one action to another. Params are re-coerced against the
+  // action being routed to, so the question tool's own loose `topic` ("article") cannot leak in
+  // as a real subject — anything the action lists in `needs` is dropped and the planner fills it
+  // from the customer's own site instead.
+  let routed = intent;
+  const known = enabledActions(registry);
+  if (intent.action === ANSWER_QUESTION || !known.has(intent.action)) {
+    const byPhrase = matchActionPhrase(message, registry);
+    const spec = byPhrase ? known.get(byPhrase)?.spec : undefined;
+    if (byPhrase && spec) {
+      const graphFills = new Set((spec.needs ?? []).map(String));
+      const params = coerceParams(spec, intent.params ?? {});
+      for (const need of Array.from(graphFills)) delete (params as Record<string, unknown>)[need];
+      routed = { ...intent, action: byPhrase, params, missing: [] };
+    } else {
+      return conversation(capabilities, intent.action);
+    }
   }
 
   /* 6 ─ Sure enough to spend money? ---------------------------------------------------- */
-  if (intent.missing.length > 0) {
+  if (routed.missing.length > 0) {
     // ONE question (§10 rule 3). The most important missing thing is the first one the action
     // declares; the rest are asked for later or defaulted, never all at once.
-    const slot = intent.missing[0];
+    const slot = routed.missing[0];
     const saved = await deps.state.save(
-      { v: 1, route: "slot", action: intent.action, echo: intent.echo, message, intent },
+      { v: 1, route: "slot", action: routed.action, echo: routed.echo, message, intent: routed },
       slot,
       state?.turn_no ?? 0
     );
@@ -309,26 +335,36 @@ export async function brainTurn(input: BrainTurnInput, deps: BrainTurnDeps): Pro
     return {
       handled: true,
       order: nothingStarted(saved.ok ? ask : `${ask} (Pichhli baat yaad nahi rakh paunga — poora order ek message me likh dena.)`),
-      action: intent.action,
+      action: routed.action,
     };
   }
 
-  if (intent.confidence < CONFIDENCE_FLOOR) {
+  // Plan §3 rule 2, in its own words: "Publish live site pe, sab cancel, 10 article ek saath —
+  // inse pehle system ek line me dohrata hai... Draft likhna, keyword research — ye reversible
+  // hain, SEEDHA KARO." So the confidence floor gates the IRREVERSIBLE actions only. Applying it
+  // to a draft meant "write an article" came back as "Main pakka nahi hun — haan bolo?" on a
+  // request that could not have been clearer, which is the interrogation the owner keeps
+  // objecting to (2026-08-31: "user se kuch nahi puchega"). A draft that turns out wrong costs
+  // one rejected item in Approvals; asking about every one of them costs the product's whole
+  // reason to exist.
+  const targetSpec = enabledActions(registry).get(routed.action)?.spec;
+  const needsConfirmation = !!targetSpec?.irreversible || routed.delivery === "publish";
+  if (routed.confidence < CONFIDENCE_FLOOR && needsConfirmation) {
     const saved = await deps.state.save(
-      { v: 1, route: "slot", action: intent.action, echo: intent.echo, message, intent },
+      { v: 1, route: "slot", action: routed.action, echo: routed.echo, message, intent: routed },
       CONFIRM_SLOT,
       state?.turn_no ?? 0
     );
-    const ask = `Main pakka nahi hun — aapka matlab ye hai? **${intent.echo}** — "haan" bolo to shuru karta hun.`;
+    const ask = `Main pakka nahi hun — aapka matlab ye hai? **${routed.echo}** — "haan" bolo to shuru karta hun.`;
     return {
       handled: true,
       order: nothingStarted(saved.ok ? ask : `${ask} (Ye sawaal yaad nahi rahega — order poora dobara likh dena.)`),
-      action: intent.action,
+      action: routed.action,
     };
   }
 
   /* 7 ─ Order it ----------------------------------------------------------------------- */
-  return { handled: true, order: await placeOrder(intent, registry, input, deps, now), action: intent.action };
+  return { handled: true, order: await placeOrder(routed, registry, input, deps, now), action: routed.action };
 }
 
 /** "topic" → "Kis topic pe". Generic on purpose: a new agent's slot gets a sentence the day it
