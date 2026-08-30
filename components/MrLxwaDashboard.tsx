@@ -130,6 +130,9 @@ type ThreadMsg = {
   live?: boolean;
   failed?: boolean;
   taskId?: string;
+  /** The one highlight from what the order produced (a keyword, a title) — rendered as a chip,
+   *  because that is what it is; burying it in a sentence made a keyword read like prose. */
+  chip?: string;
   /** A themed button under the bubble — opens that agent's Live Visual instead of pasting its
    *  whole output into the transcript. */
   cta?: { label: string; agentId?: string };
@@ -348,6 +351,48 @@ const NetCard = ({ a, area, onClick }: { a: Agent; area: string; onClick?: () =>
     </button>
   );
 };
+
+/** The one short name for a produced item, whatever kind it is.
+ *
+ *  Agents send different payload shapes (`keyword`, `h2`, `title`, `name`, `topic`, `url`), and
+ *  this file must not learn a list of them per agent — an image or a lead agent added tomorrow
+ *  has to describe itself with no change here. First field that exists wins; nothing invented. */
+const itemHeadline = (payload: any): string | null => {
+  for (const field of ["keyword", "title", "h2", "name", "topic", "query", "url"]) {
+    const v = payload?.[field];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return null;
+};
+
+/** Plural without a lookup table: "keyword" → "keywords", "section" → "sections". Kinds are
+ *  lowercase single words by convention (see AgentContext.data's own doc), so this is enough. */
+const plural = (kind: string, n: number) => (n === 1 ? kind : kind.endsWith("s") ? kind : `${kind}s`);
+
+/** What an order produced, in ONE line plus one highlight — derived from whatever kinds the
+ *  agents actually emitted. Keyword runs, article runs, image runs and lead runs all describe
+ *  themselves through this without the chat learning any of their names. */
+function summariseProduced(items: { kind: string; payload: any; agent_id: string }[]) {
+  if (!items.length) return null;
+  const groups = new Map<string, typeof items>();
+  for (const it of items) {
+    const g = groups.get(it.kind) ?? [];
+    g.push(it);
+    groups.set(it.kind, g);
+  }
+  // The biggest group is what the order was really about; ties keep first-seen order.
+  let best: { kind: string; list: typeof items } | null = null;
+  for (const [kind, list] of Array.from(groups.entries())) {
+    if (!best || list.length > best.list.length) best = { kind, list };
+  }
+  if (!best) return null;
+  return {
+    kind: best.kind,
+    count: best.list.length,
+    headline: itemHeadline(best.list[0]?.payload),
+    agentId: best.list[0]?.agent_id ?? null,
+  };
+}
 
 /** Mr. Keyword's live screen, in the two states §24.4b asks for.
  *
@@ -828,6 +873,9 @@ export default function MrLxwaDashboard({
   const [desktopAssistantOpen, setDesktopAssistantOpen] = useState(() => pathname === "/dashboard");
   const closeAssistant = () => { setBotOpen(false); setDesktopAssistantOpen(false); };
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null);
+  // The chat's progress strip: one line by default, opens on the chevron (owner, 2026-08-31 —
+  // the expanded card was permanently eating the chat's own room).
+  const [stripOpen, setStripOpen] = useState(false);
   const [msg, setMsg] = useState("");
   const [thread, setThread] = useState<ThreadMsg[]>([]);
   const [chatBusy, setChatBusy] = useState(false);
@@ -1054,21 +1102,22 @@ export default function MrLxwaDashboard({
             : t.status === "awaiting_approval"
               ? "Done — it's waiting in Approvals."
               : "Done.";
-    // ONE line, not the whole list. Twelve keywords pasted into the transcript pushed every
-    // other message off screen and duplicated what the Live Visual shows far better (owner,
-    // 2026-08-31). Only the recommended one is named here — the rest are one click away.
-    const keywords = t.items.filter((it) => it.kind === "keyword");
-    const best = keywords[0]?.payload ?? null;
-    const text = best
-      ? `${keywords.length} keywords mile. Sabse behtar: **${best.keyword ?? "?"}**`
-      : summary;
+    // ONE line, not the whole list — twelve rows pasted into the transcript pushed every other
+    // message off screen and duplicated what the Live Visual shows far better. Written from
+    // whatever the order actually produced (summariseProduced), so an image, article or lead run
+    // reads correctly without this branch knowing any of those words.
+    const produced = summariseProduced(t.items);
+    const text = produced ? `${produced.count} ${plural(produced.kind, produced.count)} ready` : summary;
     if (!text) return;
-    const cta = keywords.length ? { label: "Live visual me dekho", agentId: "keyword" } : undefined;
+    // The highlight rides as its own chip, not glued into the sentence: it is a keyword / title,
+    // and it should look like one.
+    const chip = produced?.headline ?? undefined;
+    const cta = produced ? { label: "View in Live Visual", agentId: produced.agentId ?? undefined } : undefined;
     setThread((p) => {
       const i = p.findIndex((m) => m.taskId === id);
-      if (i < 0) return [...p, { who: "ai", text, time: nowTime(), taskId: id, cta }];
+      if (i < 0) return [...p, { who: "ai", text, time: nowTime(), taskId: id, chip, cta }];
       const next = [...p];
-      next[i] = { ...next[i], text, live: false, cta };
+      next[i] = { ...next[i], text, live: false, chip, cta };
       return next;
     });
   }, [live.byTask]);
@@ -1301,7 +1350,7 @@ export default function MrLxwaDashboard({
   const orderArticleFor = (keyword: string) => {
     const kw = keyword.trim();
     if (!kw || chatBusy) return;
-    const text = `"${kw}" pe article likho`;
+    const text = `Write an article about "${kw}"`;
     setThread((p) => [...p, { who: "user", text, time: nowTime() }]);
     setBotOpen(true);
     setDesktopAssistantOpen(true);
@@ -1618,6 +1667,13 @@ export default function MrLxwaDashboard({
                 >
                   {m.text ? boldText(m.text, `m${i}`) : m.live ? "…" : ""}
                 </div>
+                {m.chip && (
+                  <div style={{ marginLeft: 30 }} className="mt-1.5">
+                    <span className="lx-pill purple" style={{ maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", display: "inline-block" }}>
+                      {m.chip}
+                    </span>
+                  </div>
+                )}
                 {m.cta && (
                   <button
                     className="lx-grad lx-11 mt-1.5 px-3 py-1.5"
@@ -1656,7 +1712,16 @@ export default function MrLxwaDashboard({
           a chat bubble: progress is a live state, not something that was "said". */}
       {task && (
         <div className="lx-card2 mx-3 mb-2 px-3 py-2">
-          <div className="flex items-center gap-2">
+          {/* COLLAPSED BY DEFAULT — one line. The full card (order text, the ticking plan, the
+              bar, the review link) was several lines tall and permanently ate the chat's own
+              space; it now opens on the chevron and animates, so the detail is one click away
+              instead of always in the way. */}
+          <button
+            className="flex w-full items-center gap-2 bg-transparent text-left"
+            style={{ border: "none", padding: 0, cursor: "pointer" }}
+            onClick={() => setStripOpen((o) => !o)}
+            aria-expanded={stripOpen}
+          >
             <span
               className={`h-1.5 w-1.5 shrink-0 rounded-full ${taskActive ? "lx-pulse" : ""}`}
               style={{ background: taskActive ? "#22c55e" : "#8b8ba0", boxShadow: taskActive ? "0 0 8px #22c55e" : "none" }}
@@ -1665,60 +1730,67 @@ export default function MrLxwaDashboard({
               {taskActive
                 ? runningStep?.progressLabel || runningStep?.label || "Starting…"
                 : task.status === "needs_attention" || task.status === "failed"
-                  ? task.reason || "Stopped — see Office for the reason."
+                  ? task.reason || "Stopped"
                   : "Done"}
             </span>
             {stepNo != null && totalSteps != null && (
-              <span className="lx-10 lx-mut shrink-0">Step {stepNo}/{totalSteps}</span>
+              <span className="lx-10 lx-mut shrink-0">{stepNo}/{totalSteps}</span>
             )}
-          </div>
-          <div className="lx-10 lx-mut mt-1 truncate">{task.echo}</div>
+            <ChevronDown
+              size={13}
+              className="lx-mut shrink-0"
+              style={{ transform: stripOpen ? "rotate(180deg)" : "none", transition: "transform .18s" }}
+            />
+          </button>
 
-          {/* THE PLAN, TICKING. Mr Lxwa's real steps (task_steps, in plan order), each row
-              animating in as the plan lands and then flipping to done as its agent finishes —
-              this is the "planning ... phir progress" the owner asked for, built from the real
-              rows rather than a scripted sequence, so it can never show a step that is not
-              actually in the plan or tick one that has not actually finished. */}
-          {task.steps.length > 0 && (
-            <ul className="mt-2 space-y-1">
-              {task.steps.map((s, i) => {
-                const nm = [...allAgents, bossAgent].find((a) => a.id === s.agent_id)?.name ?? s.agent_id;
-                const done = s.status === "done";
-                const run = s.status === "running";
-                const bad = s.status === "failed";
-                const color = bad ? "#ef4444" : done ? "#22c55e" : run ? "#3b82f6" : "#5c5c72";
-                return (
-                  <li
-                    key={s.key}
-                    className="lx-live-anim flex items-center gap-2 lx-10"
-                    style={{ animationDelay: `${Math.min(i, 6) * 60}ms`, color: run ? "#e6e6f2" : "var(--lx-mut)" }}
-                  >
-                    <span
-                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${run ? "lx-pulse" : ""}`}
-                      style={{ background: color, boxShadow: run ? `0 0 6px ${color}` : "none" }}
-                    />
-                    <span className="min-w-0 flex-1 truncate">{nm}</span>
-                    {done && <CheckCircle2 size={11} style={{ color: "#22c55e", flexShrink: 0 }} />}
-                    {run && <span className="lx-shimmer lx-10 shrink-0">working</span>}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+          <Collapse open={stripOpen}>
+            <div className="pt-2">
+              <div className="lx-10 lx-mut truncate">{task.echo}</div>
 
-          {barTotalSteps > 0 && (
-            <div className="lx-track mt-2">
-              <div className="lx-fill" style={{ width: `${barPct}%` }} />
+              {/* THE PLAN, TICKING. Mr Lxwa's real steps (task_steps, in plan order), each row
+                  animating in as the plan lands and then flipping to done as its agent
+                  finishes. Built from the real rows, so it can never show a step that is not in
+                  the plan or tick one that has not finished. */}
+              {task.steps.length > 0 && (
+                <ul className="mt-2 space-y-1">
+                  {task.steps.map((st, i) => {
+                    const nm = [...allAgents, bossAgent].find((a) => a.id === st.agent_id)?.name ?? st.agent_id;
+                    const done = st.status === "done";
+                    const run = st.status === "running";
+                    const bad = st.status === "failed";
+                    const color = bad ? "#ef4444" : done ? "#22c55e" : run ? "#3b82f6" : "#5c5c72";
+                    return (
+                      <li
+                        key={st.key}
+                        className="lx-live-anim flex items-center gap-2 lx-10"
+                        style={{ animationDelay: `${Math.min(i, 6) * 60}ms`, color: run ? "#e6e6f2" : "var(--lx-mut)" }}
+                      >
+                        <span
+                          className={`h-1.5 w-1.5 shrink-0 rounded-full ${run ? "lx-pulse" : ""}`}
+                          style={{ background: color, boxShadow: run ? `0 0 6px ${color}` : "none" }}
+                        />
+                        <span className="min-w-0 flex-1 truncate">{nm}</span>
+                        {done && <CheckCircle2 size={11} style={{ color: "#22c55e", flexShrink: 0 }} />}
+                        {run && <span className="lx-shimmer lx-10 shrink-0">working</span>}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+
+              {barTotalSteps > 0 && (
+                <div className="lx-track mt-2">
+                  <div className="lx-fill" style={{ width: `${barPct}%` }} />
+                </div>
+              )}
+
+              {task.status === "awaiting_approval" && (
+                <Link href="/dashboard/approvals" className="lx-grad lx-11 mt-2 inline-flex px-3 py-1.5">
+                  Review &rarr;
+                </Link>
+              )}
             </div>
-          )}
-          {/* The finished work is reviewed and edited in Approvals — a real route, linked only
-              once the order actually reached it. Themed to the dashboard's own gradient and
-              kept to two words, per the owner: no paragraph, just the way in. */}
-          {task.status === "awaiting_approval" && (
-            <Link href="/dashboard/approvals" className="lx-grad lx-11 mt-2 inline-flex px-3 py-1.5">
-              Review →
-            </Link>
-          )}
+          </Collapse>
         </div>
       )}
 
