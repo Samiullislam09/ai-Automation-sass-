@@ -114,10 +114,25 @@ async function planTopics(
     clusterBlock,
     pageTitles.length ? `Existing pages on their site:\n- ${pageTitles.slice(0, 25).join("\n- ")}` : "",
     alreadyWritten.length ? `Already written (DO NOT repeat these):\n- ${alreadyWritten.join("\n- ")}` : "",
+    // The measured Search Console block — striking-distance queries (ranking 5-25: seen but not
+    // clicked, the cheapest positions to actually win), high-impression/no-click queries, and
+    // what already wins so we never cannibalise it. This function existed and was IMPORTED here
+    // all along but never called, so every plan was made blind to the one dataset that says
+    // which topic can realistically rank (owner's ask 2026-08-31: "traffic wala topic chune...
+    // taki google pe rank ho").
+    planningBlock(insights),
     "",
     `Choose exactly ${count} NEW blog topic${count === 1 ? "" : "s"} this business should publish next.`,
-    "Rules: each topic must be something their real customers would search for; specific, not generic;",
-    "no topic may duplicate or closely paraphrase anything listed above.",
+    "",
+    "YOU ARE PICKING FOR BUSINESS GROWTH AND GOOGLE RANKINGS — not for what is interesting to write.",
+    "Judge every candidate against these, in this order:",
+    "1. CAN IT RANK? Prefer a specific long-tail question this site has a real chance at over a broad head term it will never beat. A topic already ranking 5-25 is the cheapest win there is — it needs one good page, not a new audience.",
+    "2. IS THERE MEASURED DEMAND? Prefer queries with real impressions above anything invented. Measured beats plausible, every time.",
+    "3. DOES IT BRING THE RIGHT PEOPLE? The reader should be someone who could actually buy what this business sells — a topic that pulls traffic which will never convert is a waste of a page.",
+    "4. IS IT CLOSE TO WHAT THEY SELL? Prefer topics that connect naturally to a real offering listed above, so the article has somewhere to send the reader.",
+    "",
+    "Rules: each topic must be something their real customers would type into Google; specific, not generic;",
+    "no topic may duplicate or closely paraphrase anything listed above; never propose a topic that competes with a query this site is already winning.",
     gaps.length
       ? "PRIORITY: take topics from the gap list first, quoted closely enough that the article can target that exact search. Only invent new ones once the gaps are used up."
       : insights.connected
@@ -125,7 +140,7 @@ async function planTopics(
       : "",
     profile?.goals?.primary
       ? "For each topic, the `why` must say how it serves the goal above — not why the subject is interesting."
-      : "",
+      : "Each `why` must name the growth reason in plain words — the measured number it targets, the ranking position it can take, or the offering it feeds — never that the subject is important or timely.",
     "",
     'Reply with ONLY JSON: {"topics":[{"topic":"...","why":"one short sentence"}]}',
   ].filter(Boolean).join("\n");
