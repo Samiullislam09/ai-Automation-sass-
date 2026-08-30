@@ -21,6 +21,9 @@ const OUTLINE = {
     { h2: "What counts as a plumbing emergency", goal: "define urgency", keyword: "plumbing emergency", readerQuestion: "is this urgent?" },
     { h2: "What it costs", goal: "set price expectations", keyword: "emergency plumber cost", readerQuestion: "how much will this cost?" },
     { h2: "How to isolate the water", goal: "give a concrete action", keyword: "isolate water supply", readerQuestion: "what do I do right now?" },
+    // Four, not three, since MIN_SECTIONS rose to 4 on 2026-08-31 — see its comment in
+    // writerPipeline.ts for the 362-word article that forced it.
+    { h2: "When to call a professional", goal: "set the escalation line", keyword: "call an emergency plumber", readerQuestion: "can I wait until morning?" },
   ],
 };
 
@@ -47,7 +50,7 @@ test("buildOutline parses a well-formed reply, code-fence and all", async () => 
   });
   const outline = await buildOutline(TOPIC, undefined, undefined, fn);
   assert.equal(outline.title, OUTLINE.title);
-  assert.equal(outline.sections.length, 3);
+  assert.equal(outline.sections.length, 4);
   assert.equal(outline.sections[0].h2, "What counts as a plumbing emergency");
 });
 

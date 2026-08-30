@@ -139,7 +139,10 @@ function contextLines(context?: WriterContext): string {
 
 /* ---------------------------------------------------------------- 1 · outline ------------ */
 
-const MIN_SECTIONS = 3;
+// Raised 3 → 4 on 2026-08-31. Belt and braces with the per-section floor: even if the model
+// under-delivers on every section the way it did at 3×~120 words, four sections clear the
+// quality gate's 600-word block instead of landing at 362 and being thrown away.
+const MIN_SECTIONS = 4;
 const MAX_SECTIONS = 6;
 
 export async function buildOutline(
@@ -198,11 +201,19 @@ export async function writeSection(
     `THIS SECTION'S JOB: ${section.goal}`,
     `THE READER'S QUESTION IT ANSWERS: ${section.readerQuestion}`,
     `Place this phrase naturally, once: "${section.keyword}"`,
-    `300-400 words. Start with "## ${section.h2}" then the prose. Short paragraphs (2-4 sentences). No filler, no "in today's fast-paced world" openings. Use only facts present in the context above — never invent a statistic, price, award, client name or date.`,
+    // LENGTH IS STATED AS A HARD FLOOR, NOT A RANGE. Measured live 2026-08-31: with
+    // "300-400 words" the model delivered ~120 per section, so a 3-section article came out at
+    // 362 words and the quality gate blocked it (DEFAULT_MIN_WORDS 600) — a real article,
+    // written about the right thing, thrown away for length alone. A floor plus an explicit
+    // "do not stop early" reads as a requirement rather than a suggestion.
+    `LENGTH: at least 300 words for this section — this is a hard minimum, not a target. Do not stop early; if you run short, go deeper on the reader's question with specifics rather than padding.`,
+    `Start with "## ${section.h2}" then the prose. Short paragraphs (2-4 sentences). No filler, no "in today's fast-paced world" openings. Use only facts present in the context above — never invent a statistic, price, award, client name or date.`,
     `Output markdown only — no preamble, no explanation.`,
   ].filter(Boolean).join("\n\n");
 
-  const text = await complete(prompt, { maxTokens: 700, label: "writer.section" });
+  // 700 tokens capped a 300-word section at roughly its own minimum, leaving the model no room
+  // to satisfy the floor above — 1100 gives ~450 words of headroom.
+  const text = await complete(prompt, { maxTokens: 1100, label: "writer.section" });
   return text.trim();
 }
 
