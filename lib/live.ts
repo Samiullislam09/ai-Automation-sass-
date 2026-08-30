@@ -189,6 +189,8 @@ export type StepState = {
   reason: string | null;
   /** The run this status belongs to, so a retry may legitimately re-open a failed step. */
   runId: string | null;
+  /** The agent's own return value, straight from `task_steps.output`. */
+  output: any;
 };
 
 export type PaneStatus = "idle" | "running" | "done" | "failed";
@@ -422,6 +424,7 @@ function upsertStep(steps: StepState[], key: string, seed: Partial<StepState> & 
       ms: null,
       reason: null,
       runId: runId ?? null,
+      output: null,
     };
     const made = advanceStep(fresh, patch, runId);
     // Plan order when we know it (`no`), arrival order otherwise.
@@ -674,6 +677,9 @@ export type TaskRow = {
 
 export type StepRow = {
   id: string;
+  /** Whatever the agent returned. Read so the UI can link straight at the thing that was made
+   *  (e.g. the writer's `contentItemId`) instead of dumping the user on a list to find it. */
+  output?: any;
   no: number;
   agent_id: string;
   action: string;
@@ -740,6 +746,7 @@ export function hydrateTask(state: LiveState, snap: { task: TaskRow; steps?: Ste
         // `task_steps.error` is the same string the orchestrator hands to `task_failed`, which
         // the brain's own `userMessage()` shows to people. Not a new channel.
         reason: row.error ?? null,
+        output: row.output ?? null,
       },
     );
     if (started && (t.startedAt == null || started < t.startedAt)) t.startedAt = started;
@@ -854,7 +861,7 @@ export function supabaseSource(): WorkspaceSource {
       if (!task) throw new Error("No such order.");
       const { data: steps, error: stepErr } = await db
         .from("task_steps")
-        .select("id, no, agent_id, action, status, error, started_at, finished_at, optional")
+        .select("id, no, agent_id, action, status, error, started_at, finished_at, optional, output")
         .eq("task_id", taskId)
         .order("no");
       if (stepErr) throw new Error(stepErr.message);

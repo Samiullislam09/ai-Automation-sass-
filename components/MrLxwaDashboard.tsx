@@ -922,14 +922,20 @@ export default function MrLxwaDashboard({
     (selectedAgentId ? [...allAgents, bossAgent].find((a) => a.id === selectedAgentId) ?? null : null) ??
     workingAgent ??
     (lastStep ? [...allAgents, bossAgent].find((a) => a.id === lastStep.agent_id) ?? null : null);
-  // Auto-open only on the rising edge (nobody→somebody working) — e.g. a real task just
-  // started from chat. It never forces the panel back open after the user closes it while
-  // work continues; `panelOpen` above already hides it on its own once nobody is working.
-  const hadWorkingAgent = useRef(!!workingAgent);
+  // Auto-open on the rising edge of AN ACTIVE ORDER — not of "somebody is Working".
+  //
+  // Keyed off `workingAgent` before, this missed the case the owner actually hits: for the first
+  // seconds after an order is placed the task exists but every step is still `pending`, so no
+  // agent is "Working", so nothing opened — and by the time a step did start, the effect's
+  // dependency was a fresh object on every render rather than a value that changed, which is not
+  // something to rely on. `taskActive` is a boolean, so this fires exactly once per new order,
+  // immediately, and the panel is already open to show the plan landing and then each agent
+  // taking its turn. Closing it still sticks: the flag only re-arms when the next order starts.
+  const hadActiveTask = useRef(false);
   useEffect(() => {
-    if (workingAgent && !hadWorkingAgent.current) setShowPanel(true);
-    hadWorkingAgent.current = !!workingAgent;
-  }, [workingAgent]);
+    if (taskActive && !hadActiveTask.current) setShowPanel(true);
+    hadActiveTask.current = taskActive;
+  }, [taskActive]);
 
   useEffect(() => {
     const el = chatRef.current;
@@ -1316,6 +1322,17 @@ export default function MrLxwaDashboard({
   // Real progress numbers off `task` — used by BOTH the chat's live strip and the bottom bar,
   // so they are declared here, before either is built (a `const` used above its declaration in
   // the same scope is a runtime TDZ crash, not a type error).
+  // The exact thing this order produced, so "Review" opens THAT article instead of dumping the
+  // user on the Approvals list to hunt for it. `contentItemId` is the writer's own return value
+  // (agent-server/src/agents/writer.ts), carried through task_steps.output — no guessing, and
+  // no link at all when there is nothing to open.
+  const reviewHref = (() => {
+    for (const st of task?.steps ?? []) {
+      const id = st.output?.contentItemId;
+      if (typeof id === "string" && id) return `/dashboard/content/${id}`;
+    }
+    return null;
+  })();
   const barDoneSteps = task ? task.steps.filter((s) => s.status === "done").length : 0;
   const barTotalSteps = task ? task.totalSteps ?? task.steps.length : 0;
   const barPct = barTotalSteps ? Math.round((barDoneSteps / barTotalSteps) * 100) : 0;
@@ -1784,9 +1801,11 @@ export default function MrLxwaDashboard({
                 </div>
               )}
 
-              {task.status === "awaiting_approval" && (
-                <Link href="/dashboard/approvals" className="lx-grad lx-11 mt-2 inline-flex px-3 py-1.5">
-                  Review &rarr;
+              {/* Only once the order is genuinely over, and only when there is a real thing to
+                  open — straight at the article, not the Approvals list. */}
+              {isTerminalTask(task.status) && reviewHref && (
+                <Link href={reviewHref} className="lx-grad lx-10 mt-2 inline-flex px-2.5 py-1">
+                  Review
                 </Link>
               )}
             </div>
