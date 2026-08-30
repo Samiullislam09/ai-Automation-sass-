@@ -288,13 +288,17 @@ const NetCard = ({ a, area, onClick }: { a: Agent; area: string; onClick?: () =>
     <button
       type="button"
       onClick={onClick}
-      disabled={!working}
+      // Only a "Planned" agent is inert — it has no implementation, so it has nothing to show.
+      // Every real agent is clickable whatever its status: the whole point is being able to ask
+      // an idle or finished agent "what did you do?", not just watch the one mid-run.
+      disabled={planned}
       className={`lx-net-card ${working ? "lx-net-card-working" : ""}`}
       data-net={area}
       data-agent-id={a.id}
+      title={planned ? `${a.name} is not built yet` : `See what ${a.name} is doing`}
       style={{
         gridArea: area,
-        cursor: working ? "pointer" : "default",
+        cursor: planned ? "default" : "pointer",
         opacity: planned ? 0.68 : 1,
         borderStyle: planned ? "dashed" : "solid",
         borderColor: working ? `${a.color}bb` : undefined,
@@ -504,10 +508,14 @@ const AgentNetwork = ({
               was a hardcoded "Online" regardless of whether Mr Lxwa's own step (boss.pick_topic,
               2026-08-31) was genuinely running. "Online" stays the resting-state word (he is
               always reachable); "Working" only shows while he is actually mid-step. */}
-          <div
+          <button
+            type="button"
+            onClick={() => onOpen(bossAgent)}
+            title="See what Mr Lxwa is doing"
             className={`lx-hex lx-net-brain ${bossAgent.status === "Working" ? "lx-net-card-working" : ""}`}
             data-net="b"
-            style={{ gridArea: "b", boxShadow: bossAgent.status === "Working" ? `0 0 26px ${bossAgent.color}55` : undefined }}
+            data-agent-id="boss"
+            style={{ gridArea: "b", cursor: "pointer", border: "none", boxShadow: bossAgent.status === "Working" ? `0 0 26px ${bossAgent.color}55` : undefined }}
           >
             {/* eslint-disable-next-line @next/next/no-img-element -- static brand asset, fixed size */}
             <img src="/brand/brain-boss.png" alt="" width={156} height={124} />
@@ -518,7 +526,7 @@ const AgentNetwork = ({
               <span className="h-1.5 w-1.5 rounded-full lx-pulse" style={{ background: bossAgent.status === "Working" ? "#3b82f6" : "#22c55e" }} />
               {bossAgent.status === "Working" ? "Working" : "Online"}
             </div>
-          </div>
+          </button>
 
           {right.map((a, i) => (
             <NetCard key={a.id} a={a} area={`r${i + 1}`} onClick={() => onOpen(a)} />
@@ -740,15 +748,22 @@ export default function MrLxwaDashboard({
   // not sit closed until Mr. Keyword picks up afterward.
   const workingAgent = bossAgent.status === "Working" ? bossAgent : allAgents.find((a) => a.status === "Working") ?? null;
   const [showPanel, setShowPanel] = useState(!!workingAgent);
+  // Which agent the user asked to look at, by clicking its card. Null = "just follow the work"
+  // (whoever is running, else whoever ran last). Set by openAgentPanel below; cleared when the
+  // panel is closed, so the next auto-open follows the work again rather than being stuck on
+  // an agent the user looked at ten minutes ago.
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   // The panel used to require `workingAgent`, so it vanished the instant the last step finished
   // — the user watched it disappear exactly when the result became worth reading. It now stays
   // on whatever task it was opened for until the user closes it (X), which is also what makes
   // the finished state readable at all.
   const panelOpen = showPanel && !!task;
-  // Who the panel is about: whoever is working, else whoever ran most recently in this task —
-  // never a hardcoded "Mr. Writer" fallback, which is what it used to show for every agent.
+  // Who the panel is about: the agent the user clicked, else whoever is working, else whoever
+  // ran most recently in this task — never a hardcoded "Mr. Writer" fallback, which is what it
+  // used to show for every agent.
   const lastStep = task ? [...task.steps].filter((s) => s.startedAt != null).sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))[0] : null;
   const panelAgent =
+    (selectedAgentId ? [...allAgents, bossAgent].find((a) => a.id === selectedAgentId) ?? null : null) ??
     workingAgent ??
     (lastStep ? [...allAgents, bossAgent].find((a) => a.id === lastStep.agent_id) ?? null : null);
   // Auto-open only on the rising edge (nobody→somebody working) — e.g. a real task just
@@ -1064,8 +1079,20 @@ export default function MrLxwaDashboard({
   // Only a working agent is ever clickable — the panel shows real live activity for it, and
   // there is no fake content to show for one that's idle. Clicking any of the other 9 icons
   // does nothing, same as they'd be inert in the real dashboard until they actually start.
+  // EVERY card opens its own agent's live view — including Mr Lxwa's brain card, and including
+  // agents that are idle or already finished. It used to open only for an agent whose status
+  // was exactly "Working", so nine of the ten cards were inert clicks and the user could never
+  // ask "what did Mr. Keyword actually do?" after it finished (owner's ask, 2026-08-31).
+  // A "Planned" agent (Mr. Image / Mr. Story) still does nothing: it has no code behind it, so
+  // there is genuinely nothing to show.
   const openAgentPanel = (a: Agent) => {
-    if (a.status === "Working") setShowPanel(true);
+    if (a.status === "Planned") return;
+    setSelectedAgentId(a.id);
+    setShowPanel(true);
+  };
+  const closeAgentPanel = () => {
+    setShowPanel(false);
+    setSelectedAgentId(null);
   };
 
   const Workflow = (
@@ -1117,10 +1144,25 @@ export default function MrLxwaDashboard({
   // Real data for the panel below — all derived from `task` (the newest live task for this
   // tenant). `workingAgent` only exists when some step is genuinely "running", so everywhere
   // below that reads `task` inside AgentPanel is only ever reached with a real task present.
-  const runningStep = task?.steps.find((s) => s.status === "running") ?? null;
-  const stepNo = task && runningStep ? task.steps.findIndex((s) => s.key === runningStep.key) + 1 : null;
+  // Everything the panel shows is scoped to `panelAgent` — the card the user clicked (or, if
+  // they clicked nothing, whoever is working). Before this it always showed the whole task's
+  // combined output no matter which agent you were looking at, so clicking Mr. Keyword and
+  // clicking Mr. Writer rendered exactly the same panel.
+  const panelStep =
+    (panelAgent ? task?.steps.find((s) => s.agent_id === panelAgent.id && s.status === "running") : null) ??
+    (panelAgent ? [...(task?.steps ?? [])].filter((s) => s.agent_id === panelAgent.id).sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))[0] : null) ??
+    null;
+  const runningStep = panelStep?.status === "running" ? panelStep : null;
+  const stepNo = task && panelStep ? task.steps.findIndex((s) => s.key === panelStep.key) + 1 : null;
   const totalSteps = task?.totalSteps ?? task?.steps.length ?? null;
-  const producedItems = task ? task.agents.flatMap((p) => p.items).sort((a, b) => a.at - b.at) : [];
+  const producedItems = task
+    ? task.agents
+        .filter((p) => !panelAgent || p.agent_id === panelAgent.id)
+        .flatMap((p) => p.items)
+        .sort((a, b) => a.at - b.at)
+    : [];
+  // This agent's own sentences, plus the task-level ones (agent_id null) that frame them.
+  const panelLines = (task?.lines ?? []).filter((ln) => !panelAgent || ln.agent_id == null || ln.agent_id === panelAgent.id);
   const itemLabel = (it: (typeof producedItems)[number]) => {
     // The writer's real event kinds (agent-server/src/agents/writer.ts) — anything else
     // (from other agents in the same task) falls back to a generic "<kind>" line rather than
@@ -1128,6 +1170,17 @@ export default function MrLxwaDashboard({
     if (it.kind === "section") return `Section written: "${it.payload?.h2 ?? "untitled"}" (${it.payload?.words ?? "?"} words)`;
     if (it.kind === "research") return it.payload?.used ? `Research used — ${it.payload?.sources ?? "?"} sources` : "No research needed for this topic";
     if (it.kind === "score") return `Quality score: ${it.payload?.quality ?? "?"}/100 ${it.payload?.passed ? "— passed" : "— needs another pass"}`;
+    // Mr Lxwa's own pick (agents/boss.ts's ctx.data("topic_picked", …)) — it was rendering as
+    // the bare word "topic_picked" because this fell through to `it.kind`, hiding the one thing
+    // the brain's step actually produced and the reason it chose it.
+    if (it.kind === "topic_picked") {
+      const t = it.payload?.topic ?? "a topic";
+      return it.payload?.why ? `Chose "${t}" — ${it.payload.why}` : `Chose "${t}"`;
+    }
+    if (it.kind === "keyword") {
+      const vol = typeof it.payload?.searchVolume === "number" ? `${it.payload.searchVolume}/mo` : "volume not measured";
+      return `Keyword: ${it.payload?.keyword ?? "?"} — ${vol}`;
+    }
     return it.kind;
   };
 
@@ -1153,7 +1206,7 @@ export default function MrLxwaDashboard({
           </div>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <button className="lx-icobtn" aria-label="Close" onClick={() => setShowPanel(false)}>
+          <button className="lx-icobtn" aria-label="Close" onClick={closeAgentPanel}>
             <X size={14} />
           </button>
         </div>
@@ -1260,13 +1313,17 @@ export default function MrLxwaDashboard({
               `tab` state changed — so it was a control that looked functional and did nothing.
               The one real view it claimed to offer is the timeline directly below. */}
 
-          <div className="lx-13 mt-4 font-semibold">What the team is doing</div>
+          <div className="lx-13 mt-4 font-semibold">
+            {panelAgent ? `What ${panelAgent.name} is doing` : "What the team is doing"}
+          </div>
 
           {/* timeline — task.lines: real, human-readable events (lib/live.ts's userMessage()),
-              never a raw prompt/error string. */}
+              never a raw prompt/error string. Scoped to the agent whose card was clicked; task-
+              level lines (agent_id null — "On it — 4 steps", "Done") always stay, since they are
+              the frame every agent's work sits inside. */}
           <div className="lx-tl mt-1">
-            {(task?.lines ?? []).length === 0 && <div className="lx-11 lx-mut py-2">No activity yet.</div>}
-            {(task?.lines ?? []).slice(-8).map((ln) => {
+            {panelLines.length === 0 && <div className="lx-11 lx-mut py-2">No activity yet.</div>}
+            {panelLines.slice(-8).map((ln) => {
               const color = ln.tone === "ok" ? "#22c55e" : ln.tone === "err" ? "#ef4444" : ln.tone === "warn" ? "#f59e0b" : "#3b82f6";
               return (
                 <div className="lx-row" key={ln.key}>
