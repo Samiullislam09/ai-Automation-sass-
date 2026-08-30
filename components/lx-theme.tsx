@@ -193,10 +193,26 @@ export const LX_CSS = `
 
 .lx-net-card{position:relative;z-index:1;background:#0b0b14;border:1px solid rgba(255,255,255,.08);
   border-radius:14px;padding:15px;text-align:left;display:flex;flex-direction:column;width:100%;
-  min-height:126px;transition:.18s;box-shadow:0 4px 18px rgba(0,0,0,.35)}
+  min-height:126px;transition:transform .25s cubic-bezier(.16,1,.3,1),border-color .18s,box-shadow .25s,background .18s;
+  box-shadow:0 4px 18px rgba(0,0,0,.35)}
 .lx-net-card:not(:disabled):hover{border-color:rgba(56,189,248,.45);background:#0e0e19}
+/* the one agent actually doing something right now — real state (statusForAgent in
+   MrLxwaDashboard.tsx), never a hover trick. Scaled up and lifted in z-order rather than
+   physically relocated in the grid: the grid areas are hand-placed to match the reference
+   mockup (see .lx-net below), and moving cards around on every status change would fight that
+   layout instead of complementing it. */
+.lx-net-card-working{z-index:2;transform:scale(1.045);background:#0e0e1a}
 .lx-net-icon{width:46px;height:46px;border-radius:11px;display:flex;align-items:center;
   justify-content:center;flex-shrink:0}
+
+/* ---- wire overlay — the brain's live connection to whichever agent(s) are working -----
+   One SVG line per working agent, drawn between measured DOM centers (WireOverlay in
+   MrLxwaDashboard.tsx) so it tracks the real responsive grid instead of guessing coordinates.
+   The moving dash is the "data flowing" read; a static line would look like decoration instead
+   of a live signal. */
+.lx-wire{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible;z-index:0}
+.lx-wire-flow{stroke-dasharray:2 10;animation:lxWireFlow 1.1s linear infinite}
+@keyframes lxWireFlow{to{stroke-dashoffset:-24}}
 
 /* smooth open/close of blocks of unknown height — see the Collapse component. A gentle
    decelerate-only curve (no fast front-load) so a large height swing (compact strip ↔ full

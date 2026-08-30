@@ -120,7 +120,10 @@ const NAV: NavItem[] = [
 
 /** A chat bubble. `live` = still streaming in (the loop below keeps appending to `text`);
  *  `failed` = the request/stream broke and `text` is whatever partial reply had arrived. */
-type ThreadMsg = { who: "user" | "ai"; text: string; time: string; live?: boolean; failed?: boolean };
+/** `taskId` marks a bubble as the ONE live-status line for that order — see the effect below
+ *  that updates it in place as the task progresses, rather than a fresh "..." spinner the user
+ *  has to guess the meaning of. */
+type ThreadMsg = { who: "user" | "ai"; text: string; time: string; live?: boolean; failed?: boolean; taskId?: string };
 
 type AgentStatus = "Completed" | "Working" | "Waiting" | "Planned";
 type Agent = { id: string; name: string; role: string; status: AgentStatus; icon: React.ElementType; color: string };
@@ -286,9 +289,17 @@ const NetCard = ({ a, area, onClick }: { a: Agent; area: string; onClick?: () =>
       type="button"
       onClick={onClick}
       disabled={!working}
-      className="lx-net-card"
+      className={`lx-net-card ${working ? "lx-net-card-working" : ""}`}
       data-net={area}
-      style={{ gridArea: area, cursor: working ? "pointer" : "default", opacity: planned ? 0.68 : 1, borderStyle: planned ? "dashed" : "solid" }}
+      data-agent-id={a.id}
+      style={{
+        gridArea: area,
+        cursor: working ? "pointer" : "default",
+        opacity: planned ? 0.68 : 1,
+        borderStyle: planned ? "dashed" : "solid",
+        borderColor: working ? `${a.color}bb` : undefined,
+        boxShadow: working ? `0 0 22px ${a.color}40, 0 4px 18px rgba(0,0,0,.35)` : undefined,
+      }}
     >
       <div className="flex w-full items-start justify-between">
         {/* tinted-dark square with the agent's colored icon + a soft matching glow — the
@@ -366,6 +377,67 @@ const Collapse = ({ open, children }: { open: boolean; children: React.ReactNode
   </div>
 );
 
+/** The live wire between the brain card and whichever agent(s) are actually working right now —
+ *  drawn from measured DOM centers (`data-agent-id`/`data-net="b"`), not guessed coordinates, so
+ *  it tracks the real responsive grid (.lx-net's container-query reflow at 440px) instead of a
+ *  fixed layout that would only be right at one width. Re-measures on any resize of the host —
+ *  covers a browser resize and the grid's own breakpoint flip in one listener. No line at all
+ *  when nobody is working: a wire to an idle agent would be exactly the kind of "looks alive,
+ *  isn't" this whole pass was about removing. */
+const WireOverlay = ({ hostRef, workingAgents }: { hostRef: React.RefObject<HTMLDivElement>; workingAgents: Agent[] }) => {
+  const [lines, setLines] = useState<{ id: string; x1: number; y1: number; x2: number; y2: number; color: string }[]>([]);
+  const workingKey = workingAgents.map((a) => `${a.id}:${a.color}`).join(",");
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || !workingAgents.length) {
+      setLines([]);
+      return;
+    }
+
+    const measure = () => {
+      const hostRect = host.getBoundingClientRect();
+      const brainEl = host.querySelector<HTMLElement>('[data-net="b"]');
+      if (!hostRect.width || !brainEl) return;
+      const brainRect = brainEl.getBoundingClientRect();
+      const bx = brainRect.left + brainRect.width / 2 - hostRect.left;
+      const by = brainRect.top + brainRect.height / 2 - hostRect.top;
+
+      const next = workingAgents
+        .map((a) => {
+          const el = host.querySelector<HTMLElement>(`[data-agent-id="${a.id}"]`);
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          return { id: a.id, x1: bx, y1: by, x2: r.left + r.width / 2 - hostRect.left, y2: r.top + r.height / 2 - hostRect.top, color: a.color };
+        })
+        .filter((x): x is NonNullable<typeof x> => x != null);
+      setLines(next);
+    };
+
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(host);
+    window.addEventListener("resize", measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hostRef, workingKey]);
+
+  if (!lines.length) return null;
+  return (
+    <svg className="lx-wire" aria-hidden>
+      {lines.map((l) => (
+        <g key={l.id}>
+          <line x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke={`${l.color}33`} strokeWidth={2} />
+          <line className="lx-wire-flow" x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke={l.color} strokeWidth={2.5} strokeLinecap="round" />
+        </g>
+      ))}
+    </svg>
+  );
+};
+
 /** The resting-state "AI Agent Network": color-coded agent cards arranged around the brain
  *  "command center" card. */
 const AgentNetwork = ({
@@ -389,6 +461,8 @@ const AgentNetwork = ({
   workingAgent: Agent | null;
   onOpen: (a: Agent) => void;
 }) => {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const workingAgents = [...top, ...left, ...right, ...bottom].filter((a) => a.status === "Working");
   return (
     <div className="p-4 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -410,7 +484,8 @@ const AgentNetwork = ({
         </div>
       )}
 
-      <div className="lx-net-host relative mt-4">
+      <div className="lx-net-host relative mt-4" ref={hostRef}>
+        <WireOverlay hostRef={hostRef} workingAgents={workingAgents} />
         <div className="lx-net">
           {top.map((a, i) => (
             <NetCard key={a.id} a={a} area={`t${i + 1}`} onClick={() => onOpen(a)} />
@@ -628,6 +703,7 @@ export default function MrLxwaDashboard({
   // up in Workspace/Approvals.
   const orderedTaskId = useRef<string | null>(null);
   const reportedTaskIds = useRef<Set<string>>(new Set());
+  const startedLiveBubble = useRef<Set<string>>(new Set());
 
   // The agent panel (live activity, timeline, search results) exists to show ONE agent's
   // live work — it only makes sense while an agent is actually working. `workingAgent` is
@@ -758,23 +834,49 @@ export default function MrLxwaDashboard({
     void stream(t);
   };
 
-  /** Reports the order's real outcome back into the thread once `live` says it is over — see
-   *  `orderedTaskId` above. Fires at most once per task (`reportedTaskIds`), and everything it
-   *  writes is read straight off the task's own fields — never invented here.
+  /** The order's own live status line — one bubble per task (`taskId`, found/updated by that
+   *  key, never duplicated), updated in place as real events arrive instead of sitting on "On
+   *  it" until the whole thing is over. 2026-08-31, the owner's own words: "sirf on it nahi ho".
+   *  While the task runs, its text is the running step's own label/progress (or the latest
+   *  recorded line) — real sentences the brain already wrote for a human (lib/live.ts's
+   *  `userMessage()`), never invented here. Once terminal, the SAME bubble is overwritten with
+   *  the final summary and stops being `live`.
    *
-   *  THE SUMMARY LINE COMES FROM `t.status`/`t.reason`, NOT `t.lines[last]`. Found live
+   *  THE FINAL SUMMARY LINE COMES FROM `t.status`/`t.reason`, NOT `t.lines[last]`. Found live
    *  2026-08-29: `hydrateTask()` and a live broadcast update `state` in two separate `setState`
    *  calls (status+steps first, the event history that fills `lines` a beat later — see
    *  lib/live.ts's `pull()`), so this effect could fire the instant `isTerminalTask` turned
    *  true but before the "Done" line had arrived, and permanently report a mid-run progress
-   *  label ("Learning how they write...") as if it were the final answer — `reportedTaskIds`
-   *  then blocks it from ever correcting itself. `status`/`reason` are set atomically with the
-   *  terminal transition in both hydrate and fold, so they can't be caught mid-update. */
+   *  label ("Learning how they write...") as if it were the final answer. `status`/`reason` are
+   *  set atomically with the terminal transition in both hydrate and fold, so they can't be
+   *  caught mid-update — the live (non-terminal) phase above has no such guarantee, which is
+   *  fine there: showing one event slightly behind is harmless, the risk is only ever in what
+   *  gets written down as final. */
   useEffect(() => {
     const id = orderedTaskId.current;
     if (!id) return;
     const t = live.byTask[id];
-    if (!t || !isTerminalTask(t.status) || reportedTaskIds.current.has(id)) return;
+    if (!t) return;
+
+    if (!isTerminalTask(t.status)) {
+      const runningNow = t.steps.find((s) => s.status === "running");
+      const latestLine = t.lines[t.lines.length - 1];
+      const liveText = runningNow?.progressLabel || runningNow?.label || latestLine?.text || "On it…";
+      setThread((p) => {
+        if (!startedLiveBubble.current.has(id)) {
+          startedLiveBubble.current.add(id);
+          return [...p, { who: "ai", text: liveText, time: nowTime(), live: true, taskId: id }];
+        }
+        const i = p.findIndex((m) => m.taskId === id);
+        if (i < 0 || p[i].text === liveText) return p;
+        const next = [...p];
+        next[i] = { ...next[i], text: liveText };
+        return next;
+      });
+      return;
+    }
+
+    if (reportedTaskIds.current.has(id)) return;
     reportedTaskIds.current.add(id);
 
     const summary =
@@ -798,7 +900,14 @@ export default function MrLxwaDashboard({
           .join("\n")
       : "";
     const text = [summary, keywordLines].filter(Boolean).join("\n\n");
-    if (text) setThread((p) => [...p, { who: "ai", text, time: nowTime() }]);
+    if (!text) return;
+    setThread((p) => {
+      const i = p.findIndex((m) => m.taskId === id);
+      if (i < 0) return [...p, { who: "ai", text, time: nowTime(), taskId: id }];
+      const next = [...p];
+      next[i] = { ...next[i], text, live: false };
+      return next;
+    });
   }, [live.byTask]);
 
   /* ---------------------------------------------------------------------- */
@@ -1069,6 +1178,25 @@ export default function MrLxwaDashboard({
             <div className="lx-11 lx-mut mt-1.5">Step {stepNo} of {totalSteps}</div>
           )}
 
+          {/* Mr Lxwa's plan — task.outline, built by the real planner (agent-server's
+              planner.ts) the instant the order was accepted, over the actual manifest graph for
+              this order (not a canned list — a "publish karo" order gets a different plan than
+              a draft, and one where a topic had to be picked shows Mr Lxwa's own pick_topic step
+              first). Was computed all along and shown only on the Office page; the owner asked
+              for it here too, 2026-08-31 ("boss ne jo plan bana ye ha wo b dikhna chaaya"). */}
+          {task && task.outline.length > 0 && (
+            <div className="lx-card2 mt-3 p-3">
+              <div className="flex items-center gap-1.5 lx-11 font-semibold" style={{ color: "var(--lx-violet)" }}>
+                <BrainCircuit size={13} /> Mr Lxwa&apos;s Plan
+              </div>
+              <ol className="mt-1.5 space-y-1">
+                {task.outline.map((line, i) => (
+                  <li key={i} className="lx-11" style={{ color: "#cfcfdd" }}>{line}</li>
+                ))}
+              </ol>
+            </div>
+          )}
+
           {/* tabs */}
           <div className="lx-scroll mt-3 flex gap-6 overflow-x-auto border-b" style={{ borderColor: "var(--lx-border)" }}>
             {TABS.map((t) => (
@@ -1187,11 +1315,24 @@ export default function MrLxwaDashboard({
                 <div className="flex items-center gap-2">
                   <Robo size={24} />
                   <span className="lx-11 font-semibold">Mr. Lxwa</span>
+                  {/* live task-status bubble only (see the effect that writes `taskId`) — the
+                      model's own streaming reply is `live` too but never carries a taskId, so
+                      this dot never shows for an ordinary in-progress reply. */}
+                  {m.live && m.taskId && (
+                    <span className="flex items-center gap-1 lx-10" style={{ color: "#4ade80" }}>
+                      <span className="lx-pulse h-1.5 w-1.5 rounded-full" style={{ background: "#22c55e" }} /> working
+                    </span>
+                  )}
                   <span className="lx-10 lx-dim ml-auto">{m.time}</span>
                 </div>
                 <div
                   className="lx-ai lx-11 mt-1.5 px-3 py-2.5 leading-relaxed"
-                  style={{ marginLeft: 30, color: m.failed ? "#f87171" : undefined, whiteSpace: "pre-wrap" }}
+                  style={{
+                    marginLeft: 30,
+                    color: m.failed ? "#f87171" : undefined,
+                    whiteSpace: "pre-wrap",
+                    borderColor: m.live && m.taskId ? "rgba(34,211,238,.35)" : undefined,
+                  }}
                 >
                   {m.text ? boldText(m.text, `m${i}`) : m.live ? "…" : ""}
                 </div>
