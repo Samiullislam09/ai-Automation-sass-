@@ -40,7 +40,7 @@ import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LxGlobalStyle } from "@/components/lx-theme";
-import { useLiveEvents, isTerminalTask, type TaskState } from "@/lib/live";
+import { useLiveEvents, isTerminalTask, useNow, elapsedMs, clock, type TaskState } from "@/lib/live";
 import { useStore, PLANS } from "@/lib/store";
 import {
   LayoutDashboard,
@@ -60,8 +60,6 @@ import {
   Maximize2,
   X,
   Clock,
-  Pause,
-  Play,
   Send,
   Mic,
   MoreVertical,
@@ -532,10 +530,20 @@ export default function MrLxwaDashboard({
   // statusForAgent below.
   const live = useLiveEvents(tenantId);
   const task: TaskState | null = live.tasks[0] ?? null;
+  const taskActive = !!task && !isTerminalTask(task.status);
+  // Ticks only while the newest task is actually open — a finished task's BottomBar timer is a
+  // still image, same rule lib/live.ts's own useNow() doc comment states.
+  const now = useNow(taskActive);
   useEffect(() => {
     for (const t of live.tasks) live.loadTask(t.task_id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [live.tasks.length]);
+  // Real counts for the sidebar's System Status card — was 4 hardcoded numbers ("8 / 10", "7",
+  // "2", "32%") plus a fixed decorative sparkline, none backed by any row (found live
+  // 2026-08-31). "Server Load" had no source at all (nothing measures it client-side) and is
+  // dropped rather than faked; the rest come straight off `live`.
+  const activeTasksList = live.tasks.filter((t) => !isTerminalTask(t.status));
+  const queuedTasksList = activeTasksList.filter((t) => t.status === "queued" || t.status === "scheduled");
   const statusForAgent = (m: AgentMeta): AgentStatus => {
     if (m.fixedStatus) return m.fixedStatus;
     const step = live.tasks.map((t) => t.steps.find((s) => s.agent_id === m.id)).find((s) => s != null);
@@ -551,6 +559,17 @@ export default function MrLxwaDashboard({
   const agentsRight: Agent[] = AGENT_META_RIGHT.map((m) => ({ ...m, status: statusForAgent(m) }));
   const allAgents: Agent[] = [...agentsLeft, ...agentsRight];
   const realAgents = allAgents.filter((a) => a.status !== "Planned");
+  const workingAgentsCount = realAgents.filter((a) => a.status === "Working").length;
+  const connLabel =
+    live.connected === "live" ? "All Systems Operational"
+    : live.connected === "polling" ? "Reconnecting…"
+    : live.connected === "connecting" ? "Connecting…"
+    : "Offline";
+  const connColor =
+    live.connected === "live" ? "#22c55e"
+    : live.connected === "polling" ? "#f59e0b"
+    : live.connected === "connecting" ? "#8b8ba0"
+    : "#ef4444";
   const netTop = agentsLeft.slice(0, 4);
   const netLeft = agentsLeft.slice(4, 5);
   const netRight = agentsRight.slice(0, 1);
@@ -591,7 +610,7 @@ export default function MrLxwaDashboard({
   // effect, so it never fights a click that already changed it this visit.
   const [desktopAssistantOpen, setDesktopAssistantOpen] = useState(() => pathname === "/dashboard");
   const closeAssistant = () => { setBotOpen(false); setDesktopAssistantOpen(false); };
-  const [paused, setPaused] = useState(false);
+  const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
   const [thread, setThread] = useState<ThreadMsg[]>([]);
   const [chatBusy, setChatBusy] = useState(false);
@@ -833,50 +852,31 @@ export default function MrLxwaDashboard({
           );
         })}
 
-        {/* system status */}
+        {/* system status — every number below reads off `live` (lib/live.ts's useLiveEvents),
+            not a mock. Was 4 hardcoded numbers + a fixed decorative sparkline until 2026-08-31
+            (found live: it kept claiming "7 active tasks" with nothing running). "Server Load"
+            had no client-side source at all and is dropped rather than faked. */}
         <div className="lx-card2 mt-4 p-3">
           <div className="flex items-center gap-2">
-            <span className="lx-pulse h-2 w-2 rounded-full" style={{ background: "#22c55e", boxShadow: "0 0 8px #22c55e" }} />
+            <span className="lx-pulse h-2 w-2 rounded-full" style={{ background: connColor, boxShadow: `0 0 8px ${connColor}` }} />
             <span className="lx-12 font-semibold">System Status</span>
           </div>
-          <div className="lx-10 lx-mut mt-1">All Systems Operational</div>
+          <div className="lx-10 lx-mut mt-1">{connLabel}</div>
 
           <div className="mt-3 space-y-2">
             <div className="flex items-center justify-between lx-11">
-              <span className="lx-mut">AI Brain</span>
-              <span className="flex items-center gap-1 font-medium" style={{ color: "#4ade80" }}>
-                <span className="h-1.5 w-1.5 rounded-full" style={{ background: "#22c55e" }} /> Online
-              </span>
-            </div>
-            <div className="flex items-center justify-between lx-11">
-              <span className="lx-mut">Agents Online</span>
-              <span className="font-medium">8 / 10</span>
+              <span className="lx-mut">Agents Working</span>
+              <span className="font-medium">{workingAgentsCount} / {realAgents.length}</span>
             </div>
             <div className="flex items-center justify-between lx-11">
               <span className="lx-mut">Active Tasks</span>
-              <span className="font-medium">7</span>
+              <span className="font-medium">{activeTasksList.length}</span>
             </div>
             <div className="flex items-center justify-between lx-11">
-              <span className="lx-mut">Queue</span>
-              <span className="font-medium">2</span>
-            </div>
-            <div className="flex items-center justify-between lx-11">
-              <span className="lx-mut">Server Load</span>
-              <span className="font-medium">32%</span>
+              <span className="lx-mut">Queued</span>
+              <span className="font-medium">{queuedTasksList.length}</span>
             </div>
           </div>
-
-          <svg viewBox="0 0 120 26" className="mt-2 w-full" style={{ height: 26 }} aria-hidden>
-            <polyline
-              points="0,20 10,15 20,18 30,11 40,15 50,8 60,13 70,7 80,12 90,5 100,10 110,7 120,10"
-              fill="none"
-              stroke="#22c55e"
-              strokeWidth="1.6"
-              strokeLinejoin="round"
-              strokeLinecap="round"
-              style={{ filter: "drop-shadow(0 0 4px rgba(34,197,94,.8))" }}
-            />
-          </svg>
         </div>
       </nav>
 
@@ -993,7 +993,7 @@ export default function MrLxwaDashboard({
           <Robo size={26} />
           <div className="min-w-0 leading-tight">
             <div className="truncate text-sm font-bold">{workingAgent?.name ?? "Mr. Writer"}</div>
-            <div className="lx-10 lx-mut truncate">{workingAgent?.role ?? "Content Writer"} Agent · <ElapsedTimer paused={paused} /></div>
+            <div className="lx-10 lx-mut truncate">{workingAgent?.role ?? "Content Writer"} Agent · <ElapsedTimer /></div>
           </div>
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -1250,43 +1250,76 @@ export default function MrLxwaDashboard({
 
   /* ---------------------------------------------------------------------- */
 
-  const BottomBar = (
+  // Real cancel — POSTs to app/api/tasks/[id]/cancel, which is the thin server-side door onto
+  // lib/brain.ts's cancelTask() (needs AGENT_SERVER_URL/the shared token, so it cannot run in
+  // the browser directly). Refreshes the task list on success so the bar reflects "cancelled"
+  // the same tick the brain confirms it, rather than sitting on a stale progress bar.
+  const cancelCurrentTask = async () => {
+    if (!task || cancellingTaskId) return;
+    setCancellingTaskId(task.task_id);
+    try {
+      await fetch(`/api/tasks/${task.task_id}/cancel`, { method: "POST" });
+      live.reload();
+    } finally {
+      setCancellingTaskId(null);
+    }
+  };
+
+  // Real numbers off `task` (the newest live task) — was a hardcoded topic, step count, 42%
+  // bar and "00:12:30" total, and a Stop Task button with no onClick at all (found live
+  // 2026-08-31). No task at all → the strip doesn't render rather than showing fake progress
+  // for work that isn't happening.
+  const barDoneSteps = task ? task.steps.filter((s) => s.status === "done").length : 0;
+  const barTotalSteps = task ? task.totalSteps ?? task.steps.length : 0;
+  const barPct = barTotalSteps ? Math.round((barDoneSteps / barTotalSteps) * 100) : 0;
+
+  const BottomBar = task ? (
     <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl border px-3 py-1.5" style={{ borderColor: "var(--lx-border)", background: "var(--lx-panel)" }}>
-      <button className="lx-icobtn rounded-full" aria-label="New task">
+      <button
+        className="lx-icobtn rounded-full"
+        aria-label="Open assistant to start a new task"
+        onClick={() => {
+          setBotOpen(true);
+          setDesktopAssistantOpen(true);
+          setATab("assistant");
+          requestAnimationFrame(() => msgInputRef.current?.focus());
+        }}
+      >
         <Plus size={13} />
       </button>
       <div className="min-w-0 lx-11">
         <span className="lx-mut">Current: </span>
-        <span className="font-semibold">Solar Panel Benefits for Homes</span>
-        <span className="lx-mut"> · Step 3 of 6</span>
+        <span className="font-semibold">{task.echo || task.kind || "Untitled order"}</span>
+        {stepNo != null && totalSteps != null && <span className="lx-mut"> · Step {stepNo} of {totalSteps}</span>}
       </div>
 
       <div className="hidden min-w-0 flex-1 items-center gap-2 sm:flex" style={{ maxWidth: 260 }}>
         <div className="lx-track flex-1">
-          <div className="lx-fill" style={{ width: "42%" }} />
+          <div className="lx-fill" style={{ width: `${barPct}%` }} />
         </div>
-        <span className="lx-11 font-bold">42%</span>
+        <span className="lx-11 font-bold">{barPct}%</span>
       </div>
 
       <div className="ml-auto flex items-center gap-2">
         <span className="lx-10 lx-mut hidden md:inline">
-          <span className="lx-mono font-semibold" style={{ color: "#e6e6f2" }}><ElapsedTimer paused={paused} /></span> / 00:12:30
+          <span className="lx-mono font-semibold" style={{ color: "#e6e6f2" }}>{clock(elapsedMs(task, now))}</span>
         </span>
-        <button className="lx-icobtn rounded-full" onClick={() => setPaused((p) => !p)} aria-label={paused ? "Resume" : "Pause"}>
-          {paused ? <Play size={12} /> : <Pause size={12} />}
-        </button>
-        <button
-          className="lx-pill red"
-          style={{ cursor: "pointer", padding: "5px 11px", background: "rgba(239,68,68,.08)" }}
-        >
-          <span className="relative flex h-3 w-3 items-center justify-center rounded-full border" style={{ borderColor: "#f87171" }}>
-            <span className="h-1 w-1 rounded-sm" style={{ background: "#f87171" }} />
-          </span>
-          Stop Task
-        </button>
+        {taskActive && (
+          <button
+            className="lx-pill red"
+            style={{ cursor: cancellingTaskId ? "default" : "pointer", padding: "5px 11px", background: "rgba(239,68,68,.08)", opacity: cancellingTaskId ? 0.6 : 1 }}
+            onClick={cancelCurrentTask}
+            disabled={!!cancellingTaskId}
+          >
+            <span className="relative flex h-3 w-3 items-center justify-center rounded-full border" style={{ borderColor: "#f87171" }}>
+              <span className="h-1 w-1 rounded-sm" style={{ background: "#f87171" }} />
+            </span>
+            {cancellingTaskId ? "Stopping…" : "Stop Task"}
+          </button>
+        )}
       </div>
     </div>
-  );
+  ) : null;
 
   /* ---------------------------------------------------------------------- */
 
