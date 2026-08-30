@@ -40,7 +40,7 @@ import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LxGlobalStyle } from "@/components/lx-theme";
-import { useLiveEvents, isTerminalTask, useNow, elapsedMs, clock, type TaskState } from "@/lib/live";
+import { useLiveEvents, isTerminalTask, isFlowing, useNow, elapsedMs, clock, type TaskState } from "@/lib/live";
 import { useStore, PLANS } from "@/lib/store";
 import {
   LayoutDashboard,
@@ -531,13 +531,13 @@ const AgentNetwork = ({
 
       {/* stats strip — real, built agents only (the 2 Planned ones above are shown on the
           network because the plan names them, but never counted here as staffed/active).
-          Success Rate / Time Saved stay illustrative — there's no real source for either yet. */}
+          "Success Rate 98.6%" and "Time Saved 32.4h" were removed 2026-08-31: both were fixed
+          strings with no source anywhere in the product, and the file's own comment admitted
+          it. Add either back the day something actually measures it. */}
       <div className="lx-card2 mt-4 flex flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3">
         <StatTile icon={Users} color="#3b82f6" label="Total Agents" value={String(totalActive)} sub="Active" />
         <StatTile icon={Loader2} color="#3b82f6" label="Tasks Running" value={String(running)} sub="In Progress" spin />
         <StatTile icon={CheckCircle2} color="#a855f7" label="Tasks Completed" value={String(completed)} sub="Today" />
-        <StatTile icon={TrendingUp} color="#22c55e" label="Success Rate" value="98.6%" sub="This Week" />
-        <StatTile icon={Clock} color="#f59e0b" label="Time Saved" value="32.4h" sub="This Week" />
       </div>
     </div>
   );
@@ -631,10 +631,17 @@ export default function MrLxwaDashboard({
   const queuedTasksList = activeTasksList.filter((t) => t.status === "queued" || t.status === "scheduled");
   const statusForAgent = (m: AgentMeta): AgentStatus => {
     if (m.fixedStatus) return m.fixedStatus;
-    const step = live.tasks.map((t) => t.steps.find((s) => s.agent_id === m.id)).find((s) => s != null);
-    if (!step) return "Waiting";
-    if (step.status === "running") return "Working";
-    if (step.status === "done") return "Completed";
+    // Every step this agent owns, across every loaded task — not just the newest task's one.
+    // "Running anywhere" WINS over the newest task's own step, which is the whole point: the
+    // newest task usually has this agent still `pending` (its turn has not come), while the
+    // step actually executing right now belongs to a slightly older task. Taking the newest
+    // task's step blindly reported "Waiting" for an agent that was visibly working — which is
+    // why the Live Visual panel never auto-opened (it keys off `workingAgent`, which keys off
+    // this) and why the wires never drew. Found live 2026-08-31.
+    const mine = live.tasks.flatMap((t) => t.steps.filter((s) => s.agent_id === m.id));
+    if (!mine.length) return "Waiting";
+    if (mine.some((s) => s.status === "running")) return "Working";
+    if (mine.some((s) => s.status === "done")) return "Completed";
     // pending / failed / skipped / cancelled all collapse to "Waiting" here — this roster
     // only has 3 real states (STATUS_COLOR), and "waiting for its turn" is the closest honest
     // read for a step that isn't actively running or finished.
@@ -733,7 +740,17 @@ export default function MrLxwaDashboard({
   // not sit closed until Mr. Keyword picks up afterward.
   const workingAgent = bossAgent.status === "Working" ? bossAgent : allAgents.find((a) => a.status === "Working") ?? null;
   const [showPanel, setShowPanel] = useState(!!workingAgent);
-  const panelOpen = showPanel && !!workingAgent;
+  // The panel used to require `workingAgent`, so it vanished the instant the last step finished
+  // — the user watched it disappear exactly when the result became worth reading. It now stays
+  // on whatever task it was opened for until the user closes it (X), which is also what makes
+  // the finished state readable at all.
+  const panelOpen = showPanel && !!task;
+  // Who the panel is about: whoever is working, else whoever ran most recently in this task —
+  // never a hardcoded "Mr. Writer" fallback, which is what it used to show for every agent.
+  const lastStep = task ? [...task.steps].filter((s) => s.startedAt != null).sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))[0] : null;
+  const panelAgent =
+    workingAgent ??
+    (lastStep ? [...allAgents, bossAgent].find((a) => a.id === lastStep.agent_id) ?? null : null);
   // Auto-open only on the rising edge (nobody→somebody working) — e.g. a real task just
   // started from chat. It never forces the panel back open after the user closes it while
   // work continues; `panelOpen` above already hides it on its own once nobody is working.
@@ -1124,15 +1141,19 @@ export default function MrLxwaDashboard({
         <div className="flex min-w-0 items-center gap-2">
           <Robo size={26} />
           <div className="min-w-0 leading-tight">
-            <div className="truncate text-sm font-bold">{workingAgent?.name ?? "Mr. Writer"}</div>
-            <div className="lx-10 lx-mut truncate">{workingAgent?.role ?? "Content Writer"} Agent · <ElapsedTimer /></div>
+            {/* Real agent, real clock. Was `workingAgent?.name ?? "Mr. Writer"` plus a mock
+                timer that counted up from 272 seconds regardless of anything — so a finished
+                Mr. Keyword run displayed as "Mr. Writer · 00:04:47". elapsedMs()/clock() come
+                from lib/live.ts and freeze at the task's real finishedAt. */}
+            <div className="truncate text-sm font-bold">{panelAgent?.name ?? "Team"}</div>
+            <div className="lx-10 lx-mut truncate">
+              {panelAgent?.role ?? "Waiting for work"}
+              {task ? ` · ${clock(elapsedMs(task, now))}` : ""}
+            </div>
           </div>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <button className="lx-icobtn" aria-label="Expand">
-            <Maximize2 size={14} />
-          </button>
-          <button className="lx-icobtn" aria-label="Back to workflow" onClick={() => setShowPanel(false)}>
+          <button className="lx-icobtn" aria-label="Close" onClick={() => setShowPanel(false)}>
             <X size={14} />
           </button>
         </div>
@@ -1145,16 +1166,24 @@ export default function MrLxwaDashboard({
         <div className="min-w-0">
           <div className="flex items-center justify-between">
             <span className="lx-13 font-semibold">Live Visual</span>
-            <span className="lx-pill red">
-              <span className="lx-pulse h-1.5 w-1.5 rounded-full" style={{ background: "#ef4444" }} /> LIVE
-            </span>
+            {/* LIVE only when evidence is genuinely still arriving — isFlowing() is lib/live.ts's
+                own stall gate (§24.5: "agent ruka hai to screen bhi ruki dikhe"). It used to be
+                a permanently-pulsing red LIVE pill, which said "live" over a task that had
+                finished minutes ago. */}
+            {isFlowing(task, now) ? (
+              <span className="lx-pill red">
+                <span className="lx-pulse h-1.5 w-1.5 rounded-full" style={{ background: "#ef4444" }} /> LIVE
+              </span>
+            ) : (
+              <span className="lx-pill mut">{task && isTerminalTask(task.status) ? "Finished" : "Idle"}</span>
+            )}
           </div>
 
           <div className="lx-card2 mt-3 overflow-hidden p-3" style={{ minHeight: 360 }}>
             <div key={runningStep?.key ?? "idle"} className="lx-live-anim">
               <div className="flex items-center gap-2 lx-11 font-semibold">
                 <PenLine size={13} className="lx-mut" />
-                {runningStep?.progressLabel || runningStep?.label || "Working…"}
+                {runningStep?.progressLabel || runningStep?.label || (task && isTerminalTask(task.status) ? "Finished" : "Waiting to start…")}
               </div>
 
               {/* real produced work — sections written, research used, the quality score —
@@ -1162,8 +1191,14 @@ export default function MrLxwaDashboard({
                   events; see lib/live.ts's AgentPane.items). No fake per-word "typing". */}
               {producedItems.length === 0 ? (
                 <div className="mt-3 flex items-center gap-2.5">
-                  <Wave n={26} h={18} anim color="var(--lx-purple)" />
-                  <span className="lx-shimmer lx-10 font-medium">Working…</span>
+                  {isFlowing(task, now) ? (
+                    <>
+                      <Wave n={26} h={18} anim color="var(--lx-purple)" />
+                      <span className="lx-shimmer lx-10 font-medium">Working…</span>
+                    </>
+                  ) : (
+                    <span className="lx-10 lx-mut">Nothing was produced for this order.</span>
+                  )}
                 </div>
               ) : (
                 <ul className="mt-3 space-y-2">
@@ -1220,16 +1255,12 @@ export default function MrLxwaDashboard({
             </div>
           )}
 
-          {/* tabs */}
-          <div className="lx-scroll mt-3 flex gap-6 overflow-x-auto border-b" style={{ borderColor: "var(--lx-border)" }}>
-            {TABS.map((t) => (
-              <button key={t} className={`lx-tab ${tab === t ? "on" : ""}`} onClick={() => setTab(t)}>
-                {t}
-              </button>
-            ))}
-          </div>
+          {/* The five-tab strip ("Live Activity / Research / Writing / References / Output
+              Preview") was removed 2026-08-31: every tab rendered the same content — only a
+              `tab` state changed — so it was a control that looked functional and did nothing.
+              The one real view it claimed to offer is the timeline directly below. */}
 
-          <div className="lx-13 mt-4 font-semibold">What I&apos;m doing right now</div>
+          <div className="lx-13 mt-4 font-semibold">What the team is doing</div>
 
           {/* timeline — task.lines: real, human-readable events (lib/live.ts's userMessage()),
               never a raw prompt/error string. */}
