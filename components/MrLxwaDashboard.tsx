@@ -123,7 +123,17 @@ const NAV: NavItem[] = [
 /** `taskId` marks a bubble as the ONE live-status line for that order — see the effect below
  *  that updates it in place as the task progresses, rather than a fresh "..." spinner the user
  *  has to guess the meaning of. */
-type ThreadMsg = { who: "user" | "ai"; text: string; time: string; live?: boolean; failed?: boolean; taskId?: string };
+type ThreadMsg = {
+  who: "user" | "ai";
+  text: string;
+  time: string;
+  live?: boolean;
+  failed?: boolean;
+  taskId?: string;
+  /** A themed button under the bubble — opens that agent's Live Visual instead of pasting its
+   *  whole output into the transcript. */
+  cta?: { label: string; agentId?: string };
+};
 
 type AgentStatus = "Completed" | "Working" | "Waiting" | "Planned";
 type Agent = { id: string; name: string; role: string; status: AgentStatus; icon: React.ElementType; color: string };
@@ -336,6 +346,99 @@ const NetCard = ({ a, area, onClick }: { a: Agent; area: string; onClick?: () =>
         )}
       </div>
     </button>
+  );
+};
+
+/** Mr. Keyword's live screen, in the two states §24.4b asks for.
+ *
+ *  WHILE RUNNING — a Google-style search box with the real topic in it and the keywords
+ *  appearing underneath as suggestion rows, one per `ctx.data("keyword", …)` event. It looks
+ *  like the thing it is doing, which is the whole point of §24 ("jaise YouTube video — agent
+ *  keyword nikal raha hai to exactly visible ho"). It is NOT a fake typing animation: every row
+ *  is a real event that already arrived (§24.5 — "animation sirf event pe chale").
+ *
+ *  WHEN FINISHED — the same rows as a real table with the columns the agent actually sends
+ *  (agent-server/src/agents/keyword.ts keeps volume / competition / fit as three separate
+ *  fields on purpose, and the plan forbids blending them), plus a per-row button that orders
+ *  the article for that keyword. */
+const KeywordScreen = ({
+  items,
+  topic,
+  running,
+  onWriteArticle,
+}: {
+  items: { key: string; payload: any }[];
+  topic: string | null;
+  running: boolean;
+  onWriteArticle: (keyword: string) => void;
+}) => {
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+  if (running) {
+    return (
+      <div>
+        {/* the search box — real topic, never a placeholder */}
+        <div className="lx-in flex items-center gap-2 px-3 py-2" style={{ borderRadius: 999 }}>
+          <Search size={14} className="lx-mut shrink-0" />
+          <span className="lx-12 min-w-0 flex-1 truncate">{topic || "…"}</span>
+          <span className="lx-pulse h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: "#22c55e" }} />
+        </div>
+        <ul className="mt-2">
+          {items.map((it) => (
+            <li key={it.key} className="lx-live-anim flex items-center gap-2.5 rounded-lg px-3 py-2 lx-11" style={{ color: "#cfcfdd" }}>
+              <Search size={12} className="lx-dim shrink-0" />
+              <span className="min-w-0 flex-1 truncate">{it.payload?.keyword ?? "?"}</span>
+              {num(it.payload?.searchVolume) != null && (
+                <span className="lx-10 lx-mut shrink-0">{num(it.payload?.searchVolume)}/mo</span>
+              )}
+            </li>
+          ))}
+        </ul>
+        {items.length === 0 && <div className="lx-10 lx-mut mt-3 px-1">Searching…</div>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="lx-scroll" style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 420 }}>
+        <thead>
+          <tr className="lx-10 lx-mut" style={{ textAlign: "left" }}>
+            <th style={{ padding: "6px 8px", fontWeight: 600 }}>Keyword</th>
+            <th style={{ padding: "6px 8px", fontWeight: 600, whiteSpace: "nowrap" }}>Volume</th>
+            <th style={{ padding: "6px 8px", fontWeight: 600, whiteSpace: "nowrap" }}>Competition</th>
+            <th style={{ padding: "6px 8px", fontWeight: 600, whiteSpace: "nowrap" }}>Fit</th>
+            <th style={{ padding: "6px 8px" }} />
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((it) => {
+            const p = it.payload ?? {};
+            const vol = num(p.searchVolume);
+            const fit = num(p.fitScore);
+            return (
+              <tr key={it.key} style={{ borderTop: "1px solid var(--lx-border)" }}>
+                <td className="lx-11" style={{ padding: "8px", color: "#e6e6f2" }}>
+                  {p.keyword ?? "?"}
+                  {p.gsc ? <span className="lx-pill green ml-2">already ranking</span> : null}
+                </td>
+                {/* "not measured" is the honest word when the free source has no number —
+                    never a 0, which would read as "nobody searches this". */}
+                <td className="lx-11 lx-mut" style={{ padding: "8px", whiteSpace: "nowrap" }}>{vol != null ? `${vol}/mo` : "not measured"}</td>
+                <td className="lx-11 lx-mut" style={{ padding: "8px", whiteSpace: "nowrap" }}>{p.competitionLevel ?? "—"}</td>
+                <td className="lx-11 lx-mut" style={{ padding: "8px", whiteSpace: "nowrap" }}>{fit != null ? `${Math.round(fit * 100)}%` : "—"}</td>
+                <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>
+                  <button className="lx-ghost lx-10" style={{ padding: "4px 9px" }} onClick={() => onWriteArticle(String(p.keyword ?? ""))}>
+                    Write article
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {items.length === 0 && <div className="lx-10 lx-mut px-1 py-2">No keywords were produced.</div>}
+    </div>
   );
 };
 
@@ -858,6 +961,9 @@ export default function MrLxwaDashboard({
         });
       }
       setThread((p) => {
+        // An accepted order now replies with NO text (see lib/chat-brain.ts) — the live strip
+        // is the status. Drop the placeholder instead of leaving an empty bubble behind.
+        if (!full.trim()) return p.slice(0, -1);
         const next = [...p];
         next[next.length - 1] = { ...next[next.length - 1], text: full, live: false };
         return next;
@@ -948,23 +1054,21 @@ export default function MrLxwaDashboard({
             : t.status === "awaiting_approval"
               ? "Done — it's waiting in Approvals."
               : "Done.";
-    const keywords = t.items.filter((it) => it.kind === "keyword").slice(0, 12);
-    const keywordLines = keywords.length
-      ? keywords
-          .map((it) => {
-            const p = it.payload ?? {};
-            const vol = typeof p.searchVolume === "number" ? `${p.searchVolume}/mo` : "volume not measured";
-            return `• ${p.keyword ?? "?"} — ${vol}`;
-          })
-          .join("\n")
-      : "";
-    const text = [summary, keywordLines].filter(Boolean).join("\n\n");
+    // ONE line, not the whole list. Twelve keywords pasted into the transcript pushed every
+    // other message off screen and duplicated what the Live Visual shows far better (owner,
+    // 2026-08-31). Only the recommended one is named here — the rest are one click away.
+    const keywords = t.items.filter((it) => it.kind === "keyword");
+    const best = keywords[0]?.payload ?? null;
+    const text = best
+      ? `${keywords.length} keywords mile. Sabse behtar: **${best.keyword ?? "?"}**`
+      : summary;
     if (!text) return;
+    const cta = keywords.length ? { label: "Live visual me dekho", agentId: "keyword" } : undefined;
     setThread((p) => {
       const i = p.findIndex((m) => m.taskId === id);
-      if (i < 0) return [...p, { who: "ai", text, time: nowTime(), taskId: id }];
+      if (i < 0) return [...p, { who: "ai", text, time: nowTime(), taskId: id, cta }];
       const next = [...p];
-      next[i] = { ...next[i], text, live: false };
+      next[i] = { ...next[i], text, live: false, cta };
       return next;
     });
   }, [live.byTask]);
@@ -1174,6 +1278,35 @@ export default function MrLxwaDashboard({
     : [];
   // This agent's own sentences, plus the task-level ones (agent_id null) that frame them.
   const panelLines = (task?.lines ?? []).filter((ln) => !panelAgent || ln.agent_id == null || ln.agent_id === panelAgent.id);
+
+  // THE TABS: only the agents that are genuinely part of THIS order, in plan order — replacing
+  // the five fixed labels ("Live Activity / Research / Writing / …") that rendered identical
+  // content whichever you clicked. §24.4b asks for exactly this: tabs per agent, showing what
+  // that agent did on this task.
+  const taskAgents: Agent[] = Array.from(new Set((task?.steps ?? []).map((s) => s.agent_id)))
+    .map((id) => [...allAgents, bossAgent].find((a) => a.id === id))
+    .filter((a): a is Agent => !!a);
+
+  // Mr. Keyword's own rows for this order, and the topic it was searching — used by the live
+  // keyword screen below.
+  const keywordItems = producedItems.filter((it) => it.kind === "keyword");
+  const taskTopic =
+    (task?.items.find((it) => it.kind === "topic_picked")?.payload?.topic as string | undefined) ??
+    (task?.echo ? String(task.echo).match(/"([^"]+)"/)?.[1] : undefined) ??
+    null;
+
+  /** "Write article" on a keyword row — goes through the SAME chat path a typed order takes
+   *  (nothing bypasses the brain), so the user sees their own request in the thread and the
+   *  order is planned, confirmed and tracked exactly as usual. */
+  const orderArticleFor = (keyword: string) => {
+    const kw = keyword.trim();
+    if (!kw || chatBusy) return;
+    const text = `"${kw}" pe article likho`;
+    setThread((p) => [...p, { who: "user", text, time: nowTime() }]);
+    setBotOpen(true);
+    setDesktopAssistantOpen(true);
+    void stream(text);
+  };
   const itemLabel = (it: (typeof producedItems)[number]) => {
     // The writer's real event kinds (agent-server/src/agents/writer.ts) — anything else
     // (from other agents in the same task) falls back to a generic "<kind>" line rather than
@@ -1240,37 +1373,49 @@ export default function MrLxwaDashboard({
             </span>
           </div>
 
-          <div className="lx-card2 mt-3 overflow-hidden p-3" style={{ minHeight: 360 }}>
+          {/* Fixed height + its own scrollbar: a 20-row keyword table used to push the panel
+              (and the page) far past the fold — "content box se bahar nahi jayega". */}
+          <div className="lx-card2 lx-scroll mt-3 p-3" style={{ minHeight: 360, maxHeight: 460, overflowY: "auto" }}>
             <div key={runningStep?.key ?? "idle"} className="lx-live-anim">
               <div className="flex items-center gap-2 lx-11 font-semibold">
                 <PenLine size={13} className="lx-mut" />
                 {runningStep?.progressLabel || runningStep?.label || (task && isTerminalTask(task.status) ? "Finished" : "Waiting to start…")}
               </div>
 
-              {/* real produced work — sections written, research used, the quality score —
-                  as it actually arrives (agent-server's writer emits these as ctx.data()
-                  events; see lib/live.ts's AgentPane.items). No fake per-word "typing". */}
-              {producedItems.length === 0 ? (
-                <div className="mt-3 flex items-center gap-2.5">
-                  {isFlowing(task, now) ? (
-                    <>
-                      <Wave n={26} h={18} anim color="var(--lx-purple)" />
-                      <span className="lx-shimmer lx-10 font-medium">Working…</span>
-                    </>
-                  ) : (
-                    <span className="lx-10 lx-mut">Nothing was produced for this order.</span>
-                  )}
-                </div>
-              ) : (
-                <ul className="mt-3 space-y-2">
-                  {producedItems.map((it) => (
-                    <li key={it.key} className="lx-in flex items-start gap-2 rounded-lg px-2.5 py-2 lx-11" style={{ color: "#cfcfdd" }}>
-                      <CheckCircle2 size={14} style={{ color: "#22c55e", marginTop: 1, flexShrink: 0 }} />
-                      {itemLabel(it)}
-                    </li>
-                  ))}
-                </ul>
-              )}
+              {/* Each agent gets the screen its own output deserves (§24.4b's "typed
+                  component"), not one generic bullet list. Mr. Keyword's is the Google-style
+                  search while it runs and a real table when it is done; everything else keeps
+                  the honest per-item list until it earns a screen of its own. */}
+              <div className="mt-3">
+                {panelAgent?.id === "keyword" ? (
+                  <KeywordScreen
+                    items={keywordItems}
+                    topic={taskTopic}
+                    running={!!runningStep}
+                    onWriteArticle={orderArticleFor}
+                  />
+                ) : producedItems.length === 0 ? (
+                  <div className="flex items-center gap-2.5">
+                    {isFlowing(task, now) ? (
+                      <>
+                        <Wave n={26} h={18} anim color="var(--lx-purple)" />
+                        <span className="lx-shimmer lx-10 font-medium">Working…</span>
+                      </>
+                    ) : (
+                      <span className="lx-10 lx-mut">Nothing was produced for this order.</span>
+                    )}
+                  </div>
+                ) : (
+                  <ul className="space-y-2">
+                    {producedItems.map((it) => (
+                      <li key={it.key} className="lx-in flex items-start gap-2 rounded-lg px-2.5 py-2 lx-11" style={{ color: "#cfcfdd" }}>
+                        <CheckCircle2 size={14} style={{ color: "#22c55e", marginTop: 1, flexShrink: 0 }} />
+                        {itemLabel(it)}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -1316,14 +1461,27 @@ export default function MrLxwaDashboard({
             </div>
           )}
 
-          {/* tabs — kept at the owner's request (2026-08-31). Note for whoever wires these up:
-              they are still presentational, every tab renders the same panel below. */}
-          <div className="lx-scroll mt-3 flex gap-6 overflow-x-auto border-b" style={{ borderColor: "var(--lx-border)" }}>
-            {TABS.map((t) => (
-              <button key={t} className={`lx-tab ${tab === t ? "on" : ""}`} onClick={() => setTab(t)}>
-                {t}
+          {/* Tabs = the agents that actually worked on THIS order (§24.4b). They used to be five
+              fixed labels that all rendered the same thing; now each one switches the screen
+              above to that agent's own output and its own timeline below. */}
+          <div className="lx-scroll mt-3 flex gap-5 overflow-x-auto border-b" style={{ borderColor: "var(--lx-border)" }}>
+            {taskAgents.map((a) => (
+              <button
+                key={a.id}
+                className={`lx-tab ${panelAgent?.id === a.id ? "on" : ""}`}
+                onClick={() => setSelectedAgentId(a.id)}
+                title={`${a.name} — ${a.status}`}
+              >
+                <span className="flex items-center gap-1.5 whitespace-nowrap">
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${a.status === "Working" ? "lx-pulse" : ""}`}
+                    style={{ background: STATUS_COLOR[a.status] }}
+                  />
+                  {a.name}
+                </span>
               </button>
             ))}
+            {taskAgents.length === 0 && <span className="lx-tab lx-mut">No agents on this order yet</span>}
           </div>
 
           <div className="lx-13 mt-4 font-semibold">
@@ -1460,6 +1618,19 @@ export default function MrLxwaDashboard({
                 >
                   {m.text ? boldText(m.text, `m${i}`) : m.live ? "…" : ""}
                 </div>
+                {m.cta && (
+                  <button
+                    className="lx-grad lx-11 mt-1.5 px-3 py-1.5"
+                    style={{ marginLeft: 30 }}
+                    onClick={() => {
+                      if (m.cta?.agentId) setSelectedAgentId(m.cta.agentId);
+                      setShowPanel(true);
+                      setBotOpen(false);
+                    }}
+                  >
+                    {m.cta.label}
+                  </button>
+                )}
               </div>
             )
           )}
@@ -1507,11 +1678,12 @@ export default function MrLxwaDashboard({
               <div className="lx-fill" style={{ width: `${barPct}%` }} />
             </div>
           )}
-          {/* The finished article is reviewed and edited in Approvals — a real route, linked
-              only once the order actually reached it. */}
+          {/* The finished work is reviewed and edited in Approvals — a real route, linked only
+              once the order actually reached it. Themed to the dashboard's own gradient and
+              kept to two words, per the owner: no paragraph, just the way in. */}
           {task.status === "awaiting_approval" && (
-            <Link href="/dashboard/approvals" className="lx-ghost mt-2 inline-flex">
-              Review &amp; edit it →
+            <Link href="/dashboard/approvals" className="lx-grad lx-11 mt-2 inline-flex px-3 py-1.5">
+              Review →
             </Link>
           )}
         </div>

@@ -469,7 +469,13 @@ async function placeOrder(
   }
 
   return {
-    text: "On it.",
+    // Deliberately EMPTY. "On it." was a dead sentence that sat in the thread for the whole run
+    // and then went stale the moment work finished. The live progress strip above the composer
+    // now carries that state — it names the running step, counts the steps and moves — so a
+    // second, frozen copy of the same idea in the transcript is worse than nothing (owner,
+    // 2026-08-31: "on it ko remove kardo text ko"). The client drops an empty reply rather than
+    // rendering a blank bubble.
+    text: "",
     agentId: room,
     jobId: created.task_id,
     label: created.echo || intent.echo || null,
