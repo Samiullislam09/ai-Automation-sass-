@@ -1673,8 +1673,41 @@ export default function MrLxwaDashboard({
             )}
           </div>
           <div className="lx-10 lx-mut mt-1 truncate">{task.echo}</div>
+
+          {/* THE PLAN, TICKING. Mr Lxwa's real steps (task_steps, in plan order), each row
+              animating in as the plan lands and then flipping to done as its agent finishes —
+              this is the "planning ... phir progress" the owner asked for, built from the real
+              rows rather than a scripted sequence, so it can never show a step that is not
+              actually in the plan or tick one that has not actually finished. */}
+          {task.steps.length > 0 && (
+            <ul className="mt-2 space-y-1">
+              {task.steps.map((s, i) => {
+                const nm = [...allAgents, bossAgent].find((a) => a.id === s.agent_id)?.name ?? s.agent_id;
+                const done = s.status === "done";
+                const run = s.status === "running";
+                const bad = s.status === "failed";
+                const color = bad ? "#ef4444" : done ? "#22c55e" : run ? "#3b82f6" : "#5c5c72";
+                return (
+                  <li
+                    key={s.key}
+                    className="lx-live-anim flex items-center gap-2 lx-10"
+                    style={{ animationDelay: `${Math.min(i, 6) * 60}ms`, color: run ? "#e6e6f2" : "var(--lx-mut)" }}
+                  >
+                    <span
+                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${run ? "lx-pulse" : ""}`}
+                      style={{ background: color, boxShadow: run ? `0 0 6px ${color}` : "none" }}
+                    />
+                    <span className="min-w-0 flex-1 truncate">{nm}</span>
+                    {done && <CheckCircle2 size={11} style={{ color: "#22c55e", flexShrink: 0 }} />}
+                    {run && <span className="lx-shimmer lx-10 shrink-0">working</span>}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
           {barTotalSteps > 0 && (
-            <div className="lx-track mt-1.5">
+            <div className="lx-track mt-2">
               <div className="lx-fill" style={{ width: `${barPct}%` }} />
             </div>
           )}
