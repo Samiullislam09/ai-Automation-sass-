@@ -34,10 +34,15 @@ export type ChatContext = {
 export async function loadBusiness(supabase: SupabaseClient, tenantId: string | null): Promise<string | null> {
   if (!tenantId) return null;
   try {
-    const [{ data: tenant }, { data: profileRow }, { data: samplePages }] = await Promise.all([
-      supabase.from("tenants").select("website_url, niche, tone_profile, icp_profile, onboarded").eq("id", tenantId).single(),
+    const [{ data: tenant }, { data: profileRow }, { data: samplePages }, { count: pageCount }] = await Promise.all([
+      supabase.from("tenants").select("website_url, name, niche, tone_profile, icp_profile, onboarded, memory_facts").eq("id", tenantId).single(),
       supabase.from("site_profiles").select("profile").eq("tenant_id", tenantId).eq("active", true).maybeSingle(),
-      supabase.from("site_pages").select("title").eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(6),
+      // 6 → 40. "Mera company ka details do" has to be answerable from what the crawler
+      // actually read, and six titles is not a description of a site — the owner's own words
+      // (2026-08-31): "user sirf bolega mera company ka details do, har details all crawl page
+      // etc se usko answer dena hai".
+      supabase.from("site_pages").select("title").eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(40),
+      supabase.from("site_pages").select("*", { count: "exact", head: true }).eq("tenant_id", tenantId),
     ]);
     if (!tenant) return null;
     const profile = (profileRow?.profile as Record<string, any> | undefined) ?? null;
@@ -51,19 +56,47 @@ export async function loadBusiness(supabase: SupabaseClient, tenantId: string | 
     if (!tenant.onboarded && !profile) return null;
 
     const facts: string[] = [];
+    if (tenant.name) facts.push(`business name=${tenant.name}`);
     if (tenant.website_url) facts.push(`website=${tenant.website_url}`);
 
     if (profile) {
       if (profile.what_they_do) facts.push(`what they do=${profile.what_they_do}`);
       if (profile.audience) facts.push(`audience=${profile.audience}`);
       if (Array.isArray(profile.offerings) && profile.offerings.length) {
-        facts.push(`offerings=${profile.offerings.map((o: any) => o?.name).filter(Boolean).join(", ")}`);
+        // With URLs: "kaunsi service ka page kahan hai" is a normal question and the answer is
+        // already on file — dropping the URL made the model say it did not know.
+        facts.push(
+          `offerings=${profile.offerings
+            .map((o: any) => (o?.url ? `${o?.name} (${o.url})` : o?.name))
+            .filter(Boolean)
+            .slice(0, 20)
+            .join(", ")}`,
+        );
       }
       if (profile.geo) facts.push(`location/service area=${profile.geo}`);
       if (profile.voice?.tone) facts.push(`brand tone=${profile.voice.tone}`);
       if (Array.isArray(profile.topic_clusters) && profile.topic_clusters.length) {
-        facts.push(`content topics=${profile.topic_clusters.map((t: any) => t?.name).filter(Boolean).slice(0, 10).join(", ")}`);
+        facts.push(`content topics=${profile.topic_clusters.map((t: any) => t?.name).filter(Boolean).slice(0, 12).join(", ")}`);
       }
+      // The three fields below were built by Mr. Analyst and then never shown to anyone. They
+      // are exactly what "which topic will actually grow my traffic" needs.
+      if (Array.isArray(profile.proof) && profile.proof.length) {
+        facts.push(`verified claims we may state=${profile.proof.map((p: any) => p?.claim).filter(Boolean).slice(0, 8).join("; ")}`);
+      }
+      if (Array.isArray(profile.content_gaps) && profile.content_gaps.length) {
+        facts.push(
+          `search demand with NO page answering it (best growth opportunities)=${profile.content_gaps
+            .slice(0, 8)
+            .map((g: any) => `${g?.query}${typeof g?.impressions === "number" ? ` (${g.impressions} impressions)` : ""}`)
+            .filter(Boolean)
+            .join("; ")}`,
+        );
+      }
+      if (Array.isArray(profile.competitors) && profile.competitors.length) {
+        facts.push(`competitors=${profile.competitors.map((c: any) => c?.name ?? c).filter(Boolean).slice(0, 6).join(", ")}`);
+      }
+      if (profile.buyer_intent) facts.push(`what their buyers are trying to do=${profile.buyer_intent}`);
+      if (profile.goals?.primary) facts.push(`their goal for content=${profile.goals.primary}`);
     } else {
       // No Mr. Analyst profile yet — the same fields chat always fell back to.
       const tone = (tenant.tone_profile as any) ?? {};
@@ -74,7 +107,28 @@ export async function loadBusiness(supabase: SupabaseClient, tenantId: string | 
       if (tone.tone) facts.push(`brand tone=${tone.tone}`);
       if (Array.isArray(tone.topics) && tone.topics.length) facts.push(`content topics=${tone.topics.join(", ")}`);
     }
-    if (samplePages?.length) facts.push(`recently read pages=${samplePages.map((p) => p.title).join(", ")}`);
+    // THE MEMORY PAGE'S OWN FACTS. `tenants.memory_facts` is what the owner curates by hand on
+    // /dashboard/memory — and until 2026-08-31 the ONLY reader was app/api/memory/route.ts, so
+    // everything typed there was invisible to the chat that is supposed to know it. Put last of
+    // the profile block but before the page list, and labelled as owner-stated, because a fact
+    // the human wrote down beats anything inferred from a crawl.
+    const memoryFacts = Array.isArray(tenant.memory_facts) ? (tenant.memory_facts as any[]) : [];
+    if (memoryFacts.length) {
+      facts.push(
+        `facts the owner told us directly=${memoryFacts
+          .map((f) => (f?.k && f?.v ? `${f.k}: ${f.v}` : null))
+          .filter(Boolean)
+          .slice(0, 25)
+          .join("; ")}`,
+      );
+    }
+
+    if (typeof pageCount === "number" && pageCount > 0) {
+      facts.push(`pages we have crawled and read=${pageCount}`);
+    }
+    if (samplePages?.length) {
+      facts.push(`page titles from their site=${samplePages.map((p) => p.title).filter(Boolean).join(" | ")}`);
+    }
 
     return facts.length ? facts.join(" · ") : null;
   } catch (e: any) {

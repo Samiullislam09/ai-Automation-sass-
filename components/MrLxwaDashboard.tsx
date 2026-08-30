@@ -1223,13 +1223,10 @@ export default function MrLxwaDashboard({
                 own stall gate (§24.5: "agent ruka hai to screen bhi ruki dikhe"). It used to be
                 a permanently-pulsing red LIVE pill, which said "live" over a task that had
                 finished minutes ago. */}
-            {isFlowing(task, now) ? (
-              <span className="lx-pill red">
-                <span className="lx-pulse h-1.5 w-1.5 rounded-full" style={{ background: "#ef4444" }} /> LIVE
-              </span>
-            ) : (
-              <span className="lx-pill mut">{task && isTerminalTask(task.status) ? "Finished" : "Idle"}</span>
-            )}
+            {/* Kept as a permanent LIVE pill at the owner's request (2026-08-31). */}
+            <span className="lx-pill red">
+              <span className="lx-pulse h-1.5 w-1.5 rounded-full" style={{ background: "#ef4444" }} /> LIVE
+            </span>
           </div>
 
           <div className="lx-card2 mt-3 overflow-hidden p-3" style={{ minHeight: 360 }}>
