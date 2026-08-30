@@ -231,37 +231,27 @@ flowchart TD
 <!-- ============================================================ -->
 <h2 id="arch">4 · Nayi architecture</h2>
 
-<div class="callout warn">
-  <p class="t">Ye diagram original (v1) vision hai — &sect;16.3 Upgrade D ne ise revise kiya, phir owner ne 2026-08-28 ko FINAL faisla liya</p>
-  <p>Neeche ka diagram <code>mrlxwa-brain</code> ko ek alag service dikhata hai, aur har agent (<code>keyword-agent</code>, <code>writer-agent</code>, waghera) ko <strong>apni-apni alag Railway service</strong>, HTTP <code>/run</code> se juda hua. Ye kabhi bana hi nahi — pehle Upgrade D ne isse &ldquo;3 deploy units&rdquo; me badla, phir owner ne seedha <strong>ek hi service</strong> chuna (Mr. Audit banate waqt, 2026-08-28). Asal architecture: sab kuch (brain + har agent) <code>agent-server</code> naam ke ek hi Railway service ke andar, in-process function calls se — koi HTTP <code>/run</code> nahi, koi alag repo nahi. &sect;16.3 Upgrade D aur &sect;11 ka &ldquo;Aaj asal me&rdquo; column dekho current reality ke liye. Neeche ka diagram sirf ye samjhane ke liye rakha hai ki <em>concepts</em> (brain, registry, orchestrator, manifest-driven routing) kya hain — <em>deployment</em> ka hissa mat maano.</p>
+<div class="callout">
+  <p class="t">Ye asal architecture hai &mdash; FINAL faisla (Upgrade D, owner, 2026-08-28)</p>
+  <p>Yahan pehle v1 ka diagram tha jisme har agent ki <strong>apni alag Railway service</strong> thi aur brain unse HTTP <code>/run</code> se baat karta tha. <strong>Wo kabhi bana hi nahi</strong> aur ab banana bhi nahi hai, isliye 2026-08-31 ko wo diagram yahan se hata diya gaya (purani cheez do jagah rakhne se hi confusion hoti hai). Asal cheez: brain aur har agent <strong>ek hi Railway service</strong> <code>agent-server</code> ke andar hain, aapas me in-process function calls se jude &mdash; koi HTTP <code>/run</code> nahi, koi alag repo nahi. Contract package HTTP adapter bhi deta hai, jis din alag hona zaroori ho.</p>
 </div>
 
 <pre class="mermaid">
 flowchart LR
   subgraph Web["Vercel · Next.js"]
-    UI[Chat / Office / Schedule / Approvals]
+    UI[Chat / Dashboard / Approvals / Schedule]
   end
-  subgraph Brain["Railway · mrlxwa-brain (ek hi service)"]
-    IN[Intent Engine<br/>manifest se bana router] --> PL[Planner<br/>task → steps]
-    PL --> OR[Orchestrator<br/>state machine + queue]
+  subgraph Server["Railway · agent-server (EK hi service)"]
+    IN[Intent Engine<br/>manifest se bana router] --> PL[Planner<br/>target-backwards, code hai]
+    PL --> OR[Orchestrator<br/>state machine + pg-boss]
     OR --> REG[(Agent Registry<br/>manifests)]
-    CH[Conversation<br/>Q&amp;A model] --- IN
+    OR -->|in-process call| AG[10 agents<br/>crawler · analyst · boss · keyword<br/>writer · seo · publish · audit · social · leads]
+    AG -->|manifest on boot| REG
   end
-  subgraph Agents["Railway · ek service per agent, apna repo"]
-    A1[keyword-agent<br/>TS]
-    A2[writer-agent<br/>Python · gpt-researcher]
-    A3[seo-agent<br/>Python]
-    A4[site-audit-agent<br/>TS · Playwright]
-    A5[publish-agent<br/>TS]
-    A6[leads-agent<br/>Python · LangGraph]
-    A7[social-agent<br/>Phase 3]
-  end
-  DB[(Supabase<br/>tasks · steps · runs · articles)]
-  UI -->|/api/chat| Brain
-  OR -->|HTTP /run| A1 & A2 & A3 & A4 & A5 & A6 & A7
-  A1 & A2 & A3 & A4 & A5 & A6 & A7 -->|/manifest on boot| REG
-  Brain <--> DB
-  UI <-->|realtime| DB
+  DB[(Supabase<br/>tasks · task_steps · task_events · content_items)]
+  UI -->|/api/chat| Server
+  Server <--> DB
+  UI <-->|Realtime / poll| DB
 </pre>
 
 <h3>Kya badla, ek nazar me</h3>
@@ -452,7 +442,7 @@ POST /run        → body: { run_id, tenant_id, action, input, context, callback
 <ul>
   <li>Brain → agent: shared secret header (<code>X-Agent-Token</code>), per-agent alag token</li>
   <li>Agent → brain callback: same token + <code>run_id</code> HMAC, taaki koi bahar se fake result na bhej sake</li>
-  <li>Agent ke paas Supabase ka <strong>service key nahi hoga</strong>. Sirf brain DB likhta hai. Agent ko jo data chahiye wo <code>input</code>/<code>context</code> me milta hai. <span class="pill warn">Abhi lagu nahi</span> — &sect;16.3 Upgrade D ke FINAL faisle (ek hi service) ke hisaab se har agent isi process me hai aur seedha <code>supabase.js</code> import karta hai (jaisa har <code>agent-server/src/agents/*.ts</code> me dikhta hai) — isolation ka ye faida sirf tab milega jab agents sach me alag services ban jayen.</li>
+  <li>Agent seedha <code>supabase.js</code> import karta hai aur khud DB likhta hai (har <code>agent-server/src/agents/*.ts</code> me dikhta hai). <small>Yahan pehle likha tha &ldquo;agent ke paas service key nahi hoga, sirf brain DB likhta hai&rdquo; &mdash; wo Upgrade D ke FINAL faisle (ek hi service, in-process) ke saath lagu hi nahi hota, isliye 2026-08-31 ko hata diya. Ye isolation tabhi milega jis din agents sach me alag services banenge.</small></li>
   <li>Credentials (WordPress password, social tokens) sirf publish/social agent ko, sirf us run ke liye, encrypted (aaj ka <code>lib/crypto.ts</code>)</li>
 </ul>
 
@@ -642,34 +632,27 @@ tenant_style        tenant_id, liked_examples jsonb, avoid jsonb, tone_notes
 
 <!-- ============================================================ -->
 <h2 id="repos-layout">11 · Repo aur deploy layout</h2>
-<p>Aapka <strong>original</strong> faisla: har agent apna repo. Sahi faisla hai — <strong>agar</strong> contract shared package me ho, warna 8 repo me 8 alag shape ban jaayenge. Layout, jaisa pehle socha gaya tha:</p>
-<div class="callout warn">
-  <p class="t">Ye table ab plan ka current instruction NAHI hai — &sect;22 con #2 aur #4 ne isse revise kiya</p>
-  <p><strong>&sect;22 con #2</strong> (&ldquo;Big-bang rewrite&rdquo;) ka fix: &ldquo;Brain agent-server ke andar ugta hai&rdquo; &mdash; alag repo nahi. <strong>&sect;22 con #4</strong> ka fix: &ldquo;TS agents brain ke saath in-process &mdash; koi webhook nahi. HTTP sirf Python/Playwright units ke liye.&rdquo; Dono &ldquo;ab plan ka hissa&rdquo; hain, deviation nahi. Har agent jo asal me bana (neeche) TypeScript nikla aur <code>agent-server/src/agents/*.ts</code> ke andar hi reh gaya &mdash; koi bhi &ldquo;Python + alag repo&rdquo; column is se plan ke apne fix ki wajah se follow nahi hua, kisi galti se nahi. Ye tabhi badlega jab budget/scale (10+ paying tenants) alag repo ka Railway kharcha justify kare &mdash; strangler pattern ka poora point yahi hai: module self-contained hai, jis din alag hona hai sirf imports badlenge.</p>
+<div class="callout">
+  <p class="t">FINAL: ek repo, ek Railway service (Upgrade D, owner, 2026-08-28)</p>
+  <p>Yahan pehle ek table thi jo har agent ko <strong>apna repo aur apni Railway service</strong> deti thi (kuch Python me), aur uske neeche Dockerfile / <code>/manifest</code> poll / per-agent CI ki list. Wo sab <strong>planned</strong> tha, kabhi bana nahi, aur ab banana bhi nahi hai &mdash; isliye 2026-08-31 ko hata diya gaya. Neeche wahi hai jo asal me chalta hai.</p>
 </div>
 <div class="tablewrap"><table>
-<tr><th>Repo (original socha gaya)</th><th>Language (planned)</th><th>Andar</th><th><strong>Aaj asal me</strong></th></tr>
-<tr><td><code>mrlxwa-web</code></td><td>TS/Next</td><td>Aaj ka app (chat route brain ko in-process bulata hai)</td><td><span class="pill ok">MATCH</span> — Vercel pe, jaisa socha gaya</td></tr>
-<tr><td><code>mrlxwa-brain</code></td><td>TS</td><td>Intent, planner, orchestrator, registry, scheduler, pg-boss, conversation</td><td><span class="pill info">STRANGLER</span> — <code>agent-server/src/brain/</code> ke andar, alag repo nahi (&sect;22 #2)</td></tr>
-<tr><td><code>mrlxwa-agent-contract</code></td><td>TS + Python</td><td>Manifest types, /run wrapper, callback client, logger</td><td><span class="pill ok">MATCH</span> — <code>packages/agent-contract</code>, vendor hota hai <code>sync-contract.mjs</code> se jab tak npm publish na ho</td></tr>
-<tr><td><code>agent-keyword</code></td><td>TS</td><td>Aaj ka keyword.ts + fallback + dataforseo</td><td><span class="pill info">STRANGLER</span> — <code>agents/keyword.ts</code>, in-process (&sect;22 #4: TS agent)</td></tr>
-<tr><td><code>agent-writer</code></td><td>Python 3.11 (planned)</td><td>FastAPI + gpt-researcher + qualityGate port</td><td><span class="pill ok">TS + real gpt-researcher</span> — <code>agents/writer.ts</code> + <code>lib/writerPipeline.ts</code> (&sect;16.3 Upgrade E), aur <code>lib/research/</code> ka Python subprocess (2026-08-28) isi service ke andar — alag deploy unit nahi (&sect;16.3 Upgrade D FINAL faisla)</td></tr>
-<tr><td><code>agent-seo</code></td><td>Python (planned)</td><td>11 content checks (ported) + NIM scoring</td><td><span class="pill warn">TS bana</span> — <code>agents/seo.ts</code>, 24 checks (11 se zyada), in-process</td></tr>
-<tr><td><code>agent-site-audit</code></td><td>TS</td><td>seomator CLI wrapper + Playwright; crawler bhi yahin</td><td><span class="pill info">STRANGLER</span> — <code>agents/audit.ts</code>, 26 tests. <span class="pill ok">DONE 2026-08-28</span> real Core Web Vitals via <code>lighthouse</code> (&sect;17.3's <code>unlighthouse</code> engine, used directly — see &sect;17.3's own note)</td></tr>
-<tr><td><code>agent-publish</code></td><td>TS</td><td>WP REST, webhook, unpublish, URL verify</td><td><span class="pill info">STRANGLER</span> — <code>agents/publish.ts</code>, unpublish 2026-08-28 ko laga</td></tr>
-<tr><td><code>agent-leads</code></td><td>Python (planned)</td><td>LangGraph, Apollo, ICP, compliance</td><td><span class="pill warn">TS bana</span> — <code>agents/leads.ts</code>, OpenStreetMap se (Apollo optional key ke bina)</td></tr>
-<tr><td><code>agent-social</code></td><td>TS</td><td>Draft-only posts</td><td><span class="pill info">STRANGLER</span> — <code>agents/social.ts</code>, 12 tests</td></tr>
+<tr><th>Hissa</th><th>Kahan hai</th><th>Note</th></tr>
+<tr><td>Web app</td><td><code>/</code> &mdash; Next.js, Vercel pe</td><td>Chat route brain ko HTTP se bulata hai (<code>AGENT_SERVER_URL</code>)</td></tr>
+<tr><td>Brain</td><td><code>agent-server/src/brain/</code></td><td>Registry, planner, orchestrator, events, adapter, server</td></tr>
+<tr><td>Saare 10 agents</td><td><code>agent-server/src/agents/*.ts</code></td><td>crawler · analyst · boss · keyword · writer · seo · publish · audit · social · leads &mdash; sab TypeScript, sab in-process</td></tr>
+<tr><td>Agent contract</td><td><code>packages/agent-contract</code></td><td>Vendor hota hai <code>scripts/sync-contract.mjs</code> se, jab tak npm publish na ho</td></tr>
+<tr><td>Research (Python)</td><td><code>agent-server/src/lib/research/</code></td><td>gpt-researcher, subprocess se &mdash; usi service ke andar, alag deploy unit nahi</td></tr>
+<tr><td>Queue</td><td>pg-boss, Postgres pe</td><td>Retry, backoff, per-agent concurrency</td></tr>
+<tr><td>Database</td><td>Supabase</td><td><code>tasks</code> · <code>task_steps</code> · <code>task_events</code> · <code>content_items</code> · <code>site_pages</code> · <code>site_profiles</code></td></tr>
 </table></div>
-<p><small>Har agent ke naam ke saamne jo asal file hai wahi source of truth hai (<code>agent-server/src/agents/</code>) &mdash; is table ka &ldquo;planned&rdquo; column sirf history ke liye hai, taaki koi puche ki original socha kya tha.</small></p>
 <ul>
-  <li>Har agent repo me: <code>Dockerfile</code>, <code>manifest.json</code>, <code>/health</code>, ek <code>test/run.test</code> jo fixed input pe output shape verify kare, aur README jo bataye “akela kaise chalao”.</li>
-  <li>CI: har push pe test + manifest validate (contract package ka validator). Manifest invalid = deploy nahi.</li>
-  <li>Brain boot pe sab agents ka <code>/manifest</code> poll karta hai, har 60s <code>/health</code>. Agent down → uske actions router se hat jaate hain aur user ko “Mr. Writer abhi available nahi” milta hai, silent fail nahi.</li>
-  <li>Railway gotchas (memory me hain): Root Directory slash bug, Nixpacks, rediss TLS — ab alag repo hone se root-directory wala issue khatam.</li>
+  <li>Manifest in-process aata hai (<code>agent-server/src/brain/manifests.ts</code>); health registry ke andar hi check hota hai &mdash; koi <code>/manifest</code> poll nahi.</li>
+  <li>Agent down &rarr; uske actions router se hat jaate hain aur user ko &ldquo;Mr. X abhi available nahi&rdquo; milta hai, silent fail nahi.</li>
+  <li>Railway gotchas (memory me): Root Directory slash bug, Nixpacks, <code>rediss://</code> TLS. <strong>Railway git push pe auto-deploy nahi karta</strong> &mdash; &ldquo;Deploy latest commit&rdquo; manually dabana padta hai.</li>
+  <li>Alag repo tabhi, jab budget/scale (10+ paying tenants) uska Railway kharcha justify kare. Strangler ka point yahi hai: har module self-contained hai, alag hone ke din sirf imports badlenge &mdash; contract package HTTP adapter already deta hai.</li>
 </ul>
-<p><small>Ye poori list — Dockerfile se leke health-poll tak — bhi upar wale table jaisi hi <strong>planned</strong> hai, aaj ka setup nahi. Aaj: ek hi <code>agent-server</code> repo, ek hi Railway service, manifest in-process se aata hai (<code>agent-server/src/brain/manifests.ts</code>), health registry ke andar hi check hota hai. Kaam wahi hai, tareeqa simple.</small></p>
 
-<!-- ============================================================ -->
 <h2 id="scale">12 · 1000 articles/day ka hisaab</h2>
 <p>Doc kehta hai 100 users × 10 articles/day. Ye number pipeline design badalta hai. Andaze hain, launch se pehle ek hafte ka real data se replace karna.</p>
 <div class="tablewrap"><table>
@@ -750,7 +733,7 @@ tenant_style        tenant_id, liked_examples jsonb, avoid jsonb, tone_notes
 
 <!-- ============================================================ -->
 <h2 id="tests">14 · Acceptance tests — “user ne X kaha to Y hi ho”</h2>
-<p>Ye suite brain ke CI me chalegi. Har row ek test. Fail = deploy nahi. <span class="pill warn">Number stale tha</span> — "85 tests" us waqt (project shuru) ka number tha; &sect;26 build log ka aakhri row current asli count deta hai (2026-08-28 tak: 330 agent-server + 141+ web) — ye grow karta rehta hai, is line ko fix rakhna galat hoga.</p>
+<p>Ye suite brain ke CI me chalegi. Har row ek test. Fail = deploy nahi. Test count yahan jaanbujh ke nahi likha — wo har hafte badalta hai, aur ek fixed number doc me likhna hi wo galti hai jo pehle "85 tests" ke saath hui thi. Current count ke liye &sect;26 build log ka aakhri row dekho, ya khud chala lo (<code>npx tsx --test</code>).</p>
 <div class="tablewrap"><table>
 <tr><th>User kehta hai</th><th>Hona chahiye</th><th>Nahi hona chahiye</th></tr>
 <tr><td>“hello”</td><td>Greeting, 1 line</td><td>Status report, intro, koi task</td></tr>
@@ -1279,35 +1262,35 @@ ka text dekhta hai). Comment ab sahi wajah kehta hai.</p>
 
 <h3>20.1 Ek order ki poori zindagi</h3>
 <p>Example: user ne chat me likha <em>"Dubai ke 20 restaurant leads dhundo"</em>.</p>
-<p><small><span class="pill warn">Transport concept-level hai</span> — neeche ka diagram <code>POST /run</code> + async callback (agent apni alag service pe) dikhata hai, jaisa &sect;6 ka contract describe karta hai. Asal 2026-08-28 tak: sab kuch ek hi <code>agent-server</code> process me (&sect;16.3 Upgrade D FINAL), to ye HTTP hop nahi hota — function call hai. Leads agent LangGraph bhi nahi hai, plain TS (&sect;7.6). States/events/DB writes ka <em>logic</em> yahi hai; sirf "HTTP se doosri service ko call kiya" wala hissa abhi nahi.</small></p>
+<div class="callout">
+  <p class="t">Ye asal flow hai &mdash; in-process, koi HTTP hop nahi</p>
+  <p>Yahan pehle ka diagram <code>POST /run</code> + async callback dikhata tha (agent apni alag service pe). Wo transport kabhi bana nahi &mdash; Upgrade D ka FINAL faisla ek hi service hai &mdash; isliye 2026-08-31 ko diagram asal flow se badal diya gaya. Leads agent LangGraph bhi nahi hai, plain TS (&sect;7.6).</p>
+</div>
 <pre class="mermaid">
 sequenceDiagram
   autonumber
   participant U as User (chat)
   participant W as Web (/api/chat)
-  participant B as Brain
+  participant B as Brain (agent-server)
   participant DB as Supabase
   participant Q as pg-boss
-  participant A as leads-agent
+  participant A as leads agent (same process)
   U->>W: "Dubai ke 20 restaurant leads dhundo"
-  W->>B: POST /chat {text, tenant, conv}
-  B->>B: Intent Engine: tool call find_leads({area:"Dubai", type:"restaurant", count:20}) conf 0.94
-  B->>DB: INSERT tasks (status=queued, echo="20 restaurant leads, Dubai")
-  B->>DB: INSERT task_steps (1: leads.find_leads)
-  B-->>W: 202 {task_id, echo, eta: 90s}  ← 0 model text yet
-  W-->>U: System card: "Dhundh raha hun — 20 restaurant leads, Dubai (~90s)"
-  B->>Q: send("step", {task_id, step_no:1})
-  Q->>B: work → pick step 1
-  B->>DB: UPDATE task_steps SET status=running, attempts=1
-  B->>A: POST /run {run_id, action, input, context(icp), callback_url}
-  A-->>B: 202 Accepted
-  Note over A: discover → enrich → qualify → draft (LangGraph, 60-120s)
-  A->>B: POST callback {run_id, ok:true, output:{leads:[…14]}}
-  B->>DB: INSERT agent_runs; UPDATE task_steps (done, output)
-  B->>DB: INSERT leads ×14; UPDATE tasks (done)
-  B->>DB: INSERT task_events (message_user:"14 leads mile, 5 strong")
-  DB-->>W: realtime → status card update
-  W-->>U: "✓ 14 leads mile, 5 strong. Sabse achha: Al Safa… — Leads page"
+  W->>B: POST /brain/tasks {intent, tenant}
+  B->>B: Intent Engine: find_leads({query, count:20}) conf 0.94
+  B->>B: Planner: target-backwards, 1 step
+  B->>DB: INSERT tasks (queued, echo) + task_steps (1: leads.find_leads)
+  B-->>W: 202 {task_id, echo, outline, eta}
+  W-->>U: Live strip: "Dhundh raha hun - 20 restaurant leads, Dubai"
+  B->>Q: enqueue leads job with __brain {task_id, step_id}
+  Q->>A: worker picks it up (in-process call)
+  B->>DB: UPDATE task_steps SET status=running
+  Note over A: discover, enrich, qualify, draft (plain TS, 60-120s)
+  A->>B: onStepDone(task_id, step_id, output)
+  B->>DB: UPDATE task_steps done; INSERT leads; UPDATE tasks
+  B->>DB: INSERT task_events (message_user "14 leads mile, 5 strong")
+  DB-->>W: Realtime broadcast, live panel + chat strip update
+  W-->>U: "14 leads mile, 5 strong - Leads page"
 </pre>
 <div class="tablewrap"><table>
 <tr><th>Step</th><th>Agar yahan fail hua</th><th>Kya hota hai</th><th>User ko</th></tr>
@@ -1581,7 +1564,7 @@ ctx.done({ output })                                                 // STEP_FIN
 
 <h3>24.4 Teen views — ek hi event stream se</h3>
 <div class="grid2">
-  <div class="card"><h4>A · Office (aaj wala, upgrade)</h4><p>Pixel office rehta hai — wo aapki pehchaan hai. Par har agent ke <strong>monitor</strong> pe ab uska asli “screen” chalta hai: Keyword ke screen pe rows ek-ek karke aati hain (typewriter), Writer ke screen pe headings ban rahe hain aur words count badh raha hai, Image ke screen pe image fade-in, SEO ke screen pe gauge 0→82. Agent idle = screen saver. Zoom-in (aaj ka feature) = full-size screen. <strong>Ye wahi “YouTube video” feel hai</strong> — kaam ko hote dekhna, summary padhna nahi.</p></div>
+  <div class="card"><h4>A · Live panel (default)</h4><p><small>2026-08-31: is card me pehle &ldquo;Pixel office rehta hai &mdash; wo aapki pehchaan hai&rdquo; likha tha. Wo &sect;24.4b (v3 faisla) ne palat diya, isliye purani baat hata di gayi.</small> Default view <strong>live panel</strong> hai, office nahi (office ek theme reh gaya). Har agent ka apna &ldquo;screen&rdquo;: Keyword ki rows ek-ek karke aati hain, Writer ka document H2-by-H2 banta hai, SEO ka score gauge 0&rarr;82. Agent idle = screen bhi ruki. <strong>Ye wahi &ldquo;YouTube video&rdquo; feel hai</strong> &mdash; kaam ko hote dekhna, summary padhna nahi.</p></div>
   <div class="card"><h4>B · Pipeline (naya, React Flow)</h4><p>Ek task = graph: Keyword → Writer → (Image ‖ SEO) → Publish. Node ka rang = state (queued/running/done/failed), running node me progress bar + last event line, edge animate jab data pass ho. Click node → uska screen (view A ka monitor) bada. Ye “ab kaun, phir kaun” ka sawaal <em>dikhne</em> me solve karta hai — user ko poochhna nahi padta.</p></div>
   <div class="card"><h4>C · Replay + share (naya)</h4><p>Har task ka event log = ek “recording”. Approvals me article ke saath ▶ button: 5 min ka kaam 30 sec me replay, scrubber ke saath. Share link (public, read-only) — customer apne client ko dikha sakta hai “dekho AI ne kaise banaya”. Phase 4: Remotion se asli MP4 “is hafte ki team report”.</p></div>
   <div class="card"><h4>D · Chat me mini (already partly)</h4><p>Status card me live line: “Mr. Writer — section 3/5: Installation cost”. Same events, chhota render. Mobile pe yahi main view hai.</p></div>
@@ -1822,6 +1805,7 @@ aur commit ke saath &mdash; taaki kal koi (aap, main, ya 10 saal baad koi employ
 <tr><td>2026-08-31</td><td><code>961720d</code></td><td><strong>Auto-pick topics via Mr Lxwa</strong>: "article likho" bina topic ke ab "which topic?" pe dead-end nahi hota &mdash; naya <code>boss.pick_topic</code> action (<code>plan_topics</code> jaisa hi site-analysis + duplicate-lock, count=1, planner ke graph ko step ke output se seedha wire). Topic diya ho to bilkul pehle jaisa (Boss beech me nahi aata); na diya ho to plan khud <code>boss &rarr; keyword &rarr; writer &rarr; seo</code> ban jaata hai. Isi ke saath ek <strong>foundational bug</strong> mila aur fix hua: <code>orchestrator.ts</code>'s <code>resolveInput()</code> (jo ek step ka output agle step tak pahunchata hai) planner ke asal <code>__from</code> format se hi match nahi karta tha &mdash; do jagah drift ho chuka tha (galat key: <code>provides</code> vs <code>(no,agent_id)</code>; aur galat shape: flat field vs nested <code>__from</code> object). Matlab Keyword&rarr;Writer, Writer&rarr;SEO jaisi HAR real multi-step chain apna data agle agent tak kabhi pahunchati hi nahi thi &mdash; <code>orchestrator.test.ts</code> ke apne fixtures purane format se the, isliye kabhi pakda nahi gaya</td><td>agent-server 254 green (+7), tsc clean. Railway redeploy baaki</td></tr>
 <tr><td>2026-08-31</td><td><code>461408e</code></td><td>Dashboard live visual: agent se agent tak animated wire (SVG, measured DOM positions se, working agent ko real glow/pop), chat ab ek hi bubble live-update karta hai poore task ke dauraan ("On it" pe frozen nahi rehta), aur Mr Lxwa ka asal plan (<code>task.outline</code>, pehle se compute ho raha tha, sirf Office page tak limited tha) ab Live Visual panel pe bhi dikhta hai</td><td>web tsc clean, live browser check (0 console errors). Live states dekhne ke liye Railway redeploy chahiye</td></tr>
 <tr><td>2026-08-31</td><td><code>5037c13</code></td><td>Mr Lxwa ka apna hex card ab real status dikhata hai ("Online" hardcoded tha, ab <code>bossAgent.status</code> se — "Working" jab uska apna <code>pick_topic</code> step chal raha ho) aur Live Visual panel ab uske liye bhi auto-open hota hai (workingAgent-detection me pehle sirf grid ke 8 real agent scan hote the, Boss khud kabhi nahi — uska apna step shuru hote hi panel band raha jaata tha)</td><td>web tsc clean, live browser check (0 console errors). Railway redeploy baaki</td></tr>
+<tr><td>2026-08-31</td><td>(doc-only)</td><td><strong>Plan cleanup &mdash; purane version hataye.</strong> Owner ka rule: jahan ek hi cheez do jagah likhi ho (shuru me purani, aakhir me final), wahan <strong>aakhri wali final hai aur pehli delete</strong>. Isi rule se hataya gaya: &sect;4 ka v1 architecture diagram (har agent ki alag Railway service + HTTP <code>/run</code> &mdash; kabhi bana hi nahi) &rarr; asal in-process diagram se replace; &sect;11 ka poora "har agent apna repo" table + Dockerfile/<code>/manifest</code> poll/per-agent CI list &rarr; asal layout table se replace; &sect;20 ka <code>POST /run</code> + callback sequence diagram &rarr; asal in-process flow se replace; &sect;6 ka "agent ke paas service key nahi hoga" rule (lagu hi nahi hota) &rarr; asal ke saath badla; &sect;24.4 View A ka "pixel office default rehta hai" (&sect;24.4b ne palat diya tha) &rarr; live panel se badla; &sect;14 se stale test-count numbers nikale. HTML tag balance verify kiya (147 div, 54 table, 18 pre &mdash; sab match).</td><td>doc-only</td></tr>
 </table></div>
 
 <h3>26.1 Abhi kya baaki hai (is order me)</h3>
