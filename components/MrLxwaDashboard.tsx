@@ -622,7 +622,13 @@ export default function MrLxwaDashboard({
   // signed in) → everyone's honestly Waiting, not a fabricated "in progress" — see
   // statusForAgent below.
   const live = useLiveEvents(tenantId);
-  const task: TaskState | null = live.tasks[0] ?? null;
+  // THE ONE ORDER THIS SCREEN IS ABOUT. A task that is still running always wins over a newer
+  // finished one — `live.tasks[0]` alone meant the strip could sit on a cancelled or long-
+  // finished order while real work ran underneath it, which is why the same topic appeared to
+  // be stuck on screen forever (owner, 2026-08-31: "har waqt same hi topic"). Everything below
+  // — agent statuses, the wires, the glow, the plan, the bottom strip — reads from THIS task
+  // and nothing else, so the whole screen tells one consistent story.
+  const task: TaskState | null = live.tasks.find((t) => !isTerminalTask(t.status)) ?? live.tasks[0] ?? null;
   const taskActive = !!task && !isTerminalTask(task.status);
   // Ticks only while the newest task is actually open — a finished task's BottomBar timer is a
   // still image, same rule lib/live.ts's own useNow() doc comment states.
@@ -639,14 +645,13 @@ export default function MrLxwaDashboard({
   const queuedTasksList = activeTasksList.filter((t) => t.status === "queued" || t.status === "scheduled");
   const statusForAgent = (m: AgentMeta): AgentStatus => {
     if (m.fixedStatus) return m.fixedStatus;
-    // Every step this agent owns, across every loaded task — not just the newest task's one.
-    // "Running anywhere" WINS over the newest task's own step, which is the whole point: the
-    // newest task usually has this agent still `pending` (its turn has not come), while the
-    // step actually executing right now belongs to a slightly older task. Taking the newest
-    // task's step blindly reported "Waiting" for an agent that was visibly working — which is
-    // why the Live Visual panel never auto-opened (it keys off `workingAgent`, which keys off
-    // this) and why the wires never drew. Found live 2026-08-31.
-    const mine = live.tasks.flatMap((t) => t.steps.filter((s) => s.agent_id === m.id));
+    // Scoped to THIS order's steps only (see `task` above). Scanning every loaded task instead
+    // — which is what this did for a few hours on 2026-08-31 — meant that after a handful of
+    // orders every agent had a finished step somewhere, so the whole network sat on
+    // "Completed" permanently and said nothing about what was actually happening ("har agent pe
+    // abhi completed dikhta hai"). An agent that has no step in this order is honestly Waiting:
+    // the plan did not give it one.
+    const mine = (task?.steps ?? []).filter((s) => s.agent_id === m.id);
     if (!mine.length) return "Waiting";
     if (mine.some((s) => s.status === "running")) return "Working";
     if (mine.some((s) => s.status === "done")) return "Completed";
@@ -1155,6 +1160,12 @@ export default function MrLxwaDashboard({
   const runningStep = panelStep?.status === "running" ? panelStep : null;
   const stepNo = task && panelStep ? task.steps.findIndex((s) => s.key === panelStep.key) + 1 : null;
   const totalSteps = task?.totalSteps ?? task?.steps.length ?? null;
+  // Real progress numbers off `task` — used by BOTH the chat's live strip and the bottom bar,
+  // so they are declared here, before either is built (a `const` used above its declaration in
+  // the same scope is a runtime TDZ crash, not a type error).
+  const barDoneSteps = task ? task.steps.filter((s) => s.status === "done").length : 0;
+  const barTotalSteps = task ? task.totalSteps ?? task.steps.length : 0;
+  const barPct = barTotalSteps ? Math.round((barDoneSteps / barTotalSteps) * 100) : 0;
   const producedItems = task
     ? task.agents
         .filter((p) => !panelAgent || p.agent_id === panelAgent.id)
@@ -1464,6 +1475,48 @@ export default function MrLxwaDashboard({
         </div>
       )}
 
+      {/* LIVE PROGRESS, pinned above the composer.
+          The chat used to say "On it." and then nothing at all until the whole order finished —
+          asked for repeatedly and never actually delivered, because the earlier attempt hung off
+          a ref set during the fetch and an effect that only fired when `live.byTask` happened to
+          change afterwards; miss that window and no bubble was ever written. This reads straight
+          off `task` — the same value the network cards, the wires and the plan all use, which we
+          can see updating — so there is no timing to get wrong. It is deliberately a strip, not
+          a chat bubble: progress is a live state, not something that was "said". */}
+      {task && (
+        <div className="lx-card2 mx-3 mb-2 px-3 py-2">
+          <div className="flex items-center gap-2">
+            <span
+              className={`h-1.5 w-1.5 shrink-0 rounded-full ${taskActive ? "lx-pulse" : ""}`}
+              style={{ background: taskActive ? "#22c55e" : "#8b8ba0", boxShadow: taskActive ? "0 0 8px #22c55e" : "none" }}
+            />
+            <span className="lx-11 min-w-0 flex-1 truncate font-semibold">
+              {taskActive
+                ? runningStep?.progressLabel || runningStep?.label || "Starting…"
+                : task.status === "needs_attention" || task.status === "failed"
+                  ? task.reason || "Stopped — see Office for the reason."
+                  : "Done"}
+            </span>
+            {stepNo != null && totalSteps != null && (
+              <span className="lx-10 lx-mut shrink-0">Step {stepNo}/{totalSteps}</span>
+            )}
+          </div>
+          <div className="lx-10 lx-mut mt-1 truncate">{task.echo}</div>
+          {barTotalSteps > 0 && (
+            <div className="lx-track mt-1.5">
+              <div className="lx-fill" style={{ width: `${barPct}%` }} />
+            </div>
+          )}
+          {/* The finished article is reviewed and edited in Approvals — a real route, linked
+              only once the order actually reached it. */}
+          {task.status === "awaiting_approval" && (
+            <Link href="/dashboard/approvals" className="lx-ghost mt-2 inline-flex">
+              Review &amp; edit it →
+            </Link>
+          )}
+        </div>
+      )}
+
       {/* input — a soft glass pill (see .lx-chat-in); mic and send sit as matching
           icon buttons either side so the row reads as one deliberate unit instead
           of mismatched pieces */}
@@ -1518,14 +1571,6 @@ export default function MrLxwaDashboard({
       setCancellingTaskId(null);
     }
   };
-
-  // Real numbers off `task` (the newest live task) — was a hardcoded topic, step count, 42%
-  // bar and "00:12:30" total, and a Stop Task button with no onClick at all (found live
-  // 2026-08-31). No task at all → the strip doesn't render rather than showing fake progress
-  // for work that isn't happening.
-  const barDoneSteps = task ? task.steps.filter((s) => s.status === "done").length : 0;
-  const barTotalSteps = task ? task.totalSteps ?? task.steps.length : 0;
-  const barPct = barTotalSteps ? Math.round((barDoneSteps / barTotalSteps) * 100) : 0;
 
   const BottomBar = task ? (
     <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl border px-3 py-1.5" style={{ borderColor: "var(--lx-border)", background: "var(--lx-panel)" }}>
