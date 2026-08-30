@@ -445,6 +445,7 @@ const AgentNetwork = ({
   left,
   right,
   bottom,
+  bossAgent,
   totalActive,
   running,
   completed,
@@ -455,6 +456,7 @@ const AgentNetwork = ({
   left: Agent[];
   right: Agent[];
   bottom: Agent[];
+  bossAgent: Agent;
   totalActive: number;
   running: number;
   completed: number;
@@ -479,8 +481,8 @@ const AgentNetwork = ({
       {workingAgent && (
         <div className="lx-card2 mt-3 flex items-center gap-2.5 px-3 py-2">
           <span className="h-2 w-2 shrink-0 rounded-full lx-pulse" style={{ background: "#22c55e", boxShadow: "0 0 8px #22c55e" }} />
-          <span className="lx-11 font-semibold">Planning &amp; Orchestrating</span>
-          <span className="lx-10 lx-mut">— delegated to {workingAgent.name}</span>
+          <span className="lx-11 font-semibold">{workingAgent.id === "boss" ? "Mr Lxwa is working" : "Planning & Orchestrating"}</span>
+          <span className="lx-10 lx-mut">{workingAgent.id === "boss" ? "— choosing the best topic from your site" : `— delegated to ${workingAgent.name}`}</span>
         </div>
       )}
 
@@ -497,16 +499,24 @@ const AgentNetwork = ({
           {/* [ASSET] Mr. Lxwa — "command center" brain card, matching the reference
               (jhhhhhhhh.png). The brain is the reference's own 3D render, cropped out of that
               image into public/brand/brain-boss.png — a raster render can't be rebuilt in
-              CSS/SVG, and the request was to use exactly that artwork. */}
-          <div className="lx-hex lx-net-brain" data-net="b" style={{ gridArea: "b" }}>
+              CSS/SVG, and the request was to use exactly that artwork.
+              Status is real (bossAgent.status, same statusForAgent() every other card uses) —
+              was a hardcoded "Online" regardless of whether Mr Lxwa's own step (boss.pick_topic,
+              2026-08-31) was genuinely running. "Online" stays the resting-state word (he is
+              always reachable); "Working" only shows while he is actually mid-step. */}
+          <div
+            className={`lx-hex lx-net-brain ${bossAgent.status === "Working" ? "lx-net-card-working" : ""}`}
+            data-net="b"
+            style={{ gridArea: "b", boxShadow: bossAgent.status === "Working" ? `0 0 26px ${bossAgent.color}55` : undefined }}
+          >
             {/* eslint-disable-next-line @next/next/no-img-element -- static brand asset, fixed size */}
             <img src="/brand/brain-boss.png" alt="" width={156} height={124} />
             <div className="lx-13 font-bold mt-1">Mr. Lxwa</div>
             <div className="lx-10 lx-mut">Command Center</div>
             <div className="lx-10 lx-mut">Plan · Coordinate · Execute</div>
-            <div className="mt-1.5 flex items-center gap-1.5 lx-10 font-semibold" style={{ color: "#22c55e" }}>
-              <span className="h-1.5 w-1.5 rounded-full lx-pulse" style={{ background: "#22c55e" }} />
-              Online
+            <div className="mt-1.5 flex items-center gap-1.5 lx-10 font-semibold" style={{ color: bossAgent.status === "Working" ? "#60a5fa" : "#22c55e" }}>
+              <span className="h-1.5 w-1.5 rounded-full lx-pulse" style={{ background: bossAgent.status === "Working" ? "#3b82f6" : "#22c55e" }} />
+              {bossAgent.status === "Working" ? "Working" : "Online"}
             </div>
           </div>
 
@@ -632,6 +642,15 @@ export default function MrLxwaDashboard({
   };
   const agentsLeft: Agent[] = AGENT_META_LEFT.map((m) => ({ ...m, status: statusForAgent(m) }));
   const agentsRight: Agent[] = AGENT_META_RIGHT.map((m) => ({ ...m, status: statusForAgent(m) }));
+  // Mr Lxwa himself — real now that boss.pick_topic (2026-08-31) means the brain can genuinely
+  // be the one running: reads the same task_steps as every other agent (agent_id === "boss"),
+  // just kept OUT of allAgents/realAgents below rather than added as a 10th NetCard — the brain
+  // gets its own dedicated hex card (§25's reference mockup), it isn't a peer in the grid, and
+  // the header pill's "+1" already counts it once. It still has to feed `workingAgent` below,
+  // though — without that, Boss picking a topic would run for real with nothing on screen ever
+  // showing it, and the Live Visual panel would never auto-open for it (found live 2026-08-31).
+  const bossMeta: AgentMeta = { id: "boss", name: "Mr. Lxwa", role: "Command Center", icon: BrainCircuit, color: "#a78bfa" };
+  const bossAgent: Agent = { ...bossMeta, status: statusForAgent(bossMeta) };
   const allAgents: Agent[] = [...agentsLeft, ...agentsRight];
   const realAgents = allAgents.filter((a) => a.status !== "Planned");
   const workingAgentsCount = realAgents.filter((a) => a.status === "Working").length;
@@ -709,7 +728,10 @@ export default function MrLxwaDashboard({
   // live work — it only makes sense while an agent is actually working. `workingAgent` is
   // that fact; `showPanel` is the user's own choice to look at it or step back to the whole
   // team (the "Back to Workflow" button), independent of whether anyone is still working.
-  const workingAgent = allAgents.find((a) => a.status === "Working") ?? null;
+  // Mr Lxwa checked first: when a plan starts with his own pick_topic step, he is the one
+  // actually running before anyone else even has a step to run — the panel should open on him,
+  // not sit closed until Mr. Keyword picks up afterward.
+  const workingAgent = bossAgent.status === "Working" ? bossAgent : allAgents.find((a) => a.status === "Working") ?? null;
   const [showPanel, setShowPanel] = useState(!!workingAgent);
   const panelOpen = showPanel && !!workingAgent;
   // Auto-open only on the rising edge (nobody→somebody working) — e.g. a real task just
@@ -1062,6 +1084,7 @@ export default function MrLxwaDashboard({
           left={netLeft}
           right={netRight}
           bottom={netBottom}
+          bossAgent={bossAgent}
           totalActive={realAgents.length + 1}
           running={realAgents.filter((a) => a.status === "Working").length}
           completed={realAgents.filter((a) => a.status === "Completed").length}
