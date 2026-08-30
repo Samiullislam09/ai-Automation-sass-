@@ -208,7 +208,12 @@ export type RunningMatch = {
  *  reason. jobs_log's `action` wraps the topic in other words, so containment (either way
  *  round) is the test there; tasks.params.topic is the topic itself, so it is compared whole.
  */
-export async function findRunningTaskFor(tenantId: string, topic: string, excludeTaskId?: string | null): Promise<RunningMatch | null> {
+export async function findRunningTaskFor(
+  tenantId: string,
+  topic: string,
+  excludeTaskId?: string | null,
+  excludeJobLogId?: string | null,
+): Promise<RunningMatch | null> {
   const wanted = slugify(topic);
   if (!wanted) return null;
   const since = new Date(Date.now() - RUNNING_WINDOW_MS).toISOString();
@@ -245,7 +250,13 @@ export async function findRunningTaskFor(tenantId: string, topic: string, exclud
   }
 
   // 2 · jobs_log — today's reality. Only 'queued'/'running' rows, only recent ones.
-  const { data: jobs, error: jobsError } = await supabase
+  // `excludeJobLogId` is THIS agent's own row. workers.ts writes a jobs_log row with
+  // status='running' and the human task text ("Writing \"<topic>\"") BEFORE handing the job to
+  // the agent, so by the time the agent runs this lock its own row is sitting right there
+  // matching its own topic. Found live 2026-08-31 — the exact same self-block as the `tasks`
+  // half fixed hours earlier, just through the second of the lock's two sources, which that
+  // first fix did not touch.
+  let jobsQuery = supabase
     .from("jobs_log")
     .select("id, agent, action, status, created_at")
     .eq("tenant_id", tenantId)
@@ -253,6 +264,8 @@ export async function findRunningTaskFor(tenantId: string, topic: string, exclud
     .gte("created_at", since)
     .order("created_at", { ascending: false })
     .limit(50);
+  if (excludeJobLogId) jobsQuery = jobsQuery.neq("id", excludeJobLogId);
+  const { data: jobs, error: jobsError } = await jobsQuery;
 
   if (jobsError) {
     console.error("[dedupe] jobs_log lookup failed:", jobsError.message);
@@ -289,13 +302,13 @@ export type DuplicateVerdict =
  *  for (used for the in-flight match). When only one is known, pass it as both. */
 export async function checkDuplicate(
   tenantId: string,
-  { title, topic, excludeTaskId }: { title?: string | null; topic?: string | null; excludeTaskId?: string | null }
+  { title, topic, excludeTaskId, excludeJobLogId }: { title?: string | null; topic?: string | null; excludeTaskId?: string | null; excludeJobLogId?: string | null }
 ): Promise<DuplicateVerdict> {
   const forSlug = String(title ?? topic ?? "").trim();
   const forTopic = String(topic ?? title ?? "").trim();
 
   if (forTopic) {
-    const running = await findRunningTaskFor(tenantId, forTopic, excludeTaskId);
+    const running = await findRunningTaskFor(tenantId, forTopic, excludeTaskId, excludeJobLogId);
     if (running) return { status: "in_progress", task_id: running.task_id, source: running.source, label: running.label };
   }
 

@@ -157,6 +157,9 @@ async function processJob(type: AgentType, job: JobWithMetadata<AgentJobData>) {
     data: (kind, payload) => liveEvent({ type: "data", kind, payload }),
     progress: (fraction, label) => liveEvent({ type: "progress", fraction, label }),
     log: (message, level = "info") => liveEvent({ type: "log", level, message_dev: message }),
+    // So an agent can exclude its own in-flight row from a jobs_log search — see the field's
+    // own comment in agents/base.ts.
+    jobLogId: logId,
   };
 
   // Everything above and below is unchanged for ordinary jobs — the `brainRef` branches are

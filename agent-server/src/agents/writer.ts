@@ -78,8 +78,18 @@ export class WriterAgent extends Agent {
     // Exclude THIS job's own task row: the brain flips a task to "running" as soon as its
     // first step starts, so without this a brain-routed order always found itself already
     // "in progress" and refused to write — see dedupe.ts's own comment on findRunningTaskFor.
+    // BOTH of this job's own rows are excluded, because the lock searches two tables and this
+    // job is in both of them by now: its brain `tasks` row (the orchestrator flips a task to
+    // "running" as its first step starts) and its `jobs_log` row (workers.ts writes one, with
+    // the topic in the label, before calling this agent). Missing either one is a 100%
+    // self-block on every article — both were found live, hours apart, on 2026-08-31.
     const ownTaskId = brainRefOf(job.data)?.task_id ?? null;
-    const verdict = await checkDuplicate(tenantId, { title: topic.trim(), topic: topic.trim(), excludeTaskId: ownTaskId });
+    const verdict = await checkDuplicate(tenantId, {
+      title: topic.trim(),
+      topic: topic.trim(),
+      excludeTaskId: ownTaskId,
+      excludeJobLogId: ctx.jobLogId ?? null,
+    });
     if (verdict.status !== "free") {
       const reason = duplicateSentence(verdict);
       ctx.onProgress({ label: reason });

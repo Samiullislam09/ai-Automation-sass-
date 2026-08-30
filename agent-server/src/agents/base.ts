@@ -38,6 +38,16 @@ export type AgentContext = {
   /** A developer note. Deliberately NOT shown to users: the system writes what people read
    *  (brain/events.ts `userMessage`), so an agent's own words can never claim an outcome. */
   log: (message: string, level?: "debug" | "info" | "warn" | "error") => void;
+
+  /** This run's own `jobs_log.id`, written by workers.ts before the agent starts.
+   *
+   *  Only one thing needs it, and it is not logging: the duplicate locks (lib/dedupe.ts) search
+   *  `jobs_log` for a running job on the same topic, and THIS job is one of those rows by the
+   *  time the agent looks. Without a way to say "everything except me", Mr. Writer found its own
+   *  row and refused to write — found live 2026-08-31, the second self-block of the same shape
+   *  as the `tasks` one fixed earlier the same day. `undefined` when the log insert failed, in
+   *  which case the lock simply has nothing to exclude, exactly as before. */
+  jobLogId?: string;
 };
 
 export abstract class Agent {
