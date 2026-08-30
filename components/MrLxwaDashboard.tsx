@@ -876,6 +876,11 @@ export default function MrLxwaDashboard({
   // The chat's progress strip: one line by default, opens on the chevron (owner, 2026-08-31 —
   // the expanded card was permanently eating the chat's own room).
   const [stripOpen, setStripOpen] = useState(false);
+  // True from the instant an order is sent until the live feed actually has the task. Without
+  // it there is a dead gap — the request is in flight, then the brain is creating rows — where
+  // the chat showed nothing at all and the product felt asleep. The strip fills that gap with a
+  // real "Working…" rather than a fabricated step count.
+  const [awaitingOrder, setAwaitingOrder] = useState(false);
   const [msg, setMsg] = useState("");
   const [thread, setThread] = useState<ThreadMsg[]>([]);
   const [chatBusy, setChatBusy] = useState(false);
@@ -918,10 +923,16 @@ export default function MrLxwaDashboard({
   // ran most recently in this task — never a hardcoded "Mr. Writer" fallback, which is what it
   // used to show for every agent.
   const lastStep = task ? [...task.steps].filter((s) => s.startedAt != null).sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))[0] : null;
+  // Last resort: whoever actually PRODUCED something on this order. Without it a finished order
+  // opened on "Team" with the generic item list instead of that agent's own screen — the panel
+  // had auto-opened before any step existed, nothing was ever selected, and `lastStep` needs a
+  // `startedAt` that a step only gets once it runs.
+  const producerAgent = task?.agents.find((p) => p.items.length)?.agent_id ?? null;
   const panelAgent =
     (selectedAgentId ? [...allAgents, bossAgent].find((a) => a.id === selectedAgentId) ?? null : null) ??
     workingAgent ??
-    (lastStep ? [...allAgents, bossAgent].find((a) => a.id === lastStep.agent_id) ?? null : null);
+    (lastStep ? [...allAgents, bossAgent].find((a) => a.id === lastStep.agent_id) ?? null : null) ??
+    (producerAgent ? [...allAgents, bossAgent].find((a) => a.id === producerAgent) ?? null : null);
   // Auto-open on the rising edge of AN ACTIVE ORDER — not of "somebody is Working".
   //
   // Keyed off `workingAgent` before, this missed the case the owner actually hits: for the first
@@ -934,6 +945,7 @@ export default function MrLxwaDashboard({
   const hadActiveTask = useRef(false);
   useEffect(() => {
     if (taskActive && !hadActiveTask.current) setShowPanel(true);
+    if (taskActive) setAwaitingOrder(false);
     hadActiveTask.current = taskActive;
   }, [taskActive]);
 
@@ -1002,6 +1014,8 @@ export default function MrLxwaDashboard({
       if (returned) convId.current = returned;
       const runJob = res.headers.get("X-Run-Job");
       if (runJob) orderedTaskId.current = runJob;
+      // No task id back = this turn was a plain answer, not an order. Stop waiting.
+      else setAwaitingOrder(false);
       const reader = res.body.getReader();
       const dec = new TextDecoder();
       while (true) {
@@ -1035,6 +1049,7 @@ export default function MrLxwaDashboard({
       });
     } finally {
       setChatBusy(false);
+      if (!orderedTaskId.current) setAwaitingOrder(false);
     }
   };
 
@@ -1050,6 +1065,7 @@ export default function MrLxwaDashboard({
     if (!t || chatBusy) return;
     setThread((p) => [...p, { who: "user", text: t, time: nowTime() }]);
     setMsg("");
+    setAwaitingOrder(true);
     void stream(t);
   };
 
@@ -1371,6 +1387,7 @@ export default function MrLxwaDashboard({
     setThread((p) => [...p, { who: "user", text, time: nowTime() }]);
     setBotOpen(true);
     setDesktopAssistantOpen(true);
+    setAwaitingOrder(true);
     void stream(text);
   };
   const itemLabel = (it: (typeof producedItems)[number]) => {
@@ -1686,7 +1703,13 @@ export default function MrLxwaDashboard({
                 </div>
                 {m.chip && (
                   <div style={{ marginLeft: 30 }} className="mt-1.5">
-                    <span className="lx-pill purple" style={{ maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", display: "inline-block" }}>
+                    {/* Wraps instead of truncating — .lx-pill is nowrap by default, which cut a
+                        real keyword down to "iso 22000 food safety man…". The whole phrase is
+                        the point of showing it. */}
+                    <span
+                      className="lx-pill purple"
+                      style={{ maxWidth: "100%", display: "inline-block", whiteSpace: "normal", lineHeight: 1.5, textAlign: "left" }}
+                    >
                       {m.chip}
                     </span>
                   </div>
@@ -1727,7 +1750,9 @@ export default function MrLxwaDashboard({
           off `task` — the same value the network cards, the wires and the plan all use, which we
           can see updating — so there is no timing to get wrong. It is deliberately a strip, not
           a chat bubble: progress is a live state, not something that was "said". */}
-      {task && (
+      {/* Shown the moment an order is sent (awaitingOrder), not only once the task row exists —
+          that gap is exactly where the product used to look asleep. */}
+      {(task || awaitingOrder) && (
         <div className="lx-card2 mx-3 mb-2 px-3 py-2">
           {/* COLLAPSED BY DEFAULT — one line. The full card (order text, the ticking plan, the
               bar, the review link) was several lines tall and permanently ate the chat's own
@@ -1739,18 +1764,26 @@ export default function MrLxwaDashboard({
             onClick={() => setStripOpen((o) => !o)}
             aria-expanded={stripOpen}
           >
+            {/* `awaitingOrder` wins over `task`: right after sending, `task` is still the
+                PREVIOUS (finished) order, and showing its "Done" while the new one is being
+                created is exactly the stale answer this strip exists to avoid. */}
             <span
-              className={`h-1.5 w-1.5 shrink-0 rounded-full ${taskActive ? "lx-pulse" : ""}`}
-              style={{ background: taskActive ? "#22c55e" : "#8b8ba0", boxShadow: taskActive ? "0 0 8px #22c55e" : "none" }}
+              className={`h-1.5 w-1.5 shrink-0 rounded-full ${awaitingOrder || taskActive ? "lx-pulse" : ""}`}
+              style={{
+                background: awaitingOrder || taskActive ? "#22c55e" : "#8b8ba0",
+                boxShadow: awaitingOrder || taskActive ? "0 0 8px #22c55e" : "none",
+              }}
             />
-            <span className="lx-11 min-w-0 flex-1 truncate font-semibold">
-              {taskActive
-                ? runningStep?.progressLabel || runningStep?.label || "Starting…"
-                : task.status === "needs_attention" || task.status === "failed"
-                  ? task.reason || "Stopped"
-                  : "Done"}
+            <span className={`lx-11 min-w-0 flex-1 truncate font-semibold ${awaitingOrder ? "lx-shimmer" : ""}`}>
+              {awaitingOrder || !task
+                ? "Working…"
+                : taskActive
+                  ? runningStep?.progressLabel || runningStep?.label || "Starting…"
+                  : task.status === "needs_attention" || task.status === "failed"
+                    ? task.reason || "Stopped"
+                    : "Done"}
             </span>
-            {stepNo != null && totalSteps != null && (
+            {!awaitingOrder && task && stepNo != null && totalSteps != null && (
               <span className="lx-10 lx-mut shrink-0">{stepNo}/{totalSteps}</span>
             )}
             <ChevronDown
@@ -1762,15 +1795,15 @@ export default function MrLxwaDashboard({
 
           <Collapse open={stripOpen}>
             <div className="pt-2">
-              <div className="lx-10 lx-mut truncate">{task.echo}</div>
+              <div className="lx-10 lx-mut truncate">{awaitingOrder || !task ? "Sending it to the team…" : task.echo}</div>
 
               {/* THE PLAN, TICKING. Mr Lxwa's real steps (task_steps, in plan order), each row
                   animating in as the plan lands and then flipping to done as its agent
                   finishes. Built from the real rows, so it can never show a step that is not in
                   the plan or tick one that has not finished. */}
-              {task.steps.length > 0 && (
+              {!awaitingOrder && task && task.steps.length > 0 && (
                 <ul className="mt-2 space-y-1">
-                  {task.steps.map((st, i) => {
+                  {task!.steps.map((st, i) => {
                     const nm = [...allAgents, bossAgent].find((a) => a.id === st.agent_id)?.name ?? st.agent_id;
                     const done = st.status === "done";
                     const run = st.status === "running";
@@ -1803,7 +1836,7 @@ export default function MrLxwaDashboard({
 
               {/* Only once the order is genuinely over, and only when there is a real thing to
                   open — straight at the article, not the Approvals list. */}
-              {isTerminalTask(task.status) && reviewHref && (
+              {!awaitingOrder && task && isTerminalTask(task.status) && reviewHref && (
                 <Link href={reviewHref} className="lx-grad lx-10 mt-2 inline-flex px-2.5 py-1">
                   Review
                 </Link>
