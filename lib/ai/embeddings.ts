@@ -1,10 +1,13 @@
 import "@/lib/dns-fix";
 
 /** Provider-agnostic embeddings adapter (Build Guide Step 5).
- *  Default: NVIDIA NIM `nv-embedqa-e5-v5` — same free build.nvidia.com account/key the
+ *  Default: NVIDIA NIM `nemotron-3-embed-1b` — same free build.nvidia.com account/key the
  *  guide already has you create in Step 0 (and reuses for Lightning/Mr Lxwa in Step 7),
- *  so there's no second AI account to sign up for. Its 1024 dimensions must match the
- *  `vector(1024)` column on `site_pages` — see supabase/migrations/002_embedding_dim.sql.
+ *  so there's no second AI account to sign up for. Its 2048 dimensions must match the
+ *  `vector(2048)` column on `site_pages` — see supabase/migrations/022_embedding_dim_2048.sql.
+ *  (The original `nv-embedqa-e5-v5`, 1024-dim, reached end-of-life 2026-08-25 — HTTP 410 with
+ *  no migration path. Found live 2026-08-31: every embed() call here and in agent-server's
+ *  twin had been failing silently since, so `/api/onboarding/crawl` indexed zero pages.)
  *  Swap providers by changing EMBEDDINGS_PROVIDER in .env — call sites never change. */
 
 export async function embed(text: string): Promise<number[]> {
@@ -27,8 +30,8 @@ async function embedNvidia(text: string): Promise<number[]> {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
     body: JSON.stringify({
-      // nv-embedqa-e5-v5 caps input at 512 tokens (~1800 chars of English is a safe margin)
-      model: "nvidia/nv-embedqa-e5-v5",
+      // 512-token cap — ~1800 chars of English is a safe margin
+      model: "nvidia/nemotron-3-embed-1b",
       input: [text.slice(0, 1800)],
       input_type: "passage", // "passage" = indexing content (this), "query" = search-time lookups
     }),

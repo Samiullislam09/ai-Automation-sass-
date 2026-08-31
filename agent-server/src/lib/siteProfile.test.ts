@@ -87,7 +87,7 @@ test("profileBlock: an absent field prints no line, rather than an empty one", (
   assert.ok(!/unknown|not specified|n\/a/i.test(block), block);
 });
 
-test("profileBlock: 1024-number centroids and the internal confidence map stay out of the prompt", () => {
+test("profileBlock: 2048-number centroids and the internal confidence map stay out of the prompt", () => {
   const block = profileBlock(iso());
   assert.ok(!block.includes("centroid"), "centroids are for our maths, not for the model");
   assert.ok(!block.includes("confidence"), "confidence is an internal score");

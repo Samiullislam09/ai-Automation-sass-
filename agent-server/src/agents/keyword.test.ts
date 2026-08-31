@@ -36,7 +36,7 @@ type Related = import("../lib/blueprint.js").Related;
 type SiteInsights = import("../lib/insights.js").SiteInsights;
 
 // ── a health site, in four readable dimensions ──────────────────────────────────────────────
-// Real embeddings are 1024-dim; the maths is identical at 4, and at 4 a human can read the
+// Real embeddings are 2048-dim (nemotron-3-embed-1b, since migration 022); the maths is identical at 4, and at 4 a human can read the
 // test and check the arithmetic by hand. The axes are [clinical, nutrition, money, unknown] —
 // "money" is orthogonal to both of the site's subjects, which is exactly the situation the fit
 // score exists for, and "unknown" is where anything we have never seen lands.

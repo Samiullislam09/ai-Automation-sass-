@@ -23,6 +23,33 @@ Inke bina `/app/eval` page aur naya keyword/writer flow DB error dega.
 
 Sab idempotent hain — galti se dobara chala do to kuch nahi bigdega.
 
+### 1b. Migration 022 chalao + site pages re-embed karo — [ ]
+**Kyun:** NVIDIA ne `nv-embedqa-e5-v5` (jo har embedding — crawl, Site Brain content_gaps,
+topic clusters — isi model se banti thi) 2026-08-25 ko retire kar diya, **HTTP 410, koi
+1024-dim replacement nahi diya**. Isliye abhi (2026-08-31 se) har crawl **0 pages index karta
+hai** (chup-chaap, apna `reason` field bata deta hai kyun) aur Mr Lxwa ka topic-planning ka
+sabse mazboot signal (content gaps — "Google pe dikh raha hai, page nahi hai") **khaali reh
+jaata hai bina kisi error ke**. Code ab naye model (`nemotron-3-embed-1b`, 2048-dim, live
+verify kiya) pe point karta hai — ye do steps uska DB + purana data wala hissa hain.
+**Kahan:** (a) Supabase → SQL Editor → `supabase/migrations/022_embedding_dim_2048.sql` poora
+paste karke Run — ye purani (ab bekaar, kyunki dead model se bani thi) embeddings null kar
+deta hai aur columns ko `vector(2048)` kar deta hai. (b) apne computer pe terminal, repo folder
+me.
+**Kya:**
+1. Migration 022 chalao (idempotent — dobara chalao to kuch nahi bigdega).
+2. `npx tsx scripts/reembed-embeddings.mjs --confirm` chalao — har `site_pages` row (sab
+   tenants) ko naye model se dobara embed karta hai, ~1 request/second (asli, chhoti NVIDIA
+   billing, free tier pe hi rehta hai). Pehle ek tenant pe test karna ho to
+   `--tenant <uuid>` add karo. Crash ho jaye to bas dobara chala do — sirf null rows uthata
+   hai.
+3. Isके baad Mr. Analyst ko dobara chalao (chat: "analyse my site" / "site profile banao")
+   taaki `content_gaps`/`topic_clusters` naye embeddings se dobara ban jaayein — purana Site
+   Brain profile khud refresh nahi hota.
+
+**Note:** `content_items.embedding` aur `knowledge_chunks.embedding` bhi migration 022 me null
+ho jaate hain, par unko koi code abhi likhta hi nahi (Phase 2 ka semantic duplicate lock,
+Phase 3 ka RAG — dono unbuilt) — unke liye backfill script ki zaroorat nahi.
+
 ### 2. Encryption key rotate karo — [ ]
 **Kyun:** purani `CREDENTIALS_ENCRYPTION_KEY` chat me paste hui thi = leaked. Wo key har customer
 ka WordPress password kholti hai.

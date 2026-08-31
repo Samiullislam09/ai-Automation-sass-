@@ -41,7 +41,7 @@ export type TopicCluster = {
   name: string;
   page_urls: string[];
   /** Mean of the member pages' embeddings, unit length. Used for Mr. Keyword's fit score
-   *  and for the content-gap search. Kept out of prompt text — it is 1024 numbers. */
+   *  and for the content-gap search. Kept out of prompt text — it is 2048 numbers (nemotron-3-embed-1b, since migration 022). */
   centroid: number[] | null;
   size: number;
 };
@@ -315,7 +315,7 @@ export async function saveProfile(
  *  precise failure this whole file exists to prevent. An empty profile therefore produces an
  *  empty string, and the caller keeps its old behaviour untouched.
  *
- *  Centroids and per-field confidence maps are deliberately not printed: 1024 floats and an
+ *  Centroids and per-field confidence maps are deliberately not printed: 2048 floats (nemotron-3-embed-1b, since migration 022) and an
  *  internal quality score are for our code, not for the model. */
 export function profileBlock(profile: SiteProfile | null | undefined, options?: { maxOfferings?: number; maxClusters?: number; maxGaps?: number }): string {
   if (!profile) return "";
