@@ -1,4 +1,3 @@
-import { env } from "../env.js";
 import { nvidiaFetch } from "./nvidia.js";
 
 /** Ported from the main app's lib/ai/llm.ts, for the crawler's niche/topics summary.
@@ -7,13 +6,10 @@ import { nvidiaFetch } from "./nvidia.js";
  *  Nemotron model burns wildly variable, sometimes very large amounts of reasoning tokens
  *  even for a "reply with only JSON" instruction, live-tested to matter a lot for latency. */
 export async function completeJson<T = any>(prompt: string): Promise<T> {
-  const key = env.NVIDIA_API_KEY;
-  if (!key) throw new Error("NVIDIA_API_KEY missing");
-
   const res = await nvidiaFetch("https://integrate.api.nvidia.com/v1/chat/completions", {
     label: "llm",
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model: "nvidia/nemotron-3.5-lightning-30b-a3b",
       chat_template_kwargs: { thinking: false },

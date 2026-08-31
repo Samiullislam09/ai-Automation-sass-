@@ -17,10 +17,17 @@ export const env = {
   DATAFORSEO_LOGIN: process.env.DATAFORSEO_LOGIN || "",
   DATAFORSEO_PASSWORD: process.env.DATAFORSEO_PASSWORD || "",
   NVIDIA_API_KEY: process.env.NVIDIA_API_KEY || "",
-  // Requests per minute this server will send to NVIDIA. build.nvidia.com shows the account's
-  // ceiling ("Up to 40 rpm" on the free tier) and the API returns no quota headers, so the
-  // limit has to be respected on our side. Default 30, leaving room for the Next.js side,
-  // which shares the same key; raise it to match a paid tier. See src/lib/nvidia.ts.
+  // Comma-separated pool of NVIDIA keys reserved for THIS server's background/bulk work
+  // (crawler, keyword, writer, seo, analyst) — never shared with the Next.js app's live chat
+  // or article-revise keys (NVIDIA_API_KEYS_CHAT, lib/ai/nvidiaKeys.ts), so a heavy crawl or
+  // backfill can never starve a human waiting on chat. Falls back to the single NVIDIA_API_KEY
+  // when unset, so nothing breaks before this pool is configured. See src/lib/nvidia.ts.
+  NVIDIA_API_KEYS_BG: process.env.NVIDIA_API_KEYS_BG || "",
+  // Requests per minute PER KEY in the pool above. build.nvidia.com shows the account's
+  // ceiling ("Up to 40 rpm" on the free tier per key) and the API returns no quota headers, so
+  // the limit has to be respected on our side. Default 35 — a small safety margin under 40 for
+  // send/receive timing skew, not headroom-for-chat (that's now a structurally separate pool,
+  // not a shared budget). Raise it to match a paid tier. See src/lib/nvidia.ts.
   NVIDIA_RPM: process.env.NVIDIA_RPM || "",
   // Shared secret between the Next.js app and this server. Optional so an existing deploy
   // does not break the moment this ships, but /jobs/:type is a public URL that spends real

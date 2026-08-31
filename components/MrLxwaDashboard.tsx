@@ -129,6 +129,12 @@ type ThreadMsg = {
   time: string;
   live?: boolean;
   failed?: boolean;
+  /** Set once a live, still-empty bubble has sat too long with no token — swaps the static
+   *  "…" for an honest "still working" line. Without this a genuinely slow answer (shared
+   *  NVIDIA rate limit contention, a cold model, etc.) looked identical to a frozen tab —
+   *  found 2026-08-31 when a background re-embed job on the same NVIDIA account starved
+   *  live chat's rpm and the bubble sat on "…" with no way to tell slow from dead. */
+  slow?: boolean;
   taskId?: string;
   /** The one highlight from what the order produced (a keyword, a title) — rendered as a chip,
    *  because that is what it is; burying it in a sentence made a keyword read like prose. */
@@ -999,6 +1005,20 @@ export default function MrLxwaDashboard({
     setChatBusy(true);
     setThread((p) => [...p, { who: "ai", text: "", time: nowTime(), live: true }]);
     let full = "";
+    // Flips the still-empty bubble from "…" to a "still working" line after 6s. `send()`
+    // blocks a second order while `chatBusy`, so exactly one live bubble exists at a time —
+    // `next.length - 1` safely means THIS bubble, same assumption the rest of this function
+    // already relies on for streamed tokens and the failure message.
+    const slowTimer = setTimeout(() => {
+      if (full) return; // a token already arrived — no longer "…", nothing to flip
+      setThread((p) => {
+        const i = p.length - 1;
+        if (!p[i]?.live || p[i].text) return p;
+        const next = [...p];
+        next[i] = { ...next[i], slow: true };
+        return next;
+      });
+    }, 6000);
     try {
       const history = thread
         .filter((m) => m.text.trim() && !m.live && !m.failed)
@@ -1048,6 +1068,7 @@ export default function MrLxwaDashboard({
         return next;
       });
     } finally {
+      clearTimeout(slowTimer);
       setChatBusy(false);
       if (!orderedTaskId.current) setAwaitingOrder(false);
     }
@@ -1699,7 +1720,7 @@ export default function MrLxwaDashboard({
                     borderColor: m.live && m.taskId ? "rgba(34,211,238,.35)" : undefined,
                   }}
                 >
-                  {m.text ? boldText(m.text, `m${i}`) : m.live ? "…" : ""}
+                  {m.text ? boldText(m.text, `m${i}`) : m.live ? (m.slow ? "Still working — taking a little longer than usual…" : "…") : ""}
                 </div>
                 {m.chip && (
                   <div style={{ marginLeft: 30 }} className="mt-1.5">

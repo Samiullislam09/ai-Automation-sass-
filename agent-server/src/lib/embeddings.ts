@@ -1,4 +1,3 @@
-import { env } from "../env.js";
 import { nvidiaFetch } from "./nvidia.js";
 
 /** Ported from the main app's lib/ai/embeddings.ts — same NVIDIA model, same dim contract as
@@ -17,15 +16,13 @@ import { nvidiaFetch } from "./nvidia.js";
  *  replacement verified live (200, 2048-dim) — see migration 022 for the column-width change
  *  this forces on every table that stores one of these vectors. */
 export async function embed(text: string): Promise<number[]> {
-  const key = env.NVIDIA_API_KEY;
-  if (!key) throw new Error("NVIDIA_API_KEY missing");
-
-  // Through the shared limiter: the crawler calls this once per page, up to ~300 times in a
-  // row, which is the one place in this product that can outrun the account's rpm ceiling.
+  // Through the shared key-pool limiter (nvidia.ts, NVIDIA_API_KEYS_BG): the crawler calls
+  // this once per page, up to ~300 times in a row, which is the one place in this product
+  // that can outrun a single key's rpm ceiling — nvidiaFetch picks the key and injects it.
   const res = await nvidiaFetch("https://integrate.api.nvidia.com/v1/embeddings", {
     label: "embeddings",
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model: "nvidia/nemotron-3-embed-1b",
       input: [text.slice(0, 1800)], // 512-token cap — ~1800 chars of English is a safe margin

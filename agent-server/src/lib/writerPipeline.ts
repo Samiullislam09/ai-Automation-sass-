@@ -1,4 +1,3 @@
-import { env } from "../env.js";
 import { nvidiaFetch } from "./nvidia.js";
 import type { WriterContext } from "./writer.js";
 
@@ -74,19 +73,16 @@ export type Completer = (prompt: string, opts?: { maxTokens?: number; label?: st
 const WRITER_TIMEOUT_MS = Number(process.env.WRITER_TIMEOUT_MS) || 180_000;
 
 /** The real completer, NIM via nvidiaFetch — same model, same "thinking off" switch, same
- *  shared 30rpm limiter every other agent-server call respects (§18.4's rule 4: "writer ko
- *  chhote calls me todo... 40 RPM me aaram se aata hai"), which this pipeline's whole shape
- *  (5-6 short calls instead of one long one) is built to fit inside. */
+ *  shared NVIDIA_API_KEYS_BG key-pool limiter every other agent-server call respects (§18.4's
+ *  rule 4: "writer ko chhote calls me todo... 40 RPM me aaram se aata hai"), which this
+ *  pipeline's whole shape (5-6 short calls instead of one long one) is built to fit inside. */
 export async function nimComplete(prompt: string, opts: { maxTokens?: number; label?: string } = {}): Promise<string> {
-  const key = env.NVIDIA_API_KEY;
-  if (!key) throw new Error("NVIDIA_API_KEY missing");
-
   let res: Response;
   try {
     res = await nvidiaFetch("https://integrate.api.nvidia.com/v1/chat/completions", {
       label: opts.label ?? "writer",
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "nvidia/nemotron-3.5-lightning-30b-a3b",
         stream: false,

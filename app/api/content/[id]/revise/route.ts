@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import "@/lib/dns-fix";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
+import { nvidiaKey } from "@/lib/ai/nvidiaKeys";
 
 /** "Make the intro shorter." "Add a section on pricing." — the AI editor inside the reviewer.
  *
@@ -30,8 +31,12 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   const tenantId = await getCurrentTenantId(supabase);
   if (!tenantId) return NextResponse.json({ ok: false, error: "Not signed in." }, { status: 401 });
 
-  const key = process.env.NVIDIA_API_KEY;
-  if (!key) return NextResponse.json({ ok: false, error: "NVIDIA_API_KEY is not set on this deployment." }, { status: 503 });
+  let key: string;
+  try {
+    key = nvidiaKey("chat");
+  } catch {
+    return NextResponse.json({ ok: false, error: "NVIDIA_API_KEY is not set on this deployment." }, { status: 503 });
+  }
 
   const payload = await request.json().catch(() => ({} as any));
   const instruction = String(payload?.instruction ?? "").trim().slice(0, MAX_INSTRUCTION);

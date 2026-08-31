@@ -1,4 +1,5 @@
 import "@/lib/dns-fix";
+import { nvidiaKey } from "@/lib/ai/nvidiaKeys";
 
 /** Provider-agnostic embeddings adapter (Build Guide Step 5).
  *  Default: NVIDIA NIM `nemotron-3-embed-1b` — same free build.nvidia.com account/key the
@@ -23,8 +24,9 @@ export async function embed(text: string): Promise<number[]> {
 }
 
 async function embedNvidia(text: string): Promise<number[]> {
-  const key = process.env.NVIDIA_API_KEY;
-  if (!key) throw new Error("NVIDIA_API_KEY missing in .env.local");
+  // Onboarding's crawl is a background, one-off job — draws from the "bg" pool
+  // (NVIDIA_API_KEYS_BG), never the keys reserved for live chat. See lib/ai/nvidiaKeys.ts.
+  const key = nvidiaKey("bg");
 
   const res = await fetch("https://integrate.api.nvidia.com/v1/embeddings", {
     method: "POST",

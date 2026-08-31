@@ -7,6 +7,7 @@ import { getCurrentTenantId } from "@/lib/supabase/tenant";
 import { cached, invalidate, sessionKey, TTL } from "@/lib/chat-cache";
 import { NVIDIA_URL, chatModelsInOrder, modelParams } from "@/lib/chat-model";
 import { openFastChatStream } from "@/lib/ai/fastChat";
+import { nvidiaKey } from "@/lib/ai/nvidiaKeys";
 import { detectChatIntent, wantsAutoPublish } from "@/lib/chat-intent";
 import { parseWhen, describeWhen } from "@/lib/when";
 import { applySchedule, describeSchedule } from "@/lib/chat-schedule";
@@ -268,8 +269,7 @@ async function openLightningStream(model: string, messages: any[], signal: Abort
   const fast = await openFastChatStream(messages, { temperature: 0.2, max_tokens: 260, signal });
   if (fast) return fast.stream;
 
-  const key = process.env.NVIDIA_API_KEY;
-  if (!key) throw new Error("NVIDIA_API_KEY missing");
+  const key = nvidiaKey("chat");
 
   const res = await fetch(NVIDIA_URL, {
     method: "POST",

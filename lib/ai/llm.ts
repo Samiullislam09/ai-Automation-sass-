@@ -1,4 +1,5 @@
 import "@/lib/dns-fix";
+import { nvidiaKey } from "@/lib/ai/nvidiaKeys";
 
 /** Provider-agnostic LLM adapter (Build Guide Step 5 niche-summary, and reused for
  *  Mr Lxwa in Step 7 — see the fetch call already documented in app/api/chat/route.ts).
@@ -19,8 +20,9 @@ export async function complete(prompt: string): Promise<string> {
 }
 
 async function completeNvidia(prompt: string): Promise<string> {
-  const key = process.env.NVIDIA_API_KEY;
-  if (!key) throw new Error("NVIDIA_API_KEY missing in .env.local");
+  // Onboarding's crawl/niche-summary is a background, one-off job — draws from the "bg" pool
+  // (NVIDIA_API_KEYS_BG), never the keys reserved for live chat. See lib/ai/nvidiaKeys.ts.
+  const key = nvidiaKey("bg");
 
   const res = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
     method: "POST",
