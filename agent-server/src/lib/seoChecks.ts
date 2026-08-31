@@ -95,6 +95,12 @@ export type SeoArticle = {
   metaDescription?: string | null;
   /** The URL slug, when one has been decided. Undefined = decided later, at publish. */
   slug?: string | null;
+  /** The writer's own Article JSON-LD (lib/writerPipeline.ts's writeMeta), as a raw string —
+   *  same field content_items.meta.jsonLd carries. Absent on anything written before this was
+   *  read here, or when writeMeta's model call produced nothing usable; the E-E-A-T checks
+   *  below skip rather than fail when it is missing, same convention as every other "the
+   *  evidence to run this does not exist" case in this file. */
+  jsonLd?: string | null;
 };
 
 export type SeoOptions = {
@@ -781,7 +787,101 @@ export async function runSeoChecks(article: SeoArticle, opts: SeoOptions = {}): 
     });
   }
 
-  // ── 10. depth, and the optional SERP comparison ────────────────────────────────────────
+  // ── 10. E-E-A-T signals (Experience, Expertise, Authoritativeness, Trust) ──────────────
+  // Deterministic proxies only, same discipline as every other check here — no LLM judging
+  // "does this read as authoritative", only things we can point at. Google's own Search
+  // Quality Rater Guidelines weigh Trustworthiness highest of the four — a stated author and
+  // a real date are the cheapest signals of exactly that, which is why they lead here.
+  {
+    let ld: any = null;
+    if (article.jsonLd) {
+      try {
+        ld = JSON.parse(article.jsonLd);
+      } catch {
+        ld = null;
+      }
+    }
+
+    if (!article.jsonLd) {
+      list.skip("eeat-author", "Author", "no Article JSON-LD on this draft yet");
+      list.skip("eeat-dates", "Published date", "no Article JSON-LD on this draft yet");
+    } else {
+      const authorName =
+        typeof ld?.author === "string"
+          ? ld.author.trim()
+          : typeof ld?.author?.name === "string"
+            ? ld.author.name.trim()
+            : "";
+      list.add({
+        id: "eeat-author",
+        label: "Author",
+        severity: "warn",
+        ok: !!authorName,
+        value: authorName || null,
+        detail: authorName ? `author: "${authorName}"` : "the JSON-LD names no author",
+        fix: "Add an `author` to the Article JSON-LD — even an Organization name is a real signal. A page with no stated author reads as anonymous, and Trustworthiness is the most heavily weighted of Google's four E-E-A-T signals.",
+      });
+
+      const hasDate = typeof ld?.datePublished === "string" && !!ld.datePublished.trim();
+      list.add({
+        id: "eeat-dates",
+        label: "Published date",
+        severity: "warn",
+        ok: hasDate,
+        value: hasDate ? ld.datePublished : null,
+        detail: hasDate ? `datePublished: ${ld.datePublished}` : "the JSON-LD has no datePublished",
+        fix: "Add `datePublished` (and `dateModified` on later updates) to the Article JSON-LD — an undated page reads as unmaintained.",
+      });
+    }
+
+    // "Experience": not writing style, a real link to real proof this business has on file —
+    // opts.profile.proof is Site Brain data (§25's own rule: stated, never invented), so this
+    // never asks whether the ARTICLE'S PROSE sounds experienced, only whether it points at
+    // something that proves it.
+    const proofUrls = (opts.profile?.proof ?? []).map((pr) => pr.url).filter((u): u is string => !!u);
+    if (!proofUrls.length) {
+      list.skip("eeat-proof-cited", "Proof cited", "no proof on file carries a URL (Site Brain proof list is empty, or none link anywhere) to check against");
+    } else {
+      const base = opts.siteUrl ?? pages[0]?.url ?? null;
+      const linkedPaths = new Set(p.links.map((l) => urlKeys(l.href, base).path).filter(Boolean));
+      const citedUrl = proofUrls.find((u) => {
+        const path = urlKeys(u, base).path;
+        return path ? linkedPaths.has(path) : false;
+      });
+      list.add({
+        id: "eeat-proof-cited",
+        label: "Proof cited",
+        severity: "warn",
+        ok: !!citedUrl,
+        value: citedUrl ?? null,
+        detail: citedUrl ? `links to real proof: ${citedUrl}` : `${proofUrls.length} proof URL(s) on file, none linked from this article`,
+        fix: `Link to real proof this business has (e.g. ${proofUrls[0]}) — a case study or certification page is what turns a claim into evidence.`,
+      });
+    }
+
+    // "Trust": Google names contact info and transparency explicitly. A crawled About/Contact
+    // page is real evidence one exists; whether THIS article bothers to point at it is what
+    // is actually checkable, so that is what gets scored, not "does the site have one".
+    const trustPage = pages.find((pg) => /\/(about|about-us|contact|contact-us|team|who-we-are)(\/|$)/i.test(pg.url ?? ""));
+    if (!trustPage) {
+      list.skip("eeat-trust-page", "About/Contact linked", "no About/Contact-style page was found among the crawled pages");
+    } else {
+      const base = opts.siteUrl ?? pages[0]?.url ?? null;
+      const trustPath = urlKeys(trustPage.url, base).path;
+      const linked = internal.some((l) => urlKeys(l.href, base).path === trustPath);
+      list.add({
+        id: "eeat-trust-page",
+        label: "About/Contact linked",
+        severity: "warn",
+        ok: linked,
+        value: linked ? trustPage.url : null,
+        detail: linked ? `links to ${trustPage.url}` : `the site has ${trustPage.url} but this article does not link to it`,
+        fix: `Link to ${trustPage.url} somewhere in the article — an easy path to who is behind the content is a real Trustworthiness signal.`,
+      });
+    }
+  }
+
+  // ── 11. depth, and the optional SERP comparison ────────────────────────────────────────
   const serp = await resolveSerp(primary, opts);
 
   if (serp.compared && serp.snapshot) {

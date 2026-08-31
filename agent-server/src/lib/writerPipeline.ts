@@ -253,7 +253,13 @@ export async function polishArticle(
 
 /* ---------------------------------------------------------------- 4 · meta --------------- */
 
-export async function writeMeta(outline: Outline, topic: string, body: string, complete: Completer): Promise<WriterMeta> {
+export async function writeMeta(
+  outline: Outline,
+  topic: string,
+  body: string,
+  complete: Completer,
+  context?: WriterContext,
+): Promise<WriterMeta> {
   const excerpt = body.replace(/\s+/g, " ").trim().slice(0, 1500);
 
   const prompt = [
@@ -262,7 +268,7 @@ export async function writeMeta(outline: Outline, topic: string, body: string, c
     `metaTitle: 50-60 characters, includes the primary keyword, different wording from the article title if the title is already the right length.`,
     `metaDescription: 140-160 characters, a real reason to click, includes the primary keyword once.`,
     `slug: lowercase, hyphenated, no stopwords beyond what reads naturally, derived from the title.`,
-    `jsonLd: a single-line, valid Article schema.org JSON-LD string (as a JSON string value, escaped) with headline, description and articleBody fields — articleBody may be truncated to a summary, it does not need the full text.`,
+    `jsonLd: a single-line, valid Article schema.org JSON-LD string (as a JSON string value, escaped) with headline, description and articleBody fields — articleBody may be truncated to a summary, it does not need the full text. Do NOT include author or datePublished — leave those out entirely, they are added afterwards from real data, not guessed.`,
     `Reply with ONLY JSON: {"metaTitle":"...","metaDescription":"...","slug":"...","jsonLd":"..."}`,
   ].join("\n\n");
 
@@ -277,8 +283,37 @@ export async function writeMeta(outline: Outline, topic: string, body: string, c
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "") || slugify(outline.title),
-    jsonLd: String(parsed.jsonLd ?? "").trim(),
+    jsonLd: withRealAuthorAndDate(String(parsed.jsonLd ?? "").trim(), outline.title, context?.businessName ?? null),
   };
+}
+
+/** The model is asked NOT to fill `author`/`datePublished` (see the prompt above) — a name or
+ *  a date it invents would look exactly as confident as a real one, and lib/seoChecks.ts's
+ *  E-E-A-T checks exist to tell a real signal from an absent one, not from a plausible-looking
+ *  fake. So both are stamped here instead, from data that is actually true at this moment:
+ *  the tenant's own real name (never invented — absent when Site Brain has none, in which case
+ *  `author` is simply left off and the SEO check reports it honestly missing) and the real
+ *  wall-clock time this article was written. `dateModified` starts equal to `datePublished`
+ *  and is only ever meant to move on a real edit — nothing here updates it later. */
+function withRealAuthorAndDate(jsonLdRaw: string, title: string, businessName: string | null): string {
+  let ld: Record<string, unknown>;
+  try {
+    const parsed = jsonLdRaw ? JSON.parse(jsonLdRaw) : {};
+    ld = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    ld = {};
+  }
+
+  if (!ld["@context"]) ld["@context"] = "https://schema.org";
+  if (!ld["@type"]) ld["@type"] = "Article";
+  if (!ld.headline) ld.headline = title;
+
+  const now = new Date().toISOString();
+  ld.datePublished = now;
+  ld.dateModified = now;
+  if (businessName) ld.author = { "@type": "Organization", name: businessName };
+
+  return JSON.stringify(ld);
 }
 
 function slugify(s: string): string {
@@ -325,7 +360,7 @@ export async function writeArticlePipeline(
   for (const section of sections) opts.onSection?.(section);
 
   const polished = await polishArticle(outline, topic, sections, context, complete);
-  const meta = await writeMeta(outline, topic, polished, complete);
+  const meta = await writeMeta(outline, topic, polished, complete, context);
 
   return { title: outline.title, body: polished, sections, meta };
 }

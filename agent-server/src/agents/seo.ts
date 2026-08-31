@@ -57,6 +57,7 @@ export class SeoAgent extends Agent {
         metaTitle: draft.metaTitle,
         metaDescription: draft.metaDescription,
         slug: draft.slug,
+        jsonLd: draft.jsonLd,
       },
       { keywords, profile: site.profile, pages: site.pages, siteUrl: site.siteUrl },
     );
@@ -117,6 +118,7 @@ type Draft = {
   metaTitle: string | null;
   metaDescription: string | null;
   slug: string | null;
+  jsonLd: string | null;
   contentItemId: string | null;
 };
 
@@ -138,6 +140,7 @@ async function loadDraft(tenantId: string, d: Record<string, any>): Promise<Draf
       metaTitle: firstString([article?.metaTitle, article?.meta_title, d.metaTitle]),
       metaDescription: firstString([article?.metaDescription, article?.meta_description, d.metaDescription]),
       slug: firstString([article?.slug, d.slug]),
+      jsonLd: firstString([article?.jsonLd, d.jsonLd]),
       contentItemId: itemId,
     };
   }
@@ -167,6 +170,7 @@ async function loadDraft(tenantId: string, d: Record<string, any>): Promise<Draf
     metaTitle: firstString([meta.metaTitle, meta.meta_title]),
     metaDescription: firstString([meta.metaDescription, meta.meta_description]),
     slug: firstString([meta.slug]),
+    jsonLd: firstString([meta.jsonLd]),
     contentItemId: String(item.id),
   };
 }

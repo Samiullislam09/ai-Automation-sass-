@@ -101,7 +101,7 @@ function articleBody(o: Overrides = {}): string {
   });
   parts.push(
     o.links ??
-      `Our [emergency call-out page](https://leedsplumbing.co.uk/emergency) lists the areas we cover, and our [boiler repair page](/boiler-repair) explains the rest. The [WaterSafe register](https://www.watersafe.org.uk/) is where to check any plumber's credentials.`,
+      `Our [emergency call-out page](https://leedsplumbing.co.uk/emergency) lists the areas we cover, and our [boiler repair page](/boiler-repair) explains the rest. The [WaterSafe register](https://www.watersafe.org.uk/) is where to check any plumber's credentials. You can reach the team any time on our [contact page](/contact).`,
     ``,
   );
   for (const line of o.extra ?? []) parts.push(line, ``);
@@ -537,4 +537,97 @@ test("a SERP fetch that throws is not fatal — the on-page score still stands",
   assert.match(r.serpNote, /402 Payment Required/);
   assert.equal(r.score, 100);
   assert.equal(r.passed, true);
+});
+
+/* ---------------------------------------------------------------- E-E-A-T signals -------- */
+
+test("no jsonLd at all: author and date checks are skipped, not failed", async () => {
+  const r = await runSeoChecks(good(), OPTS);
+  const author = check(r, "eeat-author");
+  const dates = check(r, "eeat-dates");
+  assert.equal(author.severity, "info");
+  assert.equal(author.ok, true);
+  assert.match(author.detail, /no article json-ld/i);
+  assert.equal(dates.severity, "info");
+  assert.equal(dates.ok, true);
+});
+
+test("jsonLd with a real author and datePublished: both checks pass", async () => {
+  const jsonLd = JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "Article",
+    headline: "Emergency plumber in Leeds",
+    author: { "@type": "Organization", name: "Leeds Plumbing Co" },
+    datePublished: "2026-08-31T09:00:00.000Z",
+  });
+  const r = await runSeoChecks({ ...good(), jsonLd }, OPTS);
+  const author = check(r, "eeat-author");
+  const dates = check(r, "eeat-dates");
+  assert.equal(author.ok, true);
+  assert.equal(author.value, "Leeds Plumbing Co");
+  assert.equal(dates.ok, true);
+  assert.equal(dates.value, "2026-08-31T09:00:00.000Z");
+});
+
+test("jsonLd present but with no author or date: both warn, with a usable fix", async () => {
+  const jsonLd = JSON.stringify({ "@context": "https://schema.org", "@type": "Article", headline: "x" });
+  const r = await runSeoChecks({ ...good(), jsonLd }, OPTS);
+  const author = check(r, "eeat-author");
+  const dates = check(r, "eeat-dates");
+  assert.equal(author.ok, false);
+  assert.equal(author.severity, "warn");
+  assert.ok(author.fix && author.fix.length > 10);
+  assert.equal(dates.ok, false);
+  assert.equal(dates.severity, "warn");
+});
+
+test("malformed jsonLd (not valid JSON) is treated the same as no author/date, not thrown", async () => {
+  const r = await runSeoChecks({ ...good(), jsonLd: "{not valid json" }, OPTS);
+  assert.equal(check(r, "eeat-author").ok, false);
+  assert.equal(check(r, "eeat-dates").ok, false);
+});
+
+test("proof on file with a URL: cited in the body passes, uncited warns, no proof URLs skips", async () => {
+  const profileWithProof = {
+    ...PROFILE,
+    proof: [{ claim: "WaterSafe approved contractor", quote: null, url: "https://leedsplumbing.co.uk/watersafe" }],
+  };
+
+  const cited = await runSeoChecks(
+    { ...good(), body: good().body.replace("Call the office", "See our [WaterSafe approval](https://leedsplumbing.co.uk/watersafe). Call the office") },
+    { ...OPTS, profile: profileWithProof },
+  );
+  assert.equal(check(cited, "eeat-proof-cited").ok, true);
+
+  const uncited = await runSeoChecks(good(), { ...OPTS, profile: profileWithProof });
+  const uncitedCheck = check(uncited, "eeat-proof-cited");
+  assert.equal(uncitedCheck.ok, false);
+  assert.equal(uncitedCheck.severity, "warn");
+  assert.match(uncitedCheck.detail, /1 proof url/i);
+
+  const noProof = await runSeoChecks(good(), OPTS); // PROFILE has no `proof` field at all
+  const skipped = check(noProof, "eeat-proof-cited");
+  assert.equal(skipped.severity, "info");
+  assert.equal(skipped.ok, true);
+});
+
+test("an About/Contact page in the crawl that this article does not link to warns; no such page skips", async () => {
+  // good()'s default links now include /contact (added so the "clean draft" fixture stays
+  // clean under this very check) — this test needs the un-linked case, so it builds its own
+  // links line without it, same pattern every other "bad variant" test in this file uses.
+  const noContactLink = {
+    ...good(),
+    body: articleBody({
+      links: `Our [emergency call-out page](https://leedsplumbing.co.uk/emergency) lists the areas we cover, and our [boiler repair page](/boiler-repair) explains the rest. The [WaterSafe register](https://www.watersafe.org.uk/) is where to check any plumber's credentials.`,
+    }),
+  };
+  const noLink = await runSeoChecks(noContactLink, OPTS); // PAGES has /contact, this article's links do not
+  const warned = check(noLink, "eeat-trust-page");
+  assert.equal(warned.ok, false);
+  assert.equal(warned.severity, "warn");
+  assert.match(warned.detail, /leedsplumbing\.co\.uk\/contact/);
+
+  const noContactPage = PAGES.filter((p) => !p.url.includes("/contact"));
+  const skipped = await runSeoChecks(noContactLink, { ...OPTS, pages: noContactPage });
+  assert.equal(check(skipped, "eeat-trust-page").severity, "info");
 });

@@ -156,6 +156,47 @@ test("a missing slug from the model is derived from the title, never left empty"
   assert.doesNotMatch(meta.slug, /[^a-z0-9-]/);
 });
 
+/* ---------------------------------------------------------------- author + date (jsonLd) --
+ * lib/seoChecks.ts's E-E-A-T checks (2026-08-31) read `author`/`datePublished` off the
+ * jsonLd string this produces — the model is asked NOT to fill either (see writeMeta's own
+ * prompt), so these are stamped here from real data instead of trusted from the model's
+ * guess. */
+
+test("a real business name reaches jsonLd.author; datePublished/dateModified are always real, current timestamps", async () => {
+  const { fn } = fakeComplete({
+    "writer.meta": () => JSON.stringify({ metaTitle: "T", metaDescription: "D", slug: "s", jsonLd: '{"@type":"Article","headline":"H"}' }),
+  });
+  const before = Date.now();
+  const meta = await writeMeta(OUTLINE, TOPIC, "body", fn, { businessName: "Leeds Plumbing Co" } as any);
+  const ld = JSON.parse(meta.jsonLd);
+
+  assert.deepEqual(ld.author, { "@type": "Organization", name: "Leeds Plumbing Co" });
+  assert.ok(ld.datePublished, "datePublished must be set");
+  assert.equal(ld.datePublished, ld.dateModified, "a freshly written article's modified date starts equal to its published date");
+  assert.ok(Date.parse(ld.datePublished) >= before, "the stamped date must be real, not something the model invented");
+  assert.equal(ld.headline, "H", "the model's own fields are kept, not overwritten");
+});
+
+test("no business name on file: author is simply left off, never invented", async () => {
+  const { fn } = fakeComplete({ "writer.meta": () => JSON.stringify({ metaTitle: "T", metaDescription: "D", slug: "s", jsonLd: "{}" }) });
+  const meta = await writeMeta(OUTLINE, TOPIC, "body", fn); // no context passed at all
+  const ld = JSON.parse(meta.jsonLd);
+  assert.equal(ld.author, undefined);
+  assert.ok(ld.datePublished, "the date is not dependent on having a business name");
+});
+
+test("malformed jsonLd from the model does not throw — the real date/author still land in a fresh object", async () => {
+  const { fn } = fakeComplete({
+    "writer.meta": () => JSON.stringify({ metaTitle: "T", metaDescription: "D", slug: "s", jsonLd: "{not valid json at all" }),
+  });
+  const meta = await writeMeta(OUTLINE, TOPIC, "body", fn, { businessName: "Leeds Plumbing Co" } as any);
+  const ld = JSON.parse(meta.jsonLd); // must itself be valid JSON even though the model's was not
+  assert.equal(ld["@type"], "Article");
+  assert.equal(ld.headline, OUTLINE.title, "falls back to the outline's own title");
+  assert.deepEqual(ld.author, { "@type": "Organization", name: "Leeds Plumbing Co" });
+  assert.ok(ld.datePublished);
+});
+
 /* ---------------------------------------------------------------- the pipeline ----------- */
 
 test("the whole pipeline: outline, then sections in parallel, then polish, then meta — in that order", async () => {
