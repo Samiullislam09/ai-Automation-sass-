@@ -198,6 +198,29 @@ test("an optional step that fails is skipped; a required one stops the task", as
   assert.equal(h.task().status, "needs_attention", "SEO is required before anything goes live");
 });
 
+test("a check_seo step that ran fine but failed the draft (sendBackToWriter) stops the task honestly, not silently done", async () => {
+  const h = harness();
+  const { task_id } = (await createTask(TENANT, intent(), articlePlan())) as any;
+  await onStepDone(task_id, TENANT, h.stepFor("keyword")!.id, {});
+  await onStepDone(task_id, TENANT, h.stepFor("writer")!.id, {});
+  await onStepDone(task_id, TENANT, h.stepFor("image")!.id, { hero: "x.webp" });
+
+  // agents/seo.ts never throws on a low score — it returns normally with `passed:false` and
+  // `sendBackToWriter:true`. Before this fix, onStepDone had no idea what that field meant and
+  // marked the step "done" like any other, so the whole task finished "awaiting_approval" over
+  // an article that failed its own checks.
+  await onStepDone(task_id, TENANT, h.stepFor("seo")!.id, {
+    score: 40,
+    passed: false,
+    sendBackToWriter: true,
+    summary: "SEO 40/100 · BLOCKED (2): title missing keyword; no meta description",
+  });
+
+  assert.equal(h.stepFor("seo")!.status, "failed", "not silently marked done over a failed check");
+  assert.equal(h.task().status, "needs_attention");
+  assert.match(h.task().error, /SEO 40\/100/, "the real score and blockers reach the user, not a generic message");
+});
+
 test("a cap refusal stops the step with the cap's own sentence, and never retries it", async () => {
   const db = new FakeDb();
   const events: LiveEvent[] = [];

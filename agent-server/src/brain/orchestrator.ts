@@ -342,11 +342,33 @@ export async function onStepDone(taskId: string, tenantId: string, stepId: strin
   // stops honestly in `needs_attention` with the real reason — rather than inventing a new
   // status. Generic on purpose (`output.written === false`), not writer-specific: any agent
   // that adopts the same "I checked, I chose not to" convention gets the same honesty for free.
-  const declined = !!output && typeof output === "object" && (output as any).written === false;
+  //
+  // Mr. SEO adopts the same convention under a different name: `sendBackToWriter: true` when
+  // the draft failed its own checks (agents/seo.ts's own comment: "the decision, not the loop —
+  // this agent only ever reports"). The field has existed since Phase 2 but nothing ever read
+  // it (found 2026-08-31 auditing the article chain) — check_seo always fell through to "done"
+  // below regardless of `passed`, so a 40/100 draft with real blockers reported the exact same
+  // "Done" as a clean one. Wiring it through the same failStep `written:false` uses means: as
+  // an advisory finisher (draft/Approvals, the common chat case) it is SKIPPED with the real
+  // score+issues visible on the live feed instead of silently "done"; as publish's hard need
+  // (`delivery: "publish"`) it stops the task in `needs_attention` and publish_article never
+  // dispatches — exactly what planner.ts's own docstring promises ("publish ke liye SEO check
+  // zaroori hai"). A full writer-rewrite-on-fail loop (plan §5.5: "re-runs the writer at most
+  // twice") is still Upgrade H's feedback loop, not built — this only makes today's honest
+  // report actually reach the user instead of being computed and discarded.
+  const declined =
+    !!output &&
+    typeof output === "object" &&
+    ((output as any).written === false || (output as any).sendBackToWriter === true);
   if (declined) {
     const { data: step } = await db.from("task_steps").select("*").eq("id", stepId).maybeSingle();
     if (step) {
-      const reason = typeof (output as any).reason === "string" ? (output as any).reason : "Kaam nahi hua — koi wajah nahi di gayi.";
+      const reason =
+        typeof (output as any).reason === "string"
+          ? (output as any).reason
+          : typeof (output as any).summary === "string"
+            ? (output as any).summary
+            : "Kaam nahi hua — koi wajah nahi di gayi.";
       await db.from("task_steps").update({ output: output ?? null }).eq("id", stepId);
       await failStep(step, tenantId, reason, { retryable: false });
       return;
