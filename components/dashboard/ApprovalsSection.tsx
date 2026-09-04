@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight, BadgeCheck, Bell, Calendar, Check, ChevronDown, ChevronLeft, ChevronRight, Clock,
   Copy, Eye, FileText, Loader2, Megaphone, MapPin, MoreVertical, Pencil, RefreshCw, Search,
-  SlidersHorizontal, UserRound, X, XCircle, CheckCircle2, Monitor, ExternalLink,
+  SlidersHorizontal, UserRound, X, XCircle, CheckCircle2, Monitor, ExternalLink, History,
 } from "lucide-react";
 import { renderMarkdown } from "@/lib/md";
 import { useStore } from "@/lib/store";
@@ -359,12 +359,13 @@ export default function ApprovalsSection() {
                 <div key={c.id} className={`ap-grid ap-row ${selected ? "on" : ""}`} onClick={() => openDetail(c)}>
                   {/* article */}
                   <div className="ap-c-a flex min-w-0 items-center gap-3">
-                    <Tile tile={tile} size={44} />
+                    <Tile tile={tile} size={38} />
                     <div className="min-w-0">
                       <ClampTitle text={c.title || "Untitled"} />
                       <div className="lx-10 lx-mut mt-1 flex items-center gap-1.5 overflow-hidden whitespace-nowrap">
                         <span className="truncate">{categoryOf(c)}</span><i className="ap-sep" /><span>{agentOf(c)}</span><i className="ap-sep" />
                         <span>{typeof c.meta?.wordCount === "number" ? `${c.meta.wordCount.toLocaleString()} words` : "— words"}</span><i className="ap-sep" /><span>{TYPE_LABEL[c.type] ?? c.type}</span>
+                        <i className="ap-sep ap-inline-date" /><span className="ap-inline-date">{fmtBoth(c.updated_at ?? c.created_at)}</span>
                       </div>
                       {c.meta?.publishedUrl && (
                         <a href={c.meta.publishedUrl} target="_blank" rel="noreferrer" className="ap-live" onClick={(e) => e.stopPropagation()} title={c.meta.publishedUrl}>
@@ -385,8 +386,8 @@ export default function ApprovalsSection() {
                   {/* actions */}
                   <div className="ap-c-x relative flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
                     {c.type === "article" && (
-                      <Link href={`/dashboard/content/${c.id}`} className="ap-bview" title="Open the full article review page">
-                        <Monitor size={13} /><span>Browser View</span>
+                      <Link href={`/dashboard/content/${c.id}`} className="ap-act ap-act-b" title="Browser View — open the full article page" aria-label="Browser View">
+                        <Monitor size={15} />
                       </Link>
                     )}
                     <RowAction c={c} busy={isBusy} onReview={() => openDetail(c)} onHistory={() => openDetail(c, "history")} />
@@ -490,10 +491,14 @@ function Select({ value, onChange, options, icon }: { value: string; onChange: (
 function Tile({ tile, size = 60 }: { tile: ReturnType<typeof tileOf>; size?: number }) {
   return (
     <span
-      className="flex shrink-0 items-center justify-center rounded-xl"
-      style={{ width: size, height: size, background: `linear-gradient(135deg,${tile.from},${tile.to})`, border: `1px solid ${tile.border}`, boxShadow: `0 0 18px ${tile.glow}`, color: "#e8e8ff" }}
+      className="flex shrink-0 items-center justify-center"
+      style={{
+        width: size, height: size, borderRadius: Math.round(size * 0.28), color: "#e8e8ff",
+        background: `linear-gradient(135deg,${tile.from},${tile.to})`, border: `1px solid ${tile.border}`,
+        boxShadow: "inset 0 1px 0 rgba(255,255,255,.08), 0 1px 2px rgba(0,0,0,.35)",
+      }}
     >
-      <tile.Icon size={Math.round(size * 0.42)} strokeWidth={1.6} />
+      <tile.Icon size={Math.round(size * 0.44)} strokeWidth={1.7} />
     </span>
   );
 }
@@ -508,23 +513,24 @@ function StatusPill({ s }: { s: string }) {
   );
 }
 
+/** Icon-only row action — the label lives in the native tooltip so the row stays compact. */
 function RowAction({ c, busy, onReview, onHistory }: { c: ContentItem; busy: boolean; onReview: () => void; onHistory: () => void }) {
-  if (busy) return <span className="lx-ghost" style={{ minWidth: 88, justifyContent: "center" }}><Loader2 size={14} className="ap-spin" /></span>;
+  if (busy) return <span className="ap-act"><Loader2 size={14} className="ap-spin" /></span>;
   switch (c.status) {
     case "awaiting_approval":
-      return <button className="lx-grad ap-primary" onClick={onReview}>Review <ArrowRight size={14} /></button>;
+      return <button className="ap-act ap-act-p" onClick={onReview} title="Review this article" aria-label="Review"><ArrowRight size={15} /></button>;
     case "published":
       return c.meta?.publishedUrl
-        ? <a className="lx-ghost" href={c.meta.publishedUrl} target="_blank" rel="noreferrer"><Eye size={14} /> View</a>
-        : <button className="lx-ghost" onClick={onReview}><Eye size={14} /> View</button>;
+        ? <a className="ap-act" href={c.meta.publishedUrl} target="_blank" rel="noreferrer" title="View the live page" aria-label="View live page"><Eye size={15} /></a>
+        : <button className="ap-act" onClick={onReview} title="View" aria-label="View"><Eye size={15} /></button>;
     case "approved":
-      return <button className="lx-ghost" onClick={onReview}><Eye size={14} /> View</button>;
+      return <button className="ap-act" onClick={onReview} title="View" aria-label="View"><Eye size={15} /></button>;
     case "draft":
       return c.type === "article"
-        ? <Link className="lx-ghost" href={`/dashboard/content/${c.id}`}>Continue <Pencil size={13} /></Link>
-        : <button className="lx-ghost" onClick={onReview}>Continue <Pencil size={13} /></button>;
+        ? <Link className="ap-act" href={`/dashboard/content/${c.id}`} title="Continue writing" aria-label="Continue"><Pencil size={14} /></Link>
+        : <button className="ap-act" onClick={onReview} title="Continue" aria-label="Continue"><Pencil size={14} /></button>;
     default:
-      return <button className="lx-ghost" onClick={onHistory}>Review History</button>;
+      return <button className="ap-act" onClick={onHistory} title="Review history" aria-label="Review history"><History size={15} /></button>;
   }
 }
 
@@ -730,19 +736,29 @@ const CSS = `
 .ap-select select option{background:#12121c;color:#e8e8f2}
 .ap-grid{display:grid;grid-template-columns:minmax(0,1fr) 128px 56px 96px max-content;grid-template-areas:"a s v u x";align-items:center;gap:10px}
 .ap-c-a{grid-area:a;min-width:0}.ap-c-s{grid-area:s}.ap-c-v{grid-area:v}.ap-c-u{grid-area:u}.ap-c-x{grid-area:x}
-.ap-bview{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:9px;font-size:11.5px;font-weight:600;white-space:nowrap;
-  color:#7dd3fc;background:rgba(56,189,248,.08);border:1px solid rgba(56,189,248,.35);transition:.15s}
-.ap-bview:hover{background:rgba(56,189,248,.16);color:#fff;border-color:rgba(56,189,248,.6)}
+/* row actions are icon-only squares: the row stays compact, the label is the tooltip */
+.ap-act{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;flex-shrink:0;border-radius:8px;
+  background:#12121c;border:1px solid var(--lx-border);color:#b6b6c8;cursor:pointer;transition:.15s}
+.ap-act:hover{color:#fff;border-color:rgba(255,255,255,.22);background:#181824}
+.ap-act-b{color:#7dd3fc;background:rgba(56,189,248,.09);border-color:rgba(56,189,248,.32)}
+.ap-act-b:hover{color:#fff;background:rgba(56,189,248,.2);border-color:rgba(56,189,248,.6)}
+.ap-act-p{color:#fff;background:linear-gradient(135deg,#4f46e5,#7c3aed);border-color:rgba(139,92,246,.65);
+  box-shadow:0 2px 10px rgba(124,58,237,.3)}
+.ap-act-p:hover{color:#fff;filter:brightness(1.1)}
+.ap-inline-date{display:none}
 .ap-live{display:inline-flex;align-items:center;gap:4px;max-width:100%;margin-top:3px;font-size:11px;color:#4ade80;text-decoration:none}
 .ap-live:hover{text-decoration:underline}
 @container ap (max-width:980px){
-  .ap-grid{grid-template-columns:minmax(0,1fr) 118px max-content;grid-template-areas:"a s x";gap:8px}
-  .ap-c-v,.ap-c-u{display:none}
+  /* version drops first — the date column always stays visible */
+  .ap-grid{grid-template-columns:minmax(0,1fr) 116px 84px max-content;grid-template-areas:"a s u x";gap:8px}
+  .ap-c-v{display:none}
 }
 @container ap (max-width:620px){
   .ap-grid{grid-template-columns:minmax(0,1fr) max-content;grid-template-areas:"a a" "s x";row-gap:10px}
   .ap-head{display:none}
   .ap-c-s{justify-self:start}
+  .ap-c-u{display:none}
+  .ap-inline-date{display:inline}
 }
 .ap-head{padding:0 12px;font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--lx-mut)}
 .ap-row{background:#0d0d16;border:1px solid var(--lx-border);border-radius:11px;padding:10px 12px;cursor:pointer;
@@ -759,7 +775,6 @@ const CSS = `
 .ap-title-wrap:hover .ap-tip{opacity:1;transform:translateY(0);transition-delay:.3s}
 .ap-sep{width:3px;height:3px;border-radius:50%;background:var(--lx-dim);flex-shrink:0}
 .ap-primary{padding:6px 12px;font-size:12px;border-radius:9px;gap:6px}
-.ap-row .lx-ghost{padding:6px 10px;font-size:11.5px;border-radius:9px}
 .ap-kebab{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:7px;
   background:none;border:none;color:#8b8ba0;cursor:pointer;transition:.15s}
 .ap-kebab:hover{color:#fff;background:rgba(255,255,255,.06)}
