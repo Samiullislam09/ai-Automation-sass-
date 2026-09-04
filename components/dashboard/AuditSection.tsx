@@ -345,7 +345,7 @@ export default function AuditSection() {
   const actions = (
     <div className="flex flex-wrap items-center gap-2 lx-audit-noprint">
       <button className="lx-grad lx-11 px-3 py-1.5" disabled={starting || !!polling} onClick={runAudit}>
-        {starting ? "Starting…" : polling ? "Auditing…" : "Check my site now"}
+        {starting ? "Starting…" : polling ? "Auditing…" : state?.latest ? "Re-audit" : "Audit my site"}
       </button>
       <button className="lx-ghost" onClick={() => window.print()} title="Opens your browser's print dialog — choose 'Save as PDF' as the destination">
         Export as PDF

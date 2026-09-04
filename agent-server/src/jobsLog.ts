@@ -61,6 +61,41 @@ export async function logJobError(id: string | undefined, detail: JobErrorDetail
   if (error) console.error("[jobsLog] update (error) failed:", error.message);
 }
 
+/** Rows left in "running" by a process that no longer exists. This server is one instance
+ *  (Railway); when it restarts — a deploy, a crash, pg-boss expiring a hung job and the
+ *  process being replaced — every job the OLD process had in flight is gone, but its jobs_log
+ *  row still says "running" and would say so forever (found 2026-09-04: four audit rows from
+ *  one day, all "running", the Audit page showing "stopped responding" for a run that had in
+ *  fact died hours earlier). pg-boss's retry, if any, is a separate row with its own attempt
+ *  number, so closing these is correct, not destructive. Rows younger than GRACE_MS are left
+ *  alone — a job that started seconds before boot might belong to this very process. */
+export async function sweepOrphanedJobs(bootedAt = new Date()): Promise<number> {
+  const GRACE_MS = 60_000;
+  const before = new Date(bootedAt.getTime() - GRACE_MS).toISOString();
+  const { data, error } = await supabase
+    .from("jobs_log")
+    .update({
+      status: "error",
+      detail: {
+        message: "This job did not finish — the server restarted while it was running.",
+        cause: `Row was still "running" when the agent server booted at ${bootedAt.toISOString()}; the process that owned it is gone.`,
+        hint: "Run it again. If it stops at the same step twice, that step is what to look at — the reason is recorded here next time.",
+        at: new Date().toISOString(),
+        orphaned: true,
+      },
+    })
+    .eq("status", "running")
+    .lt("created_at", before)
+    .select("id");
+  if (error) {
+    console.error("[jobsLog] orphan sweep failed:", error.message);
+    return 0;
+  }
+  const n = data?.length ?? 0;
+  if (n) console.log(`[jobsLog] closed ${n} job row(s) left "running" by a previous process`);
+  return n;
+}
+
 /** Hard per-tenant daily cap check — counts today's jobs_log rows for this tenant+agent.
  *  Backed by Supabase (not a Redis counter) so it's the same durable source of truth
  *  the dashboard already reads, and survives a Redis flush/restart. */

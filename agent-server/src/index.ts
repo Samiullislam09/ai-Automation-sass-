@@ -8,7 +8,7 @@ import { boss } from "./db.js";
 import { initSocket } from "./socket.js";
 import { startWorkers } from "./workers.js";
 import { startScheduler, stopScheduler } from "./scheduler.js";
-import { dailyUsage } from "./jobsLog.js";
+import { dailyUsage, sweepOrphanedJobs } from "./jobsLog.js";
 import { CAP_TABLE } from "./config/caps.js";
 import { nvidiaWindow } from "./lib/nvidia.js";
 import { mountBrain, startBrain, getRegistry } from "./brain/server.js";
@@ -127,6 +127,9 @@ app.post("/jobs/:type", async (req, res) => {
 
 async function main() {
   await initQueues(); // declares each agent's queue in Postgres before anything sends/works them
+  // Close jobs_log rows a previous process left "running" — before the workers start, so a
+  // retry pg-boss hands this process is never confused with the dead attempt's row.
+  await sweepOrphanedJobs().catch((e: any) => console.error("[jobsLog] orphan sweep threw:", e?.message));
 
   // The brain refuses to start on a contradictory registry — two agents claiming a phrase, a
   // cycle in the needs graph. That refusal is deliberate: those bugs otherwise surface as an
