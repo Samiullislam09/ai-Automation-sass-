@@ -34,6 +34,7 @@
  *  both are told honestly rather than one silently standing in for the other.
  */
 
+import { createHash } from "node:crypto";
 import * as cheerio from "cheerio";
 import { parseRobotsTxt, isBlocked } from "./robots.js";
 
@@ -308,6 +309,201 @@ function sameOrigin(url: string, origin: string): boolean {
   }
 }
 
+/* ---------------------------------------------------------------- page facts ------------ */
+
+/** Everything the checks need to know about ONE page, read off its DOM exactly once and kept
+ *  after the DOM is thrown away.
+ *
+ *  WHY THIS EXISTS (2026-09-05): the checks used to hold a cheerio DOM for every readable page
+ *  at once. A DOM is ~10× the HTML it came from; 156 Elementor pages of 300-800 KB each is
+ *  well over a gigabyte, and Railway killed the whole agent-server out of memory every time the
+ *  crawl finished — before a single check ran, before the report was filed. Extracting these
+ *  facts one page at a time keeps one DOM alive at any moment, and the facts for a page are a
+ *  few kilobytes (anchor list included) instead of megabytes.
+ *
+ *  Nothing here is a judgement — every field is a measurement; the judgements are in
+ *  auditFacts() below, so a check can still be read in one place. */
+export type PageFacts = {
+  page: AuditPage;
+  /** status < 400 and there was HTML to read. Every field below is meaningless when false. */
+  readable: boolean;
+  hasDoctype: boolean;
+  noindex: boolean;
+  title: string;
+  description: string;
+  h1Count: number;
+  /** First H1's text, whitespace-normalised and lower-cased (for the H1-equals-title check). */
+  firstH1: string;
+  /** Every <link rel=canonical href> on the page, in order. */
+  canonicals: string[];
+  imageWithoutAlt: boolean;
+  /** An img/script/link on the page loads from http:// (judged against the page's own scheme later). */
+  insecureResource: boolean;
+  metaRefresh: boolean;
+  /** The viewport meta's content, or null when the tag is absent. */
+  viewport: string | null;
+  hasCharset: boolean;
+  pluginContent: boolean;
+  frames: boolean;
+  invalidStructuredData: boolean;
+  hreflangs: { lang: string; href: string }[];
+  htmlLang: string;
+  /** Every <a href>, as the link checks need it — nothing about the element is kept. */
+  anchors: { href: string; nofollow: boolean; text: string; imgAlt: boolean; labelled: boolean }[];
+  /** Raw src/href of every script, stylesheet and image (for the robots.txt-blocked check). */
+  resources: string[];
+  /** Visible text — script/style and the site furniture removed — as a word count, a character
+   *  count and a hash. The text itself is not kept: duplicate-content only needs equality. */
+  words: number;
+  textChars: number;
+  textHash: string;
+  /** The newest date the page states about itself (time/meta/JSON-LD), or null when it states none. */
+  latestDate: number | null;
+  divCount: number;
+  semanticCount: number;
+};
+
+const EMPTY_FACTS: Omit<PageFacts, "page" | "readable"> = {
+  hasDoctype: false,
+  noindex: false,
+  title: "",
+  description: "",
+  h1Count: 0,
+  firstH1: "",
+  canonicals: [],
+  imageWithoutAlt: false,
+  insecureResource: false,
+  metaRefresh: false,
+  viewport: null,
+  hasCharset: false,
+  pluginContent: false,
+  frames: false,
+  invalidStructuredData: false,
+  hreflangs: [],
+  htmlLang: "",
+  anchors: [],
+  resources: [],
+  words: 0,
+  textChars: 0,
+  textHash: "",
+  latestDate: null,
+  divCount: 0,
+  semanticCount: 0,
+};
+
+const normText = (s: string) => s.replace(/\s+/g, " ").trim();
+
+/** JSON-LD that a parser rejects, or that names no @type, is markup Google throws away whole. */
+function ldValid(text: string): boolean {
+  try {
+    const j = JSON.parse(text);
+    const items = Array.isArray(j) ? j : j && Array.isArray(j["@graph"]) ? j["@graph"] : [j];
+    return items.length > 0 && items.every((it: unknown) => !!it && typeof it === "object" && "@type" in (it as object));
+  } catch {
+    return false;
+  }
+}
+
+/** One page's facts from its HTML. The DOM lives only inside this function. */
+export function extractPageFacts(page: AuditPage): PageFacts {
+  const readable = page.status !== null && page.status < 400 && !!page.html;
+  if (!readable) return { page, readable: false, ...EMPTY_FACTS };
+
+  const html = page.html as string;
+  const $ = cheerio.load(html);
+
+  // Visible text: a clone with script/style and the furniture removed, so thin-content,
+  // duplicate-content, text ratio and the AI notices all agree on what "the text" is.
+  const clone = cheerio.load($.html());
+  clone("script, style, nav, header, footer, noscript").remove();
+  const text = normText(clone("body").text());
+
+  const raw: string[] = [];
+  $("time[datetime]").each((_, el) => {
+    raw.push($(el).attr("datetime") ?? "");
+  });
+  $('meta[property="article:modified_time"], meta[property="article:published_time"], meta[name="last-modified"], meta[itemprop="dateModified"], meta[itemprop="datePublished"]').each((_, el) => {
+    raw.push($(el).attr("content") ?? "");
+  });
+  let invalidStructuredData = false;
+  $('script[type="application/ld+json"]').each((_, el) => {
+    const t = $(el).text();
+    if (!ldValid(t)) invalidStructuredData = true;
+    for (const m of t.matchAll(/"date(?:Modified|Published)"\s*:\s*"([^"]+)"/g)) raw.push(m[1]);
+  });
+  const times = raw.map((d) => Date.parse(d)).filter((t) => Number.isFinite(t));
+
+  const viewportEl = $('meta[name="viewport"]').first();
+
+  return {
+    page,
+    readable: true,
+    // \uFEFF is a byte-order mark — some editors put one before the doctype; not a defect.
+    hasDoctype: /^\uFEFF?\s*(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*<!doctype/i.test(html),
+    noindex: /noindex/i.test($('meta[name="robots"]').attr("content") ?? ""),
+    title: ($("title").first().text() ?? "").trim(),
+    description: ($('meta[name="description"]').attr("content") ?? "").trim(),
+    h1Count: $("h1").length,
+    firstH1: normText($("h1").first().text()).toLowerCase(),
+    canonicals: $('link[rel="canonical"]')
+      .toArray()
+      .map((el) => ($(el).attr("href") ?? "").trim())
+      .filter(Boolean),
+    imageWithoutAlt: $("img").toArray().some((el) => !($(el).attr("alt") ?? "").trim()),
+    insecureResource: $('img[src^="http://"], script[src^="http://"], link[href^="http://"]').length > 0,
+    metaRefresh: $("meta[http-equiv]").toArray().some((el) => /^refresh$/i.test(($(el).attr("http-equiv") ?? "").trim())),
+    viewport: viewportEl.length ? viewportEl.attr("content") ?? "" : null,
+    hasCharset:
+      $("meta[charset]").length > 0 ||
+      $("meta[http-equiv]")
+        .toArray()
+        .some((el) => /content-type/i.test($(el).attr("http-equiv") ?? "") && /charset=/i.test($(el).attr("content") ?? "")),
+    pluginContent: $("object, embed, applet")
+      .toArray()
+      .some((el) => el.tagName === "applet" || /flash|shockwave|silverlight|\.swf\b|\.xap\b|clsid:/i.test(Object.values($(el).attr() ?? {}).join(" "))),
+    frames: $("frame, frameset").length > 0,
+    invalidStructuredData,
+    hreflangs: $('link[rel="alternate"][hreflang]')
+      .toArray()
+      .map((el) => ({ lang: ($(el).attr("hreflang") ?? "").trim(), href: ($(el).attr("href") ?? "").trim() }))
+      .filter((h) => h.lang),
+    htmlLang: ($("html").attr("lang") ?? "").trim(),
+    anchors: $("a[href]")
+      .toArray()
+      .map((el) => ({
+        href: ($(el).attr("href") ?? "").trim(),
+        nofollow: /\bnofollow\b/.test(($(el).attr("rel") ?? "").toLowerCase()),
+        text: normText($(el).text()).slice(0, 120),
+        imgAlt: $(el)
+          .find("img")
+          .toArray()
+          .some((img) => !!($(img).attr("alt") ?? "").trim()),
+        labelled: !!(($(el).attr("aria-label") ?? "").trim() || ($(el).attr("title") ?? "").trim()),
+      })),
+    resources: $('script[src], link[rel="stylesheet"][href], img[src]')
+      .toArray()
+      .map((el) => ($(el).attr("src") ?? $(el).attr("href") ?? "").trim())
+      .filter(Boolean),
+    words: text ? text.split(" ").length : 0,
+    textChars: text.length,
+    textHash: createHash("sha1").update(text.toLowerCase()).digest("hex"),
+    latestDate: times.length ? Math.max(...times) : null,
+    divCount: $("div").length,
+    semanticCount: $("main, article, section, nav, header, footer, aside").length,
+  };
+}
+
+/** Facts for every page, one DOM at a time. `releaseHtml` drops each page's HTML string once
+ *  its facts are taken — agents/audit.ts passes true, because after this nothing reads the HTML
+ *  again and a 156-page crawl's HTML is tens of MB it no longer needs. Fixtures/tests keep it. */
+export function extractFacts(pages: AuditPage[], releaseHtml = false): PageFacts[] {
+  return pages.map((p) => {
+    const f = extractPageFacts(p);
+    if (releaseHtml) p.html = null;
+    return f;
+  });
+}
+
 /* ---------------------------------------------------------------- the catalogue --------- */
 
 /** Everything that can be said about a site from its HTML and its two text files.
@@ -323,6 +519,18 @@ export function auditSite(
    *  built from fixtures with no Chrome anywhere near them) keeps compiling unchanged. */
   performance?: { issues: AuditIssue[]; skippedReason: string | null }
 ): AuditResult {
+  return auditFacts(extractFacts(pages), site, performance);
+}
+
+/** The catalogue over already-extracted facts — what agents/audit.ts calls twice (once to
+ *  file the report before the browser phase, once to add the vitals) without parsing any HTML
+ *  a second time. */
+export function auditFacts(
+  facts: PageFacts[],
+  site: SiteContext,
+  performance?: { issues: AuditIssue[]; skippedReason: string | null }
+): AuditResult {
+  const pages = facts.map((f) => f.page);
   const skipped: string[] = [];
   const issues: (AuditIssue | null)[] = [...(performance?.issues ?? [])];
 
@@ -351,8 +559,12 @@ export function auditSite(
     return { id, severity, what, fix, pages: [url], count: 1 };
   }
 
-  const ok = pages.filter((p) => p.status !== null && p.status < 400 && p.html);
-  const parsed = ok.map((p) => ({ page: p, $: cheerio.load(p.html as string) }));
+  /** The readable pages — the ones every on-page check is about. */
+  const pf = facts.filter((f) => f.readable);
+  const ok = pf.map((f) => f.page);
+  const factsByUrl = new Map(facts.map((f) => [f.page.url, f]));
+  /** `pf.filter(pred).map(url)` — the shape of nearly every check below. */
+  const urlsWhere = (pred: (f: PageFacts) => boolean) => pf.filter(pred).map((f) => f.page.url);
 
   let siteHost = "";
   try {
@@ -364,17 +576,6 @@ export function auditSite(
   const sitemapFile = site.sitemapUrl ?? site.origin + "/sitemap.xml";
   const robotsFile = site.origin + "/robots.txt";
   const groups = site.robotsTxt === null ? null : parseRobotsTxt(site.robotsTxt);
-
-  /** The text a reader actually sees — script/style and the site furniture removed — computed
-   *  once per page here and read by thin-content, duplicate-content, text ratio and the AI
-   *  Search notices below, so all four agree on what "the text of the page" is. */
-  const visibleText = new Map<string, string>();
-  for (const { page, $ } of parsed) {
-    const clone = cheerio.load($.html());
-    clone("script, style, nav, header, footer, noscript").remove();
-    visibleText.set(page.url, clone("body").text().replace(/\s+/g, " ").trim());
-  }
-  const wordsOf = (url: string) => (visibleText.get(url) ?? "").split(" ").filter(Boolean).length;
 
   /* ── 1 · broken and unreachable ─────────────────────────────────────────────────────── */
 
@@ -438,14 +639,11 @@ export function auditSite(
 
   /* ── 2 · invisible to Google ────────────────────────────────────────────────────────── */
 
-  const noindex = parsed
-    .filter(({ $ }) => /noindex/i.test($('meta[name="robots"]').attr("content") ?? ""))
-    .map(({ page }) => page.url);
   issues.push(
     issue(
       "noindex",
       "block",
-      noindex,
+      urlsWhere((f) => f.noindex),
       (n) => `${n} ${n === 1 ? "page tells" : "pages tell"} Google not to list ${n === 1 ? "it" : "them"}`,
       'Remove the "noindex" robots tag from any page you want found. This is usually left over from when the site was being built.',
     ),
@@ -571,8 +769,7 @@ export function auditSite(
       .filter((p) => {
         if (p.status !== 200) return true;
         if (p.finalUrl && canonicalKey(p.finalUrl) !== canonicalKey(p.url)) return true;
-        const entry = parsed.find((x) => x.page === p);
-        return !!entry && /noindex/i.test(entry.$('meta[name="robots"]').attr("content") ?? "");
+        return !!factsByUrl.get(p.url)?.noindex;
       })
       .map((p) => p.url);
     issues.push(
@@ -622,13 +819,11 @@ export function auditSite(
 
   /* ── 3 · the page's own basics ──────────────────────────────────────────────────────── */
 
-  const titleOf = ({ $ }: { $: cheerio.CheerioAPI }) => ($("title").first().text() ?? "").trim();
-
   issues.push(
     issue(
       "missing-title",
       "block",
-      parsed.filter((p) => !titleOf(p)).map(({ page }) => page.url),
+      urlsWhere((f) => !f.title),
       (n) => `${n} ${n === 1 ? "page has" : "pages have"} no title`,
       "Give each page a title. It is the blue line people click in Google — without it they see the URL.",
     ),
@@ -638,7 +833,7 @@ export function auditSite(
     issue(
       "long-title",
       "warn",
-      parsed.filter((p) => titleOf(p).length > 65).map(({ page }) => page.url),
+      urlsWhere((f) => f.title.length > 65),
       (n) => `${n} ${n === 1 ? "title is" : "titles are"} too long to show in full`,
       "Keep titles under about 60 characters. Anything past that is cut off with an ellipsis in the search result.",
     ),
@@ -646,29 +841,30 @@ export function auditSite(
 
   // Duplicates are the finding no per-page check can make. Two pages with the same title
   // compete with each other, and Google picks one — usually not the one you wanted.
-  const byTitle = new Map<string, string[]>();
-  for (const p of parsed) {
-    const t = titleOf(p).toLowerCase();
-    if (!t) continue;
-    byTitle.set(t, [...(byTitle.get(t) ?? []), p.page.url]);
-  }
-  const duplicateTitlePages = [...byTitle.values()].filter((urls) => urls.length > 1).flat();
+  const groupBy = (key: (f: PageFacts) => string): string[] => {
+    const groups = new Map<string, string[]>();
+    for (const f of pf) {
+      const k = key(f);
+      if (!k) continue;
+      groups.set(k, [...(groups.get(k) ?? []), f.page.url]);
+    }
+    return [...groups.values()].filter((urls) => urls.length > 1).flat();
+  };
   issues.push(
     issue(
       "duplicate-title",
       "warn",
-      duplicateTitlePages,
+      groupBy((f) => f.title.toLowerCase()),
       (n) => `${n} pages share a title with another page`,
       "Give each page its own title. Pages with the same title compete with each other, and Google shows only one of them.",
     ),
   );
 
-  const metaOf = ({ $ }: { $: cheerio.CheerioAPI }) => ($('meta[name="description"]').attr("content") ?? "").trim();
   issues.push(
     issue(
       "missing-meta",
       "warn",
-      parsed.filter((p) => !metaOf(p)).map(({ page }) => page.url),
+      urlsWhere((f) => !f.description),
       (n) => `${n} ${n === 1 ? "page has" : "pages have"} no description`,
       "Write one or two sentences describing each page. Google shows it under the title — leave it out and it picks a random sentence for you.",
     ),
@@ -678,7 +874,7 @@ export function auditSite(
     issue(
       "missing-h1",
       "warn",
-      parsed.filter(({ $ }) => $("h1").length === 0).map(({ page }) => page.url),
+      urlsWhere((f) => f.h1Count === 0),
       (n) => `${n} ${n === 1 ? "page has" : "pages have"} no main heading`,
       "Add one H1 to each page saying what it is about. It is the first thing both a reader and a crawler look for.",
     ),
@@ -688,7 +884,7 @@ export function auditSite(
     issue(
       "multiple-h1",
       "warn",
-      parsed.filter(({ $ }) => $("h1").length > 1).map(({ page }) => page.url),
+      urlsWhere((f) => f.h1Count > 1),
       (n) => `${n} ${n === 1 ? "page has" : "pages have"} more than one main heading`,
       "Keep one H1 per page and make the rest H2s. Several H1s tell a crawler the page is about several things at once.",
     ),
@@ -698,7 +894,7 @@ export function auditSite(
     issue(
       "missing-canonical",
       "warn",
-      parsed.filter(({ $ }) => !$('link[rel="canonical"]').attr("href")).map(({ page }) => page.url),
+      urlsWhere((f) => !f.canonicals[0]),
       (n) => `${n} ${n === 1 ? "page does" : "pages do"} not say which address is the real one`,
       "Add a canonical link to each page. Without it, the same page reached two ways can be counted as two competing pages.",
     ),
@@ -708,40 +904,27 @@ export function auditSite(
     issue(
       "short-title",
       "warn",
-      parsed
-        .filter((p) => {
-          const n = titleOf(p).length;
-          return n > 0 && n < SHORT_TITLE_CHARS;
-        })
-        .map(({ page }) => page.url),
+      urlsWhere((f) => f.title.length > 0 && f.title.length < SHORT_TITLE_CHARS),
       (n) => `${n} ${n === 1 ? "title is" : "titles are"} shorter than ${SHORT_TITLE_CHARS} characters`,
       'A title that short wastes the space Google gives you. Say what the page is and where — "Roof repairs in Springfield | Example Roofing" — instead of one word.',
     ),
   );
 
-  const norm = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
-  const h1Of = ({ $ }: { $: cheerio.CheerioAPI }) => norm($("h1").first().text());
   issues.push(
     issue(
       "h1-equals-title",
       "warn",
-      parsed.filter((p) => !!h1Of(p) && h1Of(p) === norm(titleOf(p))).map(({ page }) => page.url),
+      urlsWhere((f) => !!f.firstH1 && f.firstH1 === normText(f.title).toLowerCase()),
       (n) => `${n} ${n === 1 ? "page has" : "pages have"} an H1 identical to its title`,
       "Let the title and the H1 do different jobs: the title earns the click in Google (add the place and the business), the H1 tells the reader they landed in the right spot.",
     ),
   );
 
-  const byMeta = new Map<string, string[]>();
-  for (const p of parsed) {
-    const m = metaOf(p).toLowerCase();
-    if (!m) continue;
-    byMeta.set(m, [...(byMeta.get(m) ?? []), p.page.url]);
-  }
   issues.push(
     issue(
       "duplicate-meta",
       "warn",
-      [...byMeta.values()].filter((urls) => urls.length > 1).flat(),
+      groupBy((f) => f.description.toLowerCase()),
       (n) => `${n} pages share a description with another page`,
       "Write a description for each page that says what THAT page offers. The same sentence under every result tells the searcher nothing about which to open.",
     ),
@@ -751,7 +934,7 @@ export function auditSite(
     issue(
       "multiple-canonical",
       "warn",
-      parsed.filter(({ $ }) => $('link[rel="canonical"]').length > 1).map(({ page }) => page.url),
+      urlsWhere((f) => f.canonicals.length > 1),
       (n) => `${n} ${n === 1 ? "page names" : "pages name"} more than one canonical address`,
       "Keep exactly one canonical link per page. Given two, Google ignores both — usually a theme and an SEO plugin each adding their own.",
     ),
@@ -763,20 +946,17 @@ export function auditSite(
     issue(
       "meta-refresh",
       "warn",
-      parsed
-        .filter(({ $ }) => $("meta[http-equiv]").toArray().some((el) => /^refresh$/i.test(($(el).attr("http-equiv") ?? "").trim())))
-        .map(({ page }) => page.url),
+      urlsWhere((f) => f.metaRefresh),
       (n) => `${n} ${n === 1 ? "page redirects" : "pages redirect"} with a meta refresh tag`,
       "Replace the meta refresh with a real 301 redirect on the server. A meta refresh is slow for the visitor and Google may not pass the old page's authority through it.",
     ),
   );
 
-  const viewportOf = ({ $ }: { $: cheerio.CheerioAPI }) => $('meta[name="viewport"]').first();
   issues.push(
     issue(
       "missing-viewport",
       "warn",
-      parsed.filter((p) => viewportOf(p).length === 0).map(({ page }) => page.url),
+      urlsWhere((f) => f.viewport === null),
       (n) => `${n} ${n === 1 ? "page has" : "pages have"} no viewport tag`,
       'Add <meta name="viewport" content="width=device-width, initial-scale=1"> to every page. Without it phones render the desktop layout shrunk down, and Google ranks with the phone version.',
     ),
@@ -786,9 +966,7 @@ export function auditSite(
     issue(
       "viewport-no-width",
       "warn",
-      parsed
-        .filter((p) => viewportOf(p).length > 0 && !/width\s*=/i.test(viewportOf(p).attr("content") ?? ""))
-        .map(({ page }) => page.url),
+      urlsWhere((f) => f.viewport !== null && !/width\s*=/i.test(f.viewport)),
       (n) => `${n} viewport ${n === 1 ? "tag does" : "tags do"} not set a width`,
       'The viewport tag needs "width=device-width" in its content. Without a width the phone falls back to the desktop layout as if the tag were not there.',
     ),
@@ -798,15 +976,7 @@ export function auditSite(
     issue(
       "no-charset",
       "warn",
-      parsed
-        .filter(
-          ({ $ }) =>
-            $("meta[charset]").length === 0 &&
-            !$("meta[http-equiv]")
-              .toArray()
-              .some((el) => /content-type/i.test($(el).attr("http-equiv") ?? "") && /charset=/i.test($(el).attr("content") ?? "")),
-        )
-        .map(({ page }) => page.url),
+      urlsWhere((f) => !f.hasCharset),
       (n) => `${n} ${n === 1 ? "page does" : "pages do"} not declare a character encoding`,
       'Add <meta charset="utf-8"> as the first line of <head>. Without it a browser guesses, and a wrong guess turns every accent and quote into garbage characters.',
     ),
@@ -816,8 +986,7 @@ export function auditSite(
     issue(
       "no-doctype",
       "warn",
-      // \uFEFF is a byte-order mark — some editors put one before the doctype, and it is not a defect.
-      parsed.filter(({ page }) => !/^\uFEFF?\s*(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*<!doctype/i.test(page.html ?? "")).map(({ page }) => page.url),
+      urlsWhere((f) => !f.hasDoctype),
       (n) => `${n} ${n === 1 ? "page has" : "pages have"} no doctype declaration`,
       "Put <!DOCTYPE html> on the first line of every page. Without it browsers switch to quirks mode and lay the page out by 1990s rules, which breaks modern CSS.",
     ),
@@ -827,13 +996,7 @@ export function auditSite(
     issue(
       "plugin-content",
       "warn",
-      parsed
-        .filter(({ $ }) =>
-          $("object, embed, applet")
-            .toArray()
-            .some((el) => el.tagName === "applet" || /flash|shockwave|silverlight|\.swf\b|\.xap\b|clsid:/i.test(Object.values($(el).attr() ?? {}).join(" "))),
-        )
-        .map(({ page }) => page.url),
+      urlsWhere((f) => f.pluginContent),
       (n) => `${n} ${n === 1 ? "page embeds" : "pages embed"} a browser plugin (Flash, Silverlight or a Java applet)`,
       "No current browser runs these — whatever it was showing is a blank box now. Replace it with an HTML5 video, an image, or plain HTML.",
     ),
@@ -843,29 +1006,17 @@ export function auditSite(
     issue(
       "frames",
       "warn",
-      parsed.filter(({ $ }) => $("frame, frameset").length > 0).map(({ page }) => page.url),
+      urlsWhere((f) => f.frames),
       (n) => `${n} ${n === 1 ? "page is" : "pages are"} built with frames`,
       "Rebuild the page without <frameset>. Google indexes the frame contents as separate pages, so the page itself has no content of its own to rank.",
     ),
   );
 
-  // JSON-LD that a parser rejects, or that names no @type, is markup Google throws away whole.
-  const ldValid = (text: string): boolean => {
-    try {
-      const j = JSON.parse(text);
-      const items = Array.isArray(j) ? j : j && Array.isArray(j["@graph"]) ? j["@graph"] : [j];
-      return items.length > 0 && items.every((it: unknown) => !!it && typeof it === "object" && "@type" in (it as object));
-    } catch {
-      return false;
-    }
-  };
   issues.push(
     issue(
       "invalid-structured-data",
       "warn",
-      parsed
-        .filter(({ $ }) => $('script[type="application/ld+json"]').toArray().some((el) => !ldValid($(el).text())))
-        .map(({ page }) => page.url),
+      urlsWhere((f) => f.invalidStructuredData),
       (n) => `${n} ${n === 1 ? "page has" : "pages have"} structured data that cannot be read`,
       "Paste the page into Google's Rich Results Test. The JSON-LD is either not valid JSON or has no @type, and a block Google cannot parse earns none of the rich results it was added for.",
     ),
@@ -873,28 +1024,19 @@ export function auditSite(
 
   /* ── 3c · international — hreflang and the page language ───────────────────────────── */
 
-  const hreflangsOf = ({ $ }: { $: cheerio.CheerioAPI }) =>
-    $('link[rel="alternate"][hreflang]')
-      .toArray()
-      .map((el) => ({ lang: ($(el).attr("hreflang") ?? "").trim(), href: ($(el).attr("href") ?? "").trim() }))
-      .filter((h) => h.lang);
-  const htmlLangOf = ({ $ }: { $: cheerio.CheerioAPI }) => ($("html").attr("lang") ?? "").trim();
-
   issues.push(
     issue(
       "hreflang-conflict",
       "warn",
-      parsed
-        .filter((p) => {
-          const seen = new Map<string, string>();
-          for (const h of hreflangsOf(p)) {
-            const key = h.lang.toLowerCase();
-            if (seen.has(key) && seen.get(key) !== h.href) return true;
-            seen.set(key, h.href);
-          }
-          return false;
-        })
-        .map(({ page }) => page.url),
+      urlsWhere((f) => {
+        const seen = new Map<string, string>();
+        for (const h of f.hreflangs) {
+          const key = h.lang.toLowerCase();
+          if (seen.has(key) && seen.get(key) !== h.href) return true;
+          seen.set(key, h.href);
+        }
+        return false;
+      }),
       (n) => `${n} ${n === 1 ? "page points" : "pages point"} the same language at two different addresses`,
       "Each hreflang language may name one URL per page. Two different addresses for the same language and Google cannot tell which to show that country.",
     ),
@@ -904,7 +1046,7 @@ export function auditSite(
     issue(
       "hreflang-invalid",
       "warn",
-      parsed.filter((p) => hreflangsOf(p).some((h) => !HREFLANG_RE.test(h.lang))).map(({ page }) => page.url),
+      urlsWhere((f) => f.hreflangs.some((h) => !HREFLANG_RE.test(h.lang))),
       (n) => `${n} ${n === 1 ? "page uses" : "pages use"} an hreflang code that is not a language`,
       'hreflang takes a language code ("en"), optionally with a region ("en-GB"), or "x-default". Anything else — "english", "uk", "en_GB" with an underscore — is ignored.',
     ),
@@ -914,7 +1056,7 @@ export function auditSite(
     issue(
       "no-lang",
       "warn",
-      parsed.filter((p) => !htmlLangOf(p) && hreflangsOf(p).length === 0).map(({ page }) => page.url),
+      urlsWhere((f) => !f.htmlLang && f.hreflangs.length === 0),
       (n) => `${n} ${n === 1 ? "page does" : "pages do"} not say what language it is in`,
       'Add lang="en" (or the page\'s language) to the <html> tag. Screen readers pick a voice from it, and search engines use it to decide which country to show the page in.',
     ),
@@ -924,14 +1066,12 @@ export function auditSite(
     issue(
       "hreflang-lang-mismatch",
       "info",
-      parsed
-        .filter((p) => {
-          const lang = htmlLangOf(p).toLowerCase().split("-")[0];
-          if (!lang) return false;
-          const self = hreflangsOf(p).find((h) => h.lang.toLowerCase() !== "x-default" && canonicalKey(h.href) === canonicalKey(p.page.url));
-          return !!self && self.lang.toLowerCase().split("-")[0] !== lang;
-        })
-        .map(({ page }) => page.url),
+      urlsWhere((f) => {
+        const lang = f.htmlLang.toLowerCase().split("-")[0];
+        if (!lang) return false;
+        const self = f.hreflangs.find((h) => h.lang.toLowerCase() !== "x-default" && canonicalKey(h.href) === canonicalKey(f.page.url));
+        return !!self && self.lang.toLowerCase().split("-")[0] !== lang;
+      }),
       (n) => `${n} ${n === 1 ? "page's" : "pages'"} hreflang for itself disagrees with its <html lang>`,
       "Make the page's own hreflang entry and its <html lang> name the same language. When they disagree, one of them is wrong, and Google guesses which.",
     ),
@@ -979,14 +1119,11 @@ export function auditSite(
 
   /* ── 4 · images and links ───────────────────────────────────────────────────────────── */
 
-  const noAlt = parsed
-    .filter(({ $ }) => $("img").toArray().some((el) => !($(el).attr("alt") ?? "").trim()))
-    .map(({ page }) => page.url);
   issues.push(
     issue(
       "image-no-alt",
       "warn",
-      noAlt,
+      urlsWhere((f) => f.imageWithoutAlt),
       (n) => `${n} ${n === 1 ? "page has images" : "pages have images"} with no description`,
       "Describe each image in its alt text. It is what a blind visitor hears, what Google reads, and what shows when the image fails to load.",
     ),
@@ -996,9 +1133,7 @@ export function auditSite(
     issue(
       "mixed-content",
       "block",
-      parsed
-        .filter(({ page, $ }) => page.url.startsWith("https://") && $('img[src^="http://"], script[src^="http://"], link[href^="http://"]').length > 0)
-        .map(({ page }) => page.url),
+      urlsWhere((f) => f.page.url.startsWith("https://") && f.insecureResource),
       (n) => `${n} secure ${n === 1 ? "page loads something" : "pages load something"} over an insecure connection`,
       'Change those "http://" addresses to "https://". Browsers block them and some show the whole page as not secure.',
     ),
@@ -1012,20 +1147,16 @@ export function auditSite(
       issue(
         "blocked-resources",
         "warn",
-        parsed
-          .filter(({ page, $ }) =>
-            $('script[src], link[rel="stylesheet"][href], img[src]')
-              .toArray()
-              .some((el) => {
-                try {
-                  const abs = new URL($(el).attr("src") ?? $(el).attr("href") ?? "", page.finalUrl ?? page.url);
-                  return sameOrigin(abs.toString(), site.origin) && isBlocked(abs.pathname, "*", groups);
-                } catch {
-                  return false;
-                }
-              }),
-          )
-          .map(({ page }) => page.url),
+        urlsWhere((f) =>
+          f.resources.some((src) => {
+            try {
+              const abs = new URL(src, f.page.finalUrl ?? f.page.url);
+              return sameOrigin(abs.toString(), site.origin) && isBlocked(abs.pathname, "*", groups);
+            } catch {
+              return false;
+            }
+          }),
+        ),
         (n) => `${n} ${n === 1 ? "page loads" : "pages load"} a script, stylesheet or image that robots.txt blocks`,
         "Allow the /wp-content/, /assets/ or /static/ folder (whichever holds them) in robots.txt. Google renders pages like a browser; hide the CSS and it sees a broken page.",
       ),
@@ -1054,14 +1185,14 @@ export function auditSite(
   const SKIP_SCHEME = /^(mailto|tel|sms|javascript|data|ftp|file):/i;
   const LOOKS_LIKE_URL = /^(https?:\/\/|www\.)\S+$/i;
 
-  for (const { page, $ } of parsed) {
+  for (const f of pf) {
+    const page = f.page;
     const fromKey = canonicalKey(page.url);
-    const anchors = $("a[href]").toArray();
-    if (anchors.length > MAX_LINKS_PER_PAGE) linkFlags.tooMany.push(page.url);
+    if (f.anchors.length > MAX_LINKS_PER_PAGE) linkFlags.tooMany.push(page.url);
     const hit = { malformed: false, long: false, httpsToHttp: false, resource: false, internalNofollow: false, externalNofollow: false, generic: false, empty: false };
 
-    for (const el of anchors) {
-      const href = ($(el).attr("href") ?? "").trim();
+    for (const a of f.anchors) {
+      const href = a.href;
       if (!href || href.startsWith("#") || SKIP_SCHEME.test(href)) continue;
       let abs: URL;
       try {
@@ -1072,29 +1203,21 @@ export function auditSite(
       }
       if (abs.protocol !== "http:" && abs.protocol !== "https:") continue;
 
-      const rel = ($(el).attr("rel") ?? "").toLowerCase();
-      const nofollow = /\bnofollow\b/.test(rel);
-      const text = $(el).text().replace(/\s+/g, " ").trim();
-      const imgAlt = $(el)
-        .find("img")
-        .toArray()
-        .some((img) => ($(img).attr("alt") ?? "").trim());
-      const labelled = !!(($(el).attr("aria-label") ?? "").trim() || ($(el).attr("title") ?? "").trim());
-      if (!text && !imgAlt && !labelled) hit.empty = true;
-      else if (text && (GENERIC_ANCHORS.has(text.toLowerCase()) || LOOKS_LIKE_URL.test(text))) hit.generic = true;
+      if (!a.text && !a.imgAlt && !a.labelled) hit.empty = true;
+      else if (a.text && (GENERIC_ANCHORS.has(a.text.toLowerCase()) || LOOKS_LIKE_URL.test(a.text))) hit.generic = true;
       if (abs.toString().length > LONG_URL_CHARS) hit.long = true;
       if (abs.host.toLowerCase() === siteHost && abs.protocol === "http:" && page.url.startsWith("https://")) hit.httpsToHttp = true;
 
       if (sameOrigin(abs.toString(), site.origin)) {
         if (RESOURCE_EXT.test(abs.pathname)) hit.resource = true;
-        if (nofollow) hit.internalNofollow = true;
+        if (a.nofollow) hit.internalNofollow = true;
         const toKey = canonicalKey(abs.toString());
         if (toKey === fromKey) continue;
         if (!outLinks.has(fromKey)) outLinks.set(fromKey, new Set());
         outLinks.get(fromKey)!.add(toKey);
         if (!inSources.has(toKey)) inSources.set(toKey, new Set());
         inSources.get(toKey)!.add(fromKey);
-      } else if (nofollow) {
+      } else if (a.nofollow) {
         hit.externalNofollow = true;
       }
     }
@@ -1242,7 +1365,7 @@ export function auditSite(
     issue(
       "thin-content",
       "warn",
-      parsed.filter(({ page }) => wordsOf(page.url) < 150).map(({ page }) => page.url),
+      urlsWhere((f) => f.words < 150),
       (n) => `${n} ${n === 1 ? "page has" : "pages have"} almost no text on it`,
       "Either write these properly or remove them. A page with a heading and two lines rarely ranks for anything and drags the rest down.",
     ),
@@ -1250,26 +1373,20 @@ export function auditSite(
 
   // Identical visible text on two URLs that each claim to be the real one. A page whose canonical
   // points elsewhere has already declared itself the copy and is left out.
-  const selfCanonical = ({ page, $ }: { page: AuditPage; $: cheerio.CheerioAPI }) => {
-    const href = $('link[rel="canonical"]').first().attr("href");
+  const selfCanonical = (f: PageFacts) => {
+    const href = f.canonicals[0];
     if (!href) return true;
     try {
-      return canonicalKey(new URL(href, page.url).toString()) === canonicalKey(page.url);
+      return canonicalKey(new URL(href, f.page.url).toString()) === canonicalKey(f.page.url);
     } catch {
       return true;
     }
   };
-  const byText = new Map<string, string[]>();
-  for (const p of parsed) {
-    if (wordsOf(p.page.url) < 50 || !selfCanonical(p)) continue;
-    const t = (visibleText.get(p.page.url) ?? "").toLowerCase();
-    byText.set(t, [...(byText.get(t) ?? []), p.page.url]);
-  }
   issues.push(
     issue(
       "duplicate-content",
       "warn",
-      [...byText.values()].filter((urls) => urls.length > 1).flat(),
+      groupBy((f) => (f.words < 50 || !selfCanonical(f) ? "" : f.textHash)),
       (n) => `${n} pages have exactly the same text as another page`,
       "Keep one and redirect the other to it, or add a canonical link on the copy pointing at the original. Two identical pages split the ranking between them and Google picks one at random.",
     ),
@@ -1279,9 +1396,7 @@ export function auditSite(
     issue(
       "low-text-ratio",
       "warn",
-      parsed
-        .filter(({ page }) => page.bytes > 0 && (visibleText.get(page.url) ?? "").length / page.bytes < MIN_TEXT_RATIO)
-        .map(({ page }) => page.url),
+      urlsWhere((f) => f.page.bytes > 0 && f.textChars / f.page.bytes < MIN_TEXT_RATIO),
       (n) => `${n} ${n === 1 ? "page is" : "pages are"} less than ${Math.round(MIN_TEXT_RATIO * 100)}% text by size`,
       "The page is mostly markup and script, not words. Usually a page builder's output — worth showing your developer, and worth adding the text a reader actually came for.",
     ),
@@ -1293,7 +1408,7 @@ export function auditSite(
     issue(
       "ai-too-much-content",
       "info",
-      parsed.filter(({ page }) => wordsOf(page.url) > AI_TOO_MANY_WORDS).map(({ page }) => page.url),
+      urlsWhere((f) => f.words > AI_TOO_MANY_WORDS),
       (n) => `${n} ${n === 1 ? "page has" : "pages have"} more than ${AI_TOO_MANY_WORDS.toLocaleString()} words on it`,
       "AI answer engines quote a passage, not a page, and lose the thread in a very long one. Split it into pages with one question each, or add a summary and headings that name each section.",
     ),
@@ -1301,31 +1416,12 @@ export function auditSite(
 
   // Only judged when the page itself carries a date. A page with no date is not called stale —
   // that would be guessing, and this file does not guess.
-  const latestDateOf = ({ $ }: { $: cheerio.CheerioAPI }): number | null => {
-    const raw: string[] = [];
-    $("time[datetime]").each((_, el) => {
-      raw.push($(el).attr("datetime") ?? "");
-    });
-    $('meta[property="article:modified_time"], meta[property="article:published_time"], meta[name="last-modified"], meta[itemprop="dateModified"], meta[itemprop="datePublished"]').each((_, el) => {
-      raw.push($(el).attr("content") ?? "");
-    });
-    $('script[type="application/ld+json"]').each((_, el) => {
-      for (const m of $(el).text().matchAll(/"date(?:Modified|Published)"\s*:\s*"([^"]+)"/g)) raw.push(m[1]);
-    });
-    const times = raw.map((d) => Date.parse(d)).filter((t) => Number.isFinite(t));
-    return times.length ? Math.max(...times) : null;
-  };
   const staleBefore = Date.now() - AI_OUTDATED_MONTHS * 30.44 * 24 * 3600 * 1000;
   issues.push(
     issue(
       "ai-outdated-content",
       "info",
-      parsed
-        .filter((p) => {
-          const t = latestDateOf(p);
-          return t !== null && t < staleBefore;
-        })
-        .map(({ page }) => page.url),
+      urlsWhere((f) => f.latestDate !== null && f.latestDate < staleBefore),
       (n) => `${n} ${n === 1 ? "page was" : "pages were"} last updated more than ${AI_OUTDATED_MONTHS / 12} years ago, by its own date`,
       "Refresh the page and update its published/modified date. AI answer engines favour recent sources, and a page that says it is two years old is passed over for one that says it is two months old.",
     ),
@@ -1335,12 +1431,7 @@ export function auditSite(
     issue(
       "ai-low-semantic-html",
       "info",
-      parsed
-        .filter(({ $ }) => {
-          const divs = $("div").length;
-          return divs >= AI_MIN_DIVS_FOR_SEMANTIC_CHECK && $("main, article, section, nav, header, footer, aside").length / divs < AI_MIN_SEMANTIC_RATIO;
-        })
-        .map(({ page }) => page.url),
+      urlsWhere((f) => f.divCount >= AI_MIN_DIVS_FOR_SEMANTIC_CHECK && f.semanticCount / f.divCount < AI_MIN_SEMANTIC_RATIO),
       (n) => `${n} ${n === 1 ? "page is" : "pages are"} built almost entirely from <div>s`,
       "Wrap the content in <main> and <article>, the menu in <nav>, sidebars in <aside>. AI engines use those tags to find the part of the page that is the answer; a wall of <div>s gives them nothing to hold.",
     ),
@@ -1408,16 +1499,16 @@ export function auditSite(
           });
 
   // Statistics-tab rows, read straight off the structures the checks above already built (the
-  // link graph, the BFS depth map, titleOf/metaOf/wordsOf) — so the histograms and the issue
-  // rows are two views of one measurement, never two measurements.
-  const pageStats: PageStats[] = parsed.map((p) => {
-    const key = canonicalKey(p.page.url);
+  // link graph, the BFS depth map, the per-page facts) — so the histograms and the issue rows
+  // are two views of one measurement, never two measurements.
+  const pageStats: PageStats[] = pf.map((f) => {
+    const key = canonicalKey(f.page.url);
     return {
-      url: p.page.url,
+      url: f.page.url,
       depth: depth.get(key) ?? null,
-      titleChars: titleOf(p).length,
-      descriptionChars: metaOf(p).length,
-      words: wordsOf(p.page.url),
+      titleChars: f.title.length,
+      descriptionChars: f.description.length,
+      words: f.words,
       inLinks: inSources.get(key)?.size ?? 0,
       outLinks: outLinks.get(key)?.size ?? 0,
     };

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { auditSite, describeTrend, summarizeAudit, topIssues, type AuditPage, type SiteContext } from "./checks.js";
+import { auditSite, auditFacts, extractFacts, describeTrend, summarizeAudit, topIssues, type AuditPage, type SiteContext } from "./checks.js";
 import { chooseUrls, parseSitemap, auditTarget, fetchSiteContext } from "./fetchSite.js";
 
 /** Mr. Audit's catalogue, tested the way seoChecks.ts is: from fixtures, with no network, and
@@ -563,6 +563,29 @@ test("AI Search notices: too many words, a stated date older than two years, and
   const divs = "<div>x</div>".repeat(40);
   assert.ok(has(auditSite([good(`${ORIGIN}/x`, "X", divs)], CTX), "ai-low-semantic-html"));
   assert.equal(has(auditSite([good(`${ORIGIN}/x`, "X", `<main><article>${divs}</article><nav></nav></main>`)], CTX), "ai-low-semantic-html"), false);
+});
+
+/* ---------------------------------------------------------------- facts (2026-09-05, the OOM fix) ---------------- */
+
+test("facts are taken once per page and the HTML can be released — the same report comes out of auditFacts twice", () => {
+  const pages = [good(`${ORIGIN}/`, "Home", `<a href="/a">Roof repairs</a>`), good(`${ORIGIN}/a`, "A")];
+  const facts = extractFacts(pages, true);
+  assert.equal(pages[0].html, null, "releaseHtml drops the HTML once its facts are taken");
+  assert.equal(facts[0].readable, true);
+  assert.equal(facts[0].title, "Home — Example Roofing, Springfield");
+  assert.equal(facts[0].anchors.length, 1);
+  const first = auditFacts(facts, CTX);
+  const second = auditFacts(facts, CTX, { issues: [], skippedReason: null });
+  assert.deepEqual(first.issues.map((i) => i.id), second.issues.map((i) => i.id), "stage 1 and stage 2 judge the same facts");
+  assert.equal(second.skipped.length, 0);
+  assert.ok(first.pageStats.length === 2 && first.pageStats[1].inLinks === 1);
+});
+
+test("an unreadable page has empty facts, never a crash", () => {
+  const [f] = extractFacts([page(`${ORIGIN}/gone`, "", { status: 404, html: null })]);
+  assert.equal(f.readable, false);
+  assert.equal(f.anchors.length, 0);
+  assert.equal(auditFacts([f], CTX).issues.some((i) => i.id === "not-found"), true);
 });
 
 /* ---------------------------------------------------------------- choosing pages -------- */

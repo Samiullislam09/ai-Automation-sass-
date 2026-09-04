@@ -1,6 +1,6 @@
 import type { Job } from "pg-boss";
 import { Agent, type AgentContext, type AgentJobData } from "./base.js";
-import { auditSite, summarizeAudit, topIssues, type AuditIssue, type AuditPage, type AuditResult } from "../lib/audit/checks.js";
+import { auditFacts, extractFacts, summarizeAudit, topIssues, type AuditIssue, type AuditPage, type AuditResult } from "../lib/audit/checks.js";
 import { auditTarget, chooseUrls, fetchAllPages, fetchSiteContext, DEFAULT_PAGE_LIMIT } from "../lib/audit/fetchSite.js";
 import { runPerformanceAudit, issuesFromVitals, type PageVitals, type PerformanceRun } from "../lib/audit/performance.js";
 import { aiSearchAccess } from "../lib/audit/robots.js";
@@ -104,7 +104,11 @@ export class AuditAgent extends Agent {
     const previous = await previousScore(tenantId);
     const aiSearch = aiSearchAccess(site.robotsTxt);
 
-    const stage1 = auditSite(pages, site, {
+    // One DOM at a time, and each page's HTML is released as soon as its facts are taken
+    // (checks.ts's own header on PageFacts says why: 156 DOMs at once was the OOM). Both
+    // stages below read these same facts — nothing parses HTML twice.
+    const facts = extractFacts(pages, true);
+    const stage1 = auditFacts(facts, site, {
       issues: [],
       skippedReason: "Loading speed (Core Web Vitals) is being measured now — this report updates itself when that finishes.",
     });
@@ -161,7 +165,7 @@ export class AuditAgent extends Agent {
     // Same catalogue, now with the real vitals folded in — the score can only move by the
     // performance issues (slow-lcp / layout-shift / slow-interactivity), never by anything
     // that changed underneath: the pages are the same objects stage 1 judged.
-    const result = auditSite(pages, site, {
+    const result = auditFacts(facts, site, {
       issues: issuesFromVitals(perf.pages),
       skippedReason: perf.ran ? null : perf.skippedReason,
     });
