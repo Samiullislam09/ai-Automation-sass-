@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight, BadgeCheck, Bell, Calendar, Check, ChevronDown, ChevronLeft, ChevronRight, Clock,
   Copy, Eye, FileText, Loader2, Megaphone, MapPin, MoreVertical, Pencil, RefreshCw, Search,
-  SlidersHorizontal, UserRound, X, XCircle, CheckCircle2,
+  SlidersHorizontal, UserRound, X, XCircle, CheckCircle2, Globe,
 } from "lucide-react";
 import { renderMarkdown } from "@/lib/md";
 import { useStore } from "@/lib/store";
@@ -137,11 +137,15 @@ export default function ApprovalsSection() {
   useEffect(load, []);
 
   // Default selection = first pending item (the mockup opens with the top pending article).
+  // Runs ONCE after the first load — it used to re-fire on every render where selectedId was
+  // null, which is exactly what the drawer's Close button sets, so Close never closed anything.
+  const autoSelected = useRef(false);
   useEffect(() => {
-    if (selectedId || !items.length) return;
+    if (autoSelected.current || !items.length) return;
+    autoSelected.current = true;
     const first = items.find((i) => i.status === "awaiting_approval") ?? items[0];
     if (first && typeof window !== "undefined" && window.innerWidth >= 1280) setSelectedId(first.id);
-  }, [items, selectedId]);
+  }, [items]);
 
   // Body isn't in the list payload (it's the whole article) — fetched per selection.
   useEffect(() => {
@@ -286,18 +290,18 @@ export default function ApprovalsSection() {
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
 
       {/* ============ centre column ============ */}
-      <section className="ap-panel flex min-w-0 flex-1 flex-col">
+      <section className="ap-panel ap-main flex min-w-0 flex-1 flex-col">
         {/* header */}
-        <header className="flex flex-wrap items-start gap-3 px-5 pt-5 pb-4" style={{ borderBottom: "1px solid var(--lx-border)" }}>
+        <header className="flex flex-wrap items-center gap-3 px-4 pt-4 pb-3" style={{ borderBottom: "1px solid var(--lx-border)" }}>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <h1 className="ap-h1">Approvals</h1>
-              <BadgeCheck size={20} style={{ color: "#3b82f6", fill: "rgba(59,130,246,.25)" }} />
+              <BadgeCheck size={18} style={{ color: "#3b82f6", fill: "rgba(59,130,246,.25)" }} />
             </div>
-            <p className="lx-mut mt-1" style={{ fontSize: 13 }}>Review and manage all generated content</p>
+            <p className="lx-mut mt-0.5" style={{ fontSize: 12 }}>Review and manage all generated content</p>
           </div>
           <div className="flex items-center gap-2">
-            <label className="ap-search hidden md:flex" style={{ width: 190 }}>
+            <label className="ap-search ap-hdr-search" style={{ width: 170 }}>
               <Search size={15} className="lx-mut" />
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search articles..." />
             </label>
@@ -311,9 +315,9 @@ export default function ApprovalsSection() {
           </div>
         </header>
 
-        <div className="lx-scroll flex-1 overflow-y-auto px-5 pb-4">
+        <div className="lx-scroll flex-1 overflow-y-auto px-4 pb-4">
           {/* stat strip */}
-          <div className="ap-stats mt-4">
+          <div className="ap-stats mt-3">
             <Stat n={counts.total}     label="Total Articles" color="#8b5cf6" Icon={FileText} />
             <Stat n={counts.pending}   label="Pending Review" color="#f59e0b" Icon={Clock} />
             <Stat n={counts.published} label="Published"      color="#22c55e" Icon={CheckCircle2} />
@@ -323,8 +327,8 @@ export default function ApprovalsSection() {
 
           {/* filter bar */}
           {showFilters && (
-            <div className="mt-4 flex flex-wrap items-center gap-2 pt-4" style={{ borderTop: "1px solid var(--lx-border)" }}>
-              <label className="ap-search" style={{ width: 200 }}>
+            <div className="mt-3 flex flex-wrap items-center gap-2 pt-3" style={{ borderTop: "1px solid var(--lx-border)" }}>
+              <label className="ap-search" style={{ width: 160 }}>
                 <Search size={15} className="lx-mut" />
                 <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search articles..." />
               </label>
@@ -339,12 +343,12 @@ export default function ApprovalsSection() {
           )}
 
           {/* table head */}
-          <div className="ap-grid ap-head mt-4">
-            <span>Article</span><span>Status</span><span>Version</span><span>Updated</span><span className="text-right">Actions</span>
+          <div className="ap-grid ap-head mt-3">
+            <span className="ap-c-a">Article</span><span className="ap-c-s">Status</span><span className="ap-c-v">Version</span><span className="ap-c-u">Updated</span><span className="ap-c-x text-right">Actions</span>
           </div>
 
           {/* rows */}
-          <div className="mt-2 space-y-2">
+          <div className="mt-1.5 space-y-1.5">
             {loading ? (
               <div className="ap-row items-center justify-center py-10"><Loader2 size={18} className="ap-spin lx-mut" /><span className="lx-11 lx-mut ml-2">Loading…</span></div>
             ) : rows.length ? rows.map((c) => {
@@ -354,29 +358,32 @@ export default function ApprovalsSection() {
               return (
                 <div key={c.id} className={`ap-grid ap-row ${selected ? "on" : ""}`} onClick={() => openDetail(c)}>
                   {/* article */}
-                  <div className="flex min-w-0 items-center gap-3.5">
-                    <Tile tile={tile} />
+                  <div className="ap-c-a flex min-w-0 items-center gap-3">
+                    <Tile tile={tile} size={44} />
                     <div className="min-w-0">
-                      <div className="ap-title truncate">{c.title || "Untitled"}</div>
-                      <div className="lx-10 lx-mut mt-1 flex items-center gap-2">
-                        <span className="truncate">{categoryOf(c)}</span><i className="ap-sep" /><span className="whitespace-nowrap">{agentOf(c)}</span>
-                      </div>
-                      <div className="lx-10 lx-mut mt-1 flex items-center gap-2">
+                      <ClampTitle text={c.title || "Untitled"} />
+                      <div className="lx-10 lx-mut mt-1 flex items-center gap-1.5 overflow-hidden whitespace-nowrap">
+                        <span className="truncate">{categoryOf(c)}</span><i className="ap-sep" /><span>{agentOf(c)}</span><i className="ap-sep" />
                         <span>{typeof c.meta?.wordCount === "number" ? `${c.meta.wordCount.toLocaleString()} words` : "— words"}</span><i className="ap-sep" /><span>{TYPE_LABEL[c.type] ?? c.type}</span>
                       </div>
                     </div>
                   </div>
                   {/* status */}
-                  <div><StatusPill s={c.status} /></div>
+                  <div className="ap-c-s"><StatusPill s={c.status} /></div>
                   {/* version */}
-                  <div className="lx-11" style={{ color: "#d6d6e4" }}>{versionOf(c)}</div>
+                  <div className="ap-c-v lx-11" style={{ color: "#d6d6e4" }}>{versionOf(c)}</div>
                   {/* updated */}
-                  <div className="lx-11" style={{ color: "#d6d6e4" }}>
+                  <div className="ap-c-u lx-11 whitespace-nowrap" style={{ color: "#d6d6e4" }}>
                     <div>{fmtDate(c.updated_at ?? c.created_at)}</div>
-                    <div className="lx-10 lx-mut mt-0.5">{fmtTime(c.updated_at ?? c.created_at)}</div>
+                    <div className="lx-10 lx-mut">{fmtTime(c.updated_at ?? c.created_at)}</div>
                   </div>
                   {/* actions */}
-                  <div className="relative flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                  <div className="ap-c-x relative flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+                    {c.type === "article" && (
+                      <Link href={`/dashboard/content/${c.id}`} className="lx-ghost ap-bview" title="Open the full article review page">
+                        <Globe size={13} /><span>Browser View</span>
+                      </Link>
+                    )}
                     <RowAction c={c} busy={isBusy} onReview={() => openDetail(c)} onHistory={() => openDetail(c, "history")} />
                     <button className="ap-kebab" onClick={() => setMenuFor(menuFor === c.id ? null : c.id)} aria-label="More">
                       <MoreVertical size={16} />
@@ -384,7 +391,7 @@ export default function ApprovalsSection() {
                     {menuFor === c.id && (
                       <div className="ap-menu" onClick={(e) => e.stopPropagation()}>
                         <button onClick={() => { openDetail(c, "preview"); setMenuFor(null); }}><Eye size={13} /> Preview</button>
-                        {c.type === "article" && <Link href={`/dashboard/content/${c.id}`}><Pencil size={13} /> Open editor</Link>}
+                        {c.type === "article" && <Link href={`/dashboard/content/${c.id}`}><Globe size={13} /> Browser View</Link>}
                         {c.type === "social" && <button onClick={() => { copyPost(c); setMenuFor(null); }}><Copy size={13} /> Copy text</button>}
                         {c.meta?.publishedUrl && <a href={c.meta.publishedUrl} target="_blank" rel="noreferrer"><ArrowRight size={13} /> Open live page</a>}
                         {c.status === "awaiting_approval" && (
@@ -409,7 +416,7 @@ export default function ApprovalsSection() {
           </div>
 
           {/* footer / pagination */}
-          <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
             <span className="lx-11 lx-mut">
               {filtered.length
                 ? `Showing ${(safePage - 1) * PAGE_SIZE + 1} to ${Math.min(safePage * PAGE_SIZE, filtered.length)} of ${filtered.length} ${filtered.length === 1 ? "article" : "articles"}`
@@ -454,7 +461,7 @@ export default function ApprovalsSection() {
 function Stat({ n, label, color, Icon }: { n: number; label: string; color: string; Icon: React.ElementType }) {
   return (
     <div className="ap-stat" style={{ "--c": color } as React.CSSProperties}>
-      <span className="ap-stat-ico"><Icon size={20} /></span>
+      <span className="ap-stat-ico"><Icon size={17} /></span>
       <div>
         <div className="ap-stat-n">{n}</div>
         <div className="lx-10 lx-mut mt-0.5">{label}</div>
@@ -470,7 +477,7 @@ function Select({ value, onChange, options, icon }: { value: string; onChange: (
       <select value={value} onChange={(e) => onChange(e.target.value)}>
         {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
       </select>
-      <ChevronDown size={14} className="lx-mut" />
+      <ChevronDown size={13} className="lx-mut" />
     </label>
   );
 }
@@ -631,6 +638,28 @@ function Drawer({ c, loading, busy, tab, setTab, onClose, onApprove, onReject, o
   );
 }
 
+/** Two-line clamped title; the full text pops up on hover ONLY when it was actually cut off
+ *  (measured, not guessed — a short title never gets a pointless tooltip). */
+function ClampTitle({ text }: { text: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [clipped, setClipped] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const check = () => setClipped(el.scrollHeight > el.clientHeight + 1);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [text]);
+  return (
+    <div className="ap-title-wrap">
+      <div ref={ref} className="ap-title">{text}</div>
+      {clipped && <div className="ap-tip" role="tooltip">{text}</div>}
+    </div>
+  );
+}
+
 function Field({ label, children, wide }: { label: string; children: React.ReactNode; wide?: boolean }) {
   return (
     <div className={wide ? "col-span-2 min-w-0" : "min-w-0"}>
@@ -659,49 +688,71 @@ function Timeline({ events }: { events: HistoryEvent[] }) {
 /* ---- page-local CSS (colours/spacing measured off the reference mockup) ------------------ */
 const CSS = `
 .ap-panel{background:#0a0a11;border:1px solid var(--lx-border);border-radius:16px}
+/* the centre column is sized by the CONTAINER (drawer open = ~540px even on a 1366px screen),
+   so every breakpoint below is a container query, never a viewport one */
+.ap-main{container-type:inline-size;container-name:ap}
+.ap-hdr-search{display:none}
+@container ap (min-width:760px){.ap-hdr-search{display:flex}}
 .ap-drawer{display:flex;flex-direction:column;width:min(92vw,400px);flex-shrink:0;position:fixed;top:12px;right:12px;bottom:12px;z-index:50;
   box-shadow:0 20px 60px rgba(0,0,0,.6)}
 @media (min-width:1280px){.ap-drawer{position:relative;top:auto;right:auto;bottom:auto;height:100%;z-index:auto;box-shadow:none}}
-.ap-h1{font-size:26px;font-weight:800;letter-spacing:-.02em;line-height:1.1}
+.ap-h1{font-size:22px;font-weight:800;letter-spacing:-.02em;line-height:1.1}
 .ap-h2{font-size:17px;font-weight:700;line-height:1.3;color:#fff;min-width:0}
 .ap-h3{font-size:14px;font-weight:700;color:#fff}
-.ap-search{display:flex;align-items:center;gap:8px;height:38px;padding:0 12px;border-radius:10px;
+.ap-search{display:flex;align-items:center;gap:8px;height:34px;padding:0 10px;border-radius:9px;
   background:#0d0d16;border:1px solid var(--lx-border);transition:border-color .15s}
 .ap-search:focus-within{border-color:rgba(139,92,246,.55)}
-.ap-search input{flex:1;min-width:0;background:none;border:none;outline:none;color:#e8e8f2;font-size:12.5px}
+.ap-search input{flex:1;min-width:0;background:none;border:none;outline:none;color:#e8e8f2;font-size:12px}
 .ap-search input::placeholder{color:var(--lx-dim)}
-.ap-icobtn{display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;
+.ap-icobtn{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:9px;
   border:1px solid var(--lx-border);background:#0d0d16;color:#9a9ab2;cursor:pointer;transition:.15s;flex-shrink:0}
 .ap-icobtn:hover,.ap-icobtn.on{color:#fff;border-color:rgba(139,92,246,.55)}
 .ap-dot{position:absolute;top:8px;right:8px;width:6px;height:6px;border-radius:50%;background:#8b5cf6;box-shadow:0 0 6px #8b5cf6}
-.ap-stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
-@media (max-width:1100px){.ap-stats{grid-template-columns:repeat(3,minmax(0,1fr))}}
-@media (max-width:640px){.ap-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
-.ap-stat{display:flex;align-items:center;gap:14px;padding:16px;border-radius:12px;
+.ap-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:8px}
+.ap-stat{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:11px;min-width:0;
   background:color-mix(in srgb,var(--c) 9%,#0b0b12);border:1px solid color-mix(in srgb,var(--c) 40%,transparent);
   box-shadow:inset 0 0 30px color-mix(in srgb,var(--c) 5%,transparent)}
-.ap-stat-ico{display:flex;align-items:center;justify-content:center;width:42px;height:42px;border-radius:10px;flex-shrink:0;
+.ap-stat-ico{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:9px;flex-shrink:0;
   color:var(--c);background:color-mix(in srgb,var(--c) 14%,#0b0b12);border:1px solid color-mix(in srgb,var(--c) 45%,transparent);
   box-shadow:0 0 14px color-mix(in srgb,var(--c) 30%,transparent)}
-.ap-stat-n{font-size:22px;font-weight:800;line-height:1;color:#fff}
-.ap-select{position:relative;display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 10px 0 12px;border-radius:10px;
-  background:#0d0d16;border:1px solid var(--lx-border);color:#d6d6e4;font-size:12.5px;cursor:pointer}
+.ap-stat-n{font-size:19px;font-weight:800;line-height:1;color:#fff}
+.ap-stat .lx-10{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ap-select{position:relative;display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 8px 0 10px;border-radius:9px;
+  background:#0d0d16;border:1px solid var(--lx-border);color:#d6d6e4;font-size:12px;cursor:pointer}
 .ap-select:hover{border-color:rgba(139,92,246,.45)}
 .ap-select select{appearance:none;-webkit-appearance:none;background:none;border:none;outline:none;color:inherit;font:inherit;
   padding-right:2px;cursor:pointer}
 .ap-select select option{background:#12121c;color:#e8e8f2}
-.ap-grid{display:grid;grid-template-columns:minmax(0,1fr) 150px 90px 130px 170px;align-items:center;gap:12px}
-@media (max-width:1100px){.ap-grid{grid-template-columns:minmax(0,1fr) 118px 52px 96px 148px;gap:10px}.ap-title{font-size:13.5px}}
-@media (max-width:820px){.ap-grid{grid-template-columns:minmax(0,1fr) 130px 150px}.ap-grid>:nth-child(3),.ap-grid>:nth-child(4){display:none}}
-.ap-head{padding:0 16px;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--lx-mut)}
-.ap-row{background:#0d0d16;border:1px solid var(--lx-border);border-radius:12px;padding:14px 16px;cursor:pointer;
-  transition:border-color .15s,background .15s;display:grid}
-.ap-row:hover{border-color:rgba(255,255,255,.14);background:#10101a}
+.ap-grid{display:grid;grid-template-columns:minmax(0,1fr) 128px 56px 96px max-content;grid-template-areas:"a s v u x";align-items:center;gap:10px}
+.ap-c-a{grid-area:a;min-width:0}.ap-c-s{grid-area:s}.ap-c-v{grid-area:v}.ap-c-u{grid-area:u}.ap-c-x{grid-area:x}
+.ap-bview span{display:inline}
+@container ap (max-width:980px){
+  .ap-grid{grid-template-columns:minmax(0,1fr) 118px max-content;grid-template-areas:"a s x";gap:8px}
+  .ap-c-v,.ap-c-u{display:none}
+  .ap-bview{padding:6px 8px}.ap-bview span{display:none}
+}
+@container ap (max-width:620px){
+  .ap-grid{grid-template-columns:minmax(0,1fr) max-content;grid-template-areas:"a a" "s x";row-gap:10px}
+  .ap-head{display:none}
+  .ap-c-s{justify-self:start}
+}
+.ap-head{padding:0 12px;font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--lx-mut)}
+.ap-row{background:#0d0d16;border:1px solid var(--lx-border);border-radius:11px;padding:10px 12px;cursor:pointer;
+  transition:border-color .15s,background .15s;display:grid;position:relative}
+.ap-row:hover{border-color:rgba(255,255,255,.14);background:#10101a;z-index:5}
 .ap-row.on{border-color:rgba(139,92,246,.5);box-shadow:0 0 0 1px rgba(139,92,246,.2),0 0 22px rgba(139,92,246,.12)}
-.ap-title{font-size:14.5px;font-weight:600;color:#fff}
+.ap-title-wrap{position:relative;min-width:0}
+.ap-title{font-size:13.5px;font-weight:600;color:#fff;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
+/* full title on hover — a real tooltip, not the browser's slow native one */
+.ap-tip{position:absolute;left:0;top:calc(100% + 6px);z-index:40;max-width:min(460px,70vw);width:max-content;padding:8px 10px;border-radius:9px;
+  background:#16161f;border:1px solid rgba(255,255,255,.12);box-shadow:0 12px 32px rgba(0,0,0,.6);
+  color:#f2f2f7;font-size:12.5px;font-weight:500;line-height:1.45;white-space:normal;
+  opacity:0;pointer-events:none;transform:translateY(-3px);transition:opacity .15s,transform .15s;transition-delay:0s}
+.ap-title-wrap:hover .ap-tip{opacity:1;transform:translateY(0);transition-delay:.3s}
 .ap-sep{width:3px;height:3px;border-radius:50%;background:var(--lx-dim);flex-shrink:0}
-.ap-primary{padding:8px 14px;font-size:12.5px;border-radius:10px;gap:8px}
-.ap-kebab{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:8px;
+.ap-primary{padding:6px 12px;font-size:12px;border-radius:9px;gap:6px}
+.ap-row .lx-ghost{padding:6px 10px;font-size:11.5px;border-radius:9px}
+.ap-kebab{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:7px;
   background:none;border:none;color:#8b8ba0;cursor:pointer;transition:.15s}
 .ap-kebab:hover{color:#fff;background:rgba(255,255,255,.06)}
 .ap-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:30;min-width:190px;padding:6px;border-radius:12px;
@@ -712,7 +763,7 @@ const CSS = `
 .ap-menu>*:disabled{opacity:.5;cursor:not-allowed}
 .ap-menu>.danger{color:#f87171}
 .ap-pager{display:flex;align-items:center;gap:6px}
-.ap-pager button{display:inline-flex;align-items:center;justify-content:center;min-width:36px;height:36px;padding:0 10px;border-radius:10px;
+.ap-pager button{display:inline-flex;align-items:center;justify-content:center;min-width:32px;height:32px;padding:0 8px;border-radius:9px;
   border:1px solid var(--lx-border);background:#0d0d16;color:#d6d6e4;font-size:12.5px;font-weight:600;cursor:pointer;transition:.15s}
 .ap-pager button:hover:not(:disabled){border-color:rgba(139,92,246,.5);color:#fff}
 .ap-pager button:disabled{opacity:.35;cursor:not-allowed}
