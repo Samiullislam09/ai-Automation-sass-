@@ -81,6 +81,7 @@ export default function AuditSection() {
   const [starting, setStarting] = useState(false);
   const [polling, setPolling] = useState<{ sinceId: string | null; startedAt: number } | null>(null);
   const [pagesModal, setPagesModal] = useState<Issue | null>(null);
+  const [fixOpen, setFixOpen] = useState<string | null>(null);
   const [issuesExpanded, setIssuesExpanded] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(true);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -500,37 +501,55 @@ export default function AuditSection() {
         </div>
       )}
 
-      {/* ISSUE LIST — collapsed to the top 5 (Semrush's own pattern), "View all issues" to see
-          the rest; the per-issue page list opens the SAME full-page popup as "See all pages"
-          above. */}
+      {/* ISSUE LIST — Semrush's own row shape: severity-coloured left edge, the issue + its
+          real page-count as one clickable line, a separate "How to fix" link on the right that
+          opens (real content, this app's own `fix` text — never split into an invented "About"
+          paragraph the check never produced). Collapsed to the top 5, "View all issues" for
+          the rest. */}
       <div className="lx-card2 p-4">
         <b className="lx-12">Issues</b>
-        <div className="mt-3 grid grid-cols-1 gap-2.5">
+        <div className="mt-3 grid grid-cols-1 gap-2">
           {issues.length ? (
             issues.map((i) => (
-              <div key={i.id} className="rounded-lg p-3" style={{ border: "1px solid var(--lx-border)" }}>
-                <div className="flex items-start gap-3">
+              <div
+                key={i.id}
+                className="rounded-lg py-2.5 pl-3 pr-3"
+                style={{ borderLeft: `3px solid ${SEV_COLOR[i.severity]}`, background: "rgba(255,255,255,.02)" }}
+              >
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
                   <span
-                    className="lx-10 shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 font-semibold"
+                    className="lx-10 shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 font-semibold"
                     style={{ color: SEV_COLOR[i.severity], border: `1px solid ${SEV_COLOR[i.severity]}` }}
                   >
                     {SEV_LABEL[i.severity]}
                   </span>
-                  <div className="min-w-0 flex-1">
-                    <b className="lx-12 block">{i.what}</b>
-                    <p className="lx-11 lx-mut mt-1.5">{i.fix}</p>
-                  </div>
-                </div>
-                {i.pages?.length > 0 && (
                   <button
-                    className="lx-11 mt-2.5 underline lx-audit-noprint"
-                    style={{ color: "var(--lx-cyan)" }}
-                    onClick={() => setPagesModal(i)}
+                    className="lx-11 min-w-0 flex-1 text-left"
+                    style={{ background: "transparent", border: "none", cursor: i.pages?.length ? "pointer" : "default", color: "#e6e6f2" }}
+                    onClick={() => i.pages?.length && setPagesModal(i)}
                   >
-                    See {i.count > i.pages.length ? `${i.pages.length} of ` : ""}{i.count} {i.count === 1 ? "page" : "pages"} →
+                    <b>{i.what}</b>
+                    {i.pages?.length > 0 && (
+                      <span className="ml-1.5 underline lx-audit-noprint" style={{ color: "var(--lx-cyan)" }}>
+                        {i.count > i.pages.length ? `${i.pages.length} of ` : ""}{i.count} {i.count === 1 ? "page" : "pages"}
+                      </span>
+                    )}
                   </button>
+                  <button
+                    className="lx-10 shrink-0 underline lx-audit-noprint"
+                    style={{ background: "transparent", border: "none", cursor: "pointer", color: "var(--lx-violet)" }}
+                    onClick={() => setFixOpen(fixOpen === i.id ? null : i.id)}
+                  >
+                    How to fix {fixOpen === i.id ? "▴" : "▾"}
+                  </button>
+                </div>
+                {fixOpen === i.id && (
+                  <div className="mt-2 rounded-lg p-3 lx-audit-noprint" style={{ background: "rgba(139,92,246,.08)", border: "1px solid rgba(139,92,246,.25)" }}>
+                    <p className="lx-11">{i.fix}</p>
+                  </div>
                 )}
-                {/* Printed report shows every affected page inline — a PDF has no click. */}
+                {/* Printed report shows the fix inline — a PDF has no click to open it with. */}
+                <p className="lx-audit-print-only lx-11 mt-1.5" style={{ display: "none" }}>{i.fix}</p>
                 {i.pages?.length > 0 && (
                   <ul className="lx-audit-print-only mt-2 space-y-1" style={{ display: "none" }}>
                     {i.pages.map((p) => (
