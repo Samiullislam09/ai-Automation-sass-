@@ -63,7 +63,7 @@ export async function GET(req: Request) {
     });
   }
 
-  const [{ data: latest, error }, { data: history }] = await Promise.all([
+  const [{ data: latest, error }, { data: history }, { data: tenant }] = await Promise.all([
     supabase
       .from("site_audits")
       .select("id, score, previous_score, pages_checked, blocks, warns, issues, run, summary, created_at")
@@ -81,6 +81,10 @@ export async function GET(req: Request) {
       .eq("tenant_id", tenantId)
       .order("created_at", { ascending: false })
       .limit(20),
+    // The website on file — the heading's fallback for reports from before `run.websiteUrl`
+    // was stored (owner, 2026-09-04: "your site kyun aata hai, uski jagah site ka name").
+    // Still the tenant's own real address, never a placeholder.
+    supabase.from("tenants").select("website_url").eq("id", tenantId).maybeSingle(),
   ]);
 
   // 020 not applied yet is a fact about the database, not a broken page — the same handling
@@ -113,9 +117,15 @@ export async function GET(req: Request) {
           // Crawled Pages breakdown and the "see more" full-page popup both read this.
           pages: Array.isArray((latest.run as any)?.pages) ? (latest.run as any).pages : [],
           // The real domain audited — the report page's own big heading (2026-09-05, matching
-          // Semrush's "Site Audit: domain.com"). Older rows have no `run.websiteUrl`; null then,
-          // never guessed from something else on the row.
-          websiteUrl: typeof (latest.run as any)?.websiteUrl === "string" ? (latest.run as any).websiteUrl : null,
+          // Semrush's "Site Audit: domain.com"). Older rows have no `run.websiteUrl`; then the
+          // tenant's own website on file (the same column agents/audit.ts audited), and null
+          // only when there is neither — never a placeholder.
+          websiteUrl:
+            typeof (latest.run as any)?.websiteUrl === "string"
+              ? (latest.run as any).websiteUrl
+              : typeof tenant?.website_url === "string" && tenant.website_url.trim()
+                ? tenant.website_url.trim()
+                : null,
           // Real robots.txt evaluation for named AI crawlers (agent-server/src/lib/audit/
           // robots.ts) — null when robots.txt could not be read, never an empty array standing
           // in for "everything's fine".

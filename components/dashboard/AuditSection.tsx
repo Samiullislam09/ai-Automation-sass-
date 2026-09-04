@@ -292,7 +292,9 @@ export default function AuditSection() {
   );
 
   if (loading && !state) {
-    return <div className="space-y-4">{head}<div className="lx-card2 p-6"><p className="lx-11 lx-mut">Loading…</p></div></div>;
+    // First open: the report's own layout as a skeleton, so the page does not flash a generic
+    // header + "Loading…" and then jump to a different shape (owner, live screenshot 2026-09-04).
+    return <ReportSkeleton actions={actions} />;
   }
 
   if (state && !state.schemaReady) {
@@ -1053,6 +1055,52 @@ function HistoryModal({ rows, onClose }: { rows: HistoryRow[]; onClose: () => vo
         <HistoryTable rows={rows} />
       </div>
     </Modal>
+  );
+}
+
+/** The report's shape while it loads — heading, tab strip, the Overview's card grid — drawn as
+ *  soft blocks in the same places the real content lands. No numbers, no words that could be
+ *  read as a result. The action buttons are real and usable straight away. */
+function ReportSkeleton({ actions }: { actions: React.ReactNode }) {
+  const block = (w: string | number, h: number, extra: React.CSSProperties = {}) => (
+    <div className="lx-sk" style={{ width: w, height: h, borderRadius: 6, ...extra }} />
+  );
+  return (
+    <div className="space-y-4" aria-busy="true" aria-label="Loading your site audit">
+      <style>{`
+        .lx-sk{background:linear-gradient(90deg,rgba(255,255,255,.05) 25%,rgba(255,255,255,.10) 50%,rgba(255,255,255,.05) 75%);background-size:200% 100%;animation:lx-sk 1.4s ease-in-out infinite}
+        @keyframes lx-sk{0%{background-position:200% 0}100%{background-position:-200% 0}}
+      `}</style>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          {block(260, 22)}
+          <div className="mt-2">{block(200, 12)}</div>
+        </div>
+        {actions}
+      </div>
+      <div className="flex gap-5 border-b pb-3" style={{ borderColor: "var(--lx-border)" }}>
+        {TABS.map((t) => <div key={t.id}>{block(t.label.length * 7 + 8, 12)}</div>)}
+      </div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="lx-card2 p-4">
+          {block(80, 14)}
+          <div className="mt-3 flex items-center gap-6">
+            {block(92, 92, { borderRadius: "50%" })}
+            <div className="flex-1 space-y-2">{block("70%", 12)}{block("45%", 12)}</div>
+          </div>
+        </div>
+        <div className="lx-card2 p-4">
+          {block(110, 14)}
+          <div className="mt-3 flex items-center gap-3">{block(40, 26)}{block("100%", 8, { borderRadius: 999 })}</div>
+          <div className="mt-3 space-y-2">{block("60%", 12)}{block("55%", 12)}{block("50%", 12)}</div>
+        </div>
+      </div>
+      <div className="lx-card2 px-4 py-3">{block("55%", 12)}</div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="lx-card2 p-4">{block(60, 14)}<div className="mt-2">{block(48, 34)}</div><div className="mt-3">{block("100%", 44)}</div></div>
+        <div className="lx-card2 p-4">{block(80, 14)}<div className="mt-2">{block(48, 34)}</div><div className="mt-3">{block("100%", 44)}</div></div>
+      </div>
+    </div>
   );
 }
 

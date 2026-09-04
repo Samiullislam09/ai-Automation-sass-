@@ -22,7 +22,12 @@ export async function enqueueAgentJob(
   const agentServerUrl = process.env.AGENT_SERVER_URL;
   if (!agentServerUrl) return { ok: false, error: "Agent server not configured.", status: 503 };
 
-  try {
+  // Railway restarts agent-server on every push to main; for a minute or so after a deploy
+  // the first request can take longer than a cold 10s (seen live 2026-09-04: "The operation
+  // was aborted due to timeout" surfaced raw in the Audit page's toast, straight after two
+  // pushes). So: a 25s ceiling, one retry on a timeout/connection error, and a sentence a
+  // person can act on instead of Node's own abort message.
+  const attempt = async (): Promise<EnqueueResult> => {
     const res = await fetch(`${agentServerUrl}/jobs/${type}`, {
       method: "POST",
       headers: {
@@ -32,13 +37,32 @@ export async function enqueueAgentJob(
         ...(process.env.AGENT_SERVER_TOKEN ? { "x-agent-token": process.env.AGENT_SERVER_TOKEN } : {}),
       },
       body: JSON.stringify({ tenantId, ...payload }),
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(25000),
     });
     const data = await res.json().catch(() => ({} as any));
     if (!res.ok) return { ok: false, error: data?.error ?? "Agent server rejected the job.", status: res.status };
     return { ok: true, jobId: data?.jobId };
-  } catch (e: any) {
-    console.error(`[agent-jobs] enqueue ${type} failed:`, e?.message);
-    return { ok: false, error: e?.message ?? "Could not reach the agent server.", status: 502 };
+  };
+
+  const transient = (e: any) => /timeout|abort|ECONNREFUSED|ECONNRESET|fetch failed|ENOTFOUND|EAI_AGAIN/i.test(String(e?.name ?? "") + " " + String(e?.message ?? ""));
+
+  try {
+    return await attempt();
+  } catch (first: any) {
+    if (!transient(first)) {
+      console.error(`[agent-jobs] enqueue ${type} failed:`, first?.message);
+      return { ok: false, error: first?.message ?? "Could not reach the agent server.", status: 502 };
+    }
+    console.warn(`[agent-jobs] enqueue ${type}: ${first?.message} — retrying once`);
+    try {
+      return await attempt();
+    } catch (second: any) {
+      console.error(`[agent-jobs] enqueue ${type} failed twice:`, second?.message);
+      return {
+        ok: false,
+        error: "The agent server took too long to answer — it is probably restarting after an update. Wait a minute and try again.",
+        status: 504,
+      };
+    }
   }
 }
