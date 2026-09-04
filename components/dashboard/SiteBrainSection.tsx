@@ -2,8 +2,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
-  Activity, ArrowRight, Brain, Check, ChevronLeft, ChevronRight, Globe, History, Loader2, PlugZap, Plus,
-  RotateCw, Search, X,
+  Activity, ArrowRight, Brain, Check, ChevronLeft, ChevronRight, Loader2, PlugZap, Plus, RotateCw, Search, X,
 } from "lucide-react";
 import { useStore } from "@/lib/store";
 import SiteBrainField, { SiteBrainFieldStyles } from "@/components/SiteBrainField";
@@ -200,61 +199,42 @@ export default function SiteBrainSection() {
         </>
       }
     >
-      {/* overview — the same shape the Memory page uses: a section label and one-line rows */}
+      {/* overview — cards, the same shape the Memory page's fact cards use */}
       <div className="sb-sec">Overview</div>
-      <div className="sb-lines">
-        <div className="sb-line">
-          <Brain size={15} className="sb-line-i" />
-          <span className="sb-line-t">
-            {missing === 0
-              ? <>Your team knows <b>everything</b> on this list</>
-              : <>Your team knows <b>{known} of {PROFILE_FIELDS.length}</b> things about your business</>}
-            <span className="sb-bar"><i style={{ width: `${pct}%` }} /></span>
-          </span>
+      <div className="sb-cards">
+        <div className="sb-card">
+          <div className="sb-card-k">What we know</div>
+          <div className="sb-card-v">{known} of {PROFILE_FIELDS.length} things</div>
+          <div className="sb-bar"><i style={{ width: `${pct}%` }} /></div>
           {firstGap ? (
-            <button className="sb-line-a" onClick={() => setOpenField(firstGap)}>Fill the next gap <ArrowRight size={12} /></button>
+            <button className="sb-card-a" onClick={() => setOpenField(firstGap)}>Fill the next gap <ArrowRight size={12} /></button>
           ) : (
-            <span className="sb-line-done">All done</span>
+            <span className="sb-card-done">Nothing missing</span>
           )}
         </div>
 
-        <div className="sb-line">
-          <Globe size={15} className="sb-line-i" />
-          <span className="sb-line-t">Read from <b>{s.builtFrom?.pages ?? s.pagesCrawled} pages</b> on your website</span>
-          <button className="sb-line-a" disabled={refreshing} onClick={() => refresh("crawler")}>
-            {refreshing ? "Starting…" : "Read again"}
+        <div className="sb-card">
+          <div className="sb-card-k">Read from your site</div>
+          <div className="sb-card-v">{s.builtFrom?.pages ?? s.pagesCrawled} pages</div>
+          <div className="sb-card-s">Everything below was read off those pages</div>
+          <button className="sb-card-a" disabled={refreshing} onClick={() => refresh("crawler")}>
+            {refreshing ? "Starting…" : "Read my site again"}
           </button>
         </div>
 
-        <div className="sb-line">
-          <History size={15} className="sb-line-i" />
-          <span className="sb-line-t">
-            Version <b>{s.version}</b> {s.builtBy === "user" ? "— your edit" : "— built by the team"}
-            {s.builtAt ? ` · ${new Date(s.builtAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}` : ""}
-          </span>
+        <div className="sb-card">
+          <div className="sb-card-k">Version</div>
+          <div className="sb-card-v">v{s.version} {s.builtBy === "user" ? "· your edit" : "· by the team"}</div>
+          <div className="sb-card-s">
+            {s.builtAt ? `Updated ${new Date(s.builtAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}` : "Never built"}
+          </div>
           {s.history.length > 1 && (
-            <button className="sb-line-a" onClick={() => setShowHistory((v) => !v)}>
-              {showHistory ? "Hide" : `${s.history.length} versions`}
+            <button className="sb-card-a" onClick={() => setShowHistory((v) => !v)}>
+              {showHistory ? "Hide history" : `${s.history.length} versions`}
             </button>
           )}
         </div>
       </div>
-
-      {showHistory && (
-        <div className="sb-hist">
-          {s.history.map((h) => (
-            <div key={h.id} className="sb-hist-r">
-              <b className="lx-11">v{h.version}</b>
-              <span className="lx-10 lx-mut">
-                {h.created_by === "user" ? "your edit" : "the team"}
-                {h.pages ? ` · ${h.pages} pages` : ""}
-                {h.created_at ? ` · ${new Date(h.created_at).toLocaleString()}` : ""}
-              </span>
-              {h.active && <span className="sb-now">now</span>}
-            </div>
-          ))}
-        </div>
-      )}
 
       <div className="sb-sec">What your team knows</div>
 
@@ -409,19 +389,19 @@ const CSS = `
 .sb-primary:hover:not(:disabled){background:#5b52ea}
 .sb-primary:disabled{opacity:.55;cursor:not-allowed}
 .sb-sec{font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:#6f6f85}
-.sb-list+.sb-sec,.sb-lines+.sb-sec,.sb-hist+.sb-sec{margin-top:22px}
-.sb-lines{margin-top:10px;border-radius:12px;background:#101018;border:1px solid #1e1e2b;overflow:hidden}
-.sb-line{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:13px 14px}
-.sb-line+.sb-line{border-top:1px solid #1a1a26}
-.sb-line-i{flex-shrink:0;color:#7c7c95}
-.sb-line-t{flex:1;min-width:200px;font-size:12.5px;color:#c8c8d8;line-height:1.5}
-.sb-line-t b{color:#f0f0f7;font-weight:600}
-.sb-line-a{display:inline-flex;align-items:center;gap:4px;flex-shrink:0;background:none;border:none;padding:0;
-  font-size:11.5px;font-weight:600;color:#8f95ff;cursor:pointer}
-.sb-line-a:hover:not(:disabled){text-decoration:underline}
-.sb-line-a:disabled{opacity:.5;cursor:not-allowed}
-.sb-line-done{flex-shrink:0;font-size:11.5px;font-weight:600;color:#4ade80}
-.sb-bar{display:block;height:5px;margin-top:8px;border-radius:999px;background:#1c1c29;overflow:hidden;max-width:360px}
+.sb-list+.sb-sec,.sb-cards+.sb-sec,.sb-hist+.sb-sec{margin-top:22px}
+.sb-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px;margin-top:10px}
+@container sb (max-width:560px){.sb-cards{grid-template-columns:1fr}}
+.sb-card{display:flex;flex-direction:column;padding:13px 14px;border-radius:12px;background:#101018;border:1px solid #1e1e2b}
+.sb-card-k{font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:#7c7c95}
+.sb-card-v{margin-top:5px;font-size:13.5px;font-weight:600;color:#e9e9f2;line-height:1.45}
+.sb-card-s{margin-top:4px;font-size:11px;color:#7c7c95;line-height:1.45}
+.sb-card-a{align-self:flex-start;display:inline-flex;align-items:center;gap:4px;margin-top:10px;padding:0;background:none;
+  border:none;font-size:11.5px;font-weight:600;color:#8f95ff;cursor:pointer}
+.sb-card-a:hover:not(:disabled){text-decoration:underline}
+.sb-card-a:disabled{opacity:.5;cursor:not-allowed}
+.sb-card-done{margin-top:10px;font-size:11.5px;font-weight:600;color:#4ade80}
+.sb-bar{display:block;height:5px;margin-top:9px;border-radius:999px;background:#1c1c29;overflow:hidden}
 .sb-bar i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#4f46e5,#8b5cf6)}
 .sb-list{margin-top:10px;border-radius:12px;background:#101018;border:1px solid #1e1e2b;overflow:hidden}
 .sb-item{display:flex;align-items:center;gap:12px;width:100%;padding:13px 15px;text-align:left;background:none;
