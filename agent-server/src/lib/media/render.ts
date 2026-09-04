@@ -207,6 +207,67 @@ export async function templateCard(headline: string, shape: Shape, brand: Brand 
   return { webp, width: w, height: h };
 }
 
+/** A card that carries a SECTION'S OWN CONTENT — the steps it lists, the figures it quotes, or
+ *  the point it makes (lib/media/plan.ts decides which). This is what a section explaining a
+ *  map, a chart or a procedure gets INSTEAD of an AI picture: an image model would draw a
+ *  convincing wrong map, and this draws the section's real words. Nothing is invented here —
+ *  every line comes from the article.
+ *
+ *  `type` only changes how the lines are marked: numbered for steps, large-first for stats,
+ *  plain for a key point. */
+export async function contentCard(
+  heading: string,
+  lines: string[],
+  type: "steps" | "stats" | "keypoint",
+  shape: Shape,
+  brand: Brand = {},
+): Promise<{ webp: Buffer; width: number; height: number }> {
+  const { width: w, height: h } = SHAPES[shape];
+  const color = brand.color || "#8b5cf6";
+  const pad = Math.round(w * 0.07);
+  const headSize = Math.round(w / 26);
+  const bodySize = type === "stats" ? Math.round(w / 22) : Math.round(w / 28);
+  const rows = lines.filter(Boolean).slice(0, 5);
+  const wrapped = rows.map((line) => wrap(line, Math.round((w - pad * 2 - bodySize * 2) / (bodySize * 0.5)), 2));
+  const rowGap = Math.round(bodySize * 0.9);
+  const bodyTop = Math.round(h * 0.32);
+
+  let y = bodyTop;
+  const drawn: string[] = [];
+  wrapped.forEach((linesOfRow, i) => {
+    const marker =
+      type === "steps"
+        ? `<circle cx="${pad + bodySize * 0.55}" cy="${y - bodySize * 0.35}" r="${bodySize * 0.62}" fill="${esc(color)}" opacity="0.22"/>` +
+          `<text x="${pad + bodySize * 0.55}" y="${y}" text-anchor="middle" font-family="Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="${Math.round(bodySize * 0.72)}" font-weight="700" fill="${esc(color)}">${i + 1}</text>`
+        : `<rect x="${pad}" y="${y - bodySize * 0.8}" width="${Math.round(bodySize * 0.18)}" height="${Math.round(bodySize)}" rx="${Math.round(bodySize * 0.09)}" fill="${esc(color)}"/>`;
+    const textX = pad + Math.round(bodySize * 1.6);
+    const body = linesOfRow
+      .map((l, k) => `<text x="${textX}" y="${y + k * Math.round(bodySize * 1.15)}" font-family="Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="${bodySize}" font-weight="${type === "stats" && k === 0 ? 700 : 500}" fill="#f3f3f8">${esc(l)}</text>`)
+      .join("");
+    drawn.push(marker + body);
+    y += linesOfRow.length * Math.round(bodySize * 1.15) + rowGap;
+  });
+
+  const headLines = wrap(heading.trim() || "Key points", Math.round((w - pad * 2) / (headSize * 0.52)), 2);
+  const svg = `<svg width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0b0b12"/><stop offset="100%" stop-color="#16161f"/>
+    </linearGradient>
+  </defs>
+  <rect width="${w}" height="${h}" fill="url(#bg)"/>
+  <rect x="0" y="0" width="${w}" height="${Math.round(h * 0.012)}" fill="${esc(color)}"/>
+  ${headLines
+    .map((l, i) => `<text x="${pad}" y="${Math.round(h * 0.16) + i * Math.round(headSize * 1.2)}" font-family="Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="${headSize}" font-weight="700" fill="#ffffff">${esc(l)}</text>`)
+    .join("\n  ")}
+  ${drawn.join("\n  ")}
+  ${brand.name ? `<text x="${pad}" y="${h - Math.round(h * 0.06)}" font-family="Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="${Math.round(headSize * 0.5)}" fill="${esc(color)}" font-weight="600">${esc(brand.name)}</text>` : ""}
+</svg>`;
+
+  const webp = await sharp(Buffer.from(svg)).webp({ quality: 88, effort: 4 }).toBuffer();
+  return { webp, width: w, height: h };
+}
+
 /** For tests and for the story renderer: what shape a buffer actually is. */
 export async function dimensions(buf: Buffer): Promise<{ width: number; height: number; format: string }> {
   const m = await sharp(buf).metadata();

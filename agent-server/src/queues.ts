@@ -8,7 +8,7 @@ import type { AgentJobData } from "./agents/base.js";
 // "publish" is the only agent that changes something outside our own database — a page on
 // the customer's live site. It is a queue like any other; what makes it different is the
 // manifest flag (irreversible) that forces a confirmation before the brain ever queues it.
-export const AGENT_TYPES = ["boss", "keyword", "writer", "social", "seo", "leads", "crawler", "analyst", "publish", "audit"] as const;
+export const AGENT_TYPES = ["boss", "keyword", "writer", "social", "seo", "leads", "crawler", "analyst", "publish", "audit", "image"] as const;
 export type AgentType = (typeof AGENT_TYPES)[number];
 
 // Mirrors the old BullMQ config (attempts: 3, exponential backoff 3s/6s/12s):

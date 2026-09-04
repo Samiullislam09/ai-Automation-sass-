@@ -61,7 +61,7 @@ test("every action resolves to the agent that declared it", () => {
   assert.equal(reg.actions.get("write_article")?.agent_id, "writer");
   assert.equal(reg.actions.get("research_brief")?.agent_id, "writer");
   assert.equal(reg.actions.get("publish_article")?.agent_id, "publish");
-  assert.equal(reg.actions.get("make_images"), undefined); // no image agent exists today
+  assert.equal(reg.actions.get("make_images")?.agent_id, "image"); // shipped 2026-09-05
 });
 
 // ── the four problem kinds ────────────────────────────────────────────────────────────────
@@ -160,7 +160,8 @@ test("stub and not-yet-routed agents are registered but disabled", () => {
 
 test("enabledActions offers every action once its agent stops being a stub", () => {
   // Miss Social was the last stub; the day it un-stubbed, this list grew by one rather than
-  // needing a hidden-tools branch — the whole point of driving this off STUB_AGENTS.
+  // needing a hidden-tools branch — the whole point of driving this off STUB_AGENTS. It grew
+  // again when Mr. Image shipped (make_images, 2026-09-05).
   const reg = buildRegistry(MANIFESTS, REAL_OPTS);
   const offered = enabledActions(reg).map((a) => a.spec.id);
 
@@ -172,6 +173,7 @@ test("enabledActions offers every action once its agent stops being a stub", () 
     "draft_social",
     "find_keywords",
     "find_leads",
+    "make_images",
     "pick_topic",
     "plan_topics",
     "publish_article",

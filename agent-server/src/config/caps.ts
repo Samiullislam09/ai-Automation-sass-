@@ -24,18 +24,27 @@ export const PLANS: Plan[] = ["free", "starter", "growth"];
 /** null = no daily cap on that agent for that plan. */
 type PlanCaps = Record<string, number | null>;
 
+/** `image` is a different KIND of cap from the rest and the number says so: every other entry
+ *  counts JOBS this tenant may start, while `image` counts AI IMAGES GENERATED today (counted
+ *  from the media table, lib/media/store.ts's generatedToday). It is small on every plan, even
+ *  the top one, because the ceiling is not ours: a free Cloudflare account is 10,000 neurons a
+ *  day and one FLUX image costs 172.8 of them — about 57 images a day for the WHOLE platform
+ *  (measured 2026-09-05, MASTER_PLAN §19.4.1). Running out is not a failure: the slots fall
+ *  back to template cards, thumbnail last, and the run says so (§19.4.4). More Cloudflare
+ *  accounts in CLOUDFLARE_ACCOUNTS, or a paid one, is what raises the real ceiling — then
+ *  these numbers can go up. */
 const PLAN_CAPS: Record<Plan, PlanCaps> = {
   // A trial should be enough to see the whole product work end to end, once or twice.
   // The analyst is tied to the crawler: it runs after a crawl and on a weekly refresh, so its
   // cap is the crawler's plus a little room for a manual "re-read my site".
-  free: { boss: 5, keyword: 30, writer: 3, social: 10, seo: 10, leads: 10, crawler: 2, analyst: 4, publish: 3 },
+  free: { boss: 5, keyword: 30, writer: 3, social: 10, seo: 10, leads: 10, crawler: 2, analyst: 4, publish: 3, image: 4 },
 
   // Paid. Comfortably above what anyone runs by hand in a day, so the cap is never the thing
   // a customer notices — their monthly allowance is what they actually bought.
-  starter: { boss: 40, keyword: 300, writer: 30, social: 100, seo: 60, leads: 100, crawler: 5, analyst: 10, publish: 30 },
+  starter: { boss: 40, keyword: 300, writer: 30, social: 100, seo: 60, leads: 100, crawler: 5, analyst: 10, publish: 30, image: 12 },
 
   // Top plan: no daily rationing at all. Only the runaway guard below still applies.
-  growth: { boss: null, keyword: null, writer: null, social: null, seo: null, leads: null, crawler: 10, analyst: 20, publish: null },
+  growth: { boss: null, keyword: null, writer: null, social: null, seo: null, leads: null, crawler: 10, analyst: 20, publish: null, image: 25 },
 };
 
 /** Per hour, every plan, no exceptions. Sized so that a human being cannot reach it and a
@@ -43,6 +52,9 @@ const PLAN_CAPS: Record<Plan, PlanCaps> = {
  *  of a 30B model per article — so it is the tightest. */
 const RUNAWAY_PER_HOUR: Record<string, number> = {
   boss: 60,
+  // Not a money guard like the rest — a loop here would burn every Cloudflare account in the
+  // pool for the day, which no customer could then recover from until midnight UTC.
+  image: 120,
   keyword: 400,
   writer: 60,
   social: 200,

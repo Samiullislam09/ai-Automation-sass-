@@ -4,12 +4,12 @@
  *  table. There is one test per row below, in the table's order, against TWO registries:
  *
  *    • TODAY — the manifests we actually ship (`MANIFESTS` + `STUB_AGENTS` + `NOT_YET_ROUTED`).
- *      Mr. SEO is a stub, Mr. Publish has no adapter, and there is no image agent at all, so
- *      several rows can only be satisfied as an honest refusal. Those refusals ARE the test:
+ *      Mr. SEO is a stub and Mr. Publish has no adapter, so several rows can only be
+ *      satisfied as an honest refusal. Those refusals ARE the test:
  *      the planner must say "Mr. SEO abhi available nahi hai", not invent a step.
  *
- *    • PLAN_WORLD — the same manifests with Mr. SEO and Mr. Publish live and an image agent
- *      added, i.e. exactly the registry drawn in §5.5's mermaid
+ *    • PLAN_WORLD — the same manifests with Mr. SEO and Mr. Publish live and publish also
+ *      needing images, i.e. exactly the registry drawn in §5.5's mermaid
  *      (publish needs [article, images, seo_passed], images optional). This is the registry the
  *      plan's table describes, and against it the counts come out 1 / 1 / 4 / 5 as written.
  *
@@ -28,35 +28,12 @@ import { plan } from "./planner.js";
 
 const TODAY = buildRegistry(MANIFESTS, { stubs: STUB_AGENTS, notRouted: NOT_YET_ROUTED });
 
-/** Mr. Image as §5.5 draws him: works on the article, only publish wants his output, optional. */
-const IMAGE_AGENT: Manifest = {
-  id: "image",
-  name: "Mr. Image",
-  version: "1.0.0",
-  description: "Makes the hero, thumbnail and OG images for an article.",
-  actions: [
-    {
-      id: "make_images",
-      phrases: ["image banao", "is article ki image badlo", "images do"],
-      input: { article: "object", style: "string?" },
-      output: { hero: "string", thumb: "string", og: "string" },
-      provides: "images",
-      needs: ["article"],
-      optional: true,
-      irreversible: false,
-      estimated_seconds: 60,
-      cost_units: 12,
-    },
-  ],
-  office: { room: "image", ico: "🖼️", color: "#f472b6" },
-};
-
 /** The registry §5.5's diagram describes: everyone live, publish also needs images. */
 function planWorld(opts: RegistryOptions = {}): Registry {
   const manifests: Manifest[] = structuredClone(MANIFESTS);
   const publish = manifests.find((m) => m.id === "publish")!;
   publish.actions[0].needs = ["article", "images", "seo_passed"];
-  return buildRegistry([...manifests, IMAGE_AGENT], { stubs: new Set(), notRouted: new Set(), ...opts });
+  return buildRegistry(manifests, { stubs: new Set(), notRouted: new Set(), ...opts });
 }
 
 const PLAN_WORLD = planWorld();
@@ -133,8 +110,11 @@ test("row 3 · article likho, in the registry §5.5 describes → 4 steps, image
   assert.deepEqual(shape(p.steps), [
     "1:keyword.find_keywords",
     "2:writer.write_article",
-    "3:image.make_images",
+    // Within one level the planner lists the slowest first, and ties go alphabetically. The
+    // real Mr. Image (shipped 2026-09-05) takes the same 40s as Mr. SEO, where the stand-in
+    // this test used while he was a drawing on §5.5 claimed 60s — so the pair swapped.
     "3:seo.check_seo",
+    "3:image.make_images",
   ]);
   // The parallel pair: same `no`, so the orchestrator dispatches them together.
   assert.equal(p.steps[2].no, p.steps[3].no);
@@ -145,8 +125,8 @@ test("row 3 · article likho, in the registry §5.5 describes → 4 steps, image
   assert.deepEqual(p.outline, [
     "1. Mr. Keyword pehle keywords nikalega (~20s)",
     "2. Mr. Writer article likhega (~5 min)",
-    "3a. Mr. Image images banayega (~60s) ‖ saath me",
-    "3b. Mr. SEO SEO check karega (~40s) ‖ saath me",
+    "3a. Mr. SEO SEO check karega (~40s) ‖ saath me",
+    "3b. Mr. Image images banayega (~40s) ‖ saath me",
   ]);
 });
 
@@ -171,8 +151,8 @@ test("row 4 · article likh ke publish karo, in §5.5's registry → 5 steps, pu
   assert.deepEqual(shape(p.steps), [
     "1:keyword.find_keywords",
     "2:writer.write_article",
-    "3:image.make_images",
     "3:seo.check_seo",
+    "3:image.make_images",
     "4:publish.publish_article",
   ]);
   const publish = p.steps[4];
@@ -263,9 +243,13 @@ test("row 6 · audit_site is one step, and it needs nothing first", () => {
 
 // ══ ROW 7 · "is article ki image badlo" → make_images → 1 ════════════════════════════════
 
-test("row 7 · make_images has no manifest yet → unknown_action", () => {
-  const res = failed(plan(intent("make_images", {}), TODAY));
-  assert.deepEqual(res.failure, { kind: "unknown_action", action: "make_images" });
+test("row 7 · make_images is a real action now, and it plans the article it needs", () => {
+  // Was: "no manifest yet → unknown_action". Mr. Image shipped 2026-09-05 (MASTER_PLAN §19.4),
+  // so against the REAL registry the same order now plans — and, with nothing in hand, the
+  // backward walk writes the article first, because images need one.
+  const p = okPlan(plan(intent("make_images", {}), TODAY));
+  assert.equal(p.steps[p.steps.length - 1].action, "make_images");
+  assert.ok(p.steps.some((s) => s.action === "write_article"), "images need an article, so one is planned");
 });
 
 test("row 7 · with an image agent registered it is the one step the table says", () => {
@@ -455,17 +439,19 @@ test("intent params reach every step whose input schema names them, and only tho
 test("estimated_seconds is the critical path, cost_units is the sum", () => {
   const p = okPlan(plan(intent("write_article", { topic: "solar" }), PLAN_WORLD));
 
-  // Levels: 1 → kw 20s · 2 → writer 300s · 3 → image 60s ‖ seo 40s.
-  assert.equal(p.estimated_seconds, 20 + 300 + 60, "the parallel level costs its slowest member, once");
-  assert.notEqual(p.estimated_seconds, 20 + 300 + 60 + 40, "not the sum");
+  // Levels: 1 → kw 20s · 2 → writer 300s · 3 → seo 40s ‖ image 40s. The image numbers are the
+  // real agent's since 2026-09-05: 40s (2-5 Cloudflare images at 3.7s each plus one brief
+  // call) and 4 cost units — the same 40s as Mr. SEO, so the level costs 40 either way.
+  assert.equal(p.estimated_seconds, 20 + 300 + 40, "the parallel level costs its slowest member, once");
+  assert.notEqual(p.estimated_seconds, 20 + 300 + 40 + 40, "not the sum");
   // Money is different: both parallel steps are paid for.
-  assert.equal(p.cost_units, 3 + 40 + 12 + 8);
+  assert.equal(p.cost_units, 3 + 40 + 4 + 8);
 });
 
 test("the whole publish plan's numbers", () => {
   const p = okPlan(plan(intent("write_article", { topic: "solar" }, "publish"), PLAN_WORLD));
-  assert.equal(p.estimated_seconds, 20 + 300 + 60 + 30);
-  assert.equal(p.cost_units, 3 + 40 + 12 + 8 + 2);
+  assert.equal(p.estimated_seconds, 20 + 300 + 40 + 30);
+  assert.equal(p.cost_units, 3 + 40 + 4 + 8 + 2);
 });
 
 // ══ the guarantee ════════════════════════════════════════════════════════════════════════

@@ -183,6 +183,47 @@ export const MANIFESTS: Manifest[] = [
   },
 
   {
+    id: "image",
+    name: "Mr. Image",
+    version: "1.0.0",
+    description: "Makes the pictures an article needs — a thumbnail, a hero, and one per long section — each tied to the part of the article it belongs to.",
+    actions: [
+      {
+        // The article pipeline's own step. Mr. Image writes the brief itself here, from the
+        // article and the Site Brain, and then checks its own answer against the article's
+        // headings (MASTER_PLAN §19.4.3). `bump` is the user's "another image" button.
+        id: "make_images",
+        phrases: ["image banao", "is article ki image badlo", "images do", "make images", "add pictures", "thumbnail banao"],
+        // Named `article` because that is also the NEED: when this step follows Mr. Writer the
+        // brain threads the writer's whole output in under the need's name (the same reason
+        // write_article's input is called `keywords`), and agents/image.ts reads the article's
+        // own id out of it. `bump` is the user's "another image" button — seed + 1, §19.4.3.
+        input: { article: "object", bump: "number?" },
+        output: { images: "object[]", imageSetId: "string", generated: "number" },
+        provides: "images",
+        needs: ["article"],
+        // §5.5's own word for this, and §19.4.4's promise: a publish never waits on pictures.
+        // If Mr. Image is down the plan runs without him and the article goes out with
+        // template cards, rather than the whole order stopping.
+        optional: true,
+        irreversible: false,
+        // Measured: Cloudflare answered in 3.7s per image (2026-09-05) and an article takes 2-5
+        // of them, plus one brief call and the sharp work. A template fallback is far quicker.
+        estimated_seconds: 40,
+        cost_units: 4,
+      },
+    ],
+    // NOTE — `render_images` is deliberately NOT a manifest action. Mr. Image also accepts a
+    // job carrying `briefs` (agents/image.ts's renderGiven), which is how Mr. Story gets its
+    // cover and hook pages and how Miss Social will get a post image: the caller writes the
+    // brief and Mr. Image renders it word for word (§19.4.3). That is agent-to-agent work, the
+    // same way the crawler enqueues the analyst — nobody orders it in chat, it has no phrases
+    // a person would say, and putting it in the manifest would offer the intent engine a tool
+    // whose only required input is something a user cannot type.
+    office: { room: "image", ico: "🖼️", color: "#f472b6" },
+  },
+
+  {
     id: "seo",
     name: "Mr. SEO",
     version: "1.0.0", // was 0.1.0/stub — agents/seo.ts (24 checks) landed in Phase 2, `seo.test.ts`
