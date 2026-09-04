@@ -8,25 +8,27 @@ import { useStore } from "@/lib/store";
  *  noted there — never show a number nobody measured, never auto-fix anything). Restyled to
  *  the new dashboard theme per the owner's standing instruction (2026-08-29).
  *
- *  Rebuilt 2026-09-05 against a Semrush Site Audit "Overview" screenshot the owner sent, own
- *  words: "100% same UI... but sirf brand hamara". Matched where we have a REAL source for the
- *  number; deliberately NOT built where Semrush's own card has none here:
- *   - "AI Search Health" / "Blocked from AI Search" (ChatGPT-User, Googlebot, etc. hit counts) —
- *     that is Semrush's own bot-traffic product, this app has no such log to read from. Building
- *     that card would mean showing invented numbers, the one thing this whole product refuses to
- *     do (see lib/seoChecks.ts's own header).
- *   - "Top-10% websites: 92%" industry benchmark on the Site Health gauge — no benchmark dataset
- *     exists here either; the gauge shows only "Your site", never a comparison nobody measured.
- *  Everything else — Site Health gauge, Crawled Pages breakdown, Errors/Warnings cards with a
- *  real trend line, the top-issues list with "How to fix" and "View all issues", a full-page
- *  "see more" popup, and an Export-as-PDF button — is built from data this file's own API
- *  already returns or was extended to return (this session): `run.pages` (per-page crawl
- *  status/redirect, agents/audit.ts), `run.trigger` (manual vs the weekly scheduler), and the
- *  history array's blocks/warns/pagesChecked (was score-only before). */
+ *  Rebuilt 2026-09-05 against 6 real Semrush Site Audit screenshots the owner sent (their own
+ *  live account, wca-global.com), own words: "100% same UI... but sirf brand hamara" / "koi
+ *  dummy nahi, accurate". Two rounds:
+ *   Round 1 assumed "AI Search Health" / "Blocked from AI Search" (does robots.txt let GPTBot/
+ *   ChatGPT-User/Google-Extended/etc. in) were Semrush's own bot-TRAFFIC product and skipped
+ *   them. Wrong — the owner's screenshots showed they are a robots.txt DIRECTIVE check, and
+ *   this app already fetches robots.txt for every audit. Built for real in agent-server/src/
+ *   lib/audit/robots.ts (a real, tested robots.txt parser — RFC 9309's core matching rule,
+ *   longest-pattern-wins) and wired through agents/audit.ts's `aiSearch`.
+ *   Still deliberately NOT built: "Top-10% websites: 92%" industry benchmark on the Site Health
+ *   gauge — no benchmark dataset exists here, and Semrush's own thematic-report category rings
+ *   (Crawlability/HTTPS/Internal Linking/Markup %) — those need a real per-check category
+ *   taxonomy this file has not built yet; noted as the next round, not silently skipped.
+ *  Site Health's colour is this app's own brand violet (--lx-violet / the lx-grad gradient),
+ *  not a red/amber/green tone — Semrush's own gauge doesn't shift colour by score either; only
+ *  Errors (red) and Warnings (amber) carry a severity colour, same as Semrush. */
 
 type Issue = { id: string; severity: "block" | "warn" | "info"; what: string; fix: string; pages: string[]; count: number };
 type PageVitals = { url: string; ok: boolean; error?: string; performanceScore: number | null; lcpMs: number | null; cls: number | null; tbtMs: number | null };
-type CrawledPage = { url: string; status: number | null; redirectedTo: string | null; ms: number | null; error: string | null };
+type CrawledPage = { url: string; status: number | null; redirectedTo: string | null; ms: number | null; error: string | null; hasIssue?: boolean; blocked?: boolean };
+type BotAccess = { bot: string; label: string; allowed: boolean };
 type Trigger = "manual" | "schedule" | null;
 
 type Report = {
@@ -40,6 +42,8 @@ type Report = {
   skipped: string[];
   performance: PageVitals[];
   pages: CrawledPage[];
+  websiteUrl: string | null;
+  aiSearch: BotAccess[] | null;
   trigger: Trigger;
   seconds: number | null;
   summary: string | null;
@@ -78,7 +82,7 @@ export default function AuditSection() {
   const [polling, setPolling] = useState<{ sinceId: string | null; startedAt: number } | null>(null);
   const [pagesModal, setPagesModal] = useState<Issue | null>(null);
   const [issuesExpanded, setIssuesExpanded] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(true);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const load = useCallback((): Promise<Payload | null> => {
@@ -158,11 +162,18 @@ export default function AuditSection() {
           What&apos;s broken, hidden from Google, or costing you traffic — across the whole site, not one page at a time. Runs itself every week.
         </p>
       </div>
-      <div className="flex flex-wrap gap-2">
-        <button className="lx-ghost" disabled={starting || !!polling} onClick={runAudit}>
+      <div className="flex flex-wrap items-center gap-2 lx-audit-noprint">
+        <button className="lx-grad lx-11 px-3 py-1.5" disabled={starting || !!polling} onClick={runAudit}>
           {starting ? "Starting…" : polling ? "Auditing…" : "Check my site now"}
         </button>
         <Link href="/dashboard/workspace" className="lx-ghost">Watch it work →</Link>
+        <button
+          className="lx-ghost"
+          onClick={() => window.print()}
+          title="Opens your browser's print dialog — choose 'Save as PDF' as the destination"
+        >
+          Export as PDF
+        </button>
       </div>
     </div>
   );
@@ -221,7 +232,6 @@ export default function AuditSection() {
   const allIssues = [...r.issues].sort((a, b) => RANK[a.severity] - RANK[b.severity] || b.count - a.count);
   const issues = issuesExpanded ? allIssues : allIssues.slice(0, ISSUES_COLLAPSED_COUNT);
   const notices = r.issues.filter((i) => i.severity === "info").length;
-  const scoreTone = tone(r.score);
 
   const vitals = r.performance ?? [];
   const measured = vitals.filter((p) => p.ok);
@@ -229,13 +239,17 @@ export default function AuditSection() {
   const avgCls = avg(measured.map((p) => p.cls));
 
   // Crawled Pages breakdown — Semrush's own "Healthy/Broken/Have issues/Redirects/Blocked"
-  // list, trimmed to the three this app can compute EXACTLY from the real per-page crawl
-  // (status + redirect target), rather than approximate a 4th/5th bucket from data that isn't
-  // fully known here (see the file header). Every page in `r.pages` lands in exactly one.
+  // list, all five now real (2026-09-05: checks.ts's exact pageIssueIds tally + robots.ts's
+  // real per-page block check, wired through agents/audit.ts). Mutually exclusive, priority
+  // order matching a page's own most-actionable fact about itself: a broken page's brokenness
+  // matters more than whether it also happens to have an on-page issue, etc. Every page in
+  // `r.pages` lands in exactly one bucket, same as Semrush's own numbers summed to its total.
   const pages = r.pages ?? [];
   const broken = pages.filter((p) => p.status == null || p.status >= 400);
-  const redirected = pages.filter((p) => !broken.includes(p) && p.redirectedTo);
-  const healthy = pages.filter((p) => !broken.includes(p) && !redirected.includes(p));
+  const blocked = pages.filter((p) => !broken.includes(p) && p.blocked);
+  const redirected = pages.filter((p) => !broken.includes(p) && !blocked.includes(p) && p.redirectedTo);
+  const hasIssues = pages.filter((p) => !broken.includes(p) && !blocked.includes(p) && !redirected.includes(p) && p.hasIssue);
+  const healthy = pages.filter((p) => !broken.includes(p) && !blocked.includes(p) && !redirected.includes(p) && !hasIssues.includes(p));
 
   return (
     <div className="space-y-4" id="lx-audit-report">
@@ -255,25 +269,39 @@ export default function AuditSection() {
         @media print { .lx-audit-print-only { display: block !important; } }
       `}</style>
 
-      {head}
+      {/* Real domain, shown big — Semrush's own "Site Audit: domain.com" heading. Real, from
+          agents/audit.ts's own `target.origin` (2026-09-05) — not a static page title. */}
+      <div className="flex flex-wrap items-center justify-between gap-4 lx-audit-noprint">
+        <div>
+          <h1 className="text-xl font-bold">Site Audit: {r.websiteUrl ? r.websiteUrl.replace(/^https?:\/\//, "") : "your site"}</h1>
+          <p className="lx-10 lx-mut mt-1">
+            Updated {new Date(r.createdAt).toLocaleString()} · {r.pagesChecked} pages crawled
+            {r.trigger && ` · ${TRIGGER_LABEL[r.trigger]}`}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button className="lx-grad lx-11 px-3 py-1.5" disabled={starting || !!polling} onClick={runAudit}>
+            {starting ? "Starting…" : polling ? "Auditing…" : "Check my site now"}
+          </button>
+          <Link href="/dashboard/workspace" className="lx-ghost">Watch it work →</Link>
+          <button
+            className="lx-ghost"
+            onClick={() => window.print()}
+            title="Opens your browser's print dialog — choose 'Save as PDF' as the destination"
+          >
+            Export as PDF
+          </button>
+        </div>
+      </div>
       {progressBanner}
 
       {/* ROW 1 — Site Health gauge (left) + Crawled Pages breakdown (right), Semrush's own
           top-row layout. */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="lx-card2 p-4">
-          <div className="flex items-center justify-between lx-audit-noprint">
-            <b className="lx-12">Site Health</b>
-            <button
-              className="lx-ghost lx-11"
-              onClick={() => window.print()}
-              title="Opens your browser's print dialog — choose 'Save as PDF' as the destination"
-            >
-              Export as PDF
-            </button>
-          </div>
+          <b className="lx-12">Site Health</b>
           <div className="mt-3 flex flex-wrap items-center gap-6">
-            <ScoreGauge score={r.score} scoreTone={scoreTone} />
+            <ScoreGauge score={r.score} />
             <div className="min-w-40 flex-1">
               <p className="lx-11">
                 {diff === null
@@ -289,32 +317,118 @@ export default function AuditSection() {
                 {r.seconds != null && ` · ${Math.round(r.seconds / 60) || 1} min`}
                 {r.trigger && ` · ${TRIGGER_LABEL[r.trigger]}`}
               </p>
-              {state!.history.length > 1 && <Trend points={state!.history} />}
             </div>
           </div>
         </div>
 
         <div className="lx-card2 p-4">
           <b className="lx-12">Crawled Pages</b>
-          <p className="lx-10 lx-mut mt-1">{pages.length} pages, this audit</p>
-          {pages.length > 0 && (
+          {pages.length > 0 ? (
             <>
+              <p className="lx-10 lx-mut mt-1">{pages.length} pages, this audit</p>
               <div className="mt-3 flex h-2 overflow-hidden rounded-full" style={{ background: "var(--lx-border)" }}>
                 {healthy.length > 0 && <div style={{ width: `${(healthy.length / pages.length) * 100}%`, background: "#34d399" }} />}
-                {redirected.length > 0 && <div style={{ width: `${(redirected.length / pages.length) * 100}%`, background: "#38bdf8" }} />}
+                {hasIssues.length > 0 && <div style={{ width: `${(hasIssues.length / pages.length) * 100}%`, background: "#fb923c" }} />}
+                {redirected.length > 0 && <div style={{ width: `${(redirected.length / pages.length) * 100}%`, background: "#818cf8" }} />}
                 {broken.length > 0 && <div style={{ width: `${(broken.length / pages.length) * 100}%`, background: "#f87171" }} />}
+                {blocked.length > 0 && <div style={{ width: `${(blocked.length / pages.length) * 100}%`, background: "var(--lx-mut)" }} />}
               </div>
               <ul className="mt-3 space-y-2">
                 <CrawledRow color="#34d399" label="Healthy" count={healthy.length} />
-                <CrawledRow color="#38bdf8" label="Redirects" count={redirected.length} />
                 <CrawledRow color="#f87171" label="Broken" count={broken.length} />
+                <CrawledRow color="#fb923c" label="Have issues" count={hasIssues.length} />
+                <CrawledRow color="#818cf8" label="Redirects" count={redirected.length} />
+                <CrawledRow color="var(--lx-mut)" label="Blocked" count={blocked.length} />
               </ul>
               <button className="lx-11 mt-3 underline lx-audit-noprint" style={{ color: "var(--lx-cyan)" }} onClick={() => setPagesModal({ id: "__all_pages__", severity: "info", what: "All crawled pages", fix: "", pages: pages.map((p) => p.url), count: pages.length })}>
                 See all {pages.length} pages
               </button>
             </>
+          ) : (
+            // Real reports written before 2026-09-05 have no per-page summary on file (the
+            // column didn't exist yet) — said honestly, never shown as "0 pages" (which reads
+            // as a broken crawl rather than an older report).
+            <p className="lx-11 lx-mut mt-3">
+              Not on file for this report — {r.trigger ? "run" : "the next"} audit will include a full page-by-page breakdown.
+            </p>
           )}
         </div>
+      </div>
+
+      {/* AI SEARCH — real robots.txt evaluation for named AI crawlers (agent-server/src/lib/
+          audit/robots.ts). `null` (not an empty state rendered as "all good") when robots.txt
+          itself could not be read — `r.skipped` already explains that case elsewhere. */}
+      {r.aiSearch && (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <div className="lx-card2 p-4">
+            <b className="lx-12">AI Search Health</b>
+            <p className="lx-10 lx-mut mt-1">Whether the named AI crawlers below may read your site, per your own robots.txt.</p>
+            <div className="mt-3 flex items-center gap-6">
+              <AiHealthGauge allowed={r.aiSearch.filter((b) => b.allowed).length} total={r.aiSearch.length} />
+              <p className="lx-11 flex-1">
+                {r.aiSearch.every((b) => b.allowed)
+                  ? "Every named AI crawler is allowed in."
+                  : `${r.aiSearch.filter((b) => !b.allowed).length} of ${r.aiSearch.length} named AI crawlers ${r.aiSearch.filter((b) => !b.allowed).length === 1 ? "is" : "are"} blocked by robots.txt.`}
+              </p>
+            </div>
+          </div>
+          <div className="lx-card2 p-4">
+            <b className="lx-12">AI Crawler Access</b>
+            <p className="lx-10 lx-mut mt-1">Real robots.txt rules, one per named bot — not a traffic log, a directive check.</p>
+            <ul className="mt-3 space-y-2">
+              {r.aiSearch.map((b) => (
+                <li key={b.bot} className="flex items-center gap-2 lx-11">
+                  <span
+                    className="lx-10 shrink-0 rounded-full px-2 py-0.5 font-semibold"
+                    style={{ color: b.allowed ? "#34d399" : "#f87171", border: `1px solid ${b.allowed ? "#34d399" : "#f87171"}` }}
+                  >
+                    {b.allowed ? "Allowed" : "Blocked"}
+                  </span>
+                  <span className="flex-1">{b.label}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+
+      {/* HISTORY — every past run, manual vs the weekly scheduler, so "kab manual hua, kab
+          schedule pe hua" has an actual answer, right below the report it belongs to (not
+          buried at the bottom of the page — owner, 2026-09-05). Open by default: this is
+          exactly the kind of thing worth seeing without an extra click. */}
+      <div className="lx-card2 p-4 lx-audit-noprint">
+        <button className="flex w-full items-center justify-between" style={{ background: "transparent", border: "none", cursor: "pointer" }} onClick={() => setHistoryOpen((v) => !v)}>
+          <b className="lx-12">Audit history</b>
+          <span className="lx-11" style={{ color: "var(--lx-cyan)" }}>{historyOpen ? "hide" : `show ${state!.history.length}`}</span>
+        </button>
+        {historyOpen && (
+          <div className="lx-scroll mt-3" style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 420 }}>
+              <thead>
+                <tr className="lx-10 lx-mut" style={{ textAlign: "left" }}>
+                  <th style={{ padding: "6px 8px", fontWeight: 600 }}>Date</th>
+                  <th style={{ padding: "6px 8px", fontWeight: 600 }}>Triggered</th>
+                  <th style={{ padding: "6px 8px", fontWeight: 600, whiteSpace: "nowrap" }}>Score</th>
+                  <th style={{ padding: "6px 8px", fontWeight: 600, whiteSpace: "nowrap" }}>Errors</th>
+                  <th style={{ padding: "6px 8px", fontWeight: 600, whiteSpace: "nowrap" }}>Warnings</th>
+                  <th style={{ padding: "6px 8px", fontWeight: 600, whiteSpace: "nowrap" }}>Pages</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...state!.history].reverse().map((h) => (
+                  <tr key={h.id} style={{ borderTop: "1px solid var(--lx-border)" }}>
+                    <td className="lx-11" style={{ padding: "8px", color: "#e6e6f2", whiteSpace: "nowrap" }}>{new Date(h.createdAt).toLocaleString()}</td>
+                    <td className="lx-11 lx-mut" style={{ padding: "8px" }}>{h.trigger ? TRIGGER_LABEL[h.trigger] : "—"}</td>
+                    <td className="lx-11" style={{ padding: "8px", color: TONE_COLOR[tone(h.score)], fontWeight: 700 }}>{h.score}</td>
+                    <td className="lx-11 lx-mut" style={{ padding: "8px" }}>{h.blocks}</td>
+                    <td className="lx-11 lx-mut" style={{ padding: "8px" }}>{h.warns}</td>
+                    <td className="lx-11 lx-mut" style={{ padding: "8px" }}>{h.pagesChecked}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* ROW 2 — Errors / Warnings, each with a real trend line built from history, matching
@@ -455,43 +569,6 @@ export default function AuditSection() {
         </div>
       )}
 
-      {/* HISTORY — every past run, manual vs the weekly scheduler, so "kab manual hua, kab
-          schedule pe hua" has an actual answer instead of only ever showing the newest one. */}
-      <div className="lx-card2 p-4 lx-audit-noprint">
-        <button className="flex w-full items-center justify-between" style={{ background: "transparent", border: "none", cursor: "pointer" }} onClick={() => setHistoryOpen((v) => !v)}>
-          <b className="lx-12">Audit history</b>
-          <span className="lx-11" style={{ color: "var(--lx-cyan)" }}>{historyOpen ? "hide" : `show ${state!.history.length}`}</span>
-        </button>
-        {historyOpen && (
-          <div className="lx-scroll mt-3" style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 420 }}>
-              <thead>
-                <tr className="lx-10 lx-mut" style={{ textAlign: "left" }}>
-                  <th style={{ padding: "6px 8px", fontWeight: 600 }}>Date</th>
-                  <th style={{ padding: "6px 8px", fontWeight: 600 }}>Triggered</th>
-                  <th style={{ padding: "6px 8px", fontWeight: 600, whiteSpace: "nowrap" }}>Score</th>
-                  <th style={{ padding: "6px 8px", fontWeight: 600, whiteSpace: "nowrap" }}>Errors</th>
-                  <th style={{ padding: "6px 8px", fontWeight: 600, whiteSpace: "nowrap" }}>Warnings</th>
-                  <th style={{ padding: "6px 8px", fontWeight: 600, whiteSpace: "nowrap" }}>Pages</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...state!.history].reverse().map((h) => (
-                  <tr key={h.id} style={{ borderTop: "1px solid var(--lx-border)" }}>
-                    <td className="lx-11" style={{ padding: "8px", color: "#e6e6f2", whiteSpace: "nowrap" }}>{new Date(h.createdAt).toLocaleString()}</td>
-                    <td className="lx-11 lx-mut" style={{ padding: "8px" }}>{h.trigger ? TRIGGER_LABEL[h.trigger] : "—"}</td>
-                    <td className="lx-11" style={{ padding: "8px", color: TONE_COLOR[tone(h.score)], fontWeight: 700 }}>{h.score}</td>
-                    <td className="lx-11 lx-mut" style={{ padding: "8px" }}>{h.blocks}</td>
-                    <td className="lx-11 lx-mut" style={{ padding: "8px" }}>{h.warns}</td>
-                    <td className="lx-11 lx-mut" style={{ padding: "8px" }}>{h.pagesChecked}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
       {pagesModal && <PagesModal issue={pagesModal} pages={pages} onClose={() => setPagesModal(null)} />}
     </div>
   );
@@ -569,21 +646,33 @@ function PagesModal({ issue, pages, onClose }: { issue: Issue; pages: CrawledPag
 }
 
 /** The score, as a ring — the one visual a Semrush-style report leads with. Pure SVG, no
- *  charting dependency: one number between 0 and 100 is a single arc. */
-function ScoreGauge({ score, scoreTone }: { score: number; scoreTone: "good" | "ok" | "bad" }) {
+ *  charting dependency: one number between 0 and 100 is a single arc.
+ *
+ *  Brand colour, not a red/amber/green tone (2026-09-05 — the owner's own screenshot: Semrush's
+ *  own Site Health gauge doesn't shift colour by score either, only Errors/Warnings do). Uses
+ *  the SAME gradient as this app's own primary button (`.lx-grad` in lx-theme.tsx:
+ *  #4f46e5→#7c3aed→#8b5cf6) so this reads as MrLxwa, not a generic dashboard widget. */
+function ScoreGauge({ score }: { score: number }) {
   const rad = 34;
   const c = 2 * Math.PI * rad;
   const filled = (Math.max(0, Math.min(100, score)) / 100) * c;
   return (
     <div className="relative shrink-0" style={{ width: 92, height: 92 }} aria-label={`Site health score: ${score} out of 100`}>
       <svg width={92} height={92} viewBox="0 0 92 92">
+        <defs>
+          <linearGradient id="lx-audit-score-grad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#4f46e5" />
+            <stop offset="55%" stopColor="#7c3aed" />
+            <stop offset="100%" stopColor="#8b5cf6" />
+          </linearGradient>
+        </defs>
         <circle cx={46} cy={46} r={rad} fill="none" stroke="var(--lx-border)" strokeWidth={8} />
         <circle
           cx={46}
           cy={46}
           r={rad}
           fill="none"
-          stroke={TONE_COLOR[scoreTone]}
+          stroke="url(#lx-audit-score-grad)"
           strokeWidth={8}
           strokeLinecap="round"
           strokeDasharray={`${filled} ${c}`}
@@ -591,8 +680,41 @@ function ScoreGauge({ score, scoreTone }: { score: number; scoreTone: "good" | "
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <b className="font-extrabold leading-none" style={{ fontSize: 26, color: TONE_COLOR[scoreTone] }}>{score}</b>
+        <b className="font-extrabold leading-none" style={{ fontSize: 26, color: "var(--lx-violet)" }}>{score}</b>
         <span className="lx-10 lx-mut" style={{ fontSize: 9 }}>/ 100</span>
+      </div>
+    </div>
+  );
+}
+
+/** AI Search Health — real robots.txt evaluation, as a ring: N of M named crawlers allowed.
+ *  Green when every bot is let in, amber otherwise — genuinely measured, never a Semrush-style
+ *  "traffic score" this app has no log to compute. */
+function AiHealthGauge({ allowed, total }: { allowed: number; total: number }) {
+  const rad = 34;
+  const c = 2 * Math.PI * rad;
+  const pct = total > 0 ? Math.round((allowed / total) * 100) : 0;
+  const filled = (pct / 100) * c;
+  const color = allowed === total ? "#34d399" : "#fb923c";
+  return (
+    <div className="relative shrink-0" style={{ width: 92, height: 92 }} aria-label={`${allowed} of ${total} AI crawlers allowed`}>
+      <svg width={92} height={92} viewBox="0 0 92 92">
+        <circle cx={46} cy={46} r={rad} fill="none" stroke="var(--lx-border)" strokeWidth={8} />
+        <circle
+          cx={46}
+          cy={46}
+          r={rad}
+          fill="none"
+          stroke={color}
+          strokeWidth={8}
+          strokeLinecap="round"
+          strokeDasharray={`${filled} ${c}`}
+          transform="rotate(-90 46 46)"
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <b className="font-extrabold leading-none" style={{ fontSize: 20, color }}>{allowed}/{total}</b>
+        <span className="lx-10 lx-mut" style={{ fontSize: 9 }}>allowed</span>
       </div>
     </div>
   );
@@ -632,15 +754,21 @@ function SeverityCard({ label, sub, count, color, points }: { label: string; sub
 function AreaTrend({ points, color }: { points: number[]; color: string }) {
   const w = 240;
   const h = 44;
+  // Headroom so a line that's flat AT THE MAX (every run had the same count — the exact case
+  // that turned this into a solid block: found live 2026-09-05) still has visible space above
+  // it and a visible stroke, instead of sitting on y=0 where the 2px line clips against the
+  // SVG's own top edge and reads as a filled rectangle, not a chart.
+  const PAD = 6;
+  const usable = h - PAD * 2;
   const max = Math.max(1, ...points);
   const step = points.length > 1 ? w / (points.length - 1) : 0;
-  const coords = points.map((p, i) => [i * step, h - (p / max) * h] as const);
+  const coords = points.map((p, i) => [i * step, PAD + usable - (p / max) * usable] as const);
   const line = coords.map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
   const area = `${line} L${w},${h} L0,${h} Z`;
   return (
     <svg className="mt-2" width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" aria-hidden>
-      <path d={area} fill={color} opacity={0.15} />
-      <path d={line} fill="none" stroke={color} strokeWidth={2} />
+      <path d={area} fill={color} opacity={0.12} />
+      <path d={line} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
     </svg>
   );
 }
@@ -653,23 +781,6 @@ function VitalTile({ label, value, good }: { label: string; value: string; good:
         <b className="font-extrabold" style={{ fontSize: 22, color: good ? "#34d399" : "#fbbf24" }}>{value}</b>
         <span className="lx-10" style={{ color: good ? "#34d399" : "#fbbf24" }}>{good ? "Good" : "Needs work"}</span>
       </div>
-    </div>
-  );
-}
-
-/** The score, as bars. Deliberately not a charting library: twenty numbers between 0 and 100
- *  are a row of divs, and a dependency for that would be the tail wagging the dog. */
-function Trend({ points }: { points: { id: string; score: number; createdAt: string }[] }) {
-  return (
-    <div className="mt-3 flex items-end gap-1" style={{ height: 44 }} aria-label="Audit score over time">
-      {points.map((p) => (
-        <span
-          key={p.id}
-          className="w-2 rounded-t-sm"
-          style={{ height: `${Math.max(4, p.score)}%`, background: TONE_COLOR[tone(p.score)] }}
-          title={`${p.score}/100 · ${new Date(p.createdAt).toLocaleDateString()}`}
-        />
-      ))}
     </div>
   );
 }

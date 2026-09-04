@@ -3,6 +3,7 @@ import { Agent, type AgentContext, type AgentJobData } from "./base.js";
 import { auditSite, summarizeAudit, topIssues, type AuditIssue } from "../lib/audit/checks.js";
 import { auditTarget, chooseUrls, fetchAllPages, fetchSiteContext, DEFAULT_PAGE_LIMIT } from "../lib/audit/fetchSite.js";
 import { runPerformanceAudit, issuesFromVitals, type PerformanceRun } from "../lib/audit/performance.js";
+import { aiSearchAccess } from "../lib/audit/robots.js";
 import { supabase } from "../supabase.js";
 
 /** §17.3's "top 10 pages" for the browser-based performance pass — the homepage plus a handful
@@ -114,18 +115,31 @@ export class AuditAgent extends Agent {
     // defaults to "manual" rather than silently claiming a schedule that did not happen.
     const trigger: "manual" | "schedule" = d.source === "schedule" ? "schedule" : "manual";
 
-    // A light per-page summary — status, redirect, response time — never the full `html`/
-    // `bytes` (that stays transient, this file's own reason for keeping checks.ts network-free
-    // already applies here too). This is what the report page's "Crawled Pages" breakdown and
-    // its "see more" full-page popup both read; before this it was computed, used once for
+    // A light per-page summary — status, redirect, response time, and now (2026-09-05) which
+    // of the report's OWN two exact sets a page falls in (`result.pagesWithIssues`/
+    // `blockedPages` — never approximated, see checks.ts's own comment on those fields) — never
+    // the full `html`/`bytes` (that stays transient, this file's own reason for keeping
+    // checks.ts network-free already applies here too). Feeds the report page's Crawled Pages
+    // breakdown and its "see more" full-page popup; before this it was computed, used once for
     // `result`, and thrown away.
+    const issuePages = new Set(result.pagesWithIssues);
+    const blockedPages = new Set(result.blockedPages);
     const pageSummary = pages.map((p) => ({
       url: p.url,
       status: p.status,
       redirectedTo: p.finalUrl && p.finalUrl !== p.url ? p.finalUrl : null,
       ms: p.ms,
       error: p.error ?? null,
+      hasIssue: issuePages.has(p.url),
+      blocked: blockedPages.has(p.url),
     }));
+
+    // Real robots.txt evaluation for the named AI crawlers (lib/audit/robots.ts) — the owner's
+    // own real Semrush report showed this as a real, non-fabricated card ("AI Search Health" /
+    // "Blocked from AI Search"): it is a directive check against data this audit already
+    // fetches (site.robotsTxt), not a traffic log this app has never had access to. `null` only
+    // when robots.txt itself could not be read — `result.skipped` already explains that.
+    const aiSearch = aiSearchAccess(site.robotsTxt);
 
     const seconds = Math.round((Date.now() - t0) / 1000);
     const { data: saved, error } = await supabase
@@ -145,10 +159,16 @@ export class AuditAgent extends Agent {
           limit,
           skipped: result.skipped,
           trigger,
+          // The real domain, for the report page's own big heading (Semrush shows "Site Audit:
+          // domain.com" — this is what makes that real instead of a static page title).
+          websiteUrl: target.origin,
           pages: pageSummary,
           // Per-page LCP/CLS/TBT — the derived issues are in `issues` above; this is the raw
           // numbers behind them, for a future report page that wants to chart them per page.
           performance: perf.pages,
+          // Real, named-bot robots.txt evaluation — null only when robots.txt itself could not
+          // be read (see `skipped`).
+          aiSearch,
         },
         summary,
       })

@@ -69,9 +69,17 @@ export async function GET() {
           // Real Lighthouse results (agent-server/src/lib/audit/performance.ts) — already
           // stored in `run.performance` since that file shipped, never surfaced here until now.
           performance: Array.isArray((latest.run as any)?.performance) ? (latest.run as any).performance : [],
-          // Real per-page crawl summary (status/redirect/response time) — the Crawled Pages
-          // breakdown and the "see more" full-page popup both read this (2026-09-05).
+          // Real per-page crawl summary (status/redirect/response time/hasIssue/blocked) — the
+          // Crawled Pages breakdown and the "see more" full-page popup both read this.
           pages: Array.isArray((latest.run as any)?.pages) ? (latest.run as any).pages : [],
+          // The real domain audited — the report page's own big heading (2026-09-05, matching
+          // Semrush's "Site Audit: domain.com"). Older rows have no `run.websiteUrl`; null then,
+          // never guessed from something else on the row.
+          websiteUrl: typeof (latest.run as any)?.websiteUrl === "string" ? (latest.run as any).websiteUrl : null,
+          // Real robots.txt evaluation for named AI crawlers (agent-server/src/lib/audit/
+          // robots.ts) — null when robots.txt could not be read, never an empty array standing
+          // in for "everything's fine".
+          aiSearch: Array.isArray((latest.run as any)?.aiSearch) ? (latest.run as any).aiSearch : null,
           // Who asked for this run — a person ("manual") or the weekly scheduler ("schedule").
           // Older rows from before 2026-09-05 have no `run.trigger` at all; reported as null
           // rather than guessed.

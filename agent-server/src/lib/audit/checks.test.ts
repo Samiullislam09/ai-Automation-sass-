@@ -90,6 +90,42 @@ test("an unreadable robots.txt is a skipped check, never an accusation", () => {
   assert.ok(r.skipped.some((s) => /robots\.txt/.test(s)));
 });
 
+/* ---------------------------------------------------------------- pagesWithIssues / blockedPages (2026-09-05, Crawled Pages breakdown) ---------------- */
+
+test("pagesWithIssues names exactly the pages that triggered an on-page issue, not an approximation", () => {
+  const r = auditSite(
+    [
+      good(`${ORIGIN}/`, "Home"),
+      page(`${ORIGIN}/no-title`, `<html><head></head><body><h1>X</h1>${"word ".repeat(200)}</body></html>`),
+    ],
+    CTX
+  );
+  assert.ok(r.pagesWithIssues.includes(`${ORIGIN}/no-title`));
+  assert.equal(r.pagesWithIssues.includes(`${ORIGIN}/`), false, "the clean page triggered nothing, so it is not in the list");
+});
+
+test("pagesWithIssues is exact even when an issue affects more pages than PAGE_SAMPLE shows", () => {
+  const many = Array.from({ length: 120 }, (_, i) => page(`${ORIGIN}/p${i}`, `<html><head></head><body><h1>X</h1>${"word ".repeat(200)}</body></html>`));
+  const r = auditSite(many, CTX);
+  const missingTitle = r.issues.find((i) => i.id === "missing-title");
+  assert.ok(missingTitle);
+  assert.ok(missingTitle!.pages.length < 120, "the SHOWN sample is capped");
+  assert.equal(r.pagesWithIssues.length, 120, "but the real tally is not — every one of the 120 pages is accounted for");
+});
+
+test("blockedPages names exactly the pages robots.txt disallows for '*', using the same parser the AI-bot check uses", () => {
+  const r = auditSite(
+    [good(`${ORIGIN}/`, "Home"), good(`${ORIGIN}/private/secret`, "Secret")],
+    { ...CTX, robotsTxt: "User-agent: *\nDisallow: /private\n" }
+  );
+  assert.deepEqual(r.blockedPages, [`${ORIGIN}/private/secret`]);
+});
+
+test("blockedPages is empty (not a guess) when robots.txt could not be read at all", () => {
+  const r = auditSite([good(`${ORIGIN}/`, "Home")], { ...CTX, robotsTxt: null });
+  assert.deepEqual(r.blockedPages, []);
+});
+
 /* ---------------------------------------------------------------- cross-page ------------ */
 
 test("duplicate titles are found — the check no single-page tool can make", () => {

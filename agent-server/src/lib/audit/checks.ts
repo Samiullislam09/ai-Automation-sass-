@@ -35,6 +35,7 @@
  */
 
 import * as cheerio from "cheerio";
+import { parseRobotsTxt, isBlocked } from "./robots.js";
 
 /* ---------------------------------------------------------------- types ----------------- */
 
@@ -88,6 +89,17 @@ export type AuditResult = {
   issues: AuditIssue[];
   /** Checks we could not run, and why. Rendered as-is; never silently dropped. */
   skipped: string[];
+  /** Every URL that appears in at least one on-page issue's FULL affected-page list — computed
+   *  from the same data each `issue()` call already builds, before PAGE_SAMPLE trims what is
+   *  shown, so this is exact, not a sample-union that undercounts. Real Core Web Vitals issues
+   *  (from lib/audit/performance.ts, only ~10 pages sampled) are deliberately excluded — mixing
+   *  a 10-page performance sample into a 50-200 page crawl breakdown would misrepresent both.
+   *  Used by the report page's Crawled Pages "Have issues" bucket (2026-09-05). */
+  pagesWithIssues: string[];
+  /** Every URL disallowed for `User-agent: *` by the site's own robots.txt — real evaluation
+   *  (lib/audit/robots.ts), not a guess. Empty when robots.txt could not be read at all (that
+   *  gap is already reported in `skipped`). Used by the same Crawled Pages "Blocked" bucket. */
+  blockedPages: string[];
 };
 
 /* ---------------------------------------------------------------- helpers --------------- */
@@ -133,14 +145,6 @@ function sameOrigin(url: string, origin: string): boolean {
   }
 }
 
-/** Builds an issue only when it applies to at least one page. Returning null rather than an
- *  empty issue means the caller can `.filter(Boolean)` and no report ever shows "0 pages have
- *  a missing title" as though it were a finding. */
-function issue(id: string, severity: AuditSeverity, pages: string[], what: (n: number) => string, fix: string): AuditIssue | null {
-  if (!pages.length) return null;
-  return { id, severity, what: what(pages.length), fix, pages: pages.slice(0, PAGE_SAMPLE), count: pages.length };
-}
-
 /* ---------------------------------------------------------------- the catalogue --------- */
 
 /** Everything that can be said about a site from its HTML and its two text files.
@@ -158,6 +162,24 @@ export function auditSite(
 ): AuditResult {
   const skipped: string[] = [];
   const issues: (AuditIssue | null)[] = [...(performance?.issues ?? [])];
+
+  // Real per-page issue attribution (2026-09-05, Crawled Pages breakdown's "Have issues"
+  // bucket) — a closure over `pageIssueIds` so every `issue()` call below tallies the FULL
+  // (untruncated) affected-page list it already builds, before PAGE_SAMPLE trims what is
+  // shown. Summing the capped `.pages` samples after the fact would undercount on a big site;
+  // this never does, because it tallies before the cap is applied, not after.
+  const pageIssueIds = new Map<string, Set<string>>();
+  /** Builds an issue only when it applies to at least one page. Returning null rather than an
+   *  empty issue means the caller can `.filter(Boolean)` and no report ever shows "0 pages have
+   *  a missing title" as though it were a finding. */
+  function issue(id: string, severity: AuditSeverity, pageUrls: string[], what: (n: number) => string, fix: string): AuditIssue | null {
+    for (const u of pageUrls) {
+      if (!pageIssueIds.has(u)) pageIssueIds.set(u, new Set());
+      pageIssueIds.get(u)!.add(id);
+    }
+    if (!pageUrls.length) return null;
+    return { id, severity, what: what(pageUrls.length), fix, pages: pageUrls.slice(0, PAGE_SAMPLE), count: pageUrls.length };
+  }
 
   const ok = pages.filter((p) => p.status !== null && p.status < 400 && p.html);
   const parsed = ok.map((p) => ({ page: p, $: cheerio.load(p.html as string) }));
@@ -441,6 +463,26 @@ export function auditSite(
   const blocks = found.filter((i) => i.severity === "block").length;
   const warns = found.filter((i) => i.severity === "warn").length;
 
+  // Real robots.txt evaluation (lib/audit/robots.ts) — the SAME parser the AI-bot access card
+  // uses (agents/audit.ts), so a page or a bot is never "blocked" by one check and "allowed"
+  // by the other. Empty (not a guess) when robots.txt could not be read — `skipped` above
+  // already says why.
+  const blockedPages =
+    site.robotsTxt === null
+      ? []
+      : (() => {
+          const groups = parseRobotsTxt(site.robotsTxt);
+          return pages
+            .map((p) => p.url)
+            .filter((url) => {
+              try {
+                return isBlocked(new URL(url).pathname, "*", groups);
+              } catch {
+                return false;
+              }
+            });
+        })();
+
   return {
     score: clamp(100 - 25 * blocks - 5 * warns, 0, 100),
     pagesChecked: pages.length,
@@ -448,6 +490,8 @@ export function auditSite(
     warns,
     issues: found,
     skipped,
+    pagesWithIssues: Array.from(pageIssueIds.keys()),
+    blockedPages,
   };
 }
 
