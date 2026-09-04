@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { Activity, Brain, ChevronDown, Loader2, PlugZap, RotateCw, Search } from "lucide-react";
+import { Activity, AlertCircle, Brain, CheckCircle2, Loader2, PlugZap, RotateCw, Search } from "lucide-react";
 import { useStore } from "@/lib/store";
 import SiteBrainField, { SiteBrainFieldStyles } from "@/components/SiteBrainField";
 import {
@@ -46,6 +46,7 @@ export default function SiteBrainSection() {
   const [busy, setBusy] = useState<ProfileField | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [onlyGaps, setOnlyGaps] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -178,7 +179,20 @@ export default function SiteBrainSection() {
 
   const profile = s.profile;
   const known = PROFILE_FIELDS.filter((f) => !isFieldEmpty(profile, f)).length;
+  const missing = PROFILE_FIELDS.length - known;
   const edited = (profile.user_edited ?? []).length;
+  const pct = Math.round((known / PROFILE_FIELDS.length) * 100);
+  const groupStat = (g: (typeof FIELD_GROUPS)[number]) => ({
+    known: g.fields.filter((f) => !isFieldEmpty(profile, f.field)).length,
+    total: g.fields.length,
+  });
+  const jump = (title: string) => {
+    document.getElementById(anchor(title))?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  const groups = FIELD_GROUPS.map((g) => ({
+    group: g,
+    fields: onlyGaps ? g.fields.filter((f) => isFieldEmpty(profile, f.field)) : g.fields,
+  })).filter((g) => g.fields.length);
 
   return (
     <Shell
@@ -191,26 +205,28 @@ export default function SiteBrainSection() {
         </>
       }
     >
-      {/* what it knows, in four numbers */}
-      <div className="sb-sum">
-        <Num n={`${known}`} of={`/${PROFILE_FIELDS.length}`} label="things we know" />
-        <Num n={String(s.builtFrom?.pages ?? s.pagesCrawled)} label="pages read" />
-        <Num n={`v${s.version}`} label={s.builtBy === "user" ? "you last changed it" : "built by the team"} />
-        <Num n={String(edited)} label="fields you corrected" />
+      {/* how complete it is, said once, in a sentence and a bar */}
+      <div className="sb-top">
+        <div className="sb-top-l">
+          <div className="sb-top-t">
+            Your team knows <b>{known} of {PROFILE_FIELDS.length}</b> things about your business
+            {missing > 0 ? <> — <button className="sb-link" onClick={() => setOnlyGaps(true)}>{missing} still missing</button></> : " — nothing missing"}
+          </div>
+          <div className="sb-bar"><i style={{ width: `${pct}%` }} /></div>
+          <div className="sb-top-s">
+            {s.builtFrom?.pages ?? s.pagesCrawled} pages read · version {s.version} {s.builtBy === "user" ? "(your edit)" : "(built by the team)"}
+            {edited > 0 ? ` · ${edited} field${edited === 1 ? "" : "s"} you corrected` : ""}
+            {s.builtAt ? ` · last built ${new Date(s.builtAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}` : ""}
+            {s.history.length > 1 && (
+              <> · <button className="sb-link" onClick={() => setShowHistory((v) => !v)}>{showHistory ? "hide" : "show"} {s.history.length} versions</button></>
+            )}
+          </div>
+        </div>
+        <button className={`sb-toggle ${onlyGaps ? "on" : ""}`} onClick={() => setOnlyGaps((v) => !v)}>
+          {onlyGaps ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}
+          {onlyGaps ? "Showing gaps only" : "Show gaps only"}
+        </button>
       </div>
-
-      <p className="sb-meta">
-        {s.builtAt ? `Last built ${new Date(s.builtAt).toLocaleString()}` : "Never built"}
-        {s.builtFrom?.gsc_period ? ` · Search Console: ${s.builtFrom.gsc_period}` : " · Search Console not connected"}
-        {" · "}
-        {s.history.length > 1 ? (
-          <button className="sb-link" onClick={() => setShowHistory((v) => !v)}>
-            {showHistory ? "hide" : "show"} {s.history.length} versions
-          </button>
-        ) : (
-          "this is the first version"
-        )}
-      </p>
 
       {showHistory && (
         <div className="sb-hist">
@@ -228,19 +244,41 @@ export default function SiteBrainSection() {
         </div>
       )}
 
-      {FIELD_GROUPS.map((group) => (
-        <section key={group.title} className="sb-group">
-          <div className="sb-group-h">
-            <h2>{group.title}</h2>
-            <p>{group.sub}</p>
-          </div>
-          <div className="listgrid">
-            {group.fields.map((meta) => (
-              <SiteBrainField key={meta.field} meta={meta} profile={profile} busy={busy === meta.field} onSave={save} />
-            ))}
-          </div>
-        </section>
-      ))}
+      <div className="sb-body">
+        {/* contents — jump straight to the part you came to fix */}
+        <nav className="sb-nav">
+          <div className="sb-nav-h">On this page</div>
+          {FIELD_GROUPS.map((g) => {
+            const st = groupStat(g);
+            return (
+              <button key={g.title} className="sb-nav-i" onClick={() => jump(g.title)}>
+                <span className="truncate">{g.title}</span>
+                <span className={`sb-nav-n ${st.known === st.total ? "ok" : st.known === 0 ? "none" : ""}`}>{st.known}/{st.total}</span>
+              </button>
+            );
+          })}
+        </nav>
+
+        <div className="sb-main">
+          {!groups.length ? (
+            <div className="sb-empty"><CheckCircle2 size={20} style={{ color: "#4ade80" }} /><b className="lx-12 mt-2">Nothing missing</b>
+              <p className="lx-11 lx-mut mt-1">Every field has an answer. Turn the filter off to read them.</p>
+            </div>
+          ) : groups.map(({ group, fields }) => (
+            <section key={group.title} id={anchor(group.title)} className="sb-group">
+              <div className="sb-group-h">
+                <h2>{group.title}</h2>
+                <p>{group.sub}</p>
+              </div>
+              <div className="listgrid">
+                {fields.map((meta) => (
+                  <SiteBrainField key={meta.field} meta={meta} profile={profile} busy={busy === meta.field} onSave={save} />
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+      </div>
 
       <SiteBrainFieldStyles />
     </Shell>
@@ -269,14 +307,8 @@ function Shell({ children, right }: { children: React.ReactNode; right?: React.R
   );
 }
 
-function Num({ n, of, label }: { n: string; of?: string; label: string }) {
-  return (
-    <div className="sb-num">
-      <b>{n}{of && <span>{of}</span>}</b>
-      <span>{label}</span>
-    </div>
-  );
-}
+/** Stable id per group title, so the contents nav can scroll to it. */
+const anchor = (title: string) => "sb-" + title.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
 function Empty({ Icon, title, body, action }: { Icon: React.ElementType; title: string; body: string; action?: React.ReactNode }) {
   return (
@@ -308,13 +340,30 @@ const CSS = `
   text-decoration:none;transition:.15s}
 .sb-primary:hover:not(:disabled){background:#5b52ea}
 .sb-primary:disabled{opacity:.55;cursor:not-allowed}
-.sb-sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:1px;border-radius:12px;overflow:hidden;
-  background:#1a1a26;border:1px solid #1e1e2b}
-.sb-num{display:flex;flex-direction:column;gap:2px;padding:13px 14px;background:#101018}
-.sb-num b{font-size:20px;font-weight:700;color:#f0f0f7;line-height:1.1;font-variant-numeric:tabular-nums}
-.sb-num b span{font-size:13px;font-weight:600;color:#6f6f85}
-.sb-num span{font-size:10.5px;color:#7c7c95}
-.sb-meta{margin-top:10px;font-size:11px;color:#7c7c95;line-height:1.6}
+.sb-top{display:flex;flex-wrap:wrap;align-items:center;gap:14px;padding:14px 15px;border-radius:12px;background:#101018;
+  border:1px solid #1e1e2b}
+.sb-top-l{flex:1;min-width:240px}
+.sb-top-t{font-size:13.5px;color:#d8d8e6;line-height:1.5}
+.sb-top-t b{color:#fff;font-weight:700}
+.sb-bar{height:5px;margin-top:9px;border-radius:999px;background:#1c1c29;overflow:hidden}
+.sb-bar i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#4f46e5,#8b5cf6)}
+.sb-top-s{margin-top:8px;font-size:11px;color:#7c7c95;line-height:1.6}
+.sb-toggle{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:9px;flex-shrink:0;
+  background:#191925;border:1px solid #262636;color:#b6b6c8;font-size:11.5px;font-weight:600;cursor:pointer;transition:.15s}
+.sb-toggle:hover{color:#fff;border-color:#3a3a52}
+.sb-toggle.on{color:#fff;background:rgba(79,70,229,.22);border-color:rgba(99,102,241,.55)}
+.sb-body{display:grid;grid-template-columns:176px minmax(0,1fr);gap:14px;margin-top:16px;align-items:start}
+@container sb (max-width:680px){.sb-body{grid-template-columns:minmax(0,1fr)}.sb-body .sb-nav{display:none}}
+.sb-nav{position:sticky;top:0;display:flex;flex-direction:column;gap:2px;padding:10px;border-radius:12px;background:#0d0d15;
+  border:1px solid #1a1a26}
+.sb-nav-h{padding:2px 8px 8px;font-size:10px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:#6f6f85}
+.sb-nav-i{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;background:none;border:none;
+  color:#a8a8bd;font-size:11.5px;text-align:left;cursor:pointer;transition:.15s}
+.sb-nav-i:hover{background:#151520;color:#fff}
+.sb-nav-n{margin-left:auto;flex-shrink:0;font-size:10px;font-weight:700;color:#6f6f85;font-variant-numeric:tabular-nums}
+.sb-nav-n.ok{color:#4ade80}
+.sb-nav-n.none{color:#f59e0b}
+.sb-main{min-width:0}
 .sb-link{color:#8f95ff;background:none;border:none;padding:0;font:inherit;font-weight:600;cursor:pointer}
 .sb-link:hover{text-decoration:underline}
 .sb-hist{margin-top:8px;border-radius:12px;background:#101018;border:1px solid #1e1e2b;overflow:hidden}
@@ -322,9 +371,10 @@ const CSS = `
 .sb-hist-r+.sb-hist-r{border-top:1px solid #1a1a26}
 .sb-now{padding:2px 7px;border-radius:6px;font-size:9.5px;font-weight:700;color:#a5b4fc;background:rgba(99,102,241,.14);
   border:1px solid rgba(99,102,241,.35)}
-.sb-group{margin-top:16px;padding:15px;border-radius:12px;background:#101018;border:1px solid #1e1e2b}
-.sb-group-h{margin-bottom:12px}
-.sb-group-h h2{font-size:13.5px;font-weight:700;color:#f0f0f7}
+.sb-group{padding:0;background:none;border:none;scroll-margin-top:8px}
+.sb-group+.sb-group{margin-top:22px}
+.sb-group-h{margin-bottom:10px}
+.sb-group-h h2{font-size:14px;font-weight:700;color:#f0f0f7;letter-spacing:-.01em}
 .sb-group-h p{margin-top:3px;font-size:11px;color:#7c7c95;line-height:1.5}
 /* the reused field editor keeps its own markup (components/SiteBrainField.tsx); these two
    rules only calm its "where we read this" links down to the rest of the page */

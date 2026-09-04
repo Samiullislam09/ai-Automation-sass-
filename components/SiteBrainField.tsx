@@ -79,14 +79,17 @@ export default function SiteBrainField({ meta, profile, busy, onSave }: Props) {
   };
 
   return (
-    <div className="sb-f">
+    <div className={`sb-f ${empty ? "is-empty" : ""}`}>
       <div className="sb-f-head">
         <div style={{ minWidth: 0, flex: 1 }}>
-          <h3 className="sb-label">{meta.label}</h3>
+          <div className="sb-label-row">
+            <h3 className="sb-label">{meta.label}</h3>
+            {!editing && <Confidence level={confidence} userEdited={isUserEdited} empty={empty} />}
+          </div>
           <p className="sb-hint">{meta.hint}</p>
         </div>
         {!editing && (
-          <button className="btn btn-g btn-sm" onClick={open} disabled={busy} aria-label={`${empty ? "Fill in" : "Edit"} ${meta.label}`}>
+          <button className="sb-edit-btn" onClick={open} disabled={busy} aria-label={`${empty ? "Fill in" : "Edit"} ${meta.label}`}>
             {empty ? "Fill in" : "Edit"}
           </button>
         )}
@@ -95,13 +98,7 @@ export default function SiteBrainField({ meta, profile, busy, onSave }: Props) {
       {!editing && (
         <>
           <div className="sb-value">{empty ? <Unknown prompt={meta.prompt} onFill={open} /> : <FieldValue field={field} profile={profile} />}</div>
-
-          {!empty && (
-            <div className="sb-meta">
-              <Confidence level={confidence} userEdited={isUserEdited} />
-              <Sources items={sources} userEdited={isUserEdited} />
-            </div>
-          )}
+          {!empty && <Sources items={sources} userEdited={isUserEdited} />}
         </>
       )}
 
@@ -144,52 +141,43 @@ function Unknown({ prompt, onFill }: { prompt: string; onFill: () => void }) {
   );
 }
 
-function Confidence({ level, userEdited }: { level: string | null; userEdited: boolean }) {
-  if (userEdited) {
-    return (
-      <span className="pillst" style={{ background: "color-mix(in srgb, var(--ac) 16%, transparent)", color: "var(--ac)" }}>
-        YOUR WORDS
-      </span>
-    );
-  }
-  if (!level) {
-    // No confidence recorded is itself information; calling it "high" would be the one lie
-    // this page cannot afford.
-    return <span className="xs" style={{ color: "var(--mut2)" }}>Confidence not recorded</span>;
-  }
+/** A single quiet chip next to the field name: your words / how sure we are / not found yet.
+ *  Never claims confidence it doesn't have — "not recorded" says exactly that. */
+function Confidence({ level, userEdited, empty }: { level: string | null; userEdited: boolean; empty?: boolean }) {
+  if (empty) return <span className="sb-chip-st missing">Not found yet</span>;
+  if (userEdited) return <span className="sb-chip-st you">Your words</span>;
+  if (!level) return <span className="sb-chip-st">Source not recorded</span>;
   const c = CONFIDENCE_COPY[level as "high" | "medium" | "low"];
   if (!c) return null;
-  const colour = c.tone === "ok" ? "var(--grn)" : c.tone === "warn" ? "var(--amb)" : "var(--red)";
-  return (
-    <span title={c.note} className="pillst" style={{ background: `color-mix(in srgb, ${colour} 15%, transparent)`, color: colour }}>
-      {c.label.toUpperCase()}
-    </span>
-  );
+  const tone = c.tone === "ok" ? "ok" : c.tone === "warn" ? "warn" : "bad";
+  return <span title={c.note} className={`sb-chip-st ${tone}`}>{c.label}</span>;
 }
 
+/** Where this came from. Folded away by default — it used to print every page URL under
+ *  every field, which buried the answer itself under a wall of links. */
 function Sources({ items, userEdited }: { items: { label: string; href: string | null }[]; userEdited: boolean }) {
+  const [open, setOpen] = useState(false);
   if (!items.length) {
-    return (
-      <span className="xs" style={{ color: "var(--amb)" }}>
-        No source recorded — treat this as unverified.
-      </span>
-    );
+    return <div className="sb-srcbar"><span className="sb-srcnote">No source recorded — treat this as unverified.</span></div>;
   }
   return (
-    <span className="sb-src">
-      <span className="xs" style={{ color: "var(--mut2)" }}>{userEdited ? "You set this:" : "Yahan se pata chala:"}</span>
-      {items.map((s, i) =>
-        s.href ? (
-          <a key={i} href={s.href} target="_blank" rel="noopener noreferrer" className="xs brk">
-            {s.label} ↗
-          </a>
-        ) : (
-          <span key={i} className="xs mut">
-            {s.label}
-          </span>
-        )
+    <div className="sb-srcbar">
+      <button className="sb-srctoggle" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+        {userEdited ? "You set this" : `Read from ${items.length} ${items.length === 1 ? "source" : "sources"}`}
+        <span className={`sb-caret ${open ? "on" : ""}`} aria-hidden>▾</span>
+      </button>
+      {open && (
+        <div className="sb-srclist">
+          {items.map((x, i) =>
+            x.href ? (
+              <a key={i} href={x.href} target="_blank" rel="noopener noreferrer" className="sb-srcitem">{x.label}</a>
+            ) : (
+              <span key={i} className="sb-srcitem plain">{x.label}</span>
+            )
+          )}
+        </div>
       )}
-    </span>
+    </div>
   );
 }
 
@@ -553,13 +541,38 @@ function clone<T>(v: T): T {
 export function SiteBrainFieldStyles() {
   return (
     <style jsx global>{`
-      .sb-f { padding: 15px 0; border-top: 1px solid var(--line); }
-      .sb-f:first-child { border-top: none; padding-top: 2px; }
+      .sb-f { padding: 14px; border-radius: 12px; background: #101018; border: 1px solid #1e1e2b; }
+      .sb-f + .sb-f { margin-top: 10px; }
+      .sb-f.is-empty { border-style: dashed; background: #0d0d15; }
       .sb-f-head { display: flex; gap: 12px; align-items: flex-start; }
-      .sb-label { font-size: 14px; font-weight: 700; margin: 0; color: var(--ink); }
-      .sb-hint { font-size: 11.5px; color: var(--mut2); margin: 3px 0 0; max-width: 62ch; }
-      .sb-value { margin-top: 11px; min-width: 0; }
+      .sb-label-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+      .sb-label { font-size: 13.5px; font-weight: 700; margin: 0; color: #f0f0f7; }
+      .sb-hint { font-size: 11px; color: #7c7c95; margin: 3px 0 0; max-width: 62ch; }
+      .sb-value { margin-top: 10px; min-width: 0; }
       .sb-meta { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; margin-top: 11px; }
+      .sb-edit-btn { height: 28px; padding: 0 12px; border-radius: 8px; background: #191925; border: 1px solid #262636;
+                     color: #d6d6e4; font-size: 11.5px; font-weight: 600; cursor: pointer; flex-shrink: 0; }
+      .sb-edit-btn:hover:not(:disabled) { color: #fff; border-color: #3a3a52; }
+      .sb-edit-btn:disabled { opacity: .5; cursor: not-allowed; }
+      .sb-chip-st { padding: 2px 8px; border-radius: 6px; font-size: 10px; font-weight: 700; letter-spacing: .03em;
+                    color: #8b8ba0; background: rgba(255,255,255,.04); border: 1px solid #262636; white-space: nowrap; }
+      .sb-chip-st.ok { color: #4ade80; background: rgba(34,197,94,.10); border-color: rgba(34,197,94,.3); }
+      .sb-chip-st.warn { color: #fbbf24; background: rgba(251,191,36,.10); border-color: rgba(251,191,36,.3); }
+      .sb-chip-st.bad { color: #f87171; background: rgba(239,68,68,.10); border-color: rgba(239,68,68,.3); }
+      .sb-chip-st.you { color: #a5b4fc; background: rgba(99,102,241,.12); border-color: rgba(99,102,241,.35); }
+      .sb-chip-st.missing { color: #8b8ba0; border-style: dashed; }
+      .sb-srcbar { margin-top: 10px; padding-top: 9px; border-top: 1px solid #1a1a26; }
+      .sb-srcnote { font-size: 11px; color: #fbbf24; }
+      .sb-srctoggle { display: inline-flex; align-items: center; gap: 5px; padding: 0; background: none; border: none;
+                      color: #7c7c95; font-size: 11px; font-weight: 600; cursor: pointer; }
+      .sb-srctoggle:hover { color: #a5b4fc; }
+      .sb-caret { display: inline-block; transition: transform .15s; }
+      .sb-caret.on { transform: rotate(180deg); }
+      .sb-srclist { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+      .sb-srcitem { max-width: 100%; padding: 3px 8px; border-radius: 6px; font-size: 10.5px; color: #9a9ab2;
+                    background: #0a0a11; border: 1px solid #232332; text-decoration: none; overflow-wrap: anywhere; }
+      .sb-srcitem:hover { color: #fff; border-color: #3a3a52; }
+      .sb-srcitem.plain { color: #6f6f85; }
       .sb-edit { margin-top: 12px; }
       .sb-note { font-size: 11px; color: var(--mut2); margin: 10px 0 11px; max-width: 68ch; }
       .sb-pv { font-size: 13.5px; color: var(--ink); margin: 0 0 4px; line-height: 1.55; }
