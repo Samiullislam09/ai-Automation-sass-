@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
   const status = req.nextUrl.searchParams.get("status") || "awaiting_approval";
   let query = supabase
     .from("content_items")
-    .select("id, type, status, title, meta, created_at, updated_at")
+    .select("id, type, status, title, cluster, meta, created_at, updated_at")
     .eq("tenant_id", tenantId)
     .order("created_at", { ascending: false })
     .limit(100);
