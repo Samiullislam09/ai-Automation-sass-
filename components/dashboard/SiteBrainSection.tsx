@@ -2,13 +2,14 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
-  Activity, ArrowRight, Brain, Check, ChevronDown, Loader2, PlugZap, Plus, RotateCw, Search,
+  Activity, ArrowRight, Brain, Check, ChevronRight, Loader2, PlugZap, Plus, RotateCw, Search,
 } from "lucide-react";
 import { useStore } from "@/lib/store";
-import SiteBrainField, { SiteBrainFieldStyles } from "@/components/SiteBrainField";
+import { SiteBrainFieldStyles } from "@/components/SiteBrainField";
 import {
-  FIELD_GROUPS,
   FIELD_META,
+  FRIENDLY_LABEL,
+  previewOf,
   isFieldEmpty,
   normalizeProfile,
   PROFILE_FIELDS,
@@ -24,7 +25,7 @@ import {
  *  from the content, not the chrome.
  *
  *  Logic and API calls are unchanged: /api/site-brain GET/PATCH and /api/agents/trigger. The
- *  field editor itself (components/SiteBrainField.tsx — offerings, proof, topic clusters,
+ *  field editor (components/SiteBrainField.tsx — offerings, proof, topic clusters,
  *  voice, goals, RepeatRows) is reused unmodified: real, complex, tested logic, and
  *  MrLxwaDashboard remaps the old theme's CSS tokens so it renders in-theme (see the "legacy
  *  /app/** theme bridge" comment there). */
@@ -49,7 +50,6 @@ export default function SiteBrainSection() {
   const [busy, setBusy] = useState<ProfileField | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
-  const [openField, setOpenField] = useState<ProfileField | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -216,9 +216,9 @@ export default function SiteBrainSection() {
           </div>
         </div>
         {firstGap && (
-          <button className="sb-next" onClick={() => setOpenField(firstGap)}>
+          <Link href={`/dashboard/site-brain/${firstGap}`} className="sb-next">
             Fill the next gap <ArrowRight size={14} />
-          </button>
+          </Link>
         )}
       </div>
 
@@ -238,28 +238,20 @@ export default function SiteBrainSection() {
         </div>
       )}
 
-      {/* the whole brain as one plain checklist: click a line to read or change it */}
+      {/* the whole brain as one plain checklist — each line opens its own page to read,
+          add or correct that one fact */}
       <div className="sb-list">
         {PROFILE_FIELDS.map((f) => {
-          const meta = FIELD_META[f];
-          const isOpen = openField === f;
           const has = filled(f);
           return (
-            <div key={f} className={`sb-item ${isOpen ? "open" : ""} ${has ? "" : "gap"}`}>
-              <button className="sb-item-h" onClick={() => setOpenField(isOpen ? null : f)} aria-expanded={isOpen}>
-                <span className={`sb-mark ${has ? "ok" : ""}`}>{has ? <Check size={12} /> : <Plus size={12} />}</span>
-                <span className="min-w-0 flex-1">
-                  <span className="sb-item-t">{FRIENDLY[f] ?? meta.label}</span>
-                  <span className="sb-item-p">{has ? preview(profile, f) : "Not added yet"}</span>
-                </span>
-                <ChevronDown size={15} className={`sb-caret2 ${isOpen ? "on" : ""}`} />
-              </button>
-              {isOpen && (
-                <div className="sb-item-b">
-                  <SiteBrainField bare meta={meta} profile={profile} busy={busy === f} onSave={save} />
-                </div>
-              )}
-            </div>
+            <Link key={f} href={`/dashboard/site-brain/${f}`} className={`sb-item ${has ? "" : "gap"}`}>
+              <span className={`sb-mark ${has ? "ok" : ""}`}>{has ? <Check size={12} /> : <Plus size={12} />}</span>
+              <span className="min-w-0 flex-1">
+                <span className="sb-item-t">{FRIENDLY_LABEL[f] ?? FIELD_META[f].label}</span>
+                <span className="sb-item-p">{has ? previewOf(profile, f) : "Not added yet — tap to add"}</span>
+              </span>
+              <span className="sb-go">{has ? "View" : "Add"} <ChevronRight size={14} /></span>
+            </Link>
           );
         })}
       </div>
@@ -289,46 +281,6 @@ function Shell({ children, right }: { children: React.ReactNode; right?: React.R
       </section>
     </div>
   );
-}
-
-/** Plain-English names for the twelve fields. FIELD_META's labels are written for the editor;
- *  this list is what a business owner would call the same thing. */
-const FRIENDLY: Partial<Record<ProfileField, string>> = {
-  what_they_do: "What your business does",
-  offerings: "What you sell",
-  audience: "Who you sell to",
-  buyer_intent: "What buyers ask before they buy",
-  proof: "Facts we are allowed to claim",
-  topic_clusters: "Subjects your site covers",
-  content_gaps: "Questions your site doesn't answer",
-  voice: "How your writing should sound",
-  geo: "Where you work",
-  language: "Language you publish in",
-  competitors: "Your competitors",
-  goals: "What you want from this",
-};
-
-/** One line of the answer for the closed row — never the whole thing. */
-function preview(profile: SiteProfile, field: ProfileField): string {
-  const v: any = (profile as any)[field];
-  const cut = (t: string) => (t.length > 110 ? t.slice(0, 110).trimEnd() + "…" : t);
-  if (typeof v === "string") return cut(v);
-  if (Array.isArray(v)) {
-    const names = v
-      .map((x: any) => (typeof x === "string" ? x : x?.name ?? x?.claim ?? x?.query ?? ""))
-      .filter(Boolean);
-    const head = names.slice(0, 3).join(" · ");
-    return cut(`${v.length} — ${head}${names.length > 3 ? " …" : ""}`);
-  }
-  if (field === "voice" && v) {
-    const parts = [v.tone, v.do?.length ? `${v.do.length} do` : "", v.dont?.length ? `${v.dont.length} never` : ""].filter(Boolean);
-    return cut(parts.join(" · ") || "Set");
-  }
-  if (field === "goals" && v) {
-    const parts = [v.primary, v.focus?.length ? `${v.focus.length} focus areas` : ""].filter(Boolean);
-    return cut(parts.join(" · ") || "Set");
-  }
-  return "Added";
 }
 
 function Empty({ Icon, title, body, action }: { Icon: React.ElementType; title: string; body: string; action?: React.ReactNode }) {
@@ -372,21 +324,18 @@ const CSS = `
   background:#4f46e5;border:1px solid #6366f1;color:#fff;font-size:12.5px;font-weight:600;cursor:pointer;transition:.15s}
 .sb-next:hover{background:#5b52ea}
 .sb-list{margin-top:14px;border-radius:12px;background:#101018;border:1px solid #1e1e2b;overflow:hidden}
+.sb-item{display:flex;align-items:center;gap:12px;width:100%;padding:13px 15px;text-decoration:none;transition:.15s}
 .sb-item+.sb-item{border-top:1px solid #1a1a26}
-.sb-item.open{background:#12121c}
-.sb-item-h{display:flex;align-items:center;gap:12px;width:100%;padding:13px 15px;background:none;border:none;
-  color:inherit;text-align:left;cursor:pointer;transition:.15s}
-.sb-item-h:hover{background:#151520}
+.sb-item:hover{background:#151520}
+.sb-item:hover .sb-go{color:#fff;border-color:#3a3a52}
 .sb-mark{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;flex-shrink:0;border-radius:50%;
   color:#f59e0b;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.4)}
 .sb-mark.ok{color:#4ade80;background:rgba(34,197,94,.12);border-color:rgba(34,197,94,.35)}
 .sb-item-t{display:block;font-size:13.5px;font-weight:600;color:#f0f0f7}
 .sb-item-p{display:block;margin-top:2px;font-size:11.5px;color:#7c7c95;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sb-item.gap .sb-item-p{color:#c08a2e}
-.sb-caret2{flex-shrink:0;color:#6f6f85;transition:transform .15s}
-.sb-caret2.on{transform:rotate(180deg)}
-.sb-item-b{padding:0 15px 15px 49px}
-@container sb (max-width:520px){.sb-item-b{padding-left:15px}}
+.sb-go{display:inline-flex;align-items:center;gap:4px;flex-shrink:0;height:28px;padding:0 10px;border-radius:8px;
+  background:#191925;border:1px solid #262636;color:#9a9ab2;font-size:11.5px;font-weight:600;transition:.15s}
 .sb-hist{margin-top:10px;border-radius:12px;background:#101018;border:1px solid #1e1e2b;overflow:hidden}
 .sb-hist-r{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;padding:9px 13px}
 .sb-hist-r+.sb-hist-r{border-top:1px solid #1a1a26}

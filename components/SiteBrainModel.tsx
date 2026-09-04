@@ -441,6 +441,47 @@ const SOURCE_LABELS: Record<string, string> = {
   "google-search-console": "Google Search Console",
 };
 
+/** Plain-English names for the twelve fields. FIELD_META's labels are written for the editor;
+ *  these are what a business owner would call the same thing, and they are what the Site Brain
+ *  list and the per-field page show. */
+export const FRIENDLY_LABEL: Record<ProfileField, string> = {
+  what_they_do: "What your business does",
+  offerings: "What you sell",
+  audience: "Who you sell to",
+  buyer_intent: "What buyers ask before they buy",
+  proof: "Facts we are allowed to claim",
+  topic_clusters: "Subjects your site covers",
+  content_gaps: "Questions your site doesn't answer",
+  voice: "How your writing should sound",
+  geo: "Where you work",
+  language: "Language you publish in",
+  competitors: "Your competitors",
+  goals: "What you want from this",
+};
+
+/** One line of an answer, for a closed list row — never the whole thing. */
+export function previewOf(profile: SiteProfile, field: ProfileField): string {
+  const v: any = (profile as any)[field];
+  const cut = (t: string) => (t.length > 110 ? t.slice(0, 110).trimEnd() + "…" : t);
+  if (typeof v === "string") return cut(v);
+  if (Array.isArray(v)) {
+    const names = v
+      .map((x: any) => (typeof x === "string" ? x : x?.name ?? x?.claim ?? x?.query ?? ""))
+      .filter(Boolean);
+    const head = names.slice(0, 3).join(" · ");
+    return cut(`${v.length} — ${head}${names.length > 3 ? " …" : ""}`);
+  }
+  if (field === "voice" && v) {
+    const parts = [v.tone, v.do?.length ? `${v.do.length} do` : "", v.dont?.length ? `${v.dont.length} never` : ""].filter(Boolean);
+    return cut(parts.join(" · ") || "Set");
+  }
+  if (field === "goals" && v) {
+    const parts = [v.primary, v.focus?.length ? `${v.focus.length} focus areas` : ""].filter(Boolean);
+    return cut(parts.join(" · ") || "Set");
+  }
+  return "Added";
+}
+
 export const CONFIDENCE_COPY: Record<Confidence, { label: string; tone: "ok" | "warn" | "low"; note: string }> = {
   high: { label: "High confidence", tone: "ok", note: "Stated plainly on the pages linked beside it." },
   medium: { label: "Medium confidence", tone: "warn", note: "Read off your site, but worth a glance." },

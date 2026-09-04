@@ -43,9 +43,12 @@ type Props = {
   /** The Site Brain page shows the field name and status on its own row, so the card inside it
    *  drops its header and keeps only the answer, its sources and the Edit button. */
   bare?: boolean;
+  /** Open straight into the editor — used by the per-field page when the field is empty,
+   *  because "add it" is the only reason to be on that page. */
+  autoEdit?: boolean;
 };
 
-export default function SiteBrainField({ meta, profile, busy, onSave, bare }: Props) {
+export default function SiteBrainField({ meta, profile, busy, onSave, bare, autoEdit }: Props) {
   const field = meta.field;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<any>(null);
@@ -64,6 +67,12 @@ export default function SiteBrainField({ meta, profile, busy, onSave, bare }: Pr
   useEffect(() => {
     if (editing) firstInput.current?.focus?.();
   }, [editing]);
+
+  // Only on mount: re-opening the editor every render would make Cancel impossible.
+  useEffect(() => {
+    if (autoEdit) { setDraft(clone((profile as any)[field])); setEditing(true); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const save = async () => {
     const ok = await onSave(field, draft);
@@ -86,7 +95,7 @@ export default function SiteBrainField({ meta, profile, busy, onSave, bare }: Pr
       {bare ? (
         !editing && (
           <div className="sb-bare-h">
-            <span className="sb-hint">{meta.hint}</span>
+            {/* the page header already carries the name and the hint — only the action here */}
             <button className="sb-edit-btn" onClick={open} disabled={busy}>{empty ? "Fill in" : "Edit"}</button>
           </div>
         )
@@ -554,11 +563,11 @@ export function SiteBrainFieldStyles() {
   return (
     <style jsx global>{`
       .sb-f { padding: 14px; border-radius: 12px; background: #101018; border: 1px solid #1e1e2b; }
-      .sb-f.is-bare { padding: 0; background: none; border: none; }
+      .sb-f.is-bare, .sb-f.is-bare.is-empty { padding: 0; background: none; border: none; }
       .sb-f.is-bare + .sb-f { margin-top: 0; }
-      .sb-bare-h { display: flex; align-items: center; gap: 12px; }
+      .sb-bare-h { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
       .sb-bare-h .sb-hint { margin: 0; flex: 1; }
-      .sb-f.is-bare .sb-value { margin-top: 10px; }
+      .sb-f.is-bare .sb-value { margin-top: 8px; }
       .sb-f + .sb-f { margin-top: 10px; }
       .sb-f.is-empty { border-style: dashed; background: #0d0d15; }
       .sb-f-head { display: flex; gap: 12px; align-items: flex-start; }
