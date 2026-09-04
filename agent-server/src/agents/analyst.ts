@@ -14,6 +14,7 @@ import {
   type Proof,
   type TopicCluster,
   type ContentGap,
+  PROFILE_FIELDS,
   type ProfileField,
   type Confidence,
   type SiteType,
@@ -559,6 +560,25 @@ export class AnalystAgent extends Agent {
     }
     if (userEdited.length) profile.user_edited = [...userEdited];
 
+    // A re-run must never make the brain emptier than it was. One flaky LLM call used to wipe
+    // a field that a previous run had read perfectly well — the customer clicked "read my site
+    // again" and watched "what this business does" turn into "not found yet" (reported live
+    // 2026-09-05). Anything this run could not establish, but the last version knew, is copied
+    // forward with its original source and confidence: still evidence, just older evidence.
+    const carried: ProfileField[] = [];
+    if (previous) {
+      for (const field of PROFILE_FIELDS) {
+        if (userEdited.includes(field)) continue;      // already copied above
+        if (!isEmptyValue((profile as any)[field])) continue;
+        const old = (previous.profile as any)[field];
+        if (isEmptyValue(old)) continue;
+        (profile as any)[field] = old;
+        if (previous.profile.sources?.[field]) sources[field] = previous.profile.sources[field];
+        confidence[field] = previous.profile.confidence?.[field] ?? "low";
+        carried.push(field);
+      }
+    }
+
     // A profile with nothing in it is not worth a version row: it would show up in the UI as
     // "we understood your site" while saying nothing at all.
     const filled = countFilled(profile);
@@ -593,6 +613,7 @@ export class AnalystAgent extends Agent {
       pages: pages.length,
       clustered: embedded.length,
       clusters: profile.topic_clusters.map((c) => ({ name: c.name, pages: c.size })),
+      carriedForward: carried,
       offerings: profile.offerings.length,
       proof: profile.proof.length,
       gaps: profile.content_gaps.length,
@@ -636,6 +657,15 @@ const GAP_MIN_IMPRESSIONS = 20;
 // prevent. Missing a few is the cheaper mistake.
 //
 const SITE_TYPES: SiteType[] = ["business", "ecommerce", "blog", "portfolio", "nonprofit", "personal"];
+
+/** Empty in the same sense the Site Brain screen means it: nothing we could honestly show. */
+function isEmptyValue(v: unknown): boolean {
+  if (v === null || v === undefined) return true;
+  if (Array.isArray(v)) return v.length === 0;
+  if (typeof v === "string") return !v.trim();
+  if (typeof v === "object") return Object.values(v as Record<string, unknown>).every(isEmptyValue);
+  return false;
+}
 
 // Written down here rather than tuned in a prompt so it can be recalibrated from real data
 // (plan §12: replace estimates with a week of measurements) by changing one number.

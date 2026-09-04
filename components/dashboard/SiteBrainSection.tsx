@@ -116,9 +116,12 @@ export default function SiteBrainSection() {
       }
       toast(
         type === "crawler"
-          ? "Reading your site again — watch it in the Workspace."
+          ? "Reading your site — the fields fill in as it goes. Watch it in the Workspace."
           : "Rebuilding the profile from the pages we already have."
       );
+      // The run takes a couple of minutes on the agent server; poll a few times so the page
+      // fills itself in rather than waiting for the customer to hit refresh.
+      for (const delay of [20_000, 45_000, 90_000, 150_000]) setTimeout(load, delay);
     } catch {
       toast("Couldn't start the refresh — network error.", "error");
     } finally {
@@ -207,11 +210,12 @@ export default function SiteBrainSection() {
         <>
           {/* the whole point: the customer shouldn't fill anything in. This runs Mr. Analyst
               over the pages already crawled and writes every field it finds evidence for. */}
-          <button className="sb-primary" disabled={refreshing} onClick={() => refresh("analyst")} title="Let the AI read your site and fill these in">
-            {refreshing ? <Loader2 size={14} className="sb-spin" /> : <Sparkles size={14} />} Fill it in for me
-          </button>
-          <button className="sb-btn" disabled={refreshing} onClick={() => refresh("crawler")} title="Crawl the site again first, then rebuild">
-            <RotateCw size={14} /> Re-read site
+          {/* ONE button. It enqueues the crawler, which chains into the analyst itself
+              (agent-server/src/agents/crawler.ts), so a single click re-reads the site and
+              rewrites every field from it. */}
+          <button className="sb-primary" disabled={refreshing} onClick={() => refresh("crawler")} title="Read my site and fill all of this in">
+            {refreshing ? <Loader2 size={14} className="sb-spin" /> : <Sparkles size={14} />}
+            {refreshing ? "Starting…" : "Fill it in for me"}
           </button>
           <Link href="/dashboard/workspace" className="sb-btn"><Activity size={14} /> Watch</Link>
         </>
@@ -220,7 +224,7 @@ export default function SiteBrainSection() {
       {refreshing && (
         <div className="sb-working">
           <Loader2 size={14} className="sb-spin" />
-          <span>Mr. Analyst is reading your site — this page fills itself in when he&rsquo;s done.</span>
+          <span>Reading your site — this page fills itself in as the team works.</span>
           <Link href="/dashboard/workspace" className="sb-card-a" style={{ margin: 0 }}>Watch</Link>
         </div>
       )}
@@ -253,7 +257,7 @@ export default function SiteBrainSection() {
           <div className="sb-card-v">{s.builtFrom?.pages ?? s.pagesCrawled} pages</div>
           <div className="sb-card-s">&nbsp;</div>
           <button className="sb-card-a" disabled={refreshing} onClick={() => refresh("crawler")}>
-            {refreshing ? "Starting…" : "Read my site again"}
+            {refreshing ? "Starting…" : "Read again"}
           </button>
         </div>
 
