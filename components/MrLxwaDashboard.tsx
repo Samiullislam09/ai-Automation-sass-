@@ -67,6 +67,8 @@ import {
   BookOpen,
   PenLine,
   Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   BarChart3,
   KeyRound,
@@ -993,6 +995,23 @@ export default function MrLxwaDashboard({
   const [tab, setTab] = useState("Live Activity");
   const [aTab, setATab] = useState<"assistant" | "voice">("assistant");
   const [sideOpen, setSideOpen] = useState(false); // <lg drawer
+  // Icon-only rail (desktop). Owner asked for a collapsible sidebar so a reading page gets the
+  // full width. Remembered per browser; the article reviewer (/dashboard/content/<id>) starts
+  // collapsed the first time, since that page is all about the article's width. Read in an
+  // effect, never during render — localStorage on the server is a hydration mismatch.
+  const [mini, setMini] = useState(false);
+  useEffect(() => {
+    let stored: string | null = null;
+    try { stored = localStorage.getItem("lx-rail-mini"); } catch {}
+    if (stored !== null) { setMini(stored === "1"); return; }
+    setMini(/^\/dashboard\/content\/.+/.test(pathname));
+  }, [pathname]);
+  const toggleMini = () => {
+    setMini((m) => {
+      try { localStorage.setItem("lx-rail-mini", m ? "0" : "1"); } catch {}
+      return !m;
+    });
+  };
   const [botOpen, setBotOpen] = useState(false); // <lg drawer
   // >=lg: the assistant panel is static, not a drawer, so it competes with the main content for
   // width on every page it's open on. Per the owner (2026-08-29): default it open only on the
@@ -1377,25 +1396,37 @@ export default function MrLxwaDashboard({
 
   const Sidebar = (
     <aside
-      className={`lx-panelL fixed inset-y-0 left-0 z-50 flex w-48 shrink-0 flex-col transition-transform duration-300 lg:static lg:translate-x-0 ${
-        sideOpen ? "translate-x-0" : "-translate-x-full"
-      }`}
+      className={`lx-panelL fixed inset-y-0 left-0 z-50 flex shrink-0 flex-col transition-transform duration-300 lg:static lg:translate-x-0 ${
+        mini ? "w-48 lg:w-[68px]" : "w-48"
+      } ${sideOpen ? "translate-x-0" : "-translate-x-full"}`}
     >
       {/* logo */}
-      <div className="flex items-center gap-3 px-4 pt-5 pb-4">
+      <div className={`flex items-center gap-3 pt-5 pb-4 ${mini ? "px-3 lg:justify-center" : "px-4"}`}>
         <LogoMark size={30} />
-        <div className="min-w-0">
+        <div className={`min-w-0 ${mini ? "lg:hidden" : ""}`}>
           <div className="text-sm font-bold leading-tight">Mr. Lxwa</div>
           <div className="lx-10 lx-mut leading-tight">AI Automation System</div>
         </div>
         <button className="lx-icobtn ml-auto lg:hidden" onClick={() => setSideOpen(false)} aria-label="Close menu">
           <X size={15} />
         </button>
+        {/* rendered conditionally, not class-toggled: "hidden lg:inline-flex lg:hidden" is two
+            lg display utilities fighting, and inline-flex wins in Tailwind's output order */}
+        {!mini && (
+          <button className="lx-icobtn ml-auto hidden lg:inline-flex" onClick={toggleMini} aria-label="Collapse sidebar" title="Collapse sidebar">
+            <PanelLeftClose size={15} />
+          </button>
+        )}
       </div>
+      {mini && (
+        <button className="lx-icobtn mx-auto mb-2 hidden lg:inline-flex" onClick={toggleMini} aria-label="Expand sidebar" title="Expand sidebar">
+          <PanelLeftOpen size={15} />
+        </button>
+      )}
 
       {/* nav — items with a real href (see NAV's own comment) are real next/link navigation
           to the still-live app/app/** pages; the rest stay a local highlight only. */}
-      <nav className="lx-scroll flex-1 space-y-1 overflow-y-auto px-3">
+      <nav className={`lx-scroll flex-1 space-y-1 overflow-y-auto ${mini ? "px-2" : "px-3"}`}>
         {NAV.map((it) => {
           // A sub-page keeps its section lit — /dashboard/content/<id> (the article reviewer)
           // is still "Content". Exact match everywhere else, so /dashboard never lights up for
@@ -1407,10 +1438,12 @@ export default function MrLxwaDashboard({
           const inner = (
             <>
               <it.icon size={16} strokeWidth={1.8} />
-              <span className="truncate">{it.label}</span>
+              <span className={`truncate ${mini ? "lg:hidden" : ""}`}>{it.label}</span>
               {badge ? (
                 <span
-                  className="ml-auto flex h-5 w-5 items-center justify-center rounded-full lx-10 font-bold text-white"
+                  className={`flex items-center justify-center rounded-full font-bold text-white ${
+                    mini ? "lx-10 ml-auto h-5 w-5 lg:absolute lg:right-1 lg:top-1 lg:ml-0 lg:h-4 lg:w-4" : "lx-10 ml-auto h-5 w-5"
+                  }`}
                   style={{ background: "linear-gradient(135deg,#7c3aed,#8b5cf6)", boxShadow: "0 0 10px rgba(139,92,246,.6)" }}
                 >
                   {badge}
@@ -1418,12 +1451,13 @@ export default function MrLxwaDashboard({
               ) : null}
             </>
           );
+          const cls = `lx-nav relative ${active ? "on" : ""} ${mini ? "lg:justify-center lg:px-0" : ""}`;
           return it.href ? (
-            <Link key={it.label} href={it.href} className={`lx-nav ${active ? "on" : ""}`}>
+            <Link key={it.label} href={it.href} className={cls} title={mini ? it.label : undefined}>
               {inner}
             </Link>
           ) : (
-            <button key={it.label} className={`lx-nav ${active ? "on" : ""}`} onClick={() => setNav(it.label)}>
+            <button key={it.label} className={cls} onClick={() => setNav(it.label)} title={mini ? it.label : undefined}>
               {inner}
             </button>
           );
@@ -1433,7 +1467,7 @@ export default function MrLxwaDashboard({
             not a mock. Was 4 hardcoded numbers + a fixed decorative sparkline until 2026-08-31
             (found live: it kept claiming "7 active tasks" with nothing running). "Server Load"
             had no client-side source at all and is dropped rather than faked. */}
-        <div className="lx-card2 mt-4 p-3">
+        <div className={`lx-card2 mt-4 p-3 ${mini ? "lg:hidden" : ""}`}>
           <div className="flex items-center gap-2">
             <span className="lx-pulse h-2 w-2 rounded-full" style={{ background: connColor, boxShadow: `0 0 8px ${connColor}` }} />
             <span className="lx-12 font-semibold">System Status</span>
@@ -1459,19 +1493,23 @@ export default function MrLxwaDashboard({
 
       {/* user — real name/plan from lib/store.tsx (the same source AppShell's account chip
           reads), real sign-out. [ASSET] user photo → gradient initial, unchanged. */}
-      <div className="p-3">
-        <button className="lx-card2 flex w-full items-center gap-3 p-2.5 text-left" onClick={() => setAcctOpen((o) => !o)}>
+      <div className={mini ? "p-2" : "p-3"}>
+        <button
+          className={`lx-card2 flex w-full items-center gap-3 text-left ${mini ? "p-1.5 lg:justify-center" : "p-2.5"}`}
+          onClick={() => setAcctOpen((o) => !o)}
+          title={mini ? `${userName} \u00b7 ${planName}` : undefined}
+        >
           <span
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white"
             style={{ background: "linear-gradient(135deg,#f59e0b,#ef4444 60%,#7c3aed)" }}
           >
             {userInitial}
           </span>
-          <span className="min-w-0 flex-1">
+          <span className={`min-w-0 flex-1 ${mini ? "lg:hidden" : ""}`}>
             <span className="block truncate lx-13 font-semibold">{userName}</span>
             <span className="block lx-10 lx-mut">{planName}</span>
           </span>
-          <ChevronDown size={15} className="lx-mut" />
+          <ChevronDown size={15} className={`lx-mut ${mini ? "lg:hidden" : ""}`} />
         </button>
         {acctOpen && (
           <button

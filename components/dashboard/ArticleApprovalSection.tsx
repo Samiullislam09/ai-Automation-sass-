@@ -3,8 +3,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  ArrowLeft, ArrowRight, Bell, CheckCircle2, ChevronDown, Copy, ExternalLink, Eye,
-  Lock, MinusCircle, MoreVertical, Pencil, RotateCw, Send, Sparkles, X, XCircle,
+  ArrowLeft, ArrowRight, CheckCircle2, ChevronDown, Copy, ExternalLink, Eye,
+  Clock, Lock, MinusCircle, MoreVertical, Pencil, RotateCw, Send, Sparkles, X, XCircle,
 } from "lucide-react";
 import { renderMarkdown } from "@/lib/md";
 import { useStore } from "@/lib/store";
@@ -40,8 +40,6 @@ import { useStore } from "@/lib/store";
  *     by nearest keyword-token overlap — the port of agent-server's nearestCluster() below.
  *   - SEO Score + the 5-item checklist: Mr. SEO's own ~22 deterministic checks
  *     (agent-server/src/lib/seoChecks.ts), grouped — not a second, invented score.
- *   - The header bell's count is the tenant's real awaiting_approval total (same list this page
- *     already loads for Previous/Next), and links to Approvals.
  *   - Link Preview: the real published URL once live (`meta.publishedUrl`), or the staged path
  *     from the real slug beforehand, labelled "will publish to" so it's never read as live.
  */
@@ -166,7 +164,7 @@ export default function ArticleApprovalSection({
   siteName: string | null;
   siteUrl: string | null;
 }) {
-  const { toast, confirmAction, s: account } = useStore();
+  const { toast, confirmAction } = useStore();
   const router = useRouter();
 
   const [tab, setTab] = useState<"read" | "edit">("read");
@@ -204,18 +202,14 @@ export default function ArticleApprovalSection({
     return () => window.removeEventListener("click", close);
   }, [moreOpen]);
 
-  // Prev/Next — real neighbours in this tenant's content list, not a fixed demo order. The same
-  // list gives the header bell its real "waiting for you" count.
+  // Prev/Next — real neighbours in this tenant's content list, not a fixed demo order.
   const [neighbors, setNeighbors] = useState<{ prev: string | null; next: string | null }>({ prev: null, next: null });
-  const [pending, setPending] = useState(0);
   useEffect(() => {
     fetch("/api/content?status=all")
       .then((r) => r.json())
       .then((d) => {
         if (!d.ok) return;
-        const list: { id: string; status: string }[] = d.items ?? [];
-        setPending(list.filter((it) => it.status === "awaiting_approval").length);
-        const ids = list.map((it) => it.id);
+        const ids: string[] = (d.items ?? []).map((it: { id: string }) => it.id);
         const i = ids.indexOf(id);
         if (i === -1) return;
         setNeighbors({ prev: i > 0 ? ids[i - 1] : null, next: i < ids.length - 1 ? ids[i + 1] : null });
@@ -346,27 +340,10 @@ export default function ArticleApprovalSection({
   const scoreColor = (s: number) => (s >= 75 ? "#22c55e" : s >= 50 ? "#fbbf24" : "#ef4444");
   const gaugeR = 34;
   const gaugeC = 2 * Math.PI * gaugeR;
-  const userInitial = (account.user?.name || account.user?.email || "U").trim().charAt(0).toUpperCase();
 
   return (
     <div className="aa-wrap">
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
-
-      {/* ---------------- page header ---------------- */}
-      <header className="aa-head">
-        <div className="min-w-0">
-          <h1 className="aa-h1">Article Approval</h1>
-          <p className="lx-mut mt-1" style={{ fontSize: 12.5 }}>Review, approve, and publish articles with confidence.</p>
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          <Link href="/dashboard/content" className="aa-btn"><ArrowLeft size={14} /> Back to Content</Link>
-          <Link href="/dashboard/approvals" className="aa-ico" aria-label="Approvals" title={`${pending} waiting for review`}>
-            <Bell size={16} />
-            {pending > 0 && <span className="aa-badge">{pending > 9 ? "9+" : pending}</span>}
-          </Link>
-          <span className="aa-avatar">{userInitial}</span>
-        </div>
-      </header>
 
       {/* ---------------- article toolbar ---------------- */}
       <div className="aa-bar">
@@ -393,6 +370,7 @@ export default function ArticleApprovalSection({
         </div>
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
+          <Link href="/dashboard/content" className="aa-btn" title="Back to Content"><ArrowLeft size={14} /> Content</Link>
           <button className="aa-btn" disabled={!neighbors.prev} onClick={() => neighbors.prev && router.push(`/dashboard/content/${neighbors.prev}`)}>
             <ArrowLeft size={14} /> Previous
           </button>
@@ -533,9 +511,21 @@ export default function ArticleApprovalSection({
 
         {/* ------- right rail ------- */}
         <aside className="aa-rail space-y-3">
-          <div className="aa-card p-4">
-            <div className="aa-h3">Article Details</div>
-            <dl className="mt-3 space-y-2.5">
+          <div className="aa-card p-3">
+            {/* the one action this rail is for \u2014 publish it, or open what was published */}
+            {isLive ? (
+              <a className="aa-live-btn" href={meta.publishedUrl!} target="_blank" rel="noreferrer">
+                <ExternalLink size={14} /> View Published Article
+              </a>
+            ) : (
+              <button className="lx-grad aa-rail-btn" onClick={approve} disabled={!pending_ || !!busy || dirty}
+                title={dirty ? "Save your changes first" : pending_ ? "Approve and publish this article" : "Only a pending article can be published"}>
+                <Send size={14} /> {busy === "approve" ? "Publishing\u2026" : "Approve & Publish"}
+              </button>
+            )}
+
+            <div className="aa-h3 mt-3">Article Details</div>
+            <dl className="mt-2 space-y-2">
               <KV label="Author" value="Mr. Writer" />
               <KV label="Assigned By" value={meta.chosenBy === "user" ? "You" : meta.chosenBy === "auto" ? "Mr. Keyword" : "Not recorded"} />
               <KV label="Category" value={category === "loading" ? "Loading…" : category ?? "Uncategorized"} />
@@ -553,22 +543,26 @@ export default function ArticleApprovalSection({
               <Block label="Created At"><div className="aa-val">{fmtDate(item.created_at)}</div></Block>
               <Block label="Last Updated"><div className="aa-val">{fmtDate(item.updated_at)}</div></Block>
               <Block label="Link Preview">
-                {slug || meta.publishedUrl ? (
-                  isLive ? (
-                    <a href={meta.publishedUrl!} target="_blank" rel="noreferrer" className="aa-link">
-                      <span className="truncate">{meta.publishedUrl}</span><ExternalLink size={12} />
-                    </a>
-                  ) : (
-                    <div className="aa-val truncate">will publish to /{slug}</div>
-                  )
+                {isLive ? (
+                  <a href={meta.publishedUrl!} target="_blank" rel="noreferrer" className="aa-url-btn live" title={meta.publishedUrl!}>
+                    <Lock size={12} className="shrink-0" /><span className="truncate">{meta.publishedUrl!.replace(/^https?:\/\//, "")}</span>
+                    <ExternalLink size={12} className="ml-auto shrink-0" />
+                  </a>
+                ) : slug ? (
+                  <span className="aa-url-btn" title={`Not live yet — this is where it will publish: /${slug}`}>
+                    <Clock size={12} className="shrink-0" /><span className="truncate">/{slug}</span>
+                    <span className="aa-url-tag">not live</span>
+                  </span>
                 ) : (
-                  <div className="lx-11 lx-mut mt-1">No slug yet — decided at publish.</div>
+                  <span className="aa-url-btn" title="The slug is decided when the article is published">
+                    <Clock size={12} className="shrink-0" /><span className="truncate">slug decided at publish</span>
+                  </span>
                 )}
               </Block>
             </dl>
           </div>
 
-          <div className="aa-card p-4">
+          <div className="aa-card p-3">
             <div className="aa-h3">AI Assistant</div>
             <div className="aa-seo-label"><Sparkles size={13} style={{ color: "#a78bfa" }} /> SEO Score</div>
 
@@ -659,21 +653,12 @@ const CSS = `
 /* every breakpoint here is a CONTAINER query: this page sits inside the dashboard shell,
    so the space it actually gets is the shell column, not the viewport */
 .aa-wrap{display:flex;flex-direction:column;gap:12px;min-width:0;container-type:inline-size;container-name:aa}
-.aa-head{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding-bottom:12px;border-bottom:1px solid var(--lx-border)}
-.aa-h1{font-size:22px;font-weight:800;letter-spacing:-.02em;line-height:1.1;color:#fff}
 .aa-h2{font-size:17px;font-weight:700;color:#fff;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-.aa-h3{font-size:14px;font-weight:700;color:#fff}
+.aa-h3{font-size:13px;font-weight:700;color:#fff}
 .aa-btn{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;border-radius:9px;white-space:nowrap;
   background:#12121c;border:1px solid var(--lx-border);color:#d6d6e4;font-size:12.5px;font-weight:600;cursor:pointer;transition:.15s}
 .aa-btn:hover:not(:disabled){color:#fff;border-color:rgba(139,92,246,.5);background:#171722}
 .aa-btn:disabled{opacity:.4;cursor:not-allowed}
-.aa-ico{position:relative;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:9px;
-  background:#12121c;border:1px solid var(--lx-border);color:#b6b6c8;transition:.15s}
-.aa-ico:hover{color:#fff;border-color:rgba(139,92,246,.5)}
-.aa-badge{position:absolute;top:-5px;right:-5px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;
-  background:#ef4444;color:#fff;font-size:9.5px;font-weight:700;display:flex;align-items:center;justify-content:center}
-.aa-avatar{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;
-  background:linear-gradient(135deg,#7c3aed,#db2777);color:#fff;font-size:13px;font-weight:700;flex-shrink:0}
 .aa-bar{display:flex;flex-wrap:wrap;align-items:flex-start;gap:10px}
 .aa-pencil{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:7px;flex-shrink:0;
   background:none;border:none;color:#8b8ba0;cursor:pointer;transition:.15s}
@@ -689,7 +674,7 @@ const CSS = `
   color:#d6d6e4;font-size:12.5px;cursor:pointer;text-align:left}
 .aa-menu>*:hover{background:rgba(255,255,255,.06);color:#fff}
 .aa-menu>.danger{color:#f87171}
-.aa-grid{display:grid;grid-template-columns:minmax(0,1fr) 272px;gap:12px;align-items:start}
+.aa-grid{display:grid;grid-template-columns:minmax(0,1fr) 238px;gap:12px;align-items:start}
 @container aa (max-width:700px){.aa-grid{grid-template-columns:minmax(0,1fr)}}
 .aa-card{background:#0a0a11;border:1px solid var(--lx-border);border-radius:14px}
 .aa-chrome{display:flex;align-items:center;gap:8px;padding:8px 10px;background:#12121c;border-bottom:1px solid var(--lx-border)}
@@ -697,7 +682,7 @@ const CSS = `
 .aa-url{display:flex;align-items:center;gap:6px;flex:1;min-width:0;height:28px;padding:0 12px;border-radius:14px;
   background:#0a0a11;border:1px solid var(--lx-border);font-size:11.5px;
   font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-.aa-view{max-height:min(70vh,760px);overflow-y:auto}
+.aa-view{max-height:min(80vh,920px);overflow-y:auto}
 .aa-hero{padding:30px 26px;background:linear-gradient(135deg,#1c1330,#0b0b18 60%,#0a1420);border-bottom:1px solid var(--lx-border)}
 .aa-hero-title{font-size:28px;font-weight:800;line-height:1.15;color:#fff;letter-spacing:-.02em;max-width:640px}
 .aa-hero-sub{margin-top:10px;max-width:560px;font-size:13.5px;line-height:1.55;color:#b8b8cc}
@@ -730,16 +715,28 @@ const CSS = `
 .aa-danger:hover:not(:disabled){background:rgba(239,68,68,.12)}
 .aa-warn:disabled,.aa-danger:disabled{opacity:.4;cursor:not-allowed}
 .aa-kv{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
-.aa-k{font-size:11.5px;color:var(--lx-mut)}
-.aa-v{font-size:12.5px;font-weight:600;color:#fff;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.aa-k{font-size:11px;color:var(--lx-mut)}
+.aa-v{font-size:12px;font-weight:600;color:#fff;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .aa-block{padding-top:2px}
-.aa-val{margin-top:3px;font-size:12.5px;font-weight:600;color:#fff;line-height:1.45}
+.aa-val{margin-top:2px;font-size:12px;font-weight:600;color:#fff;line-height:1.4}
 .aa-tag{display:inline-flex;align-items:center;padding:3px 8px;border-radius:6px;font-size:10.5px;font-weight:600;
   color:#d6d6e4;background:rgba(255,255,255,.05);border:1px solid var(--lx-border)}
 .aa-link{display:flex;align-items:center;gap:5px;margin-top:3px;font-size:12px;color:#818cf8;text-decoration:none}
 .aa-link:hover{text-decoration:underline}
 .aa-seo-label{display:flex;align-items:center;gap:6px;margin-top:12px;font-size:11.5px;color:var(--lx-mut)}
-.aa-check{display:flex;align-items:center;gap:8px;font-size:12.5px}
+.aa-check{display:flex;align-items:center;gap:8px;font-size:12px}
+.aa-rail-btn,.aa-live-btn{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;height:36px;
+  border-radius:9px;font-size:12.5px;font-weight:600;cursor:pointer}
+.aa-rail-btn:disabled{opacity:.4;cursor:not-allowed;filter:none}
+.aa-live-btn{color:#4ade80;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.4);text-decoration:none}
+.aa-live-btn:hover{background:rgba(34,197,94,.18);color:#fff}
+.aa-url-btn{display:flex;align-items:center;gap:6px;width:100%;margin-top:4px;height:30px;padding:0 9px;border-radius:8px;
+  background:#0d0d16;border:1px solid var(--lx-border);color:var(--lx-mut);font-size:11px;text-decoration:none;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.aa-url-btn.live{color:#4ade80;border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.07)}
+.aa-url-btn.live:hover{background:rgba(34,197,94,.14)}
+.aa-url-tag{margin-left:auto;flex-shrink:0;padding:1px 5px;border-radius:5px;font-family:inherit;font-size:9.5px;font-weight:700;
+  color:#fbbf24;background:rgba(251,191,36,.12)}
 .aa-report{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;margin-top:14px;padding-top:12px;
   border-top:1px solid var(--lx-border);color:#818cf8;font-size:12.5px;font-weight:600;background:none;border-left:none;
   border-right:none;border-bottom:none;cursor:pointer}
