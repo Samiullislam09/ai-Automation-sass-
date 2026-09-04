@@ -40,9 +40,12 @@ type Props = {
   profile: SiteProfile;
   busy: boolean;
   onSave: (field: ProfileField, value: unknown) => Promise<boolean>;
+  /** The Site Brain page shows the field name and status on its own row, so the card inside it
+   *  drops its header and keeps only the answer, its sources and the Edit button. */
+  bare?: boolean;
 };
 
-export default function SiteBrainField({ meta, profile, busy, onSave }: Props) {
+export default function SiteBrainField({ meta, profile, busy, onSave, bare }: Props) {
   const field = meta.field;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<any>(null);
@@ -79,7 +82,15 @@ export default function SiteBrainField({ meta, profile, busy, onSave }: Props) {
   };
 
   return (
-    <div className={`sb-f ${empty ? "is-empty" : ""}`}>
+    <div className={`sb-f ${empty ? "is-empty" : ""} ${bare ? "is-bare" : ""}`}>
+      {bare ? (
+        !editing && (
+          <div className="sb-bare-h">
+            <span className="sb-hint">{meta.hint}</span>
+            <button className="sb-edit-btn" onClick={open} disabled={busy}>{empty ? "Fill in" : "Edit"}</button>
+          </div>
+        )
+      ) : (
       <div className="sb-f-head">
         <div style={{ minWidth: 0, flex: 1 }}>
           <div className="sb-label-row">
@@ -94,6 +105,7 @@ export default function SiteBrainField({ meta, profile, busy, onSave }: Props) {
           </button>
         )}
       </div>
+      )}
 
       {!editing && (
         <>
@@ -542,6 +554,11 @@ export function SiteBrainFieldStyles() {
   return (
     <style jsx global>{`
       .sb-f { padding: 14px; border-radius: 12px; background: #101018; border: 1px solid #1e1e2b; }
+      .sb-f.is-bare { padding: 0; background: none; border: none; }
+      .sb-f.is-bare + .sb-f { margin-top: 0; }
+      .sb-bare-h { display: flex; align-items: center; gap: 12px; }
+      .sb-bare-h .sb-hint { margin: 0; flex: 1; }
+      .sb-f.is-bare .sb-value { margin-top: 10px; }
       .sb-f + .sb-f { margin-top: 10px; }
       .sb-f.is-empty { border-style: dashed; background: #0d0d15; }
       .sb-f-head { display: flex; gap: 12px; align-items: flex-start; }

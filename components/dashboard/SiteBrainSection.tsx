@@ -2,12 +2,13 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
-  Activity, AlertCircle, Brain, CheckCircle2, FileText, GitBranch, Loader2, PlugZap, RotateCw, Search,
+  Activity, ArrowRight, Brain, Check, ChevronDown, Loader2, PlugZap, Plus, RotateCw, Search,
 } from "lucide-react";
 import { useStore } from "@/lib/store";
 import SiteBrainField, { SiteBrainFieldStyles } from "@/components/SiteBrainField";
 import {
   FIELD_GROUPS,
+  FIELD_META,
   isFieldEmpty,
   normalizeProfile,
   PROFILE_FIELDS,
@@ -48,8 +49,7 @@ export default function SiteBrainSection() {
   const [busy, setBusy] = useState<ProfileField | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
-  const [onlyGaps, setOnlyGaps] = useState(false);
-  const [tab, setTab] = useState(0);
+  const [openField, setOpenField] = useState<ProfileField | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -181,46 +181,46 @@ export default function SiteBrainSection() {
   }
 
   const profile = s.profile;
-  const known = PROFILE_FIELDS.filter((f) => !isFieldEmpty(profile, f)).length;
+  const filled = (f: ProfileField) => !isFieldEmpty(profile, f);
+  const known = PROFILE_FIELDS.filter(filled).length;
   const missing = PROFILE_FIELDS.length - known;
-  const edited = (profile.user_edited ?? []).length;
   const pct = Math.round((known / PROFILE_FIELDS.length) * 100);
-  const stat = (g: (typeof FIELD_GROUPS)[number]) => ({
-    known: g.fields.filter((f) => !isFieldEmpty(profile, f.field)).length,
-    total: g.fields.length,
-  });
-
-  const group = FIELD_GROUPS[Math.min(tab, FIELD_GROUPS.length - 1)];
-  const shown = onlyGaps ? group.fields.filter((f) => isFieldEmpty(profile, f.field)) : group.fields;
+  const firstGap = PROFILE_FIELDS.find((f) => !filled(f)) ?? null;
 
   return (
     <Shell
       right={
         <>
-          <button className="sb-btn" disabled={refreshing} onClick={() => refresh("crawler")} title="Read the site again and rebuild the profile">
-            {refreshing ? <Loader2 size={14} className="sb-spin" /> : <RotateCw size={14} />} Refresh
+          <button className="sb-btn" disabled={refreshing} onClick={() => refresh("crawler")} title="Read my website again and rebuild this">
+            {refreshing ? <Loader2 size={14} className="sb-spin" /> : <RotateCw size={14} />} Read my site again
           </button>
           <Link href="/dashboard/workspace" className="sb-btn"><Activity size={14} /> Watch it work</Link>
         </>
       }
     >
-      {/* ---- stat strip, same shape as Approvals / Reports ---- */}
-      <div className="sb-stats">
-        <Stat color="#8b5cf6" Icon={Brain} value={`${known}/${PROFILE_FIELDS.length}`} label="Things we know" sub={`${pct}% complete`} />
-        <Stat color={missing ? "#f59e0b" : "#22c55e"} Icon={AlertCircle} value={String(missing)} label="Still missing" sub={missing ? "click a tab to fill them" : "nothing missing"} />
-        <Stat color="#3b82f6" Icon={FileText} value={String(s.builtFrom?.pages ?? s.pagesCrawled)} label="Pages read" sub="from your website" />
-        <Stat color="#22d3ee" Icon={GitBranch} value={`v${s.version}`} label={s.builtBy === "user" ? "Your edit" : "Built by the team"} sub={edited ? `${edited} field${edited === 1 ? "" : "s"} you corrected` : "no manual corrections"} />
-      </div>
-
-      <div className="sb-bar"><i style={{ width: `${pct}%` }} /></div>
-
-      <p className="sb-meta">
-        {s.builtAt ? `Last built ${new Date(s.builtAt).toLocaleString()}` : "Never built"}
-        {s.builtFrom?.gsc_period ? " · Search Console connected" : " · Search Console not connected"}
-        {s.history.length > 1 && (
-          <> · <button className="sb-link" onClick={() => setShowHistory((v) => !v)}>{showHistory ? "hide" : "show"} {s.history.length} versions</button></>
+      {/* one sentence, one bar, one next step */}
+      <div className="sb-top">
+        <div className="min-w-0 flex-1">
+          <div className="sb-top-t">
+            {missing === 0
+              ? <>Your team knows <b>everything</b> on this list.</>
+              : <>Your team knows <b>{known} of {PROFILE_FIELDS.length}</b> things about your business.</>}
+          </div>
+          <div className="sb-bar"><i style={{ width: `${pct}%` }} /></div>
+          <div className="sb-top-s">
+            Read from {s.builtFrom?.pages ?? s.pagesCrawled} pages on your website
+            {s.builtAt ? ` · last updated ${new Date(s.builtAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}` : ""}
+            {s.history.length > 1 && (
+              <> · <button className="sb-link" onClick={() => setShowHistory((v) => !v)}>{showHistory ? "hide history" : `${s.history.length} versions`}</button></>
+            )}
+          </div>
+        </div>
+        {firstGap && (
+          <button className="sb-next" onClick={() => setOpenField(firstGap)}>
+            Fill the next gap <ArrowRight size={14} />
+          </button>
         )}
-      </p>
+      </div>
 
       {showHistory && (
         <div className="sb-hist">
@@ -238,41 +238,31 @@ export default function SiteBrainSection() {
         </div>
       )}
 
-      {/* ---- one tab per section, so nothing is a long scroll ---- */}
-      <div className="sb-tabs">
-        {FIELD_GROUPS.map((g, i) => {
-          const st = stat(g);
+      {/* the whole brain as one plain checklist: click a line to read or change it */}
+      <div className="sb-list">
+        {PROFILE_FIELDS.map((f) => {
+          const meta = FIELD_META[f];
+          const isOpen = openField === f;
+          const has = filled(f);
           return (
-            <button key={g.title} className={`sb-tab ${i === tab ? "on" : ""}`} onClick={() => setTab(i)}>
-              {g.title}
-              <span className={`sb-tab-n ${st.known === st.total ? "ok" : st.known === 0 ? "none" : ""}`}>{st.known}/{st.total}</span>
-            </button>
+            <div key={f} className={`sb-item ${isOpen ? "open" : ""} ${has ? "" : "gap"}`}>
+              <button className="sb-item-h" onClick={() => setOpenField(isOpen ? null : f)} aria-expanded={isOpen}>
+                <span className={`sb-mark ${has ? "ok" : ""}`}>{has ? <Check size={12} /> : <Plus size={12} />}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="sb-item-t">{FRIENDLY[f] ?? meta.label}</span>
+                  <span className="sb-item-p">{has ? preview(profile, f) : "Not added yet"}</span>
+                </span>
+                <ChevronDown size={15} className={`sb-caret2 ${isOpen ? "on" : ""}`} />
+              </button>
+              {isOpen && (
+                <div className="sb-item-b">
+                  <SiteBrainField bare meta={meta} profile={profile} busy={busy === f} onSave={save} />
+                </div>
+              )}
+            </div>
           );
         })}
-        <button className={`sb-toggle ${onlyGaps ? "on" : ""}`} onClick={() => setOnlyGaps((v) => !v)} title="Show only the fields that are still empty">
-          {onlyGaps ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />} Gaps only
-        </button>
       </div>
-
-      <section className="sb-group">
-        <div className="sb-group-h">
-          <h2>{group.title}</h2>
-          <p>{group.sub}</p>
-        </div>
-        {shown.length ? (
-          <div className="listgrid">
-            {shown.map((meta) => (
-              <SiteBrainField key={meta.field} meta={meta} profile={profile} busy={busy === meta.field} onSave={save} />
-            ))}
-          </div>
-        ) : (
-          <div className="sb-empty">
-            <CheckCircle2 size={20} style={{ color: "#4ade80" }} />
-            <b className="lx-12 mt-2">Nothing missing here</b>
-            <p className="lx-11 lx-mut mt-1">Every field in this section has an answer. Turn &ldquo;Gaps only&rdquo; off to read them.</p>
-          </div>
-        )}
-      </section>
 
       <SiteBrainFieldStyles />
     </Shell>
@@ -301,19 +291,44 @@ function Shell({ children, right }: { children: React.ReactNode; right?: React.R
   );
 }
 
-function Stat({ color, Icon, value, label, sub }: {
-  color: string; Icon: React.ElementType; value: string; label: string; sub: string;
-}) {
-  return (
-    <div className="sb-stat" style={{ ["--c" as any]: color }}>
-      <span className="sb-stat-ico"><Icon size={16} /></span>
-      <div className="min-w-0">
-        <div className="sb-stat-n">{value}</div>
-        <div className="lx-10 lx-mut">{label}</div>
-        <div className="sb-stat-sub" title={sub}>{sub}</div>
-      </div>
-    </div>
-  );
+/** Plain-English names for the twelve fields. FIELD_META's labels are written for the editor;
+ *  this list is what a business owner would call the same thing. */
+const FRIENDLY: Partial<Record<ProfileField, string>> = {
+  what_they_do: "What your business does",
+  offerings: "What you sell",
+  audience: "Who you sell to",
+  buyer_intent: "What buyers ask before they buy",
+  proof: "Facts we are allowed to claim",
+  topic_clusters: "Subjects your site covers",
+  content_gaps: "Questions your site doesn't answer",
+  voice: "How your writing should sound",
+  geo: "Where you work",
+  language: "Language you publish in",
+  competitors: "Your competitors",
+  goals: "What you want from this",
+};
+
+/** One line of the answer for the closed row — never the whole thing. */
+function preview(profile: SiteProfile, field: ProfileField): string {
+  const v: any = (profile as any)[field];
+  const cut = (t: string) => (t.length > 110 ? t.slice(0, 110).trimEnd() + "…" : t);
+  if (typeof v === "string") return cut(v);
+  if (Array.isArray(v)) {
+    const names = v
+      .map((x: any) => (typeof x === "string" ? x : x?.name ?? x?.claim ?? x?.query ?? ""))
+      .filter(Boolean);
+    const head = names.slice(0, 3).join(" · ");
+    return cut(`${v.length} — ${head}${names.length > 3 ? " …" : ""}`);
+  }
+  if (field === "voice" && v) {
+    const parts = [v.tone, v.do?.length ? `${v.do.length} do` : "", v.dont?.length ? `${v.dont.length} never` : ""].filter(Boolean);
+    return cut(parts.join(" · ") || "Set");
+  }
+  if (field === "goals" && v) {
+    const parts = [v.primary, v.focus?.length ? `${v.focus.length} focus areas` : ""].filter(Boolean);
+    return cut(parts.join(" · ") || "Set");
+  }
+  return "Added";
 }
 
 function Empty({ Icon, title, body, action }: { Icon: React.ElementType; title: string; body: string; action?: React.ReactNode }) {
@@ -346,37 +361,37 @@ const CSS = `
   text-decoration:none;transition:.15s}
 .sb-primary:hover:not(:disabled){background:#5b52ea}
 .sb-primary:disabled{opacity:.55;cursor:not-allowed}
-.sb-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px}
-.sb-stat{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:11px;min-width:0;
-  background:color-mix(in srgb,var(--c) 9%,#0b0b12);border:1px solid color-mix(in srgb,var(--c) 40%,transparent)}
-.sb-stat-ico{display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:9px;flex-shrink:0;
-  color:var(--c);background:color-mix(in srgb,var(--c) 14%,#0b0b12);border:1px solid color-mix(in srgb,var(--c) 45%,transparent)}
-.sb-stat-n{font-size:19px;font-weight:800;line-height:1;color:#fff;font-variant-numeric:tabular-nums}
-.sb-stat-sub{margin-top:2px;font-size:10px;color:var(--lx-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sb-bar{height:5px;margin-top:10px;border-radius:999px;background:#16161f;overflow:hidden}
+.sb-top{display:flex;flex-wrap:wrap;align-items:center;gap:14px;padding:15px 16px;border-radius:12px;background:#101018;
+  border:1px solid #1e1e2b}
+.sb-top-t{font-size:14.5px;color:#d8d8e6;line-height:1.5}
+.sb-top-t b{color:#fff;font-weight:700}
+.sb-bar{height:6px;margin-top:10px;border-radius:999px;background:#1c1c29;overflow:hidden;max-width:420px}
 .sb-bar i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#4f46e5,#8b5cf6)}
-.sb-meta{margin-top:8px;font-size:11px;color:var(--lx-mut);line-height:1.6}
-.sb-tabs{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px}
-.sb-tab{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 12px;border-radius:9px;font-size:12px;
-  font-weight:600;background:#0d0d16;border:1px solid var(--lx-border);color:#9a9ab2;cursor:pointer;transition:.15s}
-.sb-tab:hover{color:#fff}
-.sb-tab.on{color:#fff;background:linear-gradient(135deg,rgba(79,70,229,.55),rgba(124,58,237,.35));border-color:rgba(139,92,246,.6)}
-.sb-tab-n{font-size:10px;font-weight:700;color:#6f6f85;font-variant-numeric:tabular-nums}
-.sb-tab.on .sb-tab-n{color:#c4b5fd}
-.sb-tab-n.ok{color:#4ade80}
-.sb-tab-n.none{color:#f59e0b}
-.sb-toggle{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:9px;margin-left:auto;
-  background:#0d0d16;border:1px solid var(--lx-border);color:#9a9ab2;font-size:11.5px;font-weight:600;cursor:pointer;transition:.15s}
-.sb-toggle:hover{color:#fff;border-color:rgba(139,92,246,.5)}
-.sb-toggle.on{color:#fff;background:rgba(245,158,11,.16);border-color:rgba(245,158,11,.5)}
-.sb-group{margin-top:14px}
-.sb-group-h{margin-bottom:10px;padding:0 2px}
-.sb-group-h h2{font-size:14px;font-weight:700;color:#f0f0f7;letter-spacing:-.01em}
-.sb-group-h p{margin-top:3px;font-size:11px;color:#7c7c95;line-height:1.5}
-/* the reused field editor keeps its own markup (components/SiteBrainField.tsx); these two
-   rules only calm its "where we read this" links down to the rest of the page */
-.sb-group .sb-src a{color:#7c7c95;text-decoration:none}
-.sb-group .sb-src a:hover{color:#a5b4fc;text-decoration:underline}
+.sb-top-s{margin-top:9px;font-size:11.5px;color:#7c7c95;line-height:1.6}
+.sb-next{display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 15px;border-radius:9px;flex-shrink:0;
+  background:#4f46e5;border:1px solid #6366f1;color:#fff;font-size:12.5px;font-weight:600;cursor:pointer;transition:.15s}
+.sb-next:hover{background:#5b52ea}
+.sb-list{margin-top:14px;border-radius:12px;background:#101018;border:1px solid #1e1e2b;overflow:hidden}
+.sb-item+.sb-item{border-top:1px solid #1a1a26}
+.sb-item.open{background:#12121c}
+.sb-item-h{display:flex;align-items:center;gap:12px;width:100%;padding:13px 15px;background:none;border:none;
+  color:inherit;text-align:left;cursor:pointer;transition:.15s}
+.sb-item-h:hover{background:#151520}
+.sb-mark{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;flex-shrink:0;border-radius:50%;
+  color:#f59e0b;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.4)}
+.sb-mark.ok{color:#4ade80;background:rgba(34,197,94,.12);border-color:rgba(34,197,94,.35)}
+.sb-item-t{display:block;font-size:13.5px;font-weight:600;color:#f0f0f7}
+.sb-item-p{display:block;margin-top:2px;font-size:11.5px;color:#7c7c95;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sb-item.gap .sb-item-p{color:#c08a2e}
+.sb-caret2{flex-shrink:0;color:#6f6f85;transition:transform .15s}
+.sb-caret2.on{transform:rotate(180deg)}
+.sb-item-b{padding:0 15px 15px 49px}
+@container sb (max-width:520px){.sb-item-b{padding-left:15px}}
+.sb-hist{margin-top:10px;border-radius:12px;background:#101018;border:1px solid #1e1e2b;overflow:hidden}
+.sb-hist-r{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;padding:9px 13px}
+.sb-hist-r+.sb-hist-r{border-top:1px solid #1a1a26}
+.sb-now{padding:2px 7px;border-radius:6px;font-size:9.5px;font-weight:700;color:#a5b4fc;background:rgba(99,102,241,.14);
+  border:1px solid rgba(99,102,241,.35)}
 .sb-empty{display:flex;flex-direction:column;align-items:center;text-align:center;padding:32px 20px;border-radius:12px;
   background:#101018;border:1px dashed #232332}
 .sb-loading{display:flex;align-items:center;justify-content:center;gap:8px;padding:26px;border-radius:12px;background:#101018;
