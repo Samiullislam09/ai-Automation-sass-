@@ -9,7 +9,10 @@ import SiteBrainField, { SiteBrainFieldStyles } from "@/components/SiteBrainFiel
 import {
   FIELD_META,
   FRIENDLY_LABEL,
+  isFieldRelevant,
   previewOf,
+  SITE_TYPE_LABEL,
+  USER_ONLY_FIELDS,
   isFieldEmpty,
   normalizeProfile,
   PROFILE_FIELDS,
@@ -183,10 +186,19 @@ export default function SiteBrainSection() {
 
   const profile = s.profile;
   const filled = (f: ProfileField) => !isFieldEmpty(profile, f);
-  const known = PROFILE_FIELDS.filter(filled).length;
-  const missing = PROFILE_FIELDS.length - known;
-  const pct = Math.round((known / PROFILE_FIELDS.length) * 100);
-  const firstGap = PROFILE_FIELDS.find((f) => !filled(f)) ?? null;
+  // Only what actually applies to this kind of site is counted — a blog is not "missing" a
+  // price list. See NOT_APPLICABLE in SiteBrainModel.
+  const applies = PROFILE_FIELDS.filter((f) => isFieldRelevant(profile, f));
+  const skipped = PROFILE_FIELDS.filter((f) => !isFieldRelevant(profile, f));
+  const known = applies.filter(filled).length;
+  const missing = applies.length - known;
+  const pct = Math.round((known / applies.length) * 100);
+  // The team fills what it can read off the site; only the owner can answer the rest, so the
+  // "next gap" points at the ones a human actually has to answer.
+  const firstGap = applies.find((f) => !filled(f) && USER_ONLY_FIELDS.includes(f))
+    ?? applies.find((f) => !filled(f))
+    ?? null;
+  const typeLabel = profile.site_type ? SITE_TYPE_LABEL[profile.site_type] : null;
 
   return (
     <Shell
@@ -204,13 +216,26 @@ export default function SiteBrainSection() {
       <div className="sb-cards">
         <div className="sb-card">
           <div className="sb-card-k">What we know</div>
-          <div className="sb-card-v">{known} of {PROFILE_FIELDS.length} things</div>
+          <div className="sb-card-v">{known} of {applies.length} things</div>
           <div className="sb-bar"><i style={{ width: `${pct}%` }} /></div>
           {firstGap ? (
             <button className="sb-card-a" onClick={() => setOpenField(firstGap)}>Fill the next gap <ArrowRight size={12} /></button>
           ) : (
             <span className="sb-card-done">Nothing missing</span>
           )}
+        </div>
+
+        <div className="sb-card">
+          <div className="sb-card-k">Kind of site</div>
+          <div className="sb-card-v">{typeLabel ?? "Not worked out yet"}</div>
+          <div className="sb-card-s">
+            {typeLabel
+              ? `${skipped.length ? `${skipped.length} questions don't apply to this kind of site` : "Every question below applies"}`
+              : "Read off your pages, not asked"}
+          </div>
+          <button className="sb-card-a" onClick={() => setOpenField("site_type")}>
+            {typeLabel ? "Change it" : "Set it"}
+          </button>
         </div>
 
         <div className="sb-card">
@@ -237,24 +262,51 @@ export default function SiteBrainSection() {
       </div>
 
       <div className="sb-sec">What your team knows</div>
+      <p className="sb-note">
+        The team reads all of this off your website by itself. You only have to answer the few marked
+        <span className="sb-only"> Only you can answer</span> — nobody can read a house rule or a hard limit off a page.
+      </p>
 
       {/* the whole brain as one plain checklist — each line opens a popup to read, add or
           correct that one fact (owner, 2026-09-05: popup, not a separate page) */}
       <div className="sb-list">
-        {PROFILE_FIELDS.map((f) => {
+        {applies.map((f) => {
           const has = filled(f);
+          const userOnly = USER_ONLY_FIELDS.includes(f);
           return (
             <button key={f} className={`sb-item ${has ? "" : "gap"}`} onClick={() => setOpenField(f)}>
               <span className={`sb-mark ${has ? "ok" : ""}`}>{has ? <Check size={12} /> : <Plus size={12} />}</span>
               <span className="min-w-0 flex-1">
-                <span className="sb-item-t">{FRIENDLY_LABEL[f] ?? FIELD_META[f].label}</span>
-                <span className="sb-item-p">{has ? previewOf(profile, f) : "Not added yet — tap to add"}</span>
+                <span className="sb-item-t">
+                  {FRIENDLY_LABEL[f] ?? FIELD_META[f].label}
+                  {userOnly && !has && <span className="sb-only">Only you can answer</span>}
+                </span>
+                <span className="sb-item-p">
+                  {has
+                    ? previewOf(profile, f)
+                    : userOnly
+                      ? "Tell the team once and it sticks"
+                      : "The team hasn't found this on your site yet"}
+                </span>
               </span>
               <span className="sb-go">{has ? "View" : "Add"} <ChevronRight size={14} /></span>
             </button>
           );
         })}
       </div>
+
+      {skipped.length > 0 && (
+        <>
+          <div className="sb-sec">Not needed for this kind of site</div>
+          <div className="sb-skipped">
+            {skipped.map((f) => (
+              <button key={f} className="sb-skip" onClick={() => setOpenField(f)} title="Open it anyway">
+                {FRIENDLY_LABEL[f] ?? FIELD_META[f].label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
 
       {openField && (
         <FieldPopup
@@ -390,6 +442,13 @@ const CSS = `
 .sb-primary:disabled{opacity:.55;cursor:not-allowed}
 .sb-sec{font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:#6f6f85}
 .sb-list+.sb-sec,.sb-cards+.sb-sec,.sb-hist+.sb-sec{margin-top:22px}
+.sb-note{margin-top:8px;font-size:11.5px;color:#7c7c95;line-height:1.6}
+.sb-only{display:inline-flex;align-items:center;margin-left:8px;padding:2px 7px;border-radius:6px;font-size:9.5px;
+  font-weight:700;letter-spacing:.03em;color:#a5b4fc;background:rgba(99,102,241,.14);border:1px solid rgba(99,102,241,.35)}
+.sb-skipped{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.sb-skip{padding:6px 11px;border-radius:8px;background:#0d0d15;border:1px dashed #232332;color:#6f6f85;
+  font-size:11.5px;cursor:pointer;transition:.15s}
+.sb-skip:hover{color:#a8a8bd;border-color:#3a3a52}
 .sb-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px;margin-top:10px}
 @container sb (max-width:560px){.sb-cards{grid-template-columns:1fr}}
 .sb-card{display:flex;flex-direction:column;padding:13px 14px;border-radius:12px;background:#101018;border:1px solid #1e1e2b}

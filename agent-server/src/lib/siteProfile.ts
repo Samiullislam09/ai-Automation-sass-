@@ -104,10 +104,16 @@ export type PublishingRules = {
   disclaimer: string | null;
 };
 
+/** What kind of site this is — read off the pages, never asked. It decides which fields even
+ *  apply (a blog that sells nothing has no price list); the map lives in the web mirror,
+ *  components/SiteBrainModel.tsx, because that is where the asking happens. */
+export type SiteType = "business" | "ecommerce" | "blog" | "portfolio" | "nonprofit" | "personal";
+
 export type Confidence = "high" | "medium" | "low";
 
 /** The fields that carry a confidence + sources entry. Keys of the two maps below. */
 export const PROFILE_FIELDS = [
+  "site_type",
   "what_they_do",
   "offerings",
   "audience",
@@ -134,6 +140,7 @@ export const PROFILE_FIELDS = [
 export type ProfileField = (typeof PROFILE_FIELDS)[number];
 
 export type SiteProfile = {
+  site_type: SiteType | null;
   what_they_do: string | null;
   offerings: Offering[];
   audience: string | null;
@@ -187,6 +194,7 @@ export type BuiltFrom = {
  *  been built yet. Never "unknown business" or any other placeholder prose. */
 export function emptyProfile(): SiteProfile {
   return {
+    site_type: null,
     what_they_do: null,
     offerings: [],
     audience: null,

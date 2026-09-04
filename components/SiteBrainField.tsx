@@ -19,6 +19,8 @@ import {
   type Credential,
   type MoneyPage,
   type PublishingRules,
+  type SiteType,
+  SITE_TYPE_LABEL,
 } from "@/components/SiteBrainModel";
 
 /** One field of the Site Brain, with the three things that make it trustworthy (§25.2):
@@ -212,6 +214,9 @@ function Sources({ items, userEdited }: { items: { label: string; href: string |
 
 function FieldValue({ field, profile }: { field: ProfileField; profile: SiteProfile }) {
   switch (field) {
+    case "site_type":
+      return <p className="sb-pv brk">{profile.site_type ? SITE_TYPE_LABEL[profile.site_type] : null}</p>;
+
     case "what_they_do":
     case "audience":
     case "geo":
@@ -457,6 +462,19 @@ function FieldEditor({
   firstRef: React.MutableRefObject<any>;
 }) {
   switch (field) {
+    case "site_type":
+      return (
+        <fieldset className="sb-gset">
+          <legend className="xs mut">Which of these is closest?</legend>
+          {(Object.keys(SITE_TYPE_LABEL) as SiteType[]).map((k) => (
+            <label key={k} className="sb-gopt">
+              <input type="radio" name="sb-site-type" checked={value === k} onChange={() => onChange(k)} />
+              <span>{SITE_TYPE_LABEL[k]}</span>
+            </label>
+          ))}
+        </fieldset>
+      );
+
     case "what_they_do":
     case "audience":
       return <textarea ref={firstRef} rows={3} value={value ?? ""} onChange={(e) => onChange(e.target.value)} aria-label={field} />;

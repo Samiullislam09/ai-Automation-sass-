@@ -68,9 +68,15 @@ export type PublishingRules = {
   image_policy: string | null;
   disclaimer: string | null;
 };
+/** What kind of website this is. Read off the pages by the analyst, never asked.
+ *  It decides which of the fields below even apply: a personal blog that sells nothing is not
+ *  missing a price list, and telling its owner it is would be nonsense. */
+export type SiteType = "business" | "ecommerce" | "blog" | "portfolio" | "nonprofit" | "personal";
+
 export type Confidence = "high" | "medium" | "low";
 
 export const PROFILE_FIELDS = [
+  "site_type",
   "what_they_do",
   "offerings",
   "audience",
@@ -97,6 +103,7 @@ export const PROFILE_FIELDS = [
 export type ProfileField = (typeof PROFILE_FIELDS)[number];
 
 export type SiteProfile = {
+  site_type: SiteType | null;
   what_they_do: string | null;
   offerings: Offering[];
   audience: string | null;
@@ -147,6 +154,7 @@ export function isProfileField(v: unknown): v is ProfileField {
 
 export function emptyProfile(): SiteProfile {
   return {
+    site_type: null,
     what_they_do: null,
     offerings: [],
     audience: null,
@@ -240,6 +248,12 @@ const num = (v: unknown, fallback: number | null = null): number | null => {
  *  Returns an error string (never throws) so the route can answer 400 with the reason. */
 export function coerceField(field: ProfileField, raw: unknown): CoerceResult {
   switch (field) {
+    case "site_type": {
+      const v = str(raw);
+      const ok = ["business", "ecommerce", "blog", "portfolio", "nonprofit", "personal"].includes(v);
+      return { ok: true, value: ok ? (v as SiteType) : null };
+    }
+
     case "what_they_do":
     case "audience":
     case "geo":
@@ -426,6 +440,44 @@ export function isFieldEmpty(profile: SiteProfile, field: ProfileField): boolean
   return false;
 }
 
+// ── which fields even apply ─────────────────────────────────────────────────────────────────
+
+/** Not every site sells something. A recipe blog has no price list, a personal site has no
+ *  objections to handle, and a charity has no "pages that earn" — asking for them would be
+ *  noise, and counting them as gaps would make an honest brain look half-empty forever.
+ *
+ *  So each site type names the fields that DO NOT apply to it. Everything else applies.
+ *  `business` is the default when the analyst hasn't decided yet: it asks for the most, which
+ *  is the safe direction — a field that turns out not to apply is dismissed in one click,
+ *  a field never asked for is simply missing. */
+const NOT_APPLICABLE: Record<SiteType, ProfileField[]> = {
+  business: [],
+  ecommerce: [],
+  blog: ["offerings", "pricing", "money_pages", "objections", "credentials"],
+  portfolio: ["pricing", "money_pages"],
+  nonprofit: ["pricing", "money_pages"],
+  personal: ["offerings", "pricing", "money_pages", "objections", "credentials", "competitors"],
+};
+
+export function isFieldRelevant(profile: SiteProfile, field: ProfileField): boolean {
+  const type = profile.site_type;
+  if (!type) return true;
+  return !NOT_APPLICABLE[type].includes(field);
+}
+
+export const SITE_TYPE_LABEL: Record<SiteType, string> = {
+  business: "Business / services site",
+  ecommerce: "Online shop",
+  blog: "Blog or publication",
+  portfolio: "Portfolio",
+  nonprofit: "Non-profit",
+  personal: "Personal site",
+};
+
+/** Fields nobody can read off a website: house rules, hard limits and intent live in the
+ *  owner's head. The screen says so instead of implying the next crawl will find them. */
+export const USER_ONLY_FIELDS: ProfileField[] = ["never_say", "publishing_rules", "goals", "competitors"];
+
 // ── how a person reads this ─────────────────────────────────────────────────────────────────
 
 export type FieldMeta = {
@@ -444,6 +496,19 @@ export type FieldMeta = {
 export type FieldGroup = { title: string; sub: string; fields: FieldMeta[] };
 
 export const FIELD_GROUPS: FieldGroup[] = [
+  {
+    title: "What kind of site this is",
+    sub: "Read off your pages. It decides which of the questions below even apply to you.",
+    fields: [
+      {
+        field: "site_type",
+        label: "Type of site",
+        hint: "A blog that sells nothing is never asked for a price list.",
+        prompt: "Pick the one that fits.",
+        derived: true,
+      },
+    ],
+  },
   {
     title: "What you do",
     sub: "The one paragraph every agent reads before it writes a word.",
@@ -655,6 +720,7 @@ const SOURCE_LABELS: Record<string, string> = {
  *  these are what a business owner would call the same thing, and they are what the Site Brain
  *  list and the per-field page show. */
 export const FRIENDLY_LABEL: Record<ProfileField, string> = {
+  site_type: "What kind of site this is",
   what_they_do: "What your business does",
   offerings: "What you sell",
   audience: "Who you sell to",
@@ -680,6 +746,7 @@ export const FRIENDLY_LABEL: Record<ProfileField, string> = {
 /** One line of an answer, for a closed list row — never the whole thing. */
 export function previewOf(profile: SiteProfile, field: ProfileField): string {
   const v: any = (profile as any)[field];
+  if (field === "site_type" && v) return SITE_TYPE_LABEL[v as SiteType] ?? String(v);
   const cut = (t: string) => (t.length > 110 ? t.slice(0, 110).trimEnd() + "…" : t);
   if (typeof v === "string") return cut(v);
   if (Array.isArray(v)) {

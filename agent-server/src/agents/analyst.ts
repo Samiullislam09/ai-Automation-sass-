@@ -16,6 +16,12 @@ import {
   type ContentGap,
   type ProfileField,
   type Confidence,
+  type SiteType,
+  type Cta,
+  type Pricing,
+  type Objection,
+  type Credential,
+  type MoneyPage,
 } from "../lib/siteProfile.js";
 
 /** Mr. Analyst — the step that turns a crawl into an understanding (rebuild plan §25).
@@ -271,6 +277,135 @@ export class AnalystAgent extends Agent {
       failures.push({ field: "voice", error: String(e?.message ?? e).slice(0, 200) });
     }
 
+    // ── 4b · the Phase 1 facts, read off the same pages ───────────────────────────────────
+    //
+    // These are NOT questions for the customer. Almost every one of them is written somewhere
+    // on the site already — the button in the header, the accreditation logos on the about
+    // page, the FAQ, the price on a service page — so the analyst reads them, exactly like it
+    // reads what_they_do. What it cannot read (house rules, hard limits) stays empty and the
+    // Site Brain screen labels those "only you can answer".
+    //
+    // `site_type` comes first because it decides what the rest of the app asks for: a blog
+    // that sells nothing is never asked for a price list (NOT_APPLICABLE in
+    // components/SiteBrainModel.tsx).
+    ctx.onProgress({ phase: "commerce", label: "Reading how they sell, prove and charge..." });
+    try {
+      const evidence = keyPages.slice(0, 8);
+      const answer = await completeJson<{
+        site_type?: string;
+        cta?: { text?: string; url?: string; contact?: string };
+        usp?: string[];
+        pricing?: { model?: string; range?: string; note?: string };
+        objections?: { question?: string; answer?: string }[];
+        credentials?: { name?: string; url?: string }[];
+        money_pages?: { url?: string; label?: string }[];
+      }>(
+        [
+          "Read these pages from one website:",
+          "",
+          pageDigest(evidence, 1400),
+          "",
+          "Answer ONLY from the text above. Anything the pages do not say is null (or []).",
+          "",
+          '- site_type: one of "business" (sells services), "ecommerce" (sells products online),',
+          '  "blog" (publishes articles, sells nothing), "portfolio" (shows work), "nonprofit", "personal".',
+          "- cta: the main action they ask visitors to take — text (the words on the button/link),",
+          "  url (where it goes), contact (any other route stated: a phone number, an email, a form page).",
+          "- usp: up to 5 things they say make them different, in their own words. No adjectives of your own.",
+          "- pricing: model = one of fixed|quote|subscription|free if the pages make it clear, else null;",
+          "  range = the price or range EXACTLY as printed (with its currency), else null; note = any condition stated.",
+          "- objections: up to 5 real questions their FAQ or copy answers, with the answer summarised in one sentence.",
+          "- credentials: accreditations, licences, registrations, memberships or certifications they hold,",
+          "  each with the page it appears on. Not awards-sounding adjectives — named bodies only.",
+          "- money_pages: up to 6 pages that exist to sell or convert (service, product, pricing, booking, contact),",
+          "  most important first, each with the label they use for it.",
+          "",
+          'Reply with ONLY JSON: {"site_type":"...","cta":{"text":"...","url":"...","contact":"..."},',
+          '"usp":["..."],"pricing":{"model":"...","range":"...","note":"..."},',
+          '"objections":[{"question":"...","answer":"..."}],"credentials":[{"name":"...","url":"..."}],',
+          '"money_pages":[{"url":"...","label":"..."}]}',
+        ].join("\n")
+      );
+
+      const known = new Set(pages.map((p) => p.url));
+      const urlIfReal = (u: unknown): string | null => {
+        const v = cleanText(u, 500);
+        return v && known.has(v) ? v : null; // a URL not in the crawl is a hallucination
+      };
+      const evidenceUrls = evidence.map((p) => p.url);
+
+      const type = cleanText(answer?.site_type, 20)?.toLowerCase() ?? null;
+      if (type && SITE_TYPES.includes(type as SiteType)) {
+        profile.site_type = type as SiteType;
+        sources.site_type = evidenceUrls;
+        confidence.site_type = "medium";
+      }
+
+      const ctaText = cleanText(answer?.cta?.text, 120);
+      const ctaUrl = urlIfReal(answer?.cta?.url);
+      const ctaContact = cleanText(answer?.cta?.contact, 160);
+      if (ctaText || ctaUrl || ctaContact) {
+        profile.cta = { text: ctaText, url: ctaUrl, contact: ctaContact } as Cta;
+        sources.cta = ctaUrl ? [ctaUrl] : evidenceUrls;
+        confidence.cta = ctaUrl ? "high" : "low";
+      }
+
+      profile.usp = uniqStrings(answer?.usp, 5, 180);
+      if (profile.usp.length) { sources.usp = evidenceUrls; confidence.usp = "low"; }
+
+      const priceModel = cleanText(answer?.pricing?.model, 20)?.toLowerCase() ?? null;
+      const priceRange = cleanText(answer?.pricing?.range, 160);
+      const priceNote = cleanText(answer?.pricing?.note, 200);
+      const modelOk = priceModel && ["fixed", "quote", "subscription", "free"].includes(priceModel);
+      if (modelOk || priceRange || priceNote) {
+        profile.pricing = {
+          model: (modelOk ? priceModel : null) as Pricing["model"],
+          range: priceRange,
+          note: priceNote,
+        };
+        sources.pricing = evidenceUrls;
+        // A printed price is a fact; a guessed billing model is not.
+        confidence.pricing = priceRange ? "medium" : "low";
+      }
+
+      const objections: Objection[] = [];
+      for (const o of answer?.objections ?? []) {
+        const question = cleanText(o?.question, 200);
+        if (!question) continue;
+        objections.push({ question, answer: cleanText(o?.answer, 400) ?? "" });
+        if (objections.length >= 5) break;
+      }
+      profile.objections = objections;
+      if (objections.length) { sources.objections = evidenceUrls; confidence.objections = "low"; }
+
+      const credentials: Credential[] = [];
+      for (const c of answer?.credentials ?? []) {
+        const name = cleanText(c?.name, 160);
+        if (!name) continue;
+        credentials.push({ name, url: urlIfReal(c?.url) });
+        if (credentials.length >= 12) break;
+      }
+      profile.credentials = credentials;
+      if (credentials.length) {
+        const withUrl = credentials.map((c) => c.url).filter(Boolean) as string[];
+        sources.credentials = withUrl.length ? withUrl : evidenceUrls;
+        confidence.credentials = withUrl.length ? "high" : "low";
+      }
+
+      const money: MoneyPage[] = [];
+      for (const m of answer?.money_pages ?? []) {
+        const url = urlIfReal(m?.url);
+        if (!url || money.some((x) => x.url === url)) continue;
+        money.push({ url, label: cleanText(m?.label, 120) });
+        if (money.length >= 6) break;
+      }
+      profile.money_pages = money;
+      if (money.length) { sources.money_pages = money.map((m) => m.url); confidence.money_pages = "medium"; }
+    } catch (e: any) {
+      console.error("[analyst] commerce extraction failed:", e?.message);
+      failures.push({ field: "cta", error: String(e?.message ?? e).slice(0, 200) });
+    }
+
     // ── 5 · geo + language ────────────────────────────────────────────────────────────────
     ctx.onProgress({ phase: "place", label: "Finding where they work..." });
     try {
@@ -500,6 +635,8 @@ const GAP_MIN_IMPRESSIONS = 20;
 // a subject the site already covers -- which is the exact failure §25.5's locks exist to
 // prevent. Missing a few is the cheaper mistake.
 //
+const SITE_TYPES: SiteType[] = ["business", "ecommerce", "blog", "portfolio", "nonprofit", "personal"];
+
 // Written down here rather than tuned in a prompt so it can be recalibrated from real data
 // (plan §12: replace estimates with a week of measurements) by changing one number.
 const GAP_MAX_SIMILARITY = 0.62;
@@ -788,5 +925,14 @@ function countFilled(p: SiteProfile): number {
   if (p.competitors.length) n++;
   if (p.voice) n++;
   if (p.goals) n++;
+  // Phase 1 (docs/SITE_BRAIN_PLAN.md) — the analyst fills all but never_say/publishing_rules,
+  // which no page can state.
+  if (p.site_type) n++;
+  if (p.cta) n++;
+  if (p.usp.length) n++;
+  if (p.pricing) n++;
+  if (p.objections.length) n++;
+  if (p.credentials.length) n++;
+  if (p.money_pages.length) n++;
   return n;
 }

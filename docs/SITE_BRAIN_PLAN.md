@@ -106,3 +106,40 @@ must never say*, or *where a reader should be sent* — which is where most bad 
    Approvals can explain the failure.
 6. Writer prompt: add the new fields in a fixed order and keep the prompt under budget by
    sending only the fields that field's article type needs.
+
+---
+
+## Not every customer sells something (added 2026-09-05)
+
+The user base is not only companies. A recipe blog, a portfolio, a charity and a personal site
+are all valid customers, and asking a blog for its "price range" or its "pages that earn" is
+noise that makes an honest brain look permanently half-finished.
+
+So the brain carries **`site_type`** — `business | ecommerce | blog | portfolio | nonprofit |
+personal` — read off the pages by the analyst, never asked as a question. It decides which
+fields apply:
+
+| Site type | Fields that do not apply |
+|---|---|
+| business, ecommerce | none |
+| blog | offerings, pricing, money_pages, objections, credentials |
+| portfolio | pricing, money_pages |
+| nonprofit | pricing, money_pages |
+| personal | offerings, pricing, money_pages, objections, credentials, competitors |
+
+The Site Brain screen counts only what applies ("6 of 21", not "6 of 27"), lists the rest under
+"Not needed for this kind of site" (still openable, in case the analyst got the type wrong), and
+never points "Fill the next gap" at one of them.
+
+## Who fills what (the important half)
+
+**The team fills almost everything by crawling.** The analyst reads the same pages it already
+reads for `what_they_do` and extracts `site_type`, `cta`, `usp`, `pricing`, `objections`,
+`credentials` and `money_pages` — the button in the header, the accreditation logos on the about
+page, the FAQ, the price on a service page. A URL the model returns that is not in the crawl is
+dropped as a hallucination, and a field with no evidence stays empty. The customer never fills a
+form for these; they only correct one if it is wrong.
+
+**Only four fields genuinely need a human**, because no page states them:
+`never_say`, `publishing_rules`, `goals`, `competitors`. These are the ones the screen marks
+**"Only you can answer"**, and they are what "Fill the next gap" points at first.
