@@ -1397,7 +1397,12 @@ export default function MrLxwaDashboard({
           to the still-live app/app/** pages; the rest stay a local highlight only. */}
       <nav className="lx-scroll flex-1 space-y-1 overflow-y-auto px-3">
         {NAV.map((it) => {
-          const active = it.href ? pathname === it.href : nav === it.label;
+          // A sub-page keeps its section lit — /dashboard/content/<id> (the article reviewer)
+          // is still "Content". Exact match everywhere else, so /dashboard never lights up for
+          // every /dashboard/** page.
+          const active = it.href
+            ? pathname === it.href || (it.href !== "/dashboard" && pathname.startsWith(it.href + "/"))
+            : nav === it.label;
           const badge = it.label === "Approvals" ? approvalsCount : it.badge;
           const inner = (
             <>
