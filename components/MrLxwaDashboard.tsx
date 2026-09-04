@@ -114,7 +114,7 @@ const NAV: NavItem[] = [
   { label: "Content", icon: FileText, href: "/dashboard/content" },
   { label: "Leads", icon: UserRound, href: "/dashboard/leads" },
   { label: "Site Brain", icon: Globe, href: "/dashboard/site-brain" },
-  { label: "SEO & Insights", icon: TrendingUp, href: "/dashboard/audit" },
+  { label: "Audit", icon: TrendingUp, href: "/dashboard/audit" },
   { label: "Reports", icon: ClipboardList, href: "/dashboard/reports" },
   { label: "Memory", icon: BrainCircuit, href: "/dashboard/memory" },
   { label: "Settings", icon: Settings, href: "/dashboard/settings" },

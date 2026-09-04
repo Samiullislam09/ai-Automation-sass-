@@ -62,6 +62,9 @@ export async function GET() {
           warns: Number(latest.warns) || 0,
           issues: Array.isArray(latest.issues) ? latest.issues : [],
           skipped: Array.isArray((latest.run as any)?.skipped) ? (latest.run as any).skipped : [],
+          // Real Lighthouse results (agent-server/src/lib/audit/performance.ts) — already
+          // stored in `run.performance` since that file shipped, never surfaced here until now.
+          performance: Array.isArray((latest.run as any)?.performance) ? (latest.run as any).performance : [],
           seconds: Number((latest.run as any)?.seconds) || null,
           summary: latest.summary ?? null,
           createdAt: latest.created_at,

@@ -19,8 +19,15 @@ export const AUDIT_UA = "MrLxwaAuditBot/1.0 (+https://mrlxwa.com/bot; site audit
  *  audit, so this is politeness to their server rather than to a stranger's. */
 const GAP_MS = 400;
 const TIMEOUT_MS = 15_000;
-/** Enough to be a real audit of a small business site; §7.4's own figure is 50 pages. */
-export const DEFAULT_PAGE_LIMIT = 50;
+/** §7.4's own original figure was 50 pages — raised to match agents/audit.ts's own already-
+ *  existing ceiling (2026-09-04, owner: "complete site audit samjhe?" — most small-business
+ *  sites are well under 200 pages, so this is "the whole site" for nearly everyone on this
+ *  plan, not a sample of it). Still a real cap, not unlimited: at 400ms between requests
+ *  (GAP_MS, politeness to the customer's own server) 200 pages is ~80s for the deterministic
+ *  crawl alone — a genuinely unbounded audit of a very large site would need its own async job
+ *  design, not a bigger number here. A caller (agents/audit.ts's `pages` job param) can still
+ *  ask for fewer. */
+export const DEFAULT_PAGE_LIMIT = 200;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

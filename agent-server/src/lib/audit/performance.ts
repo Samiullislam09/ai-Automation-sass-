@@ -102,15 +102,25 @@ async function auditOne(url: string, port: number): Promise<PageVitals> {
     });
     const lhr = result?.lhr;
     if (!lhr) return { ...empty, ok: false, error: "Lighthouse returned no result" };
+    // Lighthouse does not always throw when a run genuinely fails — a page that did not settle
+    // under simulated throttling, a mid-run navigation, a target that closed early all come
+    // back as a NORMAL resolved promise carrying `lhr.runtimeError` and an empty `categories`/
+    // `audits` object. Reproduced live 2026-09-04: three real audits in a row, Chrome launching
+    // fine every time (`ok:true`), every single page's score/LCP/CLS/TBT silently null — this
+    // looked like a working run that measured nothing, the exact "made-up number dressed as a
+    // measurement" this file's own header promises never to do, just inverted (a MISSING
+    // measurement dressed as a successful one). Treat a runtimeError, or a run with literally
+    // no numbers to show, as the failure it actually is.
+    if (lhr.runtimeError?.message) return { ...empty, ok: false, error: lhr.runtimeError.message };
     const score = lhr.categories?.performance?.score;
-    return {
-      ...empty,
-      ok: true,
-      performanceScore: typeof score === "number" ? Math.round(score * 100) : null,
-      lcpMs: numeric(lhr.audits?.["largest-contentful-paint"]),
-      cls: numeric(lhr.audits?.["cumulative-layout-shift"]),
-      tbtMs: numeric(lhr.audits?.["total-blocking-time"]),
-    };
+    const performanceScore = typeof score === "number" ? Math.round(score * 100) : null;
+    const lcpMs = numeric(lhr.audits?.["largest-contentful-paint"]);
+    const cls = numeric(lhr.audits?.["cumulative-layout-shift"]);
+    const tbtMs = numeric(lhr.audits?.["total-blocking-time"]);
+    if (performanceScore == null && lcpMs == null && cls == null && tbtMs == null) {
+      return { ...empty, ok: false, error: "Lighthouse produced no usable performance data for this page" };
+    }
+    return { ...empty, ok: true, performanceScore, lcpMs, cls, tbtMs };
   } catch (e: any) {
     return { ...empty, ok: false, error: e?.message ?? "lighthouse run failed" };
   }
