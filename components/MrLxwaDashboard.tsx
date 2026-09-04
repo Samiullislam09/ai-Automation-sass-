@@ -382,6 +382,41 @@ const itemHeadline = (payload: any): string | null => {
  *  lowercase single words by convention (see AgentContext.data's own doc), so this is enough. */
 const plural = (kind: string, n: number) => (n === 1 ? kind : kind.endsWith("s") ? kind : `${kind}s`);
 
+/** A clean, human title for a task — NOT `task.echo`, which is a confirmation SENTENCE built
+ *  for a different job (lib/chat-brain-intent.ts's `echoLine()`: "analyse my site · abhi ·
+ *  Approvals me" — the phrase, the subject, when, and where it lands, joined for someone
+ *  confirming an order). That sentence read as a page heading like it was debug output — the
+ *  owner's own words, 2026-09-04: "professional title dena hai ki title padhke user samajh
+ *  jaaye". `task.kind` is the real action id this task was created for (agent-server's
+ *  orchestrator.ts: `kind: intent.action`) — a small, known, stable set (13 actions today) —
+ *  so this maps each to the title a person would actually want, with the real subject (pulled
+ *  from `echo`'s own quoted phrase, never re-invented) folded in where it matters. An action id
+ *  not yet in the map (a new agent registers, this file hasn't been updated) never breaks: it
+ *  falls back to the echo's own first segment, capitalised — still real, just not tailored. */
+const TASK_TITLES: Record<string, (subject: string | null) => string> = {
+  crawl_site: () => "Crawling Your Site",
+  build_site_profile: () => "Site Analysis",
+  plan_topics: () => "Planning Your Content",
+  pick_topic: () => "Choosing Your Next Topic",
+  find_keywords: (s) => (s ? `Keyword Research: ${s}` : "Keyword Research"),
+  write_article: (s) => (s ? `Writing: ${s}` : "Writing Your Article"),
+  research_brief: (s) => (s ? `Research: ${s}` : "Research Brief"),
+  check_seo: () => "SEO Check",
+  publish_article: () => "Publishing Your Article",
+  audit_site: () => "Site Audit",
+  draft_social: () => "Social Post Draft",
+  find_leads: () => "Finding Leads",
+};
+
+function taskTitle(task: { kind?: string | null; echo?: string | null } | null | undefined): string {
+  if (!task) return "Task";
+  const subject = task.echo ? (task.echo.match(/"([^"]+)"/)?.[1] ?? null) : null;
+  const known = task.kind ? TASK_TITLES[task.kind] : undefined;
+  if (known) return known(subject);
+  const firstSegment = task.echo?.split(" · ")[0]?.trim();
+  return firstSegment ? firstSegment.charAt(0).toUpperCase() + firstSegment.slice(1) : "Task";
+}
+
 /** What an order produced, in ONE line plus one highlight — derived from whatever kinds the
  *  agents actually emitted. Keyword runs, article runs, image runs and lead runs all describe
  *  themselves through this without the chat learning any of their names. */
@@ -844,13 +879,35 @@ export default function MrLxwaDashboard({
   // signed in) → everyone's honestly Waiting, not a fabricated "in progress" — see
   // statusForAgent below.
   const live = useLiveEvents(tenantId);
-  // THE ONE ORDER THIS SCREEN IS ABOUT. A task that is still running always wins over a newer
-  // finished one — `live.tasks[0]` alone meant the strip could sit on a cancelled or long-
-  // finished order while real work ran underneath it, which is why the same topic appeared to
-  // be stuck on screen forever (owner, 2026-08-31: "har waqt same hi topic"). Everything below
-  // — agent statuses, the wires, the glow, the plan, the bottom strip — reads from THIS task
-  // and nothing else, so the whole screen tells one consistent story.
-  const task: TaskState | null = live.tasks.find((t) => !isTerminalTask(t.status)) ?? live.tasks[0] ?? null;
+  // Which chat conversation is open right now — moved up here (was declared much lower, with
+  // the rest of the chat's own state) because `task` below needs it to scope itself. Not
+  // persisted to localStorage — the mount effect further down re-resumes the most recently
+  // active conversation from the server instead (chat_conversations.updated_at), the same way
+  // reloading ChatGPT does, so there is nothing here to go stale. Null until the first message
+  // of a brand new chat is sent, or until a past conversation is reopened.
+  const convId = useRef<string | null>(null);
+  // History sidebar (2026-09-04) — the list from GET /api/chat/conversations, and whether it's
+  // showing. Populated lazily (on mount, and again whenever the panel opens) rather than kept
+  // live-subscribed; a chat list changing under someone else's tab is not a case this needs to
+  // handle instantly.
+  const [convs, setConvs] = useState<{ id: string; title: string | null; updated_at: string }[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  // THE ONE ORDER THIS SCREEN IS ABOUT — scoped to the chat you're actually looking at
+  // (2026-09-04). Used to be the tenant's single most recent task, full stop, which meant an
+  // OLD chat's order kept narrating a brand new conversation's strip/panel/BottomBar forever
+  // (owner: "old task bhi yahan pe dikha raha hai... naya chat pe naya task ho"). `tasks.
+  // conversation_id` (agent-server's orchestrator already writes it, `intent.conversation_id`)
+  // is the real link between a task and the chat that placed it — a scheduled/cron run has
+  // none, and correctly never appears inside any specific chat's story here. A brand new,
+  // still-unsent chat (`convId.current === null`) has no task of its own yet, so this is
+  // deliberately `null`, not a guess at the tenant's last unrelated order. A task that is still
+  // running always wins over a newer finished one within the SAME conversation, for the reason
+  // the original comment already gave (2026-08-31: "har waqt same hi topic").
+  const task: TaskState | null = convId.current
+    ? (live.tasks.find((t) => t.conversation_id === convId.current && !isTerminalTask(t.status)) ??
+      live.tasks.find((t) => t.conversation_id === convId.current) ??
+      null)
+    : null;
   const taskActive = !!task && !isTerminalTask(task.status);
   // Ticks only while the newest task is actually open — a finished task's BottomBar timer is a
   // still image, same rule lib/live.ts's own useNow() doc comment states.
@@ -960,7 +1017,6 @@ export default function MrLxwaDashboard({
   const [chatBusy, setChatBusy] = useState(false);
   const chatRef = useRef<HTMLDivElement>(null);
   const msgInputRef = useRef<HTMLTextAreaElement>(null);
-  const convId = useRef<string | null>(null);
   const helloSent = useRef(false); // React 18 strict-mode double-invokes effects in dev — without
   // this the real /api/chat "__hello__" greeting was requested twice on one mount.
 
@@ -1142,10 +1198,84 @@ export default function MrLxwaDashboard({
     }
   };
 
+  /** ChatGPT-style conversation history (2026-09-04, owner: "chat history rahe... har chat pe
+   *  alag task"). The backend for this already existed and was already proven — `/api/chat/
+   *  conversations*` (migration 011) is exactly what components/kit.tsx's older BossChat widget
+   *  already uses on the legacy /app/** route group; this just wires the SAME endpoints into
+   *  today's /dashboard chat, which never had a history UI of its own. Reusing the endpoints
+   *  and the open/new/delete shape verbatim rather than inventing a second contract for the
+   *  same job. */
+  async function refreshConvs() {
+    try {
+      const r = await fetch("/api/chat/conversations").then((res) => res.json());
+      if (r?.ok) setConvs(r.conversations ?? []);
+    } catch {
+      // Migration 011 not applied, or offline — chat still works, it just won't remember.
+    }
+  }
+
+  async function openConversation(id: string) {
+    try {
+      const r = await fetch(`/api/chat/conversations/${id}`).then((res) => res.json());
+      if (!r?.ok) return;
+      convId.current = id;
+      orderedTaskId.current = null;
+      setThread(
+        (r.messages ?? [])
+          .filter((m: any) => m.role === "user" || m.role === "assistant")
+          .map(
+            (m: any): ThreadMsg => ({
+              who: m.role === "user" ? "user" : "ai",
+              text: String(m.content ?? ""),
+              time: m.created_at
+                ? new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }).toUpperCase()
+                : "",
+            })
+          )
+      );
+      setShowHistory(false);
+    } catch {}
+  }
+
+  function newChat() {
+    convId.current = null;
+    orderedTaskId.current = null;
+    setThread([]);
+    setShowHistory(false);
+    // No chat_conversations row is created until a real message is sent — same as ChatGPT, and
+    // the same rule ensureConversation()/app/api/chat/route.ts already enforces server-side.
+    void stream("__hello__");
+  }
+
+  async function deleteConversation(id: string) {
+    try {
+      const res = await fetch(`/api/chat/conversations/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch {
+      return;
+    }
+    setConvs((c) => c.filter((x) => x.id !== id));
+    if (id === convId.current) newChat();
+  }
+
   useEffect(() => {
     if (helloSent.current) return;
     helloSent.current = true;
-    void stream("__hello__");
+    (async () => {
+      // Resume the most recently active conversation, same rule a reload of ChatGPT follows —
+      // `chat_conversations.updated_at` already moves on every real turn (app/api/chat/route.ts's
+      // saveTurn), so "most recent" here is never stale. Falls through to a fresh "__hello__"
+      // when there is no history yet (a brand new tenant) or the history call itself fails.
+      try {
+        const r = await fetch("/api/chat/conversations").then((res) => res.json());
+        if (r?.ok && r.conversations?.length) {
+          setConvs(r.conversations);
+          await openConversation(r.conversations[0].id);
+          return;
+        }
+      } catch {}
+      void stream("__hello__");
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1495,6 +1625,24 @@ export default function MrLxwaDashboard({
     setAwaitingOrder(true);
     void stream(text);
   };
+
+  // Real cancel — POSTs to app/api/tasks/[id]/cancel, which is the thin server-side door onto
+  // lib/brain.ts's cancelTask() (needs AGENT_SERVER_URL/the shared token, so it cannot run in
+  // the browser directly). Refreshes the task list on success so the bar reflects "cancelled"
+  // the same tick the brain confirms it, rather than sitting on a stale progress bar. Declared
+  // here (not lower, by BottomBar) so the chat panel's own Stop button — same task, same
+  // handler, 2026-09-04 ("stop karne ka chat pe hi ek option ho") — can call it too.
+  const cancelCurrentTask = async () => {
+    if (!task || cancellingTaskId) return;
+    setCancellingTaskId(task.task_id);
+    try {
+      await fetch(`/api/tasks/${task.task_id}/cancel`, { method: "POST" });
+      live.reload();
+    } finally {
+      setCancellingTaskId(null);
+    }
+  };
+
   const itemLabel = (it: (typeof producedItems)[number]) => {
     // The writer's real event kinds (agent-server/src/agents/writer.ts) — anything else
     // (from other agents in the same task) falls back to a generic "<kind>" line rather than
@@ -1610,11 +1758,12 @@ export default function MrLxwaDashboard({
           </div>
         </div>
 
-        {/* writer progress — secondary, below the live visual. Real: the task's own echo
-            (what was actually asked for), the running step's real label/fraction if it
-            reported one, and real step-of-total position — nothing here is invented. */}
+        {/* writer progress — secondary, below the live visual. Real: a clean title derived from
+            the task's own kind + subject (taskTitle — never the raw "·"-joined confirmation
+            echo), the running step's real label/fraction if it reported one, and real
+            step-of-total position — nothing here is invented. */}
         <div className="min-w-0">
-          <div className="text-lg font-bold leading-tight">{task?.echo || workingAgent?.role}</div>
+          <div className="text-lg font-bold leading-tight">{task ? taskTitle(task) : workingAgent?.role}</div>
           {runningStep?.label && <div className="lx-12 lx-mut mt-0.5">{runningStep.label}</div>}
 
           {runningStep?.fraction != null && (
@@ -1741,13 +1890,67 @@ export default function MrLxwaDashboard({
         >
           Voice
         </button>
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex items-center gap-1" style={{ position: "relative" }}>
+          <button
+            className="lx-icobtn"
+            style={{ border: "none", background: "transparent" }}
+            aria-label="Chat history"
+            aria-expanded={showHistory}
+            onClick={() => {
+              const opening = !showHistory;
+              setShowHistory(opening);
+              if (opening) void refreshConvs();
+            }}
+          >
+            <MoreVertical size={15} />
+          </button>
           <button className="lx-icobtn" onClick={closeAssistant} aria-label="Close assistant">
             <X size={14} />
           </button>
-          <button className="lx-icobtn" style={{ border: "none", background: "transparent" }} aria-label="More">
-            <MoreVertical size={15} />
-          </button>
+
+          {/* History dropdown — same job as components/kit.tsx's older BossChat sidebar, as a
+              popover instead of a persistent panel: this chat is narrower and already competes
+              for room with the live progress strip below it. */}
+          {showHistory && (
+            <div
+              className="lx-card2 lx-scroll"
+              style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 260, maxHeight: 360, overflowY: "auto", zIndex: 30, padding: 6 }}
+            >
+              <button
+                className="lx-ghost lx-11 flex w-full items-center gap-2"
+                style={{ padding: "7px 9px" }}
+                onClick={newChat}
+              >
+                <Plus size={13} /> New Chat
+              </button>
+              <div className="lx-10 lx-mut mt-1.5 px-1.5">History</div>
+              {convs.length === 0 && <div className="lx-10 lx-mut px-1.5 py-2">No past chats yet.</div>}
+              {convs.map((c) => (
+                <div
+                  key={c.id}
+                  className="flex items-center gap-1 rounded-lg px-1.5 py-1.5"
+                  style={{ background: c.id === convId.current ? "rgba(139,92,246,.12)" : undefined }}
+                >
+                  <button
+                    className="lx-11 min-w-0 flex-1 truncate text-left"
+                    style={{ background: "transparent", border: "none", color: c.id === convId.current ? "var(--lx-text)" : "var(--lx-mut)", cursor: "pointer" }}
+                    onClick={() => openConversation(c.id)}
+                    title={c.title ?? "Untitled chat"}
+                  >
+                    {c.title || "Untitled chat"}
+                  </button>
+                  <button
+                    className="lx-icobtn shrink-0"
+                    style={{ width: 22, height: 22, border: "none", background: "transparent" }}
+                    aria-label="Delete chat"
+                    onClick={() => deleteConversation(c.id)}
+                  >
+                    <X size={11} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -1897,11 +2100,19 @@ export default function MrLxwaDashboard({
               bar, the review link) was several lines tall and permanently ate the chat's own
               space; it now opens on the chevron and animates, so the detail is one click away
               instead of always in the way. */}
-          <button
-            className="flex w-full items-center gap-2 bg-transparent text-left"
-            style={{ border: "none", padding: 0, cursor: "pointer" }}
+          {/* A `<button>` wrapper, not nested inside one — the Stop button below needs to be a
+              real, separately-clickable button in this same row, and two <button>s cannot
+              nest. */}
+          <div
+            className="flex w-full items-center gap-2"
+            style={{ cursor: "pointer" }}
             onClick={() => setStripOpen((o) => !o)}
+            role="button"
+            tabIndex={0}
             aria-expanded={stripOpen}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") setStripOpen((o) => !o);
+            }}
           >
             {/* `awaitingOrder` wins over `task`: right after sending, `task` is still the
                 PREVIOUS (finished) order, and showing its "Done" while the new one is being
@@ -1925,16 +2136,35 @@ export default function MrLxwaDashboard({
             {!awaitingOrder && task && stepNo != null && totalSteps != null && (
               <span className="lx-10 lx-mut shrink-0">{stepNo}/{totalSteps}</span>
             )}
+            {/* Real cancel, right here — same handler/state as Office's "Stop Task" (BottomBar),
+                so a click here disables both at once and neither goes stale. 2026-09-04, the
+                owner's own words: "current task ko rokne ka, stop karne ka, chat pe hi ek
+                option ho". Only while a task is genuinely running — nothing to stop otherwise. */}
+            {!awaitingOrder && taskActive && (
+              <button
+                className="lx-icobtn shrink-0"
+                style={{ width: 20, height: 20, color: "#ef4444", opacity: cancellingTaskId ? 0.5 : 1 }}
+                aria-label={cancellingTaskId ? "Stopping…" : "Stop task"}
+                title={cancellingTaskId ? "Stopping…" : "Stop task"}
+                disabled={!!cancellingTaskId}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void cancelCurrentTask();
+                }}
+              >
+                <XCircle size={14} />
+              </button>
+            )}
             <ChevronDown
               size={13}
               className="lx-mut shrink-0"
               style={{ transform: stripOpen ? "rotate(180deg)" : "none", transition: "transform .18s" }}
             />
-          </button>
+          </div>
 
           <Collapse open={stripOpen}>
             <div className="pt-2">
-              <div className="lx-10 lx-mut truncate">{awaitingOrder || !task ? "Sending it to the team…" : task.echo}</div>
+              <div className="lx-10 lx-mut truncate">{awaitingOrder || !task ? "Sending it to the team…" : taskTitle(task)}</div>
 
               {/* THE PLAN, TICKING. Mr Lxwa's real steps (task_steps, in plan order), each row
                   animating in as the plan lands and then flipping to done as its agent
@@ -2025,21 +2255,6 @@ export default function MrLxwaDashboard({
 
   /* ---------------------------------------------------------------------- */
 
-  // Real cancel — POSTs to app/api/tasks/[id]/cancel, which is the thin server-side door onto
-  // lib/brain.ts's cancelTask() (needs AGENT_SERVER_URL/the shared token, so it cannot run in
-  // the browser directly). Refreshes the task list on success so the bar reflects "cancelled"
-  // the same tick the brain confirms it, rather than sitting on a stale progress bar.
-  const cancelCurrentTask = async () => {
-    if (!task || cancellingTaskId) return;
-    setCancellingTaskId(task.task_id);
-    try {
-      await fetch(`/api/tasks/${task.task_id}/cancel`, { method: "POST" });
-      live.reload();
-    } finally {
-      setCancellingTaskId(null);
-    }
-  };
-
   const BottomBar = task ? (
     <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl border px-3 py-1.5" style={{ borderColor: "var(--lx-border)", background: "var(--lx-panel)" }}>
       <button
@@ -2056,7 +2271,7 @@ export default function MrLxwaDashboard({
       </button>
       <div className="min-w-0 lx-11">
         <span className="lx-mut">Current: </span>
-        <span className="font-semibold">{task.echo || task.kind || "Untitled order"}</span>
+        <span className="font-semibold">{taskTitle(task)}</span>
         {stepNo != null && totalSteps != null && <span className="lx-mut"> · Step {stepNo} of {totalSteps}</span>}
       </div>
 

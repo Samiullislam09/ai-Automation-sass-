@@ -225,6 +225,8 @@ export type TaskState = {
   /** The one line the user was shown and confirmed. */
   echo: string | null;
   kind: string | null;
+  /** Which chat conversation created this task — null for a scheduled/cron run. See TaskRow. */
+  conversation_id: string | null;
   outline: string[];
   steps: StepState[];
   agents: AgentPane[];
@@ -361,6 +363,7 @@ function blankTask(taskId: string): TaskState {
     status: "queued",
     echo: null,
     kind: null,
+    conversation_id: null,
     outline: [],
     steps: [],
     agents: [],
@@ -673,6 +676,10 @@ export type TaskRow = {
   error?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+  /** Which chat conversation created this task (null for a scheduled/cron run, which has no
+   *  conversation). Written once by agent-server's orchestrator, never changed after — see
+   *  components/MrLxwaDashboard.tsx's per-conversation task scoping (2026-09-04). */
+  conversation_id?: string | null;
 };
 
 export type StepRow = {
@@ -719,6 +726,7 @@ export function hydrateTask(state: LiveState, snap: { task: TaskRow; steps?: Ste
 
   if (task.echo) t.echo = task.echo;
   if (task.kind) t.kind = task.kind;
+  if (task.conversation_id) t.conversation_id = task.conversation_id;
   if (task.created_at) t.createdAt = t.createdAt ?? ms(task.created_at);
   if (task.error) t.reason = t.reason ?? task.error;
 
@@ -843,7 +851,7 @@ export function supabaseSource(): WorkspaceSource {
     async listTasks(tenantId, limit) {
       const { data, error } = await db
         .from("tasks")
-        .select("id, tenant_id, kind, status, echo, delivery, error, created_at, updated_at")
+        .select("id, tenant_id, kind, status, echo, delivery, error, created_at, updated_at, conversation_id")
         .eq("tenant_id", tenantId)
         .order("created_at", { ascending: false })
         .limit(limit);
@@ -853,7 +861,7 @@ export function supabaseSource(): WorkspaceSource {
     async getTask(taskId, tenantId) {
       const { data: task, error } = await db
         .from("tasks")
-        .select("id, tenant_id, kind, status, echo, delivery, error, created_at, updated_at")
+        .select("id, tenant_id, kind, status, echo, delivery, error, created_at, updated_at, conversation_id")
         .eq("id", taskId)
         .eq("tenant_id", tenantId)
         .maybeSingle();
