@@ -2,10 +2,10 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
-  Activity, ArrowRight, Brain, Check, ChevronRight, Loader2, PlugZap, Plus, RotateCw, Search,
+  Activity, ArrowRight, Brain, Check, ChevronLeft, ChevronRight, Loader2, PlugZap, Plus, RotateCw, Search, X,
 } from "lucide-react";
 import { useStore } from "@/lib/store";
-import { SiteBrainFieldStyles } from "@/components/SiteBrainField";
+import SiteBrainField, { SiteBrainFieldStyles } from "@/components/SiteBrainField";
 import {
   FIELD_META,
   FRIENDLY_LABEL,
@@ -50,6 +50,7 @@ export default function SiteBrainSection() {
   const [busy, setBusy] = useState<ProfileField | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [openField, setOpenField] = useState<ProfileField | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -216,9 +217,9 @@ export default function SiteBrainSection() {
           </div>
         </div>
         {firstGap && (
-          <Link href={`/dashboard/site-brain/${firstGap}`} className="sb-next">
+          <button className="sb-next" onClick={() => setOpenField(firstGap)}>
             Fill the next gap <ArrowRight size={14} />
-          </Link>
+          </button>
         )}
       </div>
 
@@ -238,23 +239,34 @@ export default function SiteBrainSection() {
         </div>
       )}
 
-      {/* the whole brain as one plain checklist — each line opens its own page to read,
-          add or correct that one fact */}
+      {/* the whole brain as one plain checklist — each line opens a popup to read, add or
+          correct that one fact (owner, 2026-09-05: popup, not a separate page) */}
       <div className="sb-list">
         {PROFILE_FIELDS.map((f) => {
           const has = filled(f);
           return (
-            <Link key={f} href={`/dashboard/site-brain/${f}`} className={`sb-item ${has ? "" : "gap"}`}>
+            <button key={f} className={`sb-item ${has ? "" : "gap"}`} onClick={() => setOpenField(f)}>
               <span className={`sb-mark ${has ? "ok" : ""}`}>{has ? <Check size={12} /> : <Plus size={12} />}</span>
               <span className="min-w-0 flex-1">
                 <span className="sb-item-t">{FRIENDLY_LABEL[f] ?? FIELD_META[f].label}</span>
                 <span className="sb-item-p">{has ? previewOf(profile, f) : "Not added yet — tap to add"}</span>
               </span>
               <span className="sb-go">{has ? "View" : "Add"} <ChevronRight size={14} /></span>
-            </Link>
+            </button>
           );
         })}
       </div>
+
+      {openField && (
+        <FieldPopup
+          field={openField}
+          profile={profile}
+          busy={busy === openField}
+          onSave={save}
+          onClose={() => setOpenField(null)}
+          onGo={setOpenField}
+        />
+      )}
 
       <SiteBrainFieldStyles />
     </Shell>
@@ -279,6 +291,70 @@ function Shell({ children, right }: { children: React.ReactNode; right?: React.R
         </header>
         <div className="lx-scroll flex-1 overflow-y-auto px-5 pb-6 pt-4">{children}</div>
       </section>
+    </div>
+  );
+}
+
+/** One fact, in a popup: its name, what it is for, the answer with its sources, and the editor.
+ *  An empty field opens straight into the editor — adding it is the only reason to be here.
+ *  Escape and the backdrop close it; the arrows walk the twelve without closing. */
+function FieldPopup({ field, profile, busy, onSave, onClose, onGo }: {
+  field: ProfileField;
+  profile: SiteProfile;
+  busy: boolean;
+  onSave: (f: ProfileField, v: unknown) => Promise<boolean>;
+  onClose: () => void;
+  onGo: (f: ProfileField) => void;
+}) {
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", esc);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { window.removeEventListener("keydown", esc); document.body.style.overflow = prev; };
+  }, [onClose]);
+
+  const i = PROFILE_FIELDS.indexOf(field);
+  const prev = i > 0 ? PROFILE_FIELDS[i - 1] : null;
+  const next = i < PROFILE_FIELDS.length - 1 ? PROFILE_FIELDS[i + 1] : null;
+  const empty = isFieldEmpty(profile, field);
+
+  return (
+    <div className="sb-modal" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="sb-sheet" onClick={(e) => e.stopPropagation()}>
+        <header className="sb-sheet-h">
+          <div className="min-w-0 flex-1">
+            <div className="sb-sheet-t">{FRIENDLY_LABEL[field] ?? FIELD_META[field].label}</div>
+            <div className="sb-sheet-s">{FIELD_META[field].hint}</div>
+          </div>
+          <button className="sb-x" onClick={onClose} aria-label="Close"><X size={16} /></button>
+        </header>
+
+        <div className="lx-scroll sb-sheet-b">
+          <SiteBrainField
+            key={field}
+            bare
+            autoEdit={empty}
+            meta={FIELD_META[field]}
+            profile={profile}
+            busy={busy}
+            onSave={onSave}
+          />
+        </div>
+
+        <footer className="sb-sheet-f">
+          {prev ? (
+            <button className="sb-navbtn" onClick={() => onGo(prev)}>
+              <ChevronLeft size={14} /> <span className="truncate">{FRIENDLY_LABEL[prev]}</span>
+            </button>
+          ) : <span />}
+          {next && (
+            <button className="sb-navbtn ml-auto" onClick={() => onGo(next)}>
+              <span className="truncate">{FRIENDLY_LABEL[next]}</span> <ChevronRight size={14} />
+            </button>
+          )}
+        </footer>
+      </div>
     </div>
   );
 }
@@ -324,7 +400,8 @@ const CSS = `
   background:#4f46e5;border:1px solid #6366f1;color:#fff;font-size:12.5px;font-weight:600;cursor:pointer;transition:.15s}
 .sb-next:hover{background:#5b52ea}
 .sb-list{margin-top:14px;border-radius:12px;background:#101018;border:1px solid #1e1e2b;overflow:hidden}
-.sb-item{display:flex;align-items:center;gap:12px;width:100%;padding:13px 15px;text-decoration:none;transition:.15s}
+.sb-item{display:flex;align-items:center;gap:12px;width:100%;padding:13px 15px;text-align:left;background:none;
+  border:none;color:inherit;cursor:pointer;transition:.15s}
 .sb-item+.sb-item{border-top:1px solid #1a1a26}
 .sb-item:hover{background:#151520}
 .sb-item:hover .sb-go{color:#fff;border-color:#3a3a52}
@@ -336,6 +413,24 @@ const CSS = `
 .sb-item.gap .sb-item-p{color:#c08a2e}
 .sb-go{display:inline-flex;align-items:center;gap:4px;flex-shrink:0;height:28px;padding:0 10px;border-radius:8px;
   background:#191925;border:1px solid #262636;color:#9a9ab2;font-size:11.5px;font-weight:600;transition:.15s}
+.sb-modal{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;padding:16px;
+  background:rgba(4,4,10,.72);backdrop-filter:blur(3px);animation:sbFade .12s ease-out}
+@keyframes sbFade{from{opacity:0}to{opacity:1}}
+.sb-sheet{display:flex;flex-direction:column;width:min(680px,100%);max-height:min(88vh,760px);border-radius:16px;
+  background:#0c0c14;border:1px solid #26263a;box-shadow:0 30px 80px rgba(0,0,0,.7);overflow:hidden;
+  animation:sbUp .16s ease-out}
+@keyframes sbUp{from{transform:translateY(8px);opacity:.6}to{transform:none;opacity:1}}
+.sb-sheet-h{display:flex;align-items:flex-start;gap:12px;padding:15px 16px;border-bottom:1px solid #1e1e2b}
+.sb-sheet-t{font-size:17px;font-weight:700;color:#f5f5fa;line-height:1.25}
+.sb-sheet-s{margin-top:3px;font-size:11.5px;color:#8b8ba0;line-height:1.5}
+.sb-x{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;flex-shrink:0;border-radius:8px;
+  background:#191925;border:1px solid #262636;color:#b6b6c8;cursor:pointer;transition:.15s}
+.sb-x:hover{color:#fff;border-color:#3a3a52}
+.sb-sheet-b{flex:1;min-height:0;overflow-y:auto;padding:15px 16px}
+.sb-sheet-f{display:flex;align-items:center;gap:8px;padding:11px 16px;border-top:1px solid #1e1e2b;background:#0a0a11}
+.sb-navbtn{display:inline-flex;align-items:center;gap:6px;max-width:48%;height:32px;padding:0 12px;border-radius:9px;
+  background:#101018;border:1px solid #1e1e2b;color:#a8a8bd;font-size:11.5px;font-weight:600;cursor:pointer;transition:.15s}
+.sb-navbtn:hover{color:#fff;border-color:#3a3a52}
 .sb-hist{margin-top:10px;border-radius:12px;background:#101018;border:1px solid #1e1e2b;overflow:hidden}
 .sb-hist-r{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;padding:9px 13px}
 .sb-hist-r+.sb-hist-r{border-top:1px solid #1a1a26}
