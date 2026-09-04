@@ -98,6 +98,23 @@ export type AuditIssue = {
   category?: string;
 };
 
+/** What the Statistics tab aggregates (MASTER_PLAN §27.4, Round A): one row per HTML page this
+ *  run could read, every number a measurement the checks above already took — click depth from
+ *  the same BFS `deep-page` uses, in-links from the same graph `orphan-page` uses, title and
+ *  description length from the same strings `short-title`/`missing-meta` judge. Nothing here
+ *  is recomputed by the page from the HTML (which is not stored), so a histogram can never
+ *  disagree with the issue rows next to it. */
+export type PageStats = {
+  url: string;
+  /** Clicks from the home page over internal links; null when no link path reaches it. */
+  depth: number | null;
+  titleChars: number;
+  descriptionChars: number;
+  words: number;
+  inLinks: number;
+  outLinks: number;
+};
+
 export type AuditResult = {
   score: number;
   pagesChecked: number;
@@ -122,6 +139,8 @@ export type AuditResult = {
    *  checks in Crawlability). Without this the page could only see the checks that failed and
    *  would have to guess how many existed; shipping the list makes the % exact. */
   catalogue: { id: string; category: string; severity: AuditSeverity }[];
+  /** Per-page measurements for the Statistics tab — see PageStats. Only pages with HTML. */
+  pageStats: PageStats[];
 };
 
 /* ---------------------------------------------------------------- helpers --------------- */
@@ -1388,6 +1407,22 @@ export function auditSite(
             }
           });
 
+  // Statistics-tab rows, read straight off the structures the checks above already built (the
+  // link graph, the BFS depth map, titleOf/metaOf/wordsOf) — so the histograms and the issue
+  // rows are two views of one measurement, never two measurements.
+  const pageStats: PageStats[] = parsed.map((p) => {
+    const key = canonicalKey(p.page.url);
+    return {
+      url: p.page.url,
+      depth: depth.get(key) ?? null,
+      titleChars: titleOf(p).length,
+      descriptionChars: metaOf(p).length,
+      words: wordsOf(p.page.url),
+      inLinks: inSources.get(key)?.size ?? 0,
+      outLinks: outLinks.get(key)?.size ?? 0,
+    };
+  });
+
   return {
     score: clamp(100 - 25 * blocks - 5 * warns, 0, 100),
     pagesChecked: pages.length,
@@ -1401,6 +1436,7 @@ export function auditSite(
     pagesWithIssues: Array.from(pageIssueIds.keys()),
     blockedPages,
     catalogue: CHECK_CATALOGUE,
+    pageStats,
   };
 }
 

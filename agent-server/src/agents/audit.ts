@@ -124,15 +124,29 @@ export class AuditAgent extends Agent {
     // `result`, and thrown away.
     const issuePages = new Set(result.pagesWithIssues);
     const blockedPages = new Set(result.blockedPages);
-    const pageSummary = pages.map((p) => ({
-      url: p.url,
-      status: p.status,
-      redirectedTo: p.finalUrl && p.finalUrl !== p.url ? p.finalUrl : null,
-      ms: p.ms,
-      error: p.error ?? null,
-      hasIssue: issuePages.has(p.url),
-      blocked: blockedPages.has(p.url),
-    }));
+    // Per-page measurements for the report page's Statistics tab (MASTER_PLAN §27.4, Round A,
+    // 2026-09-05) — checks.ts's own `pageStats`, taken from the same link graph / title /
+    // description / word count the issue rows were judged on. null on a page with no HTML
+    // (a 404, a PDF, a timeout): not measured, not zero.
+    const stats = new Map(result.pageStats.map((s) => [s.url, s]));
+    const pageSummary = pages.map((p) => {
+      const st = stats.get(p.url) ?? null;
+      return {
+        url: p.url,
+        status: p.status,
+        redirectedTo: p.finalUrl && p.finalUrl !== p.url ? p.finalUrl : null,
+        ms: p.ms,
+        error: p.error ?? null,
+        hasIssue: issuePages.has(p.url),
+        blocked: blockedPages.has(p.url),
+        depth: st ? st.depth : null,
+        titleChars: st ? st.titleChars : null,
+        descriptionChars: st ? st.descriptionChars : null,
+        words: st ? st.words : null,
+        inLinks: st ? st.inLinks : null,
+        outLinks: st ? st.outLinks : null,
+      };
+    });
 
     // Real robots.txt evaluation for the named AI crawlers (lib/audit/robots.ts) — the owner's
     // own real Semrush report showed this as a real, non-fabricated card ("AI Search Health" /

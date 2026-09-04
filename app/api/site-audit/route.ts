@@ -18,10 +18,50 @@ export const dynamic = "force-dynamic";
 
 const MISSING_TABLE = "42P01";
 
-export async function GET() {
+export async function GET(req: Request) {
   const supabase = await createClient();
   const tenantId = await getCurrentTenantId(supabase);
   if (!tenantId) return NextResponse.json({ ok: false, error: "Not signed in." }, { status: 401 });
+
+  // ?run=<id> — ONE older report's issue list, for the Compare Crawls tab (MASTER_PLAN §27.4,
+  // Round A, 2026-09-05). Fetched on demand for the run the user picked, tenant-scoped like
+  // everything else here; the history list above stays score-and-date only for the reason
+  // in this file's own header. Issues come back without their page samples (`pages`) — the
+  // diff is by check id and count, and 100 URLs × 70 checks for a run nobody is reading
+  // page-by-page is weight for nothing.
+  const runId = new URL(req.url).searchParams.get("run");
+  if (runId) {
+    const { data: row, error: runError } = await supabase
+      .from("site_audits")
+      .select("id, score, blocks, warns, pages_checked, issues, created_at, run->trigger")
+      .eq("tenant_id", tenantId)
+      .eq("id", runId)
+      .maybeSingle();
+    if (runError) {
+      console.error("[site-audit] run read failed:", runError.message);
+      return NextResponse.json({ ok: false, error: runError.message }, { status: 500 });
+    }
+    if (!row) return NextResponse.json({ ok: false, error: "No such audit run." }, { status: 404 });
+    return NextResponse.json({
+      ok: true,
+      run: {
+        id: String(row.id),
+        score: Number(row.score) || 0,
+        blocks: Number(row.blocks) || 0,
+        warns: Number(row.warns) || 0,
+        pagesChecked: Number(row.pages_checked) || 0,
+        trigger: (row as any).trigger === "schedule" ? "schedule" : (row as any).trigger === "manual" ? "manual" : null,
+        createdAt: String(row.created_at),
+        issues: (Array.isArray(row.issues) ? row.issues : []).map((i: any) => ({
+          id: String(i.id),
+          severity: i.severity === "block" || i.severity === "warn" ? i.severity : "info",
+          what: typeof i.what === "string" ? i.what : "",
+          count: Number(i.count) || 0,
+          category: typeof i.category === "string" ? i.category : null,
+        })),
+      },
+    });
+  }
 
   const [{ data: latest, error }, { data: history }] = await Promise.all([
     supabase

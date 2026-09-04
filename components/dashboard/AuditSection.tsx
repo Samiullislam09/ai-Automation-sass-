@@ -33,7 +33,26 @@ type Severity = "block" | "warn" | "info";
 type Issue = { id: string; severity: Severity; what: string; fix: string; pages: string[]; count: number; category?: string };
 type CatalogueEntry = { id: string; category: string; severity: Severity };
 type PageVitals = { url: string; ok: boolean; error?: string; performanceScore: number | null; lcpMs: number | null; cls: number | null; tbtMs: number | null };
-type CrawledPage = { url: string; status: number | null; redirectedTo: string | null; ms: number | null; error: string | null; hasIssue?: boolean; blocked?: boolean };
+type CrawledPage = {
+  url: string;
+  status: number | null;
+  redirectedTo: string | null;
+  ms: number | null;
+  error: string | null;
+  hasIssue?: boolean;
+  blocked?: boolean;
+  /** Per-page measurements (agent-server checks.ts `pageStats`, stored since 2026-09-05) for
+   *  the Statistics tab. Absent on older reports; null on a page with no HTML (not measured). */
+  depth?: number | null;
+  titleChars?: number | null;
+  descriptionChars?: number | null;
+  words?: number | null;
+  inLinks?: number | null;
+  outLinks?: number | null;
+};
+/** One older run, as /api/site-audit?run=<id> returns it for Compare Crawls — issues by id and
+ *  count, without page samples. */
+type RunLite = { id: string; score: number; blocks: number; warns: number; pagesChecked: number; trigger: Trigger; createdAt: string; issues: { id: string; severity: Severity; what: string; count: number; category: string | null }[] };
 type BotAccess = { bot: string; label: string; allowed: boolean };
 type Trigger = "manual" | "schedule" | null;
 
@@ -60,7 +79,7 @@ type Report = {
 type HistoryRow = { id: string; score: number; blocks: number; warns: number; pagesChecked: number; trigger: Trigger; createdAt: string };
 type Payload = { ok: boolean; schemaReady: boolean; latest: Report | null; history: HistoryRow[] };
 
-type Tab = "overview" | "issues" | "pages" | "progress";
+type Tab = "overview" | "issues" | "pages" | "statistics" | "compare" | "progress";
 type Bucket = "Healthy" | "Broken" | "Have issues" | "Redirects" | "Blocked";
 
 const RANK: Record<Severity, number> = { block: 0, warn: 1, info: 2 };
@@ -81,8 +100,29 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "issues", label: "Issues" },
   { id: "pages", label: "Crawled Pages" },
+  { id: "statistics", label: "Statistics" },
+  { id: "compare", label: "Compare Crawls" },
   { id: "progress", label: "Progress" },
 ];
+
+/** Buckets for the Statistics tab's distributions — each edge is the same number the matching
+ *  check uses (30/65 title chars are `short-title`/`long-title`, 150 words is `thin-content`,
+ *  4,000 is `ai-too-much-content`, 1.5 s is `slow-response`, 3 clicks is `deep-page`), so a
+ *  bar here and an issue row there can never disagree about the same page. */
+function bucketBy<T>(items: T[], pick: (t: T) => number | null | undefined, edges: { label: string; test: (n: number) => boolean }[], unmeasured = "Not measured"): { label: string; count: number }[] {
+  const rows = edges.map((e) => ({ label: e.label, count: 0 }));
+  let missing = 0;
+  for (const it of items) {
+    const n = pick(it);
+    if (typeof n !== "number") {
+      missing++;
+      continue;
+    }
+    const hit = edges.findIndex((e) => e.test(n));
+    if (hit >= 0) rows[hit].count++;
+  }
+  return missing > 0 ? [...rows, { label: unmeasured, count: missing }] : rows;
+}
 
 /** Mean of whatever pages actually measured — never padded with a guess for the ones that
  *  didn't (a page with ok:false contributes nothing, not a zero). */
@@ -118,7 +158,37 @@ export default function AuditSection() {
   const [sevFilter, setSevFilter] = useState<"all" | Severity>("all");
   const [catFilter, setCatFilter] = useState<string>("all");
   const [bucketFilter, setBucketFilter] = useState<"all" | Bucket>("all");
+  // Compare Crawls: which older run to hold the latest against, and that run once fetched.
+  const [compareId, setCompareId] = useState<string | null>(null);
+  const [compareRun, setCompareRun] = useState<RunLite | null>(null);
+  const [compareError, setCompareError] = useState<string | null>(null);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Default the comparison to the run before the latest, and fetch whichever run is picked.
+  useEffect(() => {
+    if (tab !== "compare" || !state?.history?.length) return;
+    const latestId = state.latest?.id ?? null;
+    const older = state.history.filter((h) => h.id !== latestId);
+    if (!compareId && older.length) setCompareId(older[older.length - 1].id);
+  }, [tab, state, compareId]);
+
+  useEffect(() => {
+    if (!compareId) return;
+    let cancelled = false;
+    setCompareRun(null);
+    setCompareError(null);
+    fetch(`/api/site-audit?run=${encodeURIComponent(compareId)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        if (d.ok && d.run) setCompareRun(d.run as RunLite);
+        else setCompareError(d.error || "Couldn't load that run.");
+      })
+      .catch(() => !cancelled && setCompareError("Couldn't load that run — network error."));
+    return () => {
+      cancelled = true;
+    };
+  }, [compareId]);
 
   const load = useCallback((): Promise<Payload | null> => {
     setLoading(true);
@@ -640,6 +710,204 @@ export default function AuditSection() {
         </div>
       )}
 
+      {/* ══════════════════════════════════════════ STATISTICS ════════════════════════════ */}
+      {tab === "statistics" && (() => {
+        // Every distribution here is a count of REAL crawled pages in a bucket — the same
+        // numbers the checks judged, stored per page since 2026-09-05. An older report has the
+        // status/response columns but not the per-page measurements, and says so per card.
+        const html = pages.filter((p) => typeof p.titleChars === "number");
+        const hasStats = html.length > 0;
+        const notOnFile = "Not on file for this report — the next audit records it per page.";
+        const statusRows = [
+          { label: "200 OK", count: pages.filter((p) => p.status != null && p.status >= 200 && p.status < 300).length, color: BUCKET_COLOR.Healthy },
+          { label: "3xx redirect", count: pages.filter((p) => p.status != null && p.status >= 300 && p.status < 400).length, color: BUCKET_COLOR.Redirects },
+          { label: "4xx client error", count: pages.filter((p) => p.status != null && p.status >= 400 && p.status < 500).length, color: BUCKET_COLOR.Broken },
+          { label: "5xx server error", count: pages.filter((p) => p.status != null && p.status >= 500).length, color: BUCKET_COLOR.Broken },
+          { label: "Unreachable", count: pages.filter((p) => p.status == null).length, color: BUCKET_COLOR.Blocked },
+        ];
+        const avgMs = avg(pages.map((p) => p.ms));
+        return (
+          <>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+              <StatTile label="Pages crawled" value={String(pages.length || r.pagesChecked)} />
+              <StatTile label="Healthy" value={pages.length ? `${Math.round((bucketCount("Healthy") / pages.length) * 100)}%` : "—"} sub={pages.length ? `${bucketCount("Healthy")} of ${pages.length}` : undefined} />
+              <StatTile label="Errors" value={String(r.blocks)} color="#f87171" />
+              <StatTile label="Warnings" value={String(r.warns)} color="#fbbf24" />
+              <StatTile label="Notices" value={String(notices)} />
+              <StatTile label="Avg. response" value={avgMs != null ? `${avgMs} ms` : "—"} sub="time to first byte" />
+            </div>
+            {pages.length === 0 ? (
+              <div className="lx-card2 p-4"><p className="lx-11 lx-mut">{notOnFile}</p></div>
+            ) : (
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <Distribution title="Status codes" note="Every crawled URL, by what the server answered." rows={statusRows} />
+                <Distribution
+                  title="Response time"
+                  note="Time to first byte per page. Over 1.5 s is the slow-response line."
+                  rows={bucketBy(pages, (p) => p.ms, [
+                    { label: "Under 200 ms", test: (n) => n < 200 },
+                    { label: "200–500 ms", test: (n) => n < 500 },
+                    { label: "500 ms – 1 s", test: (n) => n < 1000 },
+                    { label: "1 – 1.5 s", test: (n) => n <= 1500 },
+                    { label: "Over 1.5 s", test: () => true },
+                  ])}
+                />
+                <Distribution
+                  title="Click depth"
+                  note="Clicks from the home page over internal links. Past 3 is the deep-page line."
+                  empty={hasStats ? undefined : notOnFile}
+                  rows={bucketBy(html, (p) => p.depth, [
+                    { label: "Home page", test: (n) => n === 0 },
+                    { label: "1 click", test: (n) => n === 1 },
+                    { label: "2 clicks", test: (n) => n === 2 },
+                    { label: "3 clicks", test: (n) => n === 3 },
+                    { label: "4+ clicks", test: () => true },
+                  ], "No link path from home")}
+                />
+                <Distribution
+                  title="Incoming internal links"
+                  note="How many other pages link to each page. Zero is an orphan."
+                  empty={hasStats ? undefined : notOnFile}
+                  rows={bucketBy(html, (p) => p.inLinks, [
+                    { label: "0 (orphan)", test: (n) => n === 0 },
+                    { label: "1", test: (n) => n === 1 },
+                    { label: "2 – 5", test: (n) => n <= 5 },
+                    { label: "6 – 20", test: (n) => n <= 20 },
+                    { label: "21+", test: () => true },
+                  ])}
+                />
+                <Distribution
+                  title="Title length"
+                  note="Characters in <title>. Under 30 is short, over 65 is cut off in search results."
+                  empty={hasStats ? undefined : notOnFile}
+                  rows={bucketBy(html, (p) => p.titleChars, [
+                    { label: "Missing", test: (n) => n === 0 },
+                    { label: "1 – 29 (short)", test: (n) => n < 30 },
+                    { label: "30 – 65", test: (n) => n <= 65 },
+                    { label: "66+ (long)", test: () => true },
+                  ])}
+                />
+                <Distribution
+                  title="Description length"
+                  note="Characters in the meta description. Google shows roughly the first 160."
+                  empty={hasStats ? undefined : notOnFile}
+                  rows={bucketBy(html, (p) => p.descriptionChars, [
+                    { label: "Missing", test: (n) => n === 0 },
+                    { label: "1 – 69", test: (n) => n < 70 },
+                    { label: "70 – 160", test: (n) => n <= 160 },
+                    { label: "161+", test: () => true },
+                  ])}
+                />
+                <Distribution
+                  title="Word count"
+                  note="Visible words per page, site furniture removed. Under 150 is thin; over 4,000 is too long for AI answers."
+                  empty={hasStats ? undefined : notOnFile}
+                  rows={bucketBy(html, (p) => p.words, [
+                    { label: "Under 150 (thin)", test: (n) => n < 150 },
+                    { label: "150 – 500", test: (n) => n < 500 },
+                    { label: "500 – 1,500", test: (n) => n < 1500 },
+                    { label: "1,500 – 4,000", test: (n) => n <= 4000 },
+                    { label: "Over 4,000", test: () => true },
+                  ])}
+                />
+                <Distribution
+                  title="Issues by category"
+                  note="Distinct checks that fired in each category — the same rows the Issues tab lists."
+                  rows={issueCategories.map((c) => ({ label: c, count: allIssues.filter((i) => (i.category ?? "Other") === c).length }))}
+                  unit="checks"
+                />
+              </div>
+            )}
+          </>
+        );
+      })()}
+
+      {/* ══════════════════════════════════════════ COMPARE CRAWLS ════════════════════════ */}
+      {tab === "compare" && (() => {
+        const older = history.filter((h) => h.id !== r.id);
+        if (!older.length) {
+          return (
+            <div className="lx-card2 flex flex-col items-center gap-2 p-8 text-center">
+              <div className="text-2xl">🔁</div>
+              <b className="lx-12">Nothing to compare yet</b>
+              <p className="lx-11 lx-mut" style={{ maxWidth: 460 }}>A comparison needs two runs. The next audit — yours or the weekly one — will show what got fixed and what is new.</p>
+            </div>
+          );
+        }
+        const a = compareRun;
+        const latestById = new Map(allIssues.map((i) => [i.id, i]));
+        const olderById = new Map((a?.issues ?? []).map((i) => [i.id, i]));
+        const fresh = a ? allIssues.filter((i) => !olderById.has(i.id)) : [];
+        const fixed = a ? a.issues.filter((i) => !latestById.has(i.id)).sort((x, y) => RANK[x.severity] - RANK[y.severity] || y.count - x.count) : [];
+        const still = a ? allIssues.filter((i) => olderById.has(i.id)) : [];
+        const delta = (now: number, then: number) => {
+          const d = now - then;
+          return d === 0 ? "no change" : d > 0 ? `+${d}` : `${d}`;
+        };
+        return (
+          <>
+            <div className="lx-card2 flex flex-wrap items-center gap-3 px-4 py-3 lx-audit-noprint">
+              <b className="lx-12">Compare this run with</b>
+              <select
+                className="lx-11 rounded-md px-2 py-1"
+                style={{ background: "transparent", border: "1px solid var(--lx-border)", color: "var(--lx-text)" }}
+                value={compareId ?? ""}
+                onChange={(e) => setCompareId(e.target.value || null)}
+              >
+                {[...older].reverse().map((h) => (
+                  <option key={h.id} value={h.id}>
+                    {new Date(h.createdAt).toLocaleString()} · score {h.score}{h.trigger ? ` · ${TRIGGER_LABEL[h.trigger]}` : ""}
+                  </option>
+                ))}
+              </select>
+              <span className="lx-10 lx-mut">This run: {new Date(r.createdAt).toLocaleString()}</span>
+            </div>
+            {compareError && <div className="lx-card2 p-4"><p className="lx-11" style={{ color: "#f87171" }}>{compareError}</p></div>}
+            {!a && !compareError && <div className="lx-card2 p-4"><p className="lx-11 lx-mut">Loading that run…</p></div>}
+            {a && (
+              <>
+                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                  <StatTile label="Site Health" value={`${a.score} → ${r.score}`} sub={delta(r.score, a.score)} />
+                  <StatTile label="Errors" value={`${a.blocks} → ${r.blocks}`} sub={delta(r.blocks, a.blocks)} color="#f87171" />
+                  <StatTile label="Warnings" value={`${a.warns} → ${r.warns}`} sub={delta(r.warns, a.warns)} color="#fbbf24" />
+                  <StatTile label="Pages crawled" value={`${a.pagesChecked} → ${r.pagesChecked}`} sub={delta(r.pagesChecked, a.pagesChecked)} />
+                </div>
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <div className="lx-card2 p-4">
+                    <b className="lx-12" style={{ color: "#34d399" }}>Fixed since then</b>
+                    <span className="lx-11 lx-mut ml-2">({fixed.length})</span>
+                    <div className="mt-3 grid grid-cols-1 gap-2">
+                      {fixed.length ? fixed.map((i) => <CompareRow key={i.id} severity={i.severity} what={i.what} category={i.category ?? undefined} note={`was ${i.count} ${i.count === 1 ? "page" : "pages"}`} />) : <p className="lx-11 lx-mut">Nothing from that run has gone away.</p>}
+                    </div>
+                  </div>
+                  <div className="lx-card2 p-4">
+                    <b className="lx-12" style={{ color: "#f87171" }}>New since then</b>
+                    <span className="lx-11 lx-mut ml-2">({fresh.length})</span>
+                    <div className="mt-3 grid grid-cols-1 gap-2">
+                      {fresh.length ? fresh.map((i) => <IssueRow key={i.id} issue={i} onPages={() => setPagesModal(i)} onFix={() => setFixModal(i)} />) : <p className="lx-11 lx-mut">No new kinds of issue.</p>}
+                    </div>
+                  </div>
+                </div>
+                <div className="lx-card2 p-4">
+                  <b className="lx-12">Still open</b>
+                  <span className="lx-11 lx-mut ml-2">({still.length}) — page counts then → now</span>
+                  <div className="mt-3 grid grid-cols-1 gap-2">
+                    {still.length ? (
+                      still.map((i) => {
+                        const then = olderById.get(i.id)!.count;
+                        return <CompareRow key={i.id} severity={i.severity} what={i.what} category={i.category} note={`${then} → ${i.count} ${i.count === 1 ? "page" : "pages"}${then === i.count ? "" : ` (${delta(i.count, then)})`}`} onClick={i.pages?.length ? () => setPagesModal(i) : undefined} />;
+                      })
+                    ) : (
+                      <p className="lx-11 lx-mut">Nothing carried over.</p>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+          </>
+        );
+      })()}
+
       {/* ══════════════════════════════════════════ PROGRESS ══════════════════════════════ */}
       {tab === "progress" && (
         <>
@@ -958,6 +1226,65 @@ function AreaTrend({ points, color }: { points: number[]; color: string }) {
       <path d={line} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
       {coords.map(([x, y], i) => <circle key={i} cx={x} cy={y} r={2.5} fill={color} />)}
     </svg>
+  );
+}
+
+/** One number, named — the Statistics / Compare tabs' headline row. Text stays in text tokens;
+ *  `color` is only ever a status colour the rest of this file already uses. */
+function StatTile({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
+  return (
+    <div className="rounded-lg px-3 py-2.5" style={{ border: "1px solid var(--lx-border)" }}>
+      <span className="lx-10 lx-mut">{label}</span>
+      <b className="mt-1 block font-extrabold leading-none" style={{ fontSize: 20, color: color ?? "var(--lx-violet)" }}>{value}</b>
+      {sub && <span className="lx-10 lx-mut">{sub}</span>}
+    </div>
+  );
+}
+
+/** A distribution as a bar list — one brand hue for one series (a status colour per row only
+ *  where the row IS a status, e.g. 4xx), a thin bar scaled to the largest bucket, the count and
+ *  its share as text beside it, the full label on hover. Rows are the table view. */
+function Distribution({ title, note, rows, empty, unit = "pages" }: { title: string; note?: string; rows: { label: string; count: number; color?: string }[]; empty?: string; unit?: string }) {
+  const total = rows.reduce((a, b) => a + b.count, 0);
+  const max = Math.max(1, ...rows.map((x) => x.count));
+  return (
+    <div className="lx-card2 p-4">
+      <b className="lx-12">{title}</b>
+      {note && <p className="lx-10 lx-mut mt-1">{note}</p>}
+      {empty ? (
+        <p className="lx-11 lx-mut mt-3">{empty}</p>
+      ) : (
+        <ul className="mt-3 space-y-1.5">
+          {rows.map((x) => (
+            <li key={x.label} className="flex items-center gap-2 lx-11" title={`${x.label}: ${x.count} of ${total} ${unit}`}>
+              <span className="shrink-0 truncate" style={{ width: 128 }}>{x.label}</span>
+              <div className="h-2 flex-1 overflow-hidden rounded-full" style={{ background: "var(--lx-border)" }}>
+                <div style={{ width: `${(x.count / max) * 100}%`, height: "100%", borderRadius: 4, background: x.color ?? "var(--lx-violet)" }} />
+              </div>
+              <b className="shrink-0 text-right" style={{ width: 36 }}>{x.count}</b>
+              <span className="lx-10 lx-mut shrink-0 text-right" style={{ width: 36 }}>{total ? Math.round((x.count / total) * 100) : 0}%</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** Compare Crawls row for an issue that has no page list to open (the older run's, or one
+ *  shown for its count change) — severity pill, the sentence, the count note. */
+function CompareRow({ severity, what, category, note, onClick }: { severity: Severity; what: string; category?: string; note: string; onClick?: () => void }) {
+  return (
+    <div className="rounded-lg py-2.5 pl-3 pr-3" style={{ borderLeft: `3px solid ${SEV_COLOR[severity]}`, background: "rgba(255,255,255,.02)" }}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        <span className="lx-10 shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 font-semibold" style={{ color: SEV_COLOR[severity], border: `1px solid ${SEV_COLOR[severity]}` }}>{SEV_LABEL[severity]}</span>
+        <button className="lx-11 min-w-0 flex-1 text-left" style={{ background: "transparent", border: "none", cursor: onClick ? "pointer" : "default", color: "#e6e6f2" }} onClick={onClick}>
+          <b>{what}</b>
+          <span className="ml-1.5 lx-mut">{note}</span>
+        </button>
+        {category && <span className="lx-10 lx-mut shrink-0">{category}</span>}
+      </div>
+    </div>
   );
 }
 
