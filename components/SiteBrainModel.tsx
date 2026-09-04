@@ -37,6 +37,37 @@ export type Voice = { tone: string | null; do: string[]; dont: string[]; samples
  *  The planner reads it to weight topics; without it every offering looks equally important
  *  and the team spends the month writing about the one that pays least. */
 export type Goals = { primary: "leads" | "traffic" | "sales" | null; kpis: string[]; focus: string[] };
+
+/* ── Phase 1 of docs/SITE_BRAIN_PLAN.md (added 2026-09-05) ──────────────────────────────────
+   The eight facts whose absence produced visibly wrong output: a writer with no call to
+   action, no price answer, no differentiator, and nothing it is forbidden to say. Each keeps
+   the same evidence rules as the rest of the brain — empty until a page or a human says so. */
+
+/** Where an article should send the reader. `contact` is the fallback route in words
+ *  ("call +971…", "the form on /contact") for when there is no single button URL. */
+export type Cta = { text: string | null; url: string | null; contact: string | null };
+
+/** How the business charges. `model` is the shape of the price, `range` the number people
+ *  actually ask for; both may be absent, and "on request" is a real answer. */
+export type Pricing = { model: "fixed" | "quote" | "subscription" | "free" | null; range: string | null; note: string | null };
+
+/** A worry a buyer has, with the honest answer. Becomes an article section, not a slogan. */
+export type Objection = { question: string; answer: string };
+
+/** An accreditation, licence, registration or membership — the claims E-E-A-T is built on. */
+export type Credential = { name: string; url: string | null };
+
+/** The pages that actually earn, in priority order. Internal links aim here. */
+export type MoneyPage = { url: string; label: string | null };
+
+/** House rules for anything published: length, byline, images, and the legal line. */
+export type PublishingRules = {
+  words_min: number | null;
+  words_max: number | null;
+  byline: string | null;
+  image_policy: string | null;
+  disclaimer: string | null;
+};
 export type Confidence = "high" | "medium" | "low";
 
 export const PROFILE_FIELDS = [
@@ -52,6 +83,15 @@ export const PROFILE_FIELDS = [
   "language",
   "competitors",
   "goals",
+  // Phase 1 (SITE_BRAIN_PLAN.md). Order matters: this is the order the page lists them in.
+  "never_say",
+  "cta",
+  "usp",
+  "pricing",
+  "objections",
+  "credentials",
+  "money_pages",
+  "publishing_rules",
 ] as const;
 
 export type ProfileField = (typeof PROFILE_FIELDS)[number];
@@ -69,6 +109,14 @@ export type SiteProfile = {
   language: string | null;
   competitors: string[];
   goals: Goals | null;
+  never_say: string[];
+  cta: Cta | null;
+  usp: string[];
+  pricing: Pricing | null;
+  objections: Objection[];
+  credentials: Credential[];
+  money_pages: MoneyPage[];
+  publishing_rules: PublishingRules | null;
   confidence: Partial<Record<ProfileField, Confidence>>;
   sources: Partial<Record<ProfileField, string[]>>;
   /** Fields a human corrected by hand. analyst.ts reads `previous.profile.user_edited` and
@@ -111,6 +159,14 @@ export function emptyProfile(): SiteProfile {
     language: null,
     competitors: [],
     goals: null,
+    never_say: [],
+    cta: null,
+    usp: [],
+    pricing: null,
+    objections: [],
+    credentials: [],
+    money_pages: [],
+    publishing_rules: null,
     confidence: {},
     sources: {},
   };
@@ -135,6 +191,11 @@ export function normalizeProfile(raw: unknown): SiteProfile {
     topic_clusters: asArray<TopicCluster>(p.topic_clusters),
     content_gaps: asArray<ContentGap>(p.content_gaps),
     competitors: asArray<string>(p.competitors),
+    never_say: asArray<string>(p.never_say),
+    usp: asArray<string>(p.usp),
+    objections: asArray<Objection>(p.objections),
+    credentials: asArray<Credential>(p.credentials),
+    money_pages: asArray<MoneyPage>(p.money_pages),
     confidence: (p.confidence && typeof p.confidence === "object" ? p.confidence : {}) as SiteProfile["confidence"],
     sources: (p.sources && typeof p.sources === "object" ? p.sources : {}) as SiteProfile["sources"],
     user_edited: asArray<ProfileField>(p.user_edited).filter(isProfileField),
@@ -188,6 +249,8 @@ export function coerceField(field: ProfileField, raw: unknown): CoerceResult {
 
     case "buyer_intent":
     case "competitors":
+    case "never_say":
+    case "usp":
       return { ok: true, value: strList(raw) };
 
     case "offerings": {
@@ -271,6 +334,78 @@ export function coerceField(field: ProfileField, raw: unknown): CoerceResult {
       return { ok: true, value: primary || kpis.length || focus.length ? { primary, kpis, focus } : null };
     }
 
+    case "cta": {
+      if (raw === null) return { ok: true, value: null };
+      if (typeof raw !== "object") return { ok: false, error: `"cta" must be an object.` };
+      const c = raw as Partial<Cta>;
+      const value: Cta = { text: nullableStr(c.text), url: safeHttpUrl(c.url), contact: nullableStr(c.contact) };
+      return { ok: true, value: value.text || value.url || value.contact ? value : null };
+    }
+
+    case "pricing": {
+      if (raw === null) return { ok: true, value: null };
+      if (typeof raw !== "object") return { ok: false, error: `"pricing" must be an object.` };
+      const pr = raw as Partial<Pricing>;
+      const model = pr.model === "fixed" || pr.model === "quote" || pr.model === "subscription" || pr.model === "free" ? pr.model : null;
+      const value: Pricing = { model, range: nullableStr(pr.range), note: nullableStr(pr.note) };
+      return { ok: true, value: value.model || value.range || value.note ? value : null };
+    }
+
+    case "objections": {
+      if (!Array.isArray(raw)) return { ok: false, error: `"objections" must be a list.` };
+      const out: Objection[] = [];
+      for (const item of raw.slice(0, 50)) {
+        const o = (item ?? {}) as Partial<Objection>;
+        const question = str(o.question);
+        if (!question) continue; // an answer with no question is not an objection
+        out.push({ question, answer: str(o.answer) });
+      }
+      return { ok: true, value: out };
+    }
+
+    case "credentials": {
+      if (!Array.isArray(raw)) return { ok: false, error: `"credentials" must be a list.` };
+      const out: Credential[] = [];
+      for (const item of raw.slice(0, 50)) {
+        const c = (item ?? {}) as Partial<Credential>;
+        const name = str(c.name);
+        if (!name) continue;
+        out.push({ name, url: safeHttpUrl(c.url) });
+      }
+      return { ok: true, value: out };
+    }
+
+    case "money_pages": {
+      if (!Array.isArray(raw)) return { ok: false, error: `"money_pages" must be a list.` };
+      const out: MoneyPage[] = [];
+      for (const item of raw.slice(0, 50)) {
+        const m = (item ?? {}) as Partial<MoneyPage>;
+        const url = safeHttpUrl(m.url);
+        if (!url) continue; // a money page without its page is nothing to link to
+        out.push({ url, label: nullableStr(m.label) });
+      }
+      return { ok: true, value: out };
+    }
+
+    case "publishing_rules": {
+      if (raw === null) return { ok: true, value: null };
+      if (typeof raw !== "object") return { ok: false, error: `"publishing_rules" must be an object.` };
+      const r = raw as Partial<PublishingRules>;
+      const clamp = (v: unknown) => {
+        const n = num(v, null);
+        return n === null ? null : Math.min(6000, Math.max(200, Math.round(n)));
+      };
+      const value: PublishingRules = {
+        words_min: clamp(r.words_min),
+        words_max: clamp(r.words_max),
+        byline: nullableStr(r.byline),
+        image_policy: nullableStr(r.image_policy),
+        disclaimer: nullableStr(r.disclaimer),
+      };
+      const empty = !value.words_min && !value.words_max && !value.byline && !value.image_policy && !value.disclaimer;
+      return { ok: true, value: empty ? null : value };
+    }
+
     default:
       return { ok: false, error: `Unknown field "${field}".` };
   }
@@ -284,6 +419,9 @@ export function isFieldEmpty(profile: SiteProfile, field: ProfileField): boolean
   if (Array.isArray(v)) return v.length === 0;
   if (field === "voice") return !v.tone && !v.do?.length && !v.dont?.length;
   if (field === "goals") return !v.primary && !v.kpis?.length && !v.focus?.length;
+  if (field === "cta") return !v.text && !v.url && !v.contact;
+  if (field === "pricing") return !v.model && !v.range && !v.note;
+  if (field === "publishing_rules") return !v.words_min && !v.words_max && !v.byline && !v.image_policy && !v.disclaimer;
   if (typeof v === "string") return !v.trim();
   return false;
 }
@@ -396,6 +534,78 @@ export const FIELD_GROUPS: FieldGroup[] = [
     ],
   },
   {
+    title: "What you must never say",
+    sub: "The hard limits. An article that breaks one of these is stopped by the quality gate, not published.",
+    fields: [
+      {
+        field: "never_say",
+        label: "Never say this",
+        hint: "One per line: banned claims, words, guarantees, competitor names.",
+        prompt: "e.g. guaranteed certification\ne.g. cheapest in the market\ne.g. 100% pass rate",
+      },
+    ],
+  },
+  {
+    title: "Where readers should go",
+    sub: "Every article ends with a next step. Without this the writer can only say “contact us”.",
+    fields: [
+      {
+        field: "cta",
+        label: "Your call to action",
+        hint: "The words on the button, the page it opens, and how someone reaches you otherwise.",
+        prompt: "e.g. Book a free ISO readiness call — /contact",
+      },
+      {
+        field: "money_pages",
+        label: "Pages that earn",
+        hint: "In priority order. Articles link back to these instead of whatever page happens to match.",
+        prompt: "The service or product pages you want traffic sent to.",
+      },
+    ],
+  },
+  {
+    title: "Why you, and at what price",
+    sub: "The two questions every buyer asks, answered once so every article answers them the same way.",
+    fields: [
+      {
+        field: "usp",
+        label: "What makes you different",
+        hint: "Three to five, in your customer's words. One per line.",
+        prompt: "e.g. IRCA-registered auditors on staff\ne.g. certification in 30 days, not 6 months",
+      },
+      {
+        field: "pricing",
+        label: "How you charge",
+        hint: "Buyer questions are mostly price questions. “On request” is a real answer.",
+        prompt: "e.g. Quote based — typical project AED 12,000–25,000",
+      },
+      {
+        field: "objections",
+        label: "What buyers worry about",
+        hint: "The five things that stop a sale, with the honest answer to each.",
+        prompt: "e.g. “Is certification worth it for a 10-person company?”",
+      },
+      {
+        field: "credentials",
+        label: "Your credentials",
+        hint: "Accreditations, licences, registrations and memberships — only real ones, with a link where possible.",
+        prompt: "e.g. IAS accredited certification body",
+      },
+    ],
+  },
+  {
+    title: "House rules for publishing",
+    sub: "How anything published should be built — length, byline, images and the legal line.",
+    fields: [
+      {
+        field: "publishing_rules",
+        label: "Publishing rules",
+        hint: "Applied to every article before it reaches you.",
+        prompt: "e.g. 1,200–1,800 words, byline “WCA Global Team”",
+      },
+    ],
+  },
+  {
     title: "What you are aiming for",
     sub: "Set during onboarding. It decides what the planner optimises for.",
     fields: [{ field: "goals", label: "Goal", hint: "Leads, traffic or sales — plus how you will measure it.", prompt: "Pick a primary goal so the planner has something to aim at." }],
@@ -457,6 +667,14 @@ export const FRIENDLY_LABEL: Record<ProfileField, string> = {
   language: "Language you publish in",
   competitors: "Your competitors",
   goals: "What you want from this",
+  never_say: "Things we must never say",
+  cta: "Where readers should go next",
+  usp: "What makes you different",
+  pricing: "How you charge",
+  objections: "What buyers worry about",
+  credentials: "Your credentials",
+  money_pages: "Pages that earn",
+  publishing_rules: "Publishing rules",
 };
 
 /** One line of an answer, for a closed list row — never the whole thing. */
@@ -474,6 +692,15 @@ export function previewOf(profile: SiteProfile, field: ProfileField): string {
   if (field === "voice" && v) {
     const parts = [v.tone, v.do?.length ? `${v.do.length} do` : "", v.dont?.length ? `${v.dont.length} never` : ""].filter(Boolean);
     return cut(parts.join(" · ") || "Set");
+  }
+  if (field === "cta" && v) return cut([v.text, v.url, v.contact].filter(Boolean).join(" · "));
+  if (field === "pricing" && v) {
+    const model = v.model ? { fixed: "Fixed price", quote: "Quote based", subscription: "Subscription", free: "Free" }[v.model as string] : null;
+    return cut([model, v.range, v.note].filter(Boolean).join(" · ") || "Set");
+  }
+  if (field === "publishing_rules" && v) {
+    const len = v.words_min || v.words_max ? `${v.words_min ?? "?"}–${v.words_max ?? "?"} words` : null;
+    return cut([len, v.byline ? `by ${v.byline}` : null, v.disclaimer ? "disclaimer set" : null].filter(Boolean).join(" · ") || "Set");
   }
   if (field === "goals" && v) {
     const parts = [v.primary, v.focus?.length ? `${v.focus.length} focus areas` : ""].filter(Boolean);

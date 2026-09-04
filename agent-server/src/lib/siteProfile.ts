@@ -73,6 +73,37 @@ export type Goals = {
   focus: string[];
 };
 
+/* ── Phase 1 of docs/SITE_BRAIN_PLAN.md (2026-09-05) ────────────────────────────────────────
+   Mirrors components/SiteBrainModel.tsx exactly — the two files are one schema written twice
+   (this package is excluded from the web app's tsconfig), so a change here needs the same
+   change there. These eight are user-owned: the analyst never invents them, and `user_edited`
+   carries them forward untouched. `never_say` is enforced as a hard block by the quality gate,
+   not as advice to the writer. */
+
+/** Where an article should send the reader. */
+export type Cta = { text: string | null; url: string | null; contact: string | null };
+
+/** How the business charges. "On request" is a real answer; an empty one stays empty. */
+export type Pricing = { model: "fixed" | "quote" | "subscription" | "free" | null; range: string | null; note: string | null };
+
+/** A buyer's worry with the honest answer — an article section, not a slogan. */
+export type Objection = { question: string; answer: string };
+
+/** An accreditation, licence, registration or membership. */
+export type Credential = { name: string; url: string | null };
+
+/** The pages that earn, in priority order. Internal links aim here. */
+export type MoneyPage = { url: string; label: string | null };
+
+/** House rules applied to anything published. */
+export type PublishingRules = {
+  words_min: number | null;
+  words_max: number | null;
+  byline: string | null;
+  image_policy: string | null;
+  disclaimer: string | null;
+};
+
 export type Confidence = "high" | "medium" | "low";
 
 /** The fields that carry a confidence + sources entry. Keys of the two maps below. */
@@ -89,6 +120,15 @@ export const PROFILE_FIELDS = [
   "language",
   "competitors",
   "goals",
+  // Phase 1 (docs/SITE_BRAIN_PLAN.md) — keep in step with the web mirror's order.
+  "never_say",
+  "cta",
+  "usp",
+  "pricing",
+  "objections",
+  "credentials",
+  "money_pages",
+  "publishing_rules",
 ] as const;
 
 export type ProfileField = (typeof PROFILE_FIELDS)[number];
@@ -106,6 +146,15 @@ export type SiteProfile = {
   language: string | null;
   competitors: string[];
   goals: Goals | null;
+  /** Claims, words and guarantees this business must never publish. A hard block. */
+  never_say: string[];
+  cta: Cta | null;
+  usp: string[];
+  pricing: Pricing | null;
+  objections: Objection[];
+  credentials: Credential[];
+  money_pages: MoneyPage[];
+  publishing_rules: PublishingRules | null;
   /** How sure we are, per field. "low" is a real answer and is shown to the user as one. */
   confidence: Partial<Record<ProfileField, Confidence>>;
   /** Where each field came from: page URLs, "onboarding", "google-search-console", "user".
@@ -150,6 +199,14 @@ export function emptyProfile(): SiteProfile {
     language: null,
     competitors: [],
     goals: null, // { primary: null, kpis: [], focus: [] } once set — normalize below fills a partial row
+    never_say: [],
+    cta: null,
+    usp: [],
+    pricing: null,
+    objections: [],
+    credentials: [],
+    money_pages: [],
+    publishing_rules: null,
     confidence: {},
     sources: {},
   };
@@ -171,6 +228,11 @@ export function normalizeProfile(raw: unknown): SiteProfile {
     topic_clusters: asArray(p.topic_clusters),
     content_gaps: asArray(p.content_gaps),
     competitors: asArray(p.competitors),
+    never_say: asArray(p.never_say),
+    usp: asArray(p.usp),
+    objections: asArray(p.objections),
+    credentials: asArray(p.credentials),
+    money_pages: asArray(p.money_pages),
     confidence: (p.confidence && typeof p.confidence === "object" ? p.confidence : {}) as SiteProfile["confidence"],
     sources: (p.sources && typeof p.sources === "object" ? p.sources : {}) as SiteProfile["sources"],
   };

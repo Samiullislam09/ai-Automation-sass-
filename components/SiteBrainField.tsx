@@ -13,6 +13,12 @@ import {
   type SiteProfile,
   type TopicCluster,
   type Voice,
+  type Cta,
+  type Pricing,
+  type Objection,
+  type Credential,
+  type MoneyPage,
+  type PublishingRules,
 } from "@/components/SiteBrainModel";
 
 /** One field of the Site Brain, with the three things that make it trustworthy (§25.2):
@@ -212,8 +218,18 @@ function FieldValue({ field, profile }: { field: ProfileField; profile: SiteProf
     case "language":
       return <p className="sb-pv brk">{(profile as any)[field]}</p>;
 
+    case "never_say":
+      return (
+        <ul className="sb-rows">
+          {profile.never_say.map((t, i) => (
+            <li key={i} className="sb-never"><span className="sb-x2">✕</span><b className="brk">{t}</b></li>
+          ))}
+        </ul>
+      );
+
     case "buyer_intent":
     case "competitors":
+    case "usp":
       return (
         <div className="sb-chips">
           {((profile as any)[field] as string[]).map((t, i) => (
@@ -300,6 +316,91 @@ function FieldValue({ field, profile }: { field: ProfileField; profile: SiteProf
         </ul>
       );
 
+    case "cta": {
+      const c = profile.cta;
+      if (!c) return null;
+      return (
+        <div>
+          {c.text && <p className="sb-pv brk"><b>Button:</b> {c.text}</p>}
+          {c.url && (
+            <p className="sb-pv brk">
+              <b>Opens:</b> <a href={c.url} target="_blank" rel="noopener noreferrer">{pathOf(c.url)} ↗</a>
+            </p>
+          )}
+          {c.contact && <p className="sb-pv brk"><b>Otherwise:</b> {c.contact}</p>}
+        </div>
+      );
+    }
+
+    case "pricing": {
+      const pr = profile.pricing;
+      if (!pr) return null;
+      const model = pr.model ? PRICE_MODEL[pr.model] : null;
+      return (
+        <div>
+          {model && <p className="sb-pv brk"><b>How:</b> {model}</p>}
+          {pr.range && <p className="sb-pv brk"><b>Typical:</b> {pr.range}</p>}
+          {pr.note && <p className="sb-pv brk">{pr.note}</p>}
+        </div>
+      );
+    }
+
+    case "objections":
+      return (
+        <ul className="sb-rows">
+          {profile.objections.map((o: Objection, i) => (
+            <li key={i} className="col">
+              <b className="brk">“{o.question}”</b>
+              {o.answer ? <span className="sb-pv brk">{o.answer}</span> : <span className="sb-none">no answer written yet</span>}
+            </li>
+          ))}
+        </ul>
+      );
+
+    case "credentials":
+      return (
+        <ul className="sb-rows">
+          {profile.credentials.map((c: Credential, i) => (
+            <li key={i}>
+              <b className="brk">{c.name}</b>
+              {c.url ? (
+                <a href={c.url} target="_blank" rel="noopener noreferrer" className="brk">{pathOf(c.url)} ↗</a>
+              ) : (
+                <span className="sb-none">no page — you told us this</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      );
+
+    case "money_pages":
+      return (
+        <ul className="sb-rows">
+          {profile.money_pages.map((m: MoneyPage, i) => (
+            <li key={i}>
+              <span className="sb-k">{i + 1}</span>
+              <b className="brk">{m.label || pathOf(m.url)}</b>
+              <a href={m.url} target="_blank" rel="noopener noreferrer" className="brk">{pathOf(m.url)} ↗</a>
+            </li>
+          ))}
+        </ul>
+      );
+
+    case "publishing_rules": {
+      const r = profile.publishing_rules;
+      if (!r) return null;
+      return (
+        <div>
+          {(r.words_min || r.words_max) && (
+            <p className="sb-pv brk"><b>Length:</b> {r.words_min ?? "?"}–{r.words_max ?? "?"} words</p>
+          )}
+          {r.byline && <p className="sb-pv brk"><b>Byline:</b> {r.byline}</p>}
+          {r.image_policy && <p className="sb-pv brk"><b>Images:</b> {r.image_policy}</p>}
+          {r.disclaimer && <p className="sb-pv brk"><b>Disclaimer:</b> {r.disclaimer}</p>}
+        </div>
+      );
+    }
+
     case "voice": {
       const v = profile.voice;
       if (!v) return null;
@@ -366,6 +467,8 @@ function FieldEditor({
 
     case "buyer_intent":
     case "competitors":
+    case "never_say":
+    case "usp":
       return (
         <textarea
           ref={firstRef}
@@ -469,6 +572,146 @@ function FieldEditor({
       );
     }
 
+    case "cta": {
+      const c: Cta = value ?? { text: null, url: null, contact: null };
+      return (
+        <div className="sb-stack">
+          <div className="field">
+            <label htmlFor="sb-cta-text">What should the button say?</label>
+            <input id="sb-cta-text" ref={firstRef} value={c.text ?? ""} placeholder="e.g. Book a free readiness call"
+              onChange={(e) => onChange({ ...c, text: e.target.value })} />
+          </div>
+          <div className="field">
+            <label htmlFor="sb-cta-url">Where does it go?</label>
+            <input id="sb-cta-url" value={c.url ?? ""} placeholder="https://your-site.com/contact"
+              onChange={(e) => onChange({ ...c, url: e.target.value })} />
+          </div>
+          <div className="field">
+            <label htmlFor="sb-cta-contact">Any other way to reach you</label>
+            <input id="sb-cta-contact" value={c.contact ?? ""} placeholder="e.g. call +971 4 000 0000, or the form on /contact"
+              onChange={(e) => onChange({ ...c, contact: e.target.value })} />
+          </div>
+        </div>
+      );
+    }
+
+    case "pricing": {
+      const pr: Pricing = value ?? { model: null, range: null, note: null };
+      return (
+        <div className="sb-stack">
+          <fieldset className="sb-gset">
+            <legend className="xs mut">How do you charge?</legend>
+            {(["fixed", "quote", "subscription", "free"] as const).map((k) => (
+              <label key={k} className="sb-gopt">
+                <input type="radio" name="sb-price-model" checked={pr.model === k} onChange={() => onChange({ ...pr, model: k })} />
+                <span>{PRICE_MODEL[k]}</span>
+              </label>
+            ))}
+          </fieldset>
+          <div className="field">
+            <label htmlFor="sb-price-range">Typical price, if you publish one</label>
+            <input id="sb-price-range" ref={firstRef} value={pr.range ?? ""} placeholder="e.g. AED 12,000–25,000 per project"
+              onChange={(e) => onChange({ ...pr, range: e.target.value })} />
+          </div>
+          <div className="field">
+            <label htmlFor="sb-price-note">Anything a price article must say</label>
+            <textarea id="sb-price-note" rows={2} value={pr.note ?? ""} placeholder="e.g. audit days billed separately"
+              onChange={(e) => onChange({ ...pr, note: e.target.value })} />
+          </div>
+        </div>
+      );
+    }
+
+    case "objections":
+      return (
+        <RepeatRows<Objection>
+          rows={Array.isArray(value) ? value : []}
+          onChange={onChange}
+          blank={{ question: "", answer: "" }}
+          addLabel="Add a worry"
+          render={(row, set, first) => (
+            <>
+              <input ref={first ? firstRef : undefined} value={row.question ?? ""} placeholder="What they worry about"
+                onChange={(e) => set({ ...row, question: e.target.value })} aria-label="Objection" />
+              <input value={row.answer ?? ""} placeholder="Your honest answer"
+                onChange={(e) => set({ ...row, answer: e.target.value })} aria-label="Answer" />
+            </>
+          )}
+        />
+      );
+
+    case "credentials":
+      return (
+        <RepeatRows<Credential>
+          rows={Array.isArray(value) ? value : []}
+          onChange={onChange}
+          blank={{ name: "", url: null }}
+          addLabel="Add a credential"
+          render={(row, set, first) => (
+            <>
+              <input ref={first ? firstRef : undefined} value={row.name ?? ""} placeholder="e.g. IAS accredited certification body"
+                onChange={(e) => set({ ...row, name: e.target.value })} aria-label="Credential" />
+              <input value={row.url ?? ""} placeholder="https://… proof page (optional)"
+                onChange={(e) => set({ ...row, url: e.target.value })} aria-label="Credential proof URL" />
+            </>
+          )}
+        />
+      );
+
+    case "money_pages":
+      return (
+        <RepeatRows<MoneyPage>
+          rows={Array.isArray(value) ? value : []}
+          onChange={onChange}
+          blank={{ url: "", label: null }}
+          addLabel="Add a page"
+          render={(row, set, first) => (
+            <>
+              <input ref={first ? firstRef : undefined} value={row.url ?? ""} placeholder="https://your-site.com/service"
+                onChange={(e) => set({ ...row, url: e.target.value })} aria-label="Money page URL" />
+              <input value={row.label ?? ""} placeholder="What to call it (optional)"
+                onChange={(e) => set({ ...row, label: e.target.value })} aria-label="Money page label" />
+            </>
+          )}
+        />
+      );
+
+    case "publishing_rules": {
+      const r: PublishingRules = value ?? { words_min: null, words_max: null, byline: null, image_policy: null, disclaimer: null };
+      const numOrNull = (v: string) => (v.trim() === "" ? null : Number(v));
+      return (
+        <div className="sb-stack">
+          <div className="sb-two">
+            <div className="field">
+              <label htmlFor="sb-wmin">Shortest article (words)</label>
+              <input id="sb-wmin" ref={firstRef} type="number" min={200} max={6000} value={r.words_min ?? ""}
+                onChange={(e) => onChange({ ...r, words_min: numOrNull(e.target.value) })} />
+            </div>
+            <div className="field">
+              <label htmlFor="sb-wmax">Longest article (words)</label>
+              <input id="sb-wmax" type="number" min={200} max={6000} value={r.words_max ?? ""}
+                onChange={(e) => onChange({ ...r, words_max: numOrNull(e.target.value) })} />
+            </div>
+          </div>
+          <div className="field">
+            <label htmlFor="sb-byline">Who it is published as</label>
+            <input id="sb-byline" value={r.byline ?? ""} placeholder="e.g. WCA Global Team"
+              onChange={(e) => onChange({ ...r, byline: e.target.value })} />
+          </div>
+          <div className="field">
+            <label htmlFor="sb-images">Images</label>
+            <input id="sb-images" value={r.image_policy ?? ""} placeholder="e.g. no stock photos of people"
+              onChange={(e) => onChange({ ...r, image_policy: e.target.value })} />
+          </div>
+          <div className="field">
+            <label htmlFor="sb-disc">Disclaimer to add at the end</label>
+            <textarea id="sb-disc" rows={2} value={r.disclaimer ?? ""} placeholder="Leave blank if you don’t need one"
+              onChange={(e) => onChange({ ...r, disclaimer: e.target.value })} />
+          </div>
+        </div>
+      );
+    }
+
     case "goals": {
       const g: Goals = value ?? { primary: null, kpis: [], focus: [] };
       return (
@@ -498,6 +741,13 @@ function FieldEditor({
       return null;
   }
 }
+
+const PRICE_MODEL: Record<string, string> = {
+  fixed: "Fixed price",
+  quote: "Quote per job",
+  subscription: "Subscription",
+  free: "Free",
+};
 
 /** A list of small records, each removable. Deliberately plain: a few inputs and a Remove, so
  *  correcting one wrong offering takes four seconds rather than a modal. */
@@ -612,6 +862,10 @@ export function SiteBrainFieldStyles() {
       .sb-src { display: inline-flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; min-width: 0; }
       .sb-src a { color: var(--ac); text-decoration: underline; text-underline-offset: 2px; }
 
+      .sb-never { display: flex; align-items: baseline; gap: 8px; }
+      .sb-x2 { color: var(--red); font-size: 11px; flex: none; }
+      .sb-two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      @media (max-width: 480px) { .sb-two { grid-template-columns: 1fr; } }
       .sb-chips { display: flex; flex-wrap: wrap; gap: 7px; }
       .sb-chip { font-size: 12px; padding: 5px 11px; border-radius: 999px; background: var(--panel2);
                  border: 1px solid var(--line2); color: var(--ink); max-width: 100%; }
