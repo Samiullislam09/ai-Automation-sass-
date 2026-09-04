@@ -17,11 +17,11 @@ import {
 
 /** One field of the Site Brain, with the three things that make it trustworthy (§25.2):
  *
- *   · the VALUE, or an honest blank — a field with no evidence says "pata nahi" and offers to
- *     be filled in. There is no placeholder prose anywhere in here, because a placeholder is
- *     what the agents would then copy into an article;
+ *   · the VALUE, or an honest blank — a field with no evidence says "we haven't found this" and
+ *     offers to be filled in. There is no placeholder prose anywhere in here, because a
+ *     placeholder is what the agents would then copy into an article;
  *   · WHERE IT CAME FROM — the source URLs, as links you can open. This is the whole point of
- *     the screen: "yahan se pata chala". Sources that are not URLs ("you told us", "Google
+ *     the screen: where each answer was read from. Sources that are not URLs ("you told us", "Google
  *     Search Console") print as plain words. Nothing is ever dressed up as a link we cannot
  *     stand behind, and a field with no recorded source says exactly that, in amber;
  *   · the CONFIDENCE — and a low-confidence field is marked, in words, as a guess to confirm.
@@ -132,10 +132,10 @@ export default function SiteBrainField({ meta, profile, busy, onSave }: Props) {
 function Unknown({ prompt, onFill }: { prompt: string; onFill: () => void }) {
   return (
     <div className="sb-unk">
-      <b>Pata nahi — we haven&apos;t found this.</b>
+      <b>We haven&apos;t found this yet.</b>
       <span>Your site doesn&apos;t say it and you haven&apos;t told us, so it stays blank rather than being guessed. {prompt}</span>
-      <button className="btn btn-g btn-sm" onClick={onFill} style={{ alignSelf: "flex-start", marginTop: 4 }}>
-        Tell us
+      <button className="sb-edit-btn" onClick={onFill} style={{ alignSelf: "flex-start", marginTop: 6 }}>
+        Tell the team
       </button>
     </div>
   );
