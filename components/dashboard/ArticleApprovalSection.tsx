@@ -3,10 +3,12 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  ArrowLeft, ArrowRight, CheckCircle2, ChevronDown, Copy, ExternalLink, Eye,
-  Clock, Lock, MinusCircle, MoreVertical, Pencil, RotateCw, Send, Sparkles, X, XCircle,
+  ArrowLeft, Bold, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Clock, Code2, Copy,
+  ExternalLink, Eye, Heading2, Heading3, Italic, Link2, List, ListOrdered, Lock, MinusCircle,
+  MoreVertical, Pencil, Pilcrow, Redo2, Send, Sparkles, Undo2, X, XCircle,
 } from "lucide-react";
 import { renderMarkdown } from "@/lib/md";
+import { htmlToMarkdown } from "@/lib/html-to-md";
 import { useStore } from "@/lib/store";
 
 /** /dashboard/content/[id] — "Article Approval", rebuilt 2026-09-04 to match the owner's
@@ -172,7 +174,11 @@ export default function ArticleApprovalSection({
   const [title, setTitle] = useState(item.title ?? "");
   const [savedBody, setSavedBody] = useState(item.body ?? "");
   const [savedTitle, setSavedTitle] = useState(item.title ?? "");
-  const dirty = body !== savedBody || title !== savedTitle;
+  // Round-tripping the article through the visual editor re-normalises its markdown a little
+  // (spacing, escapes) without anyone having changed a word, so edit mode keeps its own
+  // baseline: "dirty" means different from what the server has AND from that baseline.
+  const [editBase, setEditBase] = useState<string | null>(null);
+  const dirty = (body !== savedBody && body !== (editBase ?? savedBody)) || title !== savedTitle;
 
   const [comment, setComment] = useState("");
   const [revising, setRevising] = useState(false);
@@ -180,7 +186,54 @@ export default function ArticleApprovalSection({
   const [statusChoice, setStatusChoice] = useState<"approve" | "reject" | "request_changes">("approve");
   const [seoReportOpen, setSeoReportOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [source, setSource] = useState(false);      // raw-markdown escape hatch inside edit mode
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkUrl, setLinkUrl] = useState("");
   const undoStack = useRef<string[]>([]);
+  const editorRef = useRef<HTMLElement>(null);
+  const editHtmlRef = useRef("");
+
+  /* ---- WYSIWYG editing (no markdown to learn — owner's ask, 2026-09-05) ----------------
+     The editable surface IS the rendered article. Its HTML is seeded once when edit mode
+     opens and never re-written from state (that would jump the caret); every keystroke is
+     converted back to markdown, which is what actually gets saved. */
+  const syncFromEditor = () => {
+    const el = editorRef.current;
+    if (el) setBody(htmlToMarkdown(el as HTMLElement));
+  };
+  const exec = (cmd: string, value?: string) => {
+    editorRef.current?.focus();
+    document.execCommand(cmd, false, value);
+    syncFromEditor();
+  };
+  const applyLink = () => {
+    const url = linkUrl.trim();
+    if (!/^(https?:\/\/|\/)/.test(url)) { toast("Link https:// se ya / se shuru hona chahiye.", "info"); return; }
+    exec("createLink", url);
+    setLinkUrl("");
+    setLinkOpen(false);
+  };
+  // Seeds the editable article once per edit session (and when coming back from Source).
+  useEffect(() => {
+    if (tab !== "edit" || source) return;
+    const el = editorRef.current;
+    if (!el) return;
+    el.innerHTML = editHtmlRef.current;
+    const md = htmlToMarkdown(el);
+    setBody(md);
+    setEditBase(md);
+  }, [tab, source]);
+
+  const enterEdit = () => {
+    editHtmlRef.current = renderMarkdown(body) || "<p><br /></p>";
+    setTab("edit");
+  };
+  const toggleEdit = () => (tab === "edit" ? setTab("read") : enterEdit());
+  const toggleSource = () => {
+    // leaving Source: re-seed the editable HTML from whatever the markdown now says
+    if (source) editHtmlRef.current = renderMarkdown(body) || "<p><br /></p>";
+    setSource((v) => !v);
+  };
 
   const html = useMemo(() => renderMarkdown(body), [body]);
   const meta = item.meta ?? {};
@@ -265,6 +318,7 @@ export default function ArticleApprovalSection({
       if (!data.ok) { toast(data.error ?? "Save failed.", "error"); return; }
       setSavedBody(body);
       setSavedTitle(title);
+      setEditBase(null);
       undoStack.current = [];
       toast("Saved.");
     } catch (e: any) {
@@ -345,74 +399,58 @@ export default function ArticleApprovalSection({
     <div className="aa-wrap">
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
 
-      {/* ---------------- article toolbar ---------------- */}
-      <div className="aa-bar">
-        <div className="min-w-0">
-          <div className="flex min-w-0 items-center gap-2">
-            {tab === "edit" ? (
-              <input value={title} onChange={(e) => setTitle(e.target.value)} className="aa-title-in" />
-            ) : (
-              <h2 className="aa-h2" title={title || "Untitled"}>{title || "Untitled"}</h2>
-            )}
-            {editable && (
-              <button className="aa-pencil" onClick={() => setTab(tab === "edit" ? "read" : "edit")} title={tab === "edit" ? "Back to preview" : "Edit article"}>
-                {tab === "edit" ? <Eye size={14} /> : <Pencil size={14} />}
-              </button>
-            )}
-          </div>
-          <div className="mt-1 flex items-center gap-2">
-            <span className="aa-status" style={{ color: STATUS_COLOR[item.status] ?? "#8b8ba0" }}>
-              <i style={{ background: STATUS_COLOR[item.status] ?? "#8b8ba0" }} />
-              {STATUS_LABEL[item.status] ?? item.status}
-            </span>
-            {dirty && <span className="aa-status" style={{ color: "#fbbf24" }}><i style={{ background: "#fbbf24" }} />Unsaved changes</span>}
-          </div>
-        </div>
-
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          <Link href="/dashboard/content" className="aa-btn" title="Back to Content"><ArrowLeft size={14} /> Content</Link>
-          <button className="aa-btn" disabled={!neighbors.prev} onClick={() => neighbors.prev && router.push(`/dashboard/content/${neighbors.prev}`)}>
-            <ArrowLeft size={14} /> Previous
-          </button>
-          <button className="aa-btn" disabled={!neighbors.next} onClick={() => neighbors.next && router.push(`/dashboard/content/${neighbors.next}`)}>
-            Next <ArrowRight size={14} />
-          </button>
-          <div className="relative" onClick={(e) => e.stopPropagation()}>
-            <button className="aa-btn" onClick={() => setMoreOpen((o) => !o)}>
-              <MoreVertical size={14} /> More Actions <ChevronDown size={13} />
-            </button>
-            {moreOpen && (
-              <div className="aa-menu">
-                {editable && (
-                  <button onClick={() => { setTab(tab === "edit" ? "read" : "edit"); setMoreOpen(false); }}>
-                    {tab === "edit" ? <><Eye size={13} /> Preview article</> : <><Pencil size={13} /> Edit article</>}
-                  </button>
-                )}
-                <button onClick={() => { copyMarkdown(); setMoreOpen(false); }}><Copy size={13} /> Copy markdown</button>
-                {isLive && <a href={meta.publishedUrl!} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Open live page</a>}
-                <Link href="/dashboard/approvals"><CheckCircle2 size={13} /> Go to Approvals</Link>
-                {pending_ && <button className="danger" onClick={() => { setMoreOpen(false); reject(); }}><X size={13} /> Reject article</button>}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
       {/* ---------------- body grid ---------------- */}
       <div className="aa-grid">
         {/* ------- main: browser-style preview ------- */}
         <div className="min-w-0 space-y-3">
           <div className="aa-card overflow-hidden">
-            {/* address bar */}
+            {/* address bar — and the page's whole toolbar. The separate title/status/Previous/
+                Next strip above it is gone (owner, 2026-09-05: "top se remove karo"); back and
+                the neighbour steps live here as icons instead, where a browser's own nav is. */}
             <div className="aa-chrome">
-              <span className="aa-chrome-nav"><ArrowLeft size={13} /></span>
-              <span className="aa-chrome-nav"><ArrowRight size={13} /></span>
-              <span className="aa-chrome-nav"><RotateCw size={13} /></span>
+              <Link href="/dashboard/content" className="aa-cbtn" title="Back to Content"><ArrowLeft size={14} /></Link>
+              <button className="aa-cbtn" disabled={!neighbors.prev} title="Previous article"
+                onClick={() => neighbors.prev && router.push(`/dashboard/content/${neighbors.prev}`)}>
+                <ChevronLeft size={14} />
+              </button>
+              <button className="aa-cbtn" disabled={!neighbors.next} title="Next article"
+                onClick={() => neighbors.next && router.push(`/dashboard/content/${neighbors.next}`)}>
+                <ChevronRight size={14} />
+              </button>
               <span className="aa-url">
                 {isLive && <Lock size={11} style={{ color: "#4ade80", flexShrink: 0 }} />}
                 <span className="truncate" style={{ color: isLive ? "#4ade80" : "var(--lx-mut)" }}>{previewUrl}</span>
               </span>
-              <span className="aa-chrome-nav"><MoreVertical size={13} /></span>
+              <span className="aa-chip" style={{ color: STATUS_COLOR[item.status] ?? "#8b8ba0" }} title={`Status: ${STATUS_LABEL[item.status] ?? item.status}`}>
+                <i style={{ background: STATUS_COLOR[item.status] ?? "#8b8ba0" }} />
+                <span className="aa-chip-t">{STATUS_LABEL[item.status] ?? item.status}</span>
+              </span>
+              {dirty && (
+                <span className="aa-chip" style={{ color: "#fbbf24" }} title="Unsaved changes">
+                  <i style={{ background: "#fbbf24" }} /><span className="aa-chip-t">Unsaved</span>
+                </span>
+              )}
+              {editable && (
+                <button className={`aa-cbtn ${tab === "edit" ? "on" : ""}`} onClick={toggleEdit} title={tab === "edit" ? "Back to preview" : "Edit article"}>
+                  {tab === "edit" ? <Eye size={14} /> : <Pencil size={14} />}
+                </button>
+              )}
+              <div className="relative" onClick={(e) => e.stopPropagation()}>
+                <button className="aa-cbtn" onClick={() => setMoreOpen((o) => !o)} title="More actions"><MoreVertical size={14} /></button>
+                {moreOpen && (
+                  <div className="aa-menu">
+                    {editable && (
+                      <button onClick={() => { toggleEdit(); setMoreOpen(false); }}>
+                        {tab === "edit" ? <><Eye size={13} /> Preview article</> : <><Pencil size={13} /> Edit article</>}
+                      </button>
+                    )}
+                    <button onClick={() => { copyMarkdown(); setMoreOpen(false); }}><Copy size={13} /> Copy markdown</button>
+                    {isLive && <a href={meta.publishedUrl!} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Open live page</a>}
+                    <Link href="/dashboard/approvals"><CheckCircle2 size={13} /> Go to Approvals</Link>
+                    {pending_ && <button className="danger" onClick={() => { setMoreOpen(false); reject(); }}><X size={13} /> Reject article</button>}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* body — WHITE, like the real published page (see header comment); everything
@@ -437,28 +475,83 @@ export default function ArticleApprovalSection({
                 )}
               </div>
             ) : (
-              <div className="p-4">
-                <label className="aa-label">Article (markdown)</label>
-                <textarea
-                  value={body}
-                  onChange={(e) => setBody(e.target.value)}
-                  spellCheck
-                  className="lx-in lx-12 w-full p-3"
-                  style={{ minHeight: "58vh", lineHeight: 1.7, fontFamily: "ui-monospace,SFMono-Regular,Menlo,monospace" }}
-                />
-                <div className="mt-3 flex items-center gap-2">
-                  <button className="lx-grad aa-primary" onClick={save} disabled={!dirty || !!busy}>
-                    {busy === "save" ? "Saving…" : "Save changes"}
+              /* EDIT MODE — you edit the page itself, not markup. The article is still stored
+                 as markdown (the publisher, Mr. SEO and every agent read markdown), so what the
+                 browser produces is converted back on every keystroke via lib/html-to-md.ts.
+                 "Source" is still there for anyone who wants the raw markdown. */
+              <>
+                <div className="aa-tools">
+                  {!source && (
+                    <>
+                      <Tool title="Bold" onClick={() => exec("bold")}><Bold size={14} /></Tool>
+                      <Tool title="Italic" onClick={() => exec("italic")}><Italic size={14} /></Tool>
+                      <span className="aa-tool-sep" />
+                      <Tool title="Heading" onClick={() => exec("formatBlock", "h2")}><Heading2 size={14} /></Tool>
+                      <Tool title="Sub-heading" onClick={() => exec("formatBlock", "h3")}><Heading3 size={14} /></Tool>
+                      <Tool title="Normal text" onClick={() => exec("formatBlock", "p")}><Pilcrow size={14} /></Tool>
+                      <span className="aa-tool-sep" />
+                      <Tool title="Bullet list" onClick={() => exec("insertUnorderedList")}><List size={14} /></Tool>
+                      <Tool title="Numbered list" onClick={() => exec("insertOrderedList")}><ListOrdered size={14} /></Tool>
+                      <Tool title="Link" onClick={() => setLinkOpen((o) => !o)}><Link2 size={14} /></Tool>
+                      <span className="aa-tool-sep" />
+                      <Tool title="Undo" onClick={() => exec("undo")}><Undo2 size={14} /></Tool>
+                      <Tool title="Redo" onClick={() => exec("redo")}><Redo2 size={14} /></Tool>
+                    </>
+                  )}
+                  <button className={`aa-btn ml-auto ${source ? "on" : ""}`} onClick={toggleSource} title="Show the raw markdown">
+                    <Code2 size={14} /> Source
                   </button>
-                  <button
-                    className="aa-btn"
-                    disabled={!undoStack.current.length}
-                    onClick={() => { const prev = undoStack.current.pop(); if (prev !== undefined) setBody(prev); }}
-                  >
-                    Undo
+                  <button className="lx-grad aa-primary" onClick={save} disabled={!dirty || !!busy}>
+                    {busy === "save" ? "Saving…" : "Save"}
                   </button>
                 </div>
-              </div>
+
+                {linkOpen && !source && (
+                  <div className="aa-linkbar">
+                    <input
+                      value={linkUrl}
+                      onChange={(e) => setLinkUrl(e.target.value)}
+                      placeholder="https://example.com/page — select the words first, then paste the link"
+                      onKeyDown={(e) => { if (e.key === "Enter") applyLink(); }}
+                    />
+                    <button className="aa-btn" onMouseDown={(e) => e.preventDefault()} onClick={applyLink}>Add link</button>
+                    <button className="aa-btn" onMouseDown={(e) => e.preventDefault()} onClick={() => { exec("unlink"); setLinkOpen(false); }}>Remove</button>
+                  </div>
+                )}
+
+                <div className="aa-view lx-scroll">
+                  <div className="aa-hero">
+                    <input className="aa-hero-input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Article title" />
+                    {meta.metaDescription && <p className="aa-hero-sub">{meta.metaDescription}</p>}
+                    <div className="aa-hero-meta">By {siteName ?? "the team"} · {fmtDate(item.created_at)} · {readMins} min read</div>
+                  </div>
+                  {source ? (
+                    <textarea
+                      value={body}
+                      onChange={(e) => setBody(e.target.value)}
+                      spellCheck
+                      className="lx-in lx-12 w-full p-3"
+                      style={{ minHeight: "50vh", lineHeight: 1.7, fontFamily: "ui-monospace,SFMono-Regular,Menlo,monospace", borderRadius: 0, border: "none" }}
+                    />
+                  ) : (
+                    <div className="aa-page">
+                      {/* deliberately empty in JSX: the HTML is written by the effect above
+                          when edit mode opens. React must not own these children — with
+                          dangerouslySetInnerHTML on a contentEditable it re-applies the seed
+                          on every re-render and every typed character vanishes. */}
+                      <article
+                        ref={editorRef}
+                        className="lxpv-article aa-editable"
+                        contentEditable
+                        suppressContentEditableWarning
+                        spellCheck
+                        onInput={syncFromEditor}
+                        onBlur={syncFromEditor}
+                      />
+                    </div>
+                  )}
+                </div>
+              </>
             )}
           </div>
 
@@ -526,6 +619,10 @@ export default function ArticleApprovalSection({
 
             <div className="aa-h3 mt-3">Article Details</div>
             <dl className="mt-2 space-y-2">
+              <div className="aa-kv">
+                <span className="aa-k">Status</span>
+                <span className="aa-v" style={{ color: STATUS_COLOR[item.status] ?? "#8b8ba0" }}>{STATUS_LABEL[item.status] ?? item.status}</span>
+              </div>
               <KV label="Author" value="Mr. Writer" />
               <KV label="Assigned By" value={meta.chosenBy === "user" ? "You" : meta.chosenBy === "auto" ? "Mr. Keyword" : "Not recorded"} />
               <KV label="Category" value={category === "loading" ? "Loading…" : category ?? "Uncategorized"} />
@@ -622,6 +719,16 @@ export default function ArticleApprovalSection({
   );
 }
 
+/** One formatting button. onMouseDown is swallowed so clicking it never drops the selection
+ *  inside the editable article — without that, execCommand has nothing to format. */
+function Tool({ title, onClick, children }: { title: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button className="aa-tool" title={title} aria-label={title} onMouseDown={(e) => e.preventDefault()} onClick={onClick}>
+      {children}
+    </button>
+  );
+}
+
 function KV({ label, value }: { label: string; value: string }) {
   return (
     <div className="aa-kv">
@@ -659,7 +766,30 @@ const CSS = `
   background:#12121c;border:1px solid var(--lx-border);color:#d6d6e4;font-size:12.5px;font-weight:600;cursor:pointer;transition:.15s}
 .aa-btn:hover:not(:disabled){color:#fff;border-color:rgba(139,92,246,.5);background:#171722}
 .aa-btn:disabled{opacity:.4;cursor:not-allowed}
-.aa-bar{display:flex;flex-wrap:wrap;align-items:flex-start;gap:10px}
+.aa-cbtn{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;flex-shrink:0;border-radius:7px;
+  background:none;border:none;color:#8b8ba0;cursor:pointer;transition:.15s}
+.aa-cbtn:hover:not(:disabled){color:#fff;background:rgba(255,255,255,.08)}
+.aa-cbtn:disabled{opacity:.35;cursor:not-allowed}
+.aa-cbtn.on{color:#fff;background:rgba(139,92,246,.25)}
+.aa-chip{display:inline-flex;align-items:center;gap:5px;flex-shrink:0;font-size:11px;font-weight:600;white-space:nowrap}
+.aa-chip i{width:6px;height:6px;border-radius:50%;display:inline-block;flex-shrink:0}
+@container aa (max-width:620px){.aa-chip-t{display:none}}
+.aa-tools{display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:7px 10px;background:#0d0d16;
+  border-bottom:1px solid var(--lx-border)}
+.aa-tool{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:7px;
+  background:none;border:none;color:#b6b6c8;cursor:pointer;transition:.15s}
+.aa-tool:hover{color:#fff;background:rgba(255,255,255,.09)}
+.aa-tool-sep{width:1px;height:18px;margin:0 4px;background:var(--lx-border)}
+.aa-btn.on{color:#fff;border-color:rgba(139,92,246,.6);background:rgba(139,92,246,.18)}
+.aa-linkbar{display:flex;align-items:center;gap:6px;padding:7px 10px;background:#0d0d16;border-bottom:1px solid var(--lx-border)}
+.aa-linkbar input{flex:1;min-width:0;height:30px;padding:0 10px;border-radius:8px;background:#0a0a11;
+  border:1px solid var(--lx-border);color:#e8e8f2;font-size:12px;outline:none}
+.aa-linkbar input:focus{border-color:rgba(139,92,246,.55)}
+.aa-hero-input{width:100%;max-width:640px;background:none;border:none;outline:none;color:#fff;letter-spacing:-.02em;
+  font-size:28px;font-weight:800;line-height:1.15;border-bottom:1px dashed rgba(255,255,255,.18);padding-bottom:2px}
+.aa-hero-input:focus{border-bottom-color:rgba(139,92,246,.8)}
+.aa-editable{outline:none;min-height:40vh}
+.aa-editable:focus{outline:none}
 .aa-pencil{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:7px;flex-shrink:0;
   background:none;border:none;color:#8b8ba0;cursor:pointer;transition:.15s}
 .aa-pencil:hover{color:#fff;background:rgba(255,255,255,.07)}
