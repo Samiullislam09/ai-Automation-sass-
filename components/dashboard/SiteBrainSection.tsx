@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { Activity, Brain, ChevronDown, Loader2, PlugZap, RotateCw, Search } from "lucide-react";
 import { useStore } from "@/lib/store";
 import SiteBrainField, { SiteBrainFieldStyles } from "@/components/SiteBrainField";
 import {
@@ -14,15 +15,16 @@ import {
   type SiteProfile,
 } from "@/components/SiteBrainModel";
 
-/** /dashboard/site-brain — same real logic and API calls as the old app/app/site-brain/page.tsx
- *  (kept verbatim: /api/site-brain GET/PATCH, /api/agents/trigger for refresh). The field
- *  editor itself (components/SiteBrainField.tsx — offerings, proof, topic clusters, voice,
- *  goals, RepeatRows) is reused unmodified: it's real, complex, tested logic, and MrLxwaDashboard
- *  now remaps the old theme's CSS tokens to the new palette so it renders in-theme without a
- *  risky rewrite (see the "legacy /app/** theme bridge" comment in MrLxwaDashboard.tsx). Only
- *  the page chrome (header, summary, empty states) is rebuilt in the new theme, per the owner's
- *  standing instruction (2026-08-29). Rendered inside <MrLxwaDashboard> as its `children` — see
- *  app/dashboard/site-brain/page.tsx. */
+/** /dashboard/site-brain — page chrome rebuilt 2026-09-05 on the same quiet theme as Memory:
+ *  one panel, a header with the two real actions, a plain summary line, and the field groups as
+ *  neutral cards. Neutral surfaces, one indigo accent — the colour on this page should come
+ *  from the content, not the chrome.
+ *
+ *  Logic and API calls are unchanged: /api/site-brain GET/PATCH and /api/agents/trigger. The
+ *  field editor itself (components/SiteBrainField.tsx — offerings, proof, topic clusters,
+ *  voice, goals, RepeatRows) is reused unmodified: real, complex, tested logic, and
+ *  MrLxwaDashboard remaps the old theme's CSS tokens so it renders in-theme (see the "legacy
+ *  /app/** theme bridge" comment there). */
 
 type Payload = {
   ok: boolean;
@@ -118,19 +120,25 @@ export default function SiteBrainSection() {
   if (loading && !state) {
     return (
       <Shell>
-        <div className="lx-card2 p-6"><p className="lx-11 lx-mut">Loading…</p></div>
+        <div className="sb-loading"><Loader2 size={16} className="sb-spin lx-mut" /><span className="lx-11 lx-mut">Loading…</span></div>
       </Shell>
     );
   }
 
   const s = state;
-  if (!s) return <Shell><Empty ico="😕" title="Couldn't load it" body="Something went wrong reading your Site Brain. Refresh the page to try again." /></Shell>;
+  if (!s) {
+    return (
+      <Shell>
+        <Empty Icon={Brain} title="Couldn't load it" body="Something went wrong reading your Site Brain. Refresh the page to try again." />
+      </Shell>
+    );
+  }
 
   if (!s.schemaReady) {
     return (
       <Shell>
         <Empty
-          ico="🧩"
+          Icon={Brain}
           title="Not set up on this database yet"
           body="The Site Brain tables (migration 019) haven't been applied here. Nothing you can do from this screen — this one is for whoever runs the database."
         />
@@ -142,10 +150,10 @@ export default function SiteBrainSection() {
     return (
       <Shell>
         <Empty
-          ico="🔌"
+          Icon={PlugZap}
           title="We haven't read your site yet"
           body="The Site Brain is built from your own pages. Connect your website and we'll read it — then this page fills itself in."
-          action={<Link href="/dashboard/connect" className="lx-grad lx-11 px-3.5 py-2">Connect your website</Link>}
+          action={<Link href="/dashboard/connect" className="sb-primary">Connect your website</Link>}
         />
       </Shell>
     );
@@ -155,11 +163,11 @@ export default function SiteBrainSection() {
     return (
       <Shell>
         <Empty
-          ico="🔎"
+          Icon={Search}
           title={`${s.pagesCrawled} pages read — nothing understood yet`}
           body="Mr. Analyst turns those pages into the profile every other agent reads. He may still be working; if not, start him here."
           action={
-            <button className="lx-grad lx-11 px-3.5 py-2" disabled={refreshing} onClick={() => refresh("analyst")}>
+            <button className="sb-primary" disabled={refreshing} onClick={() => refresh("analyst")}>
               {refreshing ? "Starting…" : "Understand my site"}
             </button>
           }
@@ -175,66 +183,56 @@ export default function SiteBrainSection() {
   return (
     <Shell
       right={
-        <div className="flex flex-wrap gap-2">
-          <button className="lx-ghost" disabled={refreshing} onClick={() => refresh("crawler")} title="Read the site again and rebuild the profile">
-            {refreshing ? "Starting…" : "↻ Refresh"}
+        <>
+          <button className="sb-btn" disabled={refreshing} onClick={() => refresh("crawler")} title="Read the site again and rebuild the profile">
+            {refreshing ? <Loader2 size={14} className="sb-spin" /> : <RotateCw size={14} />} Refresh
           </button>
-          <Link href="/dashboard/workspace" className="lx-ghost">Watch it work →</Link>
-        </div>
+          <Link href="/dashboard/workspace" className="sb-btn"><Activity size={14} /> Watch it work</Link>
+        </>
       }
     >
-      <div className="lx-card2 p-4">
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <div>
-            <b className="text-xl font-extrabold leading-tight">{known}<span className="lx-mut">/{PROFILE_FIELDS.length}</span></b>
-            <div className="lx-10 lx-mut">things we know</div>
-          </div>
-          <div>
-            <b className="text-xl font-extrabold leading-tight">{s.builtFrom?.pages ?? s.pagesCrawled}</b>
-            <div className="lx-10 lx-mut">pages read</div>
-          </div>
-          <div>
-            <b className="text-xl font-extrabold leading-tight">v{s.version}</b>
-            <div className="lx-10 lx-mut">{s.builtBy === "user" ? "you last changed it" : "built by the team"}</div>
-          </div>
-          <div>
-            <b className="text-xl font-extrabold leading-tight">{edited}</b>
-            <div className="lx-10 lx-mut">fields you corrected</div>
-          </div>
-        </div>
-        <p className="lx-10 lx-mut mt-3.5">
-          {s.builtAt ? `Last built ${new Date(s.builtAt).toLocaleString()}` : "Never built"}
-          {s.builtFrom?.gsc_period ? ` · Search Console: ${s.builtFrom.gsc_period}` : " · Search Console not connected"}
-          {" · "}
-          {s.history.length > 1 ? (
-            <button className="underline" style={{ color: "var(--lx-cyan)" }} onClick={() => setShowHistory((v) => !v)}>
-              {showHistory ? "hide" : "show"} {s.history.length} versions
-            </button>
-          ) : (
-            "this is the first version"
-          )}
-        </p>
-        {showHistory && (
-          <ul className="mt-3 space-y-1.5 border-t pt-3" style={{ borderColor: "var(--lx-border)" }}>
-            {s.history.map((h) => (
-              <li key={h.id} className="lx-11 flex flex-wrap items-baseline gap-2">
-                <b>v{h.version}</b>
-                <span className="lx-10 lx-mut">
-                  {h.created_by === "user" ? "your edit" : "the team"} · {h.pages ? `${h.pages} pages · ` : ""}
-                  {h.created_at ? new Date(h.created_at).toLocaleString() : ""}
-                </span>
-                {h.active && <span className="lx-pill blue">now</span>}
-              </li>
-            ))}
-          </ul>
-        )}
+      {/* what it knows, in four numbers */}
+      <div className="sb-sum">
+        <Num n={`${known}`} of={`/${PROFILE_FIELDS.length}`} label="things we know" />
+        <Num n={String(s.builtFrom?.pages ?? s.pagesCrawled)} label="pages read" />
+        <Num n={`v${s.version}`} label={s.builtBy === "user" ? "you last changed it" : "built by the team"} />
+        <Num n={String(edited)} label="fields you corrected" />
       </div>
 
+      <p className="sb-meta">
+        {s.builtAt ? `Last built ${new Date(s.builtAt).toLocaleString()}` : "Never built"}
+        {s.builtFrom?.gsc_period ? ` · Search Console: ${s.builtFrom.gsc_period}` : " · Search Console not connected"}
+        {" · "}
+        {s.history.length > 1 ? (
+          <button className="sb-link" onClick={() => setShowHistory((v) => !v)}>
+            {showHistory ? "hide" : "show"} {s.history.length} versions
+          </button>
+        ) : (
+          "this is the first version"
+        )}
+      </p>
+
+      {showHistory && (
+        <div className="sb-hist">
+          {s.history.map((h) => (
+            <div key={h.id} className="sb-hist-r">
+              <b className="lx-11">v{h.version}</b>
+              <span className="lx-10 lx-mut">
+                {h.created_by === "user" ? "your edit" : "the team"}
+                {h.pages ? ` · ${h.pages} pages` : ""}
+                {h.created_at ? ` · ${new Date(h.created_at).toLocaleString()}` : ""}
+              </span>
+              {h.active && <span className="sb-now">now</span>}
+            </div>
+          ))}
+        </div>
+      )}
+
       {FIELD_GROUPS.map((group) => (
-        <section key={group.title} className="lx-card2 mt-4 p-4">
-          <div className="mb-2.5">
-            <h2 className="lx-13 font-bold">{group.title}</h2>
-            <p className="lx-10 lx-mut">{group.sub}</p>
+        <section key={group.title} className="sb-group">
+          <div className="sb-group-h">
+            <h2>{group.title}</h2>
+            <p>{group.sub}</p>
           </div>
           <div className="listgrid">
             {group.fields.map((meta) => (
@@ -249,30 +247,93 @@ export default function SiteBrainSection() {
   );
 }
 
+/* ---------------------------------------------------------------------------------------- */
+
 function Shell({ children, right }: { children: React.ReactNode; right?: React.ReactNode }) {
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-lg font-bold">Site Brain</h1>
-          <p className="lx-11 lx-mut mt-1" style={{ maxWidth: 560 }}>
-            What your team understood about your business — and where each part came from. Correct anything: once you do, the agents stop rewriting it.
-          </p>
-        </div>
-        {right}
-      </div>
-      {children}
+    <div className="sb-wrap">
+      <style dangerouslySetInnerHTML={{ __html: CSS }} />
+      <section className="sb-panel flex min-w-0 flex-1 flex-col">
+        <header className="sb-head">
+          <div className="min-w-0 flex-1">
+            <h1 className="sb-h1">Site Brain</h1>
+            <p className="sb-sub">
+              What your team understood about your business. Correct anything — once you do, the agents stop rewriting it.
+            </p>
+          </div>
+          {right && <div className="flex flex-wrap items-center gap-2">{right}</div>}
+        </header>
+        <div className="lx-scroll flex-1 overflow-y-auto px-5 pb-6 pt-4">{children}</div>
+      </section>
     </div>
   );
 }
 
-function Empty({ ico, title, body, action }: { ico: string; title: string; body: string; action?: React.ReactNode }) {
+function Num({ n, of, label }: { n: string; of?: string; label: string }) {
   return (
-    <div className="lx-card2 flex flex-col items-center gap-2 p-8 text-center">
-      <div className="text-2xl">{ico}</div>
-      <b className="lx-12">{title}</b>
-      <p className="lx-11 lx-mut" style={{ maxWidth: 460 }}>{body}</p>
-      {action && <div className="mt-2">{action}</div>}
+    <div className="sb-num">
+      <b>{n}{of && <span>{of}</span>}</b>
+      <span>{label}</span>
     </div>
   );
 }
+
+function Empty({ Icon, title, body, action }: { Icon: React.ElementType; title: string; body: string; action?: React.ReactNode }) {
+  return (
+    <div className="sb-empty">
+      <Icon size={20} className="lx-mut" />
+      <b className="lx-12 mt-2">{title}</b>
+      <p className="lx-11 lx-mut mt-1" style={{ maxWidth: 440 }}>{body}</p>
+      {action && <div className="mt-3">{action}</div>}
+    </div>
+  );
+}
+
+/* Neutral surfaces, one indigo accent — same quiet language as the Memory page. Injected with
+   dangerouslySetInnerHTML: React escapes ">" inside a <style> text child, which turns every
+   child selector into a hydration mismatch. */
+const CSS = `
+.sb-wrap{display:flex;height:100%;min-height:0;container-type:inline-size;container-name:sb}
+.sb-panel{background:#0a0a11;border:1px solid var(--lx-border);border-radius:16px;min-width:0;width:100%}
+.sb-head{display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:18px 20px 16px;border-bottom:1px solid var(--lx-border)}
+.sb-h1{font-size:20px;font-weight:700;letter-spacing:-.01em;color:#f5f5fa;line-height:1.15}
+.sb-sub{margin-top:3px;max-width:560px;font-size:12.5px;color:#8b8ba0;line-height:1.5}
+.sb-btn{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 13px;border-radius:9px;white-space:nowrap;
+  background:#191925;border:1px solid #262636;color:#d6d6e4;font-size:12.5px;font-weight:600;cursor:pointer;
+  text-decoration:none;transition:.15s}
+.sb-btn:hover:not(:disabled){color:#fff;border-color:#3a3a52}
+.sb-btn:disabled{opacity:.5;cursor:not-allowed}
+.sb-primary{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 14px;border-radius:9px;white-space:nowrap;
+  background:#4f46e5;border:1px solid #6366f1;color:#fff;font-size:12.5px;font-weight:600;cursor:pointer;
+  text-decoration:none;transition:.15s}
+.sb-primary:hover:not(:disabled){background:#5b52ea}
+.sb-primary:disabled{opacity:.55;cursor:not-allowed}
+.sb-sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:1px;border-radius:12px;overflow:hidden;
+  background:#1a1a26;border:1px solid #1e1e2b}
+.sb-num{display:flex;flex-direction:column;gap:2px;padding:13px 14px;background:#101018}
+.sb-num b{font-size:20px;font-weight:700;color:#f0f0f7;line-height:1.1;font-variant-numeric:tabular-nums}
+.sb-num b span{font-size:13px;font-weight:600;color:#6f6f85}
+.sb-num span{font-size:10.5px;color:#7c7c95}
+.sb-meta{margin-top:10px;font-size:11px;color:#7c7c95;line-height:1.6}
+.sb-link{color:#8f95ff;background:none;border:none;padding:0;font:inherit;font-weight:600;cursor:pointer}
+.sb-link:hover{text-decoration:underline}
+.sb-hist{margin-top:8px;border-radius:12px;background:#101018;border:1px solid #1e1e2b;overflow:hidden}
+.sb-hist-r{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;padding:9px 13px}
+.sb-hist-r+.sb-hist-r{border-top:1px solid #1a1a26}
+.sb-now{padding:2px 7px;border-radius:6px;font-size:9.5px;font-weight:700;color:#a5b4fc;background:rgba(99,102,241,.14);
+  border:1px solid rgba(99,102,241,.35)}
+.sb-group{margin-top:16px;padding:15px;border-radius:12px;background:#101018;border:1px solid #1e1e2b}
+.sb-group-h{margin-bottom:12px}
+.sb-group-h h2{font-size:13.5px;font-weight:700;color:#f0f0f7}
+.sb-group-h p{margin-top:3px;font-size:11px;color:#7c7c95;line-height:1.5}
+/* the reused field editor keeps its own markup (components/SiteBrainField.tsx); these two
+   rules only calm its "where we read this" links down to the rest of the page */
+.sb-group .sb-src a{color:#7c7c95;text-decoration:none}
+.sb-group .sb-src a:hover{color:#a5b4fc;text-decoration:underline}
+.sb-empty{display:flex;flex-direction:column;align-items:center;text-align:center;padding:32px 20px;border-radius:12px;
+  background:#101018;border:1px dashed #232332}
+.sb-loading{display:flex;align-items:center;justify-content:center;gap:8px;padding:26px;border-radius:12px;background:#101018;
+  border:1px solid #1e1e2b}
+.sb-spin{animation:sbSpin 1s linear infinite}
+@keyframes sbSpin{to{transform:rotate(360deg)}}
+`;
