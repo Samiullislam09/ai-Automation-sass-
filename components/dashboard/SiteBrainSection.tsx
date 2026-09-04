@@ -2,7 +2,8 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
-  Activity, ArrowRight, Brain, Check, ChevronLeft, ChevronRight, Loader2, PlugZap, Plus, RotateCw, Search, X,
+  Activity, ArrowRight, Brain, Check, ChevronLeft, ChevronRight, Loader2, PlugZap, Plus, RotateCw, Search,
+  Sparkles, X,
 } from "lucide-react";
 import { useStore } from "@/lib/store";
 import SiteBrainField, { SiteBrainFieldStyles } from "@/components/SiteBrainField";
@@ -204,13 +205,26 @@ export default function SiteBrainSection() {
     <Shell
       right={
         <>
-          <button className="sb-btn" disabled={refreshing} onClick={() => refresh("crawler")} title="Read my website again and rebuild this">
-            {refreshing ? <Loader2 size={14} className="sb-spin" /> : <RotateCw size={14} />} Read my site again
+          {/* the whole point: the customer shouldn't fill anything in. This runs Mr. Analyst
+              over the pages already crawled and writes every field it finds evidence for. */}
+          <button className="sb-primary" disabled={refreshing} onClick={() => refresh("analyst")} title="Let the AI read your site and fill these in">
+            {refreshing ? <Loader2 size={14} className="sb-spin" /> : <Sparkles size={14} />} Fill it in for me
           </button>
-          <Link href="/dashboard/workspace" className="sb-btn"><Activity size={14} /> Watch it work</Link>
+          <button className="sb-btn" disabled={refreshing} onClick={() => refresh("crawler")} title="Crawl the site again first, then rebuild">
+            <RotateCw size={14} /> Re-read site
+          </button>
+          <Link href="/dashboard/workspace" className="sb-btn"><Activity size={14} /> Watch</Link>
         </>
       }
     >
+      {refreshing && (
+        <div className="sb-working">
+          <Loader2 size={14} className="sb-spin" />
+          <span>Mr. Analyst is reading your site — this page fills itself in when he&rsquo;s done.</span>
+          <Link href="/dashboard/workspace" className="sb-card-a" style={{ margin: 0 }}>Watch</Link>
+        </div>
+      )}
+
       {/* overview — cards, the same shape the Memory page's fact cards use */}
       <div className="sb-sec">Overview</div>
       <div className="sb-cards">
@@ -228,11 +242,7 @@ export default function SiteBrainSection() {
         <div className="sb-card">
           <div className="sb-card-k">Kind of site</div>
           <div className="sb-card-v">{typeLabel ?? "Not worked out yet"}</div>
-          <div className="sb-card-s">
-            {typeLabel
-              ? `${skipped.length ? `${skipped.length} questions don't apply to this kind of site` : "Every question below applies"}`
-              : "Read off your pages, not asked"}
-          </div>
+          <div className="sb-card-s">{typeLabel && skipped.length ? `${skipped.length} skipped` : " "}</div>
           <button className="sb-card-a" onClick={() => setOpenField("site_type")}>
             {typeLabel ? "Change it" : "Set it"}
           </button>
@@ -241,7 +251,7 @@ export default function SiteBrainSection() {
         <div className="sb-card">
           <div className="sb-card-k">Read from your site</div>
           <div className="sb-card-v">{s.builtFrom?.pages ?? s.pagesCrawled} pages</div>
-          <div className="sb-card-s">Everything below was read off those pages</div>
+          <div className="sb-card-s">&nbsp;</div>
           <button className="sb-card-a" disabled={refreshing} onClick={() => refresh("crawler")}>
             {refreshing ? "Starting…" : "Read my site again"}
           </button>
@@ -251,7 +261,7 @@ export default function SiteBrainSection() {
           <div className="sb-card-k">Version</div>
           <div className="sb-card-v">v{s.version} {s.builtBy === "user" ? "· your edit" : "· by the team"}</div>
           <div className="sb-card-s">
-            {s.builtAt ? `Updated ${new Date(s.builtAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}` : "Never built"}
+            {s.builtAt ? new Date(s.builtAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "Never built"}
           </div>
           {s.history.length > 1 && (
             <button className="sb-card-a" onClick={() => setShowHistory((v) => !v)}>
@@ -262,10 +272,7 @@ export default function SiteBrainSection() {
       </div>
 
       <div className="sb-sec">What your team knows</div>
-      <p className="sb-note">
-        The team reads all of this off your website by itself. You only have to answer the few marked
-        <span className="sb-only"> Only you can answer</span> — nobody can read a house rule or a hard limit off a page.
-      </p>
+      <p className="sb-note">Read off your site automatically. Only the <span className="sb-only">Needs you</span> ones can&rsquo;t be.</p>
 
       {/* the whole brain as one plain checklist — each line opens a popup to read, add or
           correct that one fact (owner, 2026-09-05: popup, not a separate page) */}
@@ -279,14 +286,10 @@ export default function SiteBrainSection() {
               <span className="min-w-0 flex-1">
                 <span className="sb-item-t">
                   {FRIENDLY_LABEL[f] ?? FIELD_META[f].label}
-                  {userOnly && !has && <span className="sb-only">Only you can answer</span>}
+                  {userOnly && !has && <span className="sb-only">Needs you</span>}
                 </span>
                 <span className="sb-item-p">
-                  {has
-                    ? previewOf(profile, f)
-                    : userOnly
-                      ? "Tell the team once and it sticks"
-                      : "The team hasn't found this on your site yet"}
+                  {has ? previewOf(profile, f) : userOnly ? "Tell the team once" : "Not found yet"}
                 </span>
               </span>
               <span className="sb-go">{has ? "View" : "Add"} <ChevronRight size={14} /></span>
@@ -297,7 +300,7 @@ export default function SiteBrainSection() {
 
       {skipped.length > 0 && (
         <>
-          <div className="sb-sec">Not needed for this kind of site</div>
+          <div className="sb-sec">Not needed here</div>
           <div className="sb-skipped">
             {skipped.map((f) => (
               <button key={f} className="sb-skip" onClick={() => setOpenField(f)} title="Open it anyway">
@@ -334,9 +337,7 @@ function Shell({ children, right }: { children: React.ReactNode; right?: React.R
         <header className="sb-head">
           <div className="min-w-0 flex-1">
             <h1 className="sb-h1">Site Brain</h1>
-            <p className="sb-sub">
-              What your team understood about your business. Correct anything — once you do, the agents stop rewriting it.
-            </p>
+            <p className="sb-sub">What your team knows about your business.</p>
           </div>
           {right && <div className="flex flex-wrap items-center gap-2">{right}</div>}
         </header>
@@ -442,6 +443,8 @@ const CSS = `
 .sb-primary:disabled{opacity:.55;cursor:not-allowed}
 .sb-sec{font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:#6f6f85}
 .sb-list+.sb-sec,.sb-cards+.sb-sec,.sb-hist+.sb-sec{margin-top:22px}
+.sb-working{display:flex;flex-wrap:wrap;align-items:center;gap:9px;margin-bottom:12px;padding:11px 13px;border-radius:11px;
+  background:rgba(79,70,229,.12);border:1px solid rgba(99,102,241,.4);color:#c7c7f0;font-size:12.5px}
 .sb-note{margin-top:8px;font-size:11.5px;color:#7c7c95;line-height:1.6}
 .sb-only{display:inline-flex;align-items:center;margin-left:8px;padding:2px 7px;border-radius:6px;font-size:9.5px;
   font-weight:700;letter-spacing:.03em;color:#a5b4fc;background:rgba(99,102,241,.14);border:1px solid rgba(99,102,241,.35)}
