@@ -72,26 +72,37 @@ export async function logJobError(id: string | undefined, detail: JobErrorDetail
 export async function sweepOrphanedJobs(bootedAt = new Date()): Promise<number> {
   const GRACE_MS = 60_000;
   const before = new Date(bootedAt.getTime() - GRACE_MS).toISOString();
-  const { data, error } = await supabase
-    .from("jobs_log")
-    .update({
-      status: "error",
-      detail: {
-        message: "This job did not finish — the server restarted while it was running.",
-        cause: `Row was still "running" when the agent server booted at ${bootedAt.toISOString()}; the process that owned it is gone.`,
-        hint: "Run it again. If it stops at the same step twice, that step is what to look at — the reason is recorded here next time.",
-        at: new Date().toISOString(),
-        orphaned: true,
-      },
-    })
-    .eq("status", "running")
-    .lt("created_at", before)
-    .select("id");
+  // Read first, so the row keeps its own `progress` (which step it was on, and when) and its
+  // `attempt` — the Audit page's error card shows where the run stopped, and the daily-cap
+  // count reads the attempt number.
+  const { data: rows, error } = await supabase.from("jobs_log").select("id, agent, detail").eq("status", "running").lt("created_at", before);
   if (error) {
     console.error("[jobsLog] orphan sweep failed:", error.message);
     return 0;
   }
-  const n = data?.length ?? 0;
+  let n = 0;
+  for (const row of rows ?? []) {
+    const prev = ((row as any).detail ?? {}) as Record<string, unknown>;
+    const progress = prev.progress as { label?: string; phase?: string; at?: string } | undefined;
+    const where = progress?.label ? ` It had got as far as "${progress.label}"${progress.at ? ` (${progress.at})` : ""}.` : "";
+    const { error: upErr } = await supabase
+      .from("jobs_log")
+      .update({
+        status: "error",
+        detail: {
+          ...prev,
+          message: "This job did not finish — the server restarted while it was running.",
+          cause: `Row was still "running" when the agent server booted at ${bootedAt.toISOString()}; the process that owned it is gone.${where}`,
+          hint: "Run it again. If it stops at the same step twice, that step is what to look at — the reason is recorded here next time.",
+          at: new Date().toISOString(),
+          orphaned: true,
+        },
+      })
+      .eq("id", (row as any).id)
+      .eq("status", "running");
+    if (upErr) console.error(`[jobsLog] orphan sweep could not close ${(row as any).agent} ${(row as any).id}:`, upErr.message);
+    else n++;
+  }
   if (n) console.log(`[jobsLog] closed ${n} job row(s) left "running" by a previous process`);
   return n;
 }
