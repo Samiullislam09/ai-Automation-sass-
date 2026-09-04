@@ -2,7 +2,8 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
-  Activity, ArrowRight, Brain, Check, ChevronLeft, ChevronRight, Loader2, PlugZap, Plus, RotateCw, Search, X,
+  Activity, ArrowRight, Brain, Check, ChevronLeft, ChevronRight, Globe, History, Loader2, PlugZap, Plus,
+  RotateCw, Search, X,
 } from "lucide-react";
 import { useStore } from "@/lib/store";
 import SiteBrainField, { SiteBrainFieldStyles } from "@/components/SiteBrainField";
@@ -199,28 +200,44 @@ export default function SiteBrainSection() {
         </>
       }
     >
-      {/* one sentence, one bar, one next step */}
-      <div className="sb-top">
-        <div className="min-w-0 flex-1">
-          <div className="sb-top-t">
+      {/* overview — the same shape the Memory page uses: a section label and one-line rows */}
+      <div className="sb-sec">Overview</div>
+      <div className="sb-lines">
+        <div className="sb-line">
+          <Brain size={15} className="sb-line-i" />
+          <span className="sb-line-t">
             {missing === 0
-              ? <>Your team knows <b>everything</b> on this list.</>
-              : <>Your team knows <b>{known} of {PROFILE_FIELDS.length}</b> things about your business.</>}
-          </div>
-          <div className="sb-bar"><i style={{ width: `${pct}%` }} /></div>
-          <div className="sb-top-s">
-            Read from {s.builtFrom?.pages ?? s.pagesCrawled} pages on your website
-            {s.builtAt ? ` · last updated ${new Date(s.builtAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}` : ""}
-            {s.history.length > 1 && (
-              <> · <button className="sb-link" onClick={() => setShowHistory((v) => !v)}>{showHistory ? "hide history" : `${s.history.length} versions`}</button></>
-            )}
-          </div>
+              ? <>Your team knows <b>everything</b> on this list</>
+              : <>Your team knows <b>{known} of {PROFILE_FIELDS.length}</b> things about your business</>}
+            <span className="sb-bar"><i style={{ width: `${pct}%` }} /></span>
+          </span>
+          {firstGap ? (
+            <button className="sb-line-a" onClick={() => setOpenField(firstGap)}>Fill the next gap <ArrowRight size={12} /></button>
+          ) : (
+            <span className="sb-line-done">All done</span>
+          )}
         </div>
-        {firstGap && (
-          <button className="sb-next" onClick={() => setOpenField(firstGap)}>
-            Fill the next gap <ArrowRight size={14} />
+
+        <div className="sb-line">
+          <Globe size={15} className="sb-line-i" />
+          <span className="sb-line-t">Read from <b>{s.builtFrom?.pages ?? s.pagesCrawled} pages</b> on your website</span>
+          <button className="sb-line-a" disabled={refreshing} onClick={() => refresh("crawler")}>
+            {refreshing ? "Starting…" : "Read again"}
           </button>
-        )}
+        </div>
+
+        <div className="sb-line">
+          <History size={15} className="sb-line-i" />
+          <span className="sb-line-t">
+            Version <b>{s.version}</b> {s.builtBy === "user" ? "— your edit" : "— built by the team"}
+            {s.builtAt ? ` · ${new Date(s.builtAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}` : ""}
+          </span>
+          {s.history.length > 1 && (
+            <button className="sb-line-a" onClick={() => setShowHistory((v) => !v)}>
+              {showHistory ? "Hide" : `${s.history.length} versions`}
+            </button>
+          )}
+        </div>
       </div>
 
       {showHistory && (
@@ -238,6 +255,8 @@ export default function SiteBrainSection() {
           ))}
         </div>
       )}
+
+      <div className="sb-sec">What your team knows</div>
 
       {/* the whole brain as one plain checklist — each line opens a popup to read, add or
           correct that one fact (owner, 2026-09-05: popup, not a separate page) */}
@@ -389,17 +408,22 @@ const CSS = `
   text-decoration:none;transition:.15s}
 .sb-primary:hover:not(:disabled){background:#5b52ea}
 .sb-primary:disabled{opacity:.55;cursor:not-allowed}
-.sb-top{display:flex;flex-wrap:wrap;align-items:center;gap:14px;padding:15px 16px;border-radius:12px;background:#101018;
-  border:1px solid #1e1e2b}
-.sb-top-t{font-size:14.5px;color:#d8d8e6;line-height:1.5}
-.sb-top-t b{color:#fff;font-weight:700}
-.sb-bar{height:6px;margin-top:10px;border-radius:999px;background:#1c1c29;overflow:hidden;max-width:420px}
+.sb-sec{font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:#6f6f85}
+.sb-list+.sb-sec,.sb-lines+.sb-sec,.sb-hist+.sb-sec{margin-top:22px}
+.sb-lines{margin-top:10px;border-radius:12px;background:#101018;border:1px solid #1e1e2b;overflow:hidden}
+.sb-line{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:13px 14px}
+.sb-line+.sb-line{border-top:1px solid #1a1a26}
+.sb-line-i{flex-shrink:0;color:#7c7c95}
+.sb-line-t{flex:1;min-width:200px;font-size:12.5px;color:#c8c8d8;line-height:1.5}
+.sb-line-t b{color:#f0f0f7;font-weight:600}
+.sb-line-a{display:inline-flex;align-items:center;gap:4px;flex-shrink:0;background:none;border:none;padding:0;
+  font-size:11.5px;font-weight:600;color:#8f95ff;cursor:pointer}
+.sb-line-a:hover:not(:disabled){text-decoration:underline}
+.sb-line-a:disabled{opacity:.5;cursor:not-allowed}
+.sb-line-done{flex-shrink:0;font-size:11.5px;font-weight:600;color:#4ade80}
+.sb-bar{display:block;height:5px;margin-top:8px;border-radius:999px;background:#1c1c29;overflow:hidden;max-width:360px}
 .sb-bar i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#4f46e5,#8b5cf6)}
-.sb-top-s{margin-top:9px;font-size:11.5px;color:#7c7c95;line-height:1.6}
-.sb-next{display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 15px;border-radius:9px;flex-shrink:0;
-  background:#4f46e5;border:1px solid #6366f1;color:#fff;font-size:12.5px;font-weight:600;cursor:pointer;transition:.15s}
-.sb-next:hover{background:#5b52ea}
-.sb-list{margin-top:14px;border-radius:12px;background:#101018;border:1px solid #1e1e2b;overflow:hidden}
+.sb-list{margin-top:10px;border-radius:12px;background:#101018;border:1px solid #1e1e2b;overflow:hidden}
 .sb-item{display:flex;align-items:center;gap:12px;width:100%;padding:13px 15px;text-align:left;background:none;
   border:none;color:inherit;cursor:pointer;transition:.15s}
 .sb-item+.sb-item{border-top:1px solid #1a1a26}
