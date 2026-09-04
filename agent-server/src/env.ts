@@ -29,6 +29,25 @@ export const env = {
   // send/receive timing skew, not headroom-for-chat (that's now a structurally separate pool,
   // not a shared budget). Raise it to match a paid tier. See src/lib/nvidia.ts.
   NVIDIA_RPM: process.env.NVIDIA_RPM || "",
+  // Cloudflare Workers AI — Mr. Image's primary image generator (MASTER_PLAN §19.4).
+  // One account gives 10,000 free neurons a day, and one FLUX image costs 172.8 of them
+  // (measured 2026-09-05), so a single account is ~57 images/day for the whole SaaS. Hence a
+  // POOL: when one account's daily quota is gone the next one takes over, and they all come
+  // back at 00:00 UTC. Same shape as NVIDIA_API_KEYS_BG above, except a Cloudflare credential
+  // is a PAIR — the token only works with its own account id:
+  //
+  //   CLOUDFLARE_ACCOUNTS="accountid1:token1,accountid2:token2,accountid3:token3"
+  //
+  // The single-account pair below still works on its own (and is used as the first account in
+  // the pool when CLOUDFLARE_ACCOUNTS is empty), so nothing breaks before the pool is filled.
+  CLOUDFLARE_ACCOUNTS: process.env.CLOUDFLARE_ACCOUNTS || "",
+  CLOUDFLARE_ACCOUNT_ID: process.env.CLOUDFLARE_ACCOUNT_ID || "",
+  CLOUDFLARE_API_TOKEN: process.env.CLOUDFLARE_API_TOKEN || "",
+  // Stock photos, for the "a real photo, not an AI one" cases (restaurant, clinic). Optional:
+  // without them the ladder in lib/media/providers.ts simply skips that rung.
+  UNSPLASH_ACCESS_KEY: process.env.UNSPLASH_ACCESS_KEY || "",
+  PEXELS_API_KEY: process.env.PEXELS_API_KEY || "",
+
   // Shared secret between the Next.js app and this server. Optional so an existing deploy
   // does not break the moment this ships, but /jobs/:type is a public URL that spends real
   // LLM + DataForSEO credits: set it in BOTH Railway and Vercel and the endpoint locks.
