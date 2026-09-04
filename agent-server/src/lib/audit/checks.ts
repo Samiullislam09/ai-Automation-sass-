@@ -79,6 +79,14 @@ export type AuditIssue = {
   pages: string[];
   /** How many pages in total — `pages` may be a sample, `count` never is. */
   count: number;
+  /** Semrush's own thematic-report taxonomy (MASTER_PLAN §27) — Crawlability, HTTPS, Performance,
+   *  Core Web Vitals, Internal Linking, On-Page SEO, Content, Technical SEO. Looked up by id from
+   *  CHECK_CATEGORY at the end of auditSite(), so a check written anywhere (this file,
+   *  performance.ts, the inline robots finding) gets one from the same table. Optional on the
+   *  TYPE because every construction site (the `issue()` closure, performance.ts's
+   *  issuesFromVitals, the inline robots finding) builds the issue first and the lookup stamps
+   *  it last — but every issue that leaves auditSite() has one, and checks.test.ts pins that. */
+  category?: string;
 };
 
 export type AuditResult = {
@@ -100,6 +108,11 @@ export type AuditResult = {
    *  (lib/audit/robots.ts), not a guess. Empty when robots.txt could not be read at all (that
    *  gap is already reported in `skipped`). Used by the same Crawled Pages "Blocked" bucket. */
   blockedPages: string[];
+  /** Every check this catalogue can make, with its category — the DENOMINATOR the report page's
+   *  thematic rings need ("Crawlability 94%" = checks in Crawlability that did NOT fire / all
+   *  checks in Crawlability). Without this the page could only see the checks that failed and
+   *  would have to guess how many existed; shipping the list makes the % exact. */
+  catalogue: { id: string; category: string; severity: AuditSeverity }[];
 };
 
 /* ---------------------------------------------------------------- helpers --------------- */
@@ -110,6 +123,39 @@ export type AuditResult = {
 // never the unbounded list, so one issue on a huge site cannot make the row heavier than the
 // rest of the report.
 const PAGE_SAMPLE = 100;
+
+/** Semrush's own thematic-report taxonomy, one entry per check this catalogue makes — MASTER_PLAN
+ *  §27's own tables, transcribed. Every id here must match the `issue(...)` id it labels (the
+ *  test in checks.test.ts pins that: a check that fires with no category fails the build). The
+ *  four `performance.ts` ids and the inline `robots-blocks-all` finding are here too, so one
+ *  table covers every issue that can reach a report. Ids and categories never change once
+ *  shipped — the trend/compare views key off them. */
+export const CHECK_CATALOGUE: { id: string; category: string; severity: AuditSeverity }[] = [
+  { id: "unreachable", category: "Crawlability", severity: "block" },
+  { id: "server-error", category: "Crawlability", severity: "block" },
+  { id: "not-found", category: "Crawlability", severity: "block" },
+  { id: "noindex", category: "Crawlability", severity: "block" },
+  { id: "robots-blocks-all", category: "Crawlability", severity: "block" },
+  { id: "redirect-chain", category: "Technical SEO", severity: "warn" },
+  { id: "heavy-html", category: "Technical SEO", severity: "warn" },
+  { id: "missing-title", category: "On-Page SEO", severity: "block" },
+  { id: "long-title", category: "On-Page SEO", severity: "warn" },
+  { id: "duplicate-title", category: "On-Page SEO", severity: "warn" },
+  { id: "missing-meta", category: "On-Page SEO", severity: "warn" },
+  { id: "missing-h1", category: "On-Page SEO", severity: "warn" },
+  { id: "multiple-h1", category: "On-Page SEO", severity: "warn" },
+  { id: "missing-canonical", category: "On-Page SEO", severity: "warn" },
+  { id: "image-no-alt", category: "On-Page SEO", severity: "warn" },
+  { id: "mixed-content", category: "HTTPS", severity: "block" },
+  { id: "orphan-page", category: "Internal Linking", severity: "warn" },
+  { id: "thin-content", category: "Content", severity: "warn" },
+  { id: "slow-response", category: "Performance", severity: "warn" },
+  { id: "slow-lcp", category: "Core Web Vitals", severity: "warn" },
+  { id: "layout-shift", category: "Core Web Vitals", severity: "warn" },
+  { id: "slow-interactivity", category: "Core Web Vitals", severity: "info" },
+  { id: "performance-check-failed", category: "Core Web Vitals", severity: "info" },
+];
+const CHECK_CATEGORY: Record<string, string> = Object.fromEntries(CHECK_CATALOGUE.map((c) => [c.id, c.category]));
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
@@ -488,10 +534,14 @@ export function auditSite(
     pagesChecked: pages.length,
     blocks,
     warns,
-    issues: found,
+    // One lookup, applied last, so the four performance.ts ids and the inline robots finding get
+    // their category from the same table as everything built through `issue()` above. "Other"
+    // is a visible smell, not a silent default — checks.test.ts asserts no check ever lands there.
+    issues: found.map((i) => ({ ...i, category: CHECK_CATEGORY[i.id] ?? "Other" })),
     skipped,
     pagesWithIssues: Array.from(pageIssueIds.keys()),
     blockedPages,
+    catalogue: CHECK_CATALOGUE,
   };
 }
 

@@ -169,6 +169,10 @@ export class AuditAgent extends Agent {
           // Real, named-bot robots.txt evaluation — null only when robots.txt itself could not
           // be read (see `skipped`).
           aiSearch,
+          // Every check this run COULD have made, with its category — the exact denominator the
+          // report page's thematic rings divide by (MASTER_PLAN §27). Stored per run, not read
+          // live from code, so a six-month-old report's % still means what it meant that day.
+          catalogue: result.catalogue,
         },
         summary,
       })

@@ -126,6 +126,36 @@ test("blockedPages is empty (not a guess) when robots.txt could not be read at a
   assert.deepEqual(r.blockedPages, []);
 });
 
+/* ---------------------------------------------------------------- category / catalogue (2026-09-05, thematic %) ---------------- */
+
+test("every issue that fires carries a real category — never the 'Other' smell", () => {
+  // A site that trips as many checks as a fixture can: broken, redirected, noindex, missing
+  // everything, mixed content, thin, heavy, slow, orphan, plus a performance issue folded in.
+  const r = auditSite(
+    [
+      page(`${ORIGIN}/`, `<html><head></head><body><p>hi</p><img src="http://x.test/a.png"></body></html>`, { ms: 5000, bytes: 3_000_000 }),
+      page(`${ORIGIN}/gone`, "", { status: 404, html: null }),
+      page(`${ORIGIN}/moved`, `<html><head><title>M</title></head><body><h1>M</h1></body></html>`, { finalUrl: `${ORIGIN}/elsewhere` }),
+      page(`${ORIGIN}/hidden`, `<html><head><title>H</title><meta name="robots" content="noindex"></head><body><h1>H</h1></body></html>`),
+    ],
+    { ...CTX, robotsTxt: "User-agent: *\nDisallow: /\n", sitemapUrls: [`${ORIGIN}/`, `${ORIGIN}/orphan`] },
+    { issues: [{ id: "slow-lcp", severity: "warn", what: "x", fix: "y", pages: [`${ORIGIN}/`], count: 1, category: "" }], skippedReason: null }
+  );
+  assert.ok(r.issues.length >= 8, `fixture should trip many checks, tripped ${r.issues.length}`);
+  for (const i of r.issues) {
+    assert.ok(i.category && i.category !== "Other", `${i.id} has no category in CHECK_CATALOGUE`);
+  }
+});
+
+test("the catalogue lists every id that can ever fire, so a thematic % has an exact denominator", () => {
+  const r = auditSite([good(`${ORIGIN}/`, "Home")], CTX);
+  const ids = new Set(r.catalogue.map((c) => c.id));
+  for (const id of ["unreachable", "server-error", "not-found", "missing-title", "duplicate-title", "mixed-content", "orphan-page", "thin-content", "robots-blocks-all", "slow-lcp"]) {
+    assert.ok(ids.has(id), `${id} missing from CHECK_CATALOGUE`);
+  }
+  assert.ok(r.catalogue.every((c) => c.category && c.severity), "every catalogue entry names a category and a severity");
+});
+
 /* ---------------------------------------------------------------- cross-page ------------ */
 
 test("duplicate titles are found — the check no single-page tool can make", () => {

@@ -80,6 +80,10 @@ export async function GET() {
           // robots.ts) — null when robots.txt could not be read, never an empty array standing
           // in for "everything's fine".
           aiSearch: Array.isArray((latest.run as any)?.aiSearch) ? (latest.run as any).aiSearch : null,
+          // The full check catalogue that run could have made (id/category/severity) — the exact
+          // denominator for thematic-report % rings. Empty on older rows; the page then says so
+          // instead of computing a % over a denominator it does not have.
+          catalogue: Array.isArray((latest.run as any)?.catalogue) ? (latest.run as any).catalogue : [],
           // Who asked for this run — a person ("manual") or the weekly scheduler ("schedule").
           // Older rows from before 2026-09-05 have no `run.trigger` at all; reported as null
           // rather than guessed.
