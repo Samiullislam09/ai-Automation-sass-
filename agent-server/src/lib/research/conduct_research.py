@@ -12,14 +12,29 @@ Invoked as a subprocess from agent-server/src/lib/research/gptResearcher.ts -- o
 service, no separate deploy unit (2026-08-28 "one service" decision): Python runs alongside
 Node in the same container, via nixpacks.toml's python3 package + requirements.txt.
 
-Protocol (stdin -> stdout, one line each):
+Protocol (stdin -> stdout, ONE JSON value per line, any number of lines):
   stdin:  {"topic": "..."}
-  stdout: {"ok": true, "context": "...", "sources": [{"url": "...", "title": "..."}]}
-       or {"ok": false, "error": "..."}
+  stdout: {"progress": <whatever gpt-researcher itself reported>}   -- zero or more, live
+       or {"ok": true, "context": "...", "sources": [{"url": "...", "title": "..."}]}  -- always last
+       or {"ok": false, "error": "..."}                                                -- always last
 
 Never a stack trace to stdout -- every failure path here resolves to a normal {"ok": false}
 line so the Node side can treat "research unavailable" as a skip, not a crash, the same
 convention lib/audit/performance.ts uses for a missing Chrome binary.
+
+LIVE PROGRESS (2026-08-31, MASTER_PLAN's "live Google-search visual" for the research step,
+owner's own reference: a real search box + real result cards + real "reading" progress while
+gpt-researcher works, not a fake animation). gpt-researcher's own reference server pushes
+progress by calling a `websocket` object's `send`/`send_json` -- this file supplies one
+(ProgressSink) that just prints each event as its own stdout line instead. UNVERIFIED against
+a live install: this package could not be installed in the authoring environment to confirm
+the exact method gpt-researcher==0.16.0 calls or the exact shape of what it sends (matches
+this file's own long-standing note -- real verification only happens on Railway). So `run()`
+below is deliberately defensive: if attaching the websocket raises ANYTHING, at construction
+or during conduct_research() itself, it is caught and the whole research call is retried with
+no websocket at all -- the exact call this file already made before progress events existed.
+A broken guess at the progress API must never cost the article its research; at worst it costs
+one retried research call and zero progress lines.
 """
 import asyncio
 import json
@@ -30,11 +45,34 @@ def emit(payload: dict) -> None:
     print(json.dumps(payload), flush=True)
 
 
+class ProgressSink:
+    """Handed to GPTResearcher as `websocket=`. Whatever it reports, forwarded verbatim as its
+    own stdout line -- this file does not parse or assume gpt-researcher's event shape, the
+    Node/frontend side reads it defensively. Every method swallows its own errors so a bad
+    progress line can never be the reason a real research result is lost; run()'s own retry
+    (see module docstring) is the backstop for everything an in-method try/except can't catch
+    (e.g. gpt-researcher awaiting this in a way that raises before entering the method body)."""
+
+    def send(self, data) -> None:
+        try:
+            emit({"progress": data})
+        except Exception:
+            pass
+
+    async def send_json(self, data) -> None:
+        self.send(data)
+
+
 async def run(topic: str) -> dict:
     from gpt_researcher import GPTResearcher  # imported here so a missing package still
 
-    researcher = GPTResearcher(query=topic, report_type="research_report", report_source="web")
-    await researcher.conduct_research()
+    try:
+        researcher = GPTResearcher(query=topic, report_type="research_report", report_source="web", websocket=ProgressSink())
+        await researcher.conduct_research()
+    except Exception as e:
+        emit({"progress": {"note": f"live progress unavailable this run ({type(e).__name__}) -- continuing without it"}})
+        researcher = GPTResearcher(query=topic, report_type="research_report", report_source="web")
+        await researcher.conduct_research()
 
     context = ""
     if hasattr(researcher, "get_research_context"):

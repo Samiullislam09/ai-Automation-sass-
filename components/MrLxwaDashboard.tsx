@@ -76,6 +76,8 @@ import {
   Loader2,
   Image as ImageIcon,
   BrainCircuit,
+  ArrowRight,
+  XCircle,
 } from "lucide-react";
 
 /* ========================================================================== */
@@ -142,6 +144,11 @@ type ThreadMsg = {
   /** A themed button under the bubble — opens that agent's Live Visual instead of pasting its
    *  whole output into the transcript. */
   cta?: { label: string; agentId?: string };
+  /** The order's real plan, checklist-style — the SAME task.steps the collapsed strip above
+   *  the composer reads, just rendered where the owner's reference mockup put it: inline in
+   *  the reply, ticking live as each step's status changes. Never a separate, invented list —
+   *  absent entirely until a real task_steps row exists for this order. */
+  planSteps?: { label: string; status: string }[];
 };
 
 type AgentStatus = "Completed" | "Working" | "Waiting" | "Planned";
@@ -489,6 +496,67 @@ const KeywordScreen = ({
         </tbody>
       </table>
       {items.length === 0 && <div className="lx-10 lx-mut px-1 py-2">No keywords were produced.</div>}
+    </div>
+  );
+};
+
+/** Mr. Writer's research step, live — gpt-researcher's own progress, forwarded verbatim from
+ *  conduct_research.py's ProgressSink through agents/writer.ts's onProgress (2026-08-31). Every
+ *  line here is something gpt-researcher itself reported; nothing is timed, percentaged or
+ *  invented — gpt-researcher does not expose a per-page "reading %" today, so this deliberately
+ *  does not draw one (see that file's own header for why the hook is defensive/best-effort in
+ *  the first place: the exact event shape could not be verified against a live install before
+ *  this shipped, and a broken guess must never cost the article its research). */
+const ResearchScreen = ({ items, running }: { items: { key: string; payload: any }[]; running: boolean }) => {
+  // Defensive extraction — gpt-researcher's real event shape varies by version and was never
+  // confirmed locally; whichever text field is actually present wins, never a guess at one
+  // that isn't there.
+  const lineFor = (payload: unknown): string => {
+    if (typeof payload === "string") return payload;
+    if (payload && typeof payload === "object") {
+      const p = payload as Record<string, unknown>;
+      if (typeof p.output === "string") return p.output;
+      if (typeof p.content === "string" && typeof p.output !== "string") return p.content;
+      if (typeof p.note === "string") return p.note;
+    }
+    return "Working…";
+  };
+  const urlsFor = (payload: unknown): string[] => {
+    const meta = payload && typeof payload === "object" ? (payload as Record<string, unknown>).metadata : null;
+    if (!Array.isArray(meta)) return [];
+    return meta.filter((m): m is string => typeof m === "string" && /^https?:\/\//.test(m));
+  };
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 lx-11 font-semibold">
+        <Globe size={13} className="lx-mut" />
+        Researching the open web…
+        <span className="lx-pulse h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: "#22c55e" }} />
+      </div>
+      <ul className="mt-2 space-y-2">
+        {items.map((it) => {
+          const urls = urlsFor(it.payload);
+          return (
+            <li key={it.key} className="lx-live-anim">
+              <div className="flex items-center gap-2 lx-11" style={{ color: "#cfcfdd" }}>
+                <Search size={12} className="lx-dim shrink-0" />
+                <span className="min-w-0 flex-1 truncate">{lineFor(it.payload)}</span>
+              </div>
+              {urls.length > 0 && (
+                <ul className="mt-1 ml-5 space-y-0.5">
+                  {urls.slice(0, 5).map((u) => (
+                    <li key={u} className="lx-10 lx-mut truncate">{u}</li>
+                  ))}
+                </ul>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {items.length === 0 && (
+        <div className="lx-10 lx-mut mt-3 px-1">{running ? "Starting research…" : "No research activity was reported for this order."}</div>
+      )}
     </div>
   );
 };
@@ -1118,15 +1186,25 @@ export default function MrLxwaDashboard({
       const runningNow = t.steps.find((s) => s.status === "running");
       const latestLine = t.lines[t.lines.length - 1];
       const liveText = runningNow?.progressLabel || runningNow?.label || latestLine?.text || "On it…";
+      // The plan, checklist-style — same rows the collapsed strip above the composer reads
+      // (task.steps, real task_steps rows), just also rendered inline here per the owner's
+      // reference mockup. Empty until the planner has actually written steps for this task.
+      const planSteps = t.steps.map((st) => ({
+        label: [...allAgents, bossAgent].find((a) => a.id === st.agent_id)?.name ?? st.agent_id,
+        status: st.status,
+      }));
+      const cta = planSteps.length ? { label: "View Live Workflow", agentId: runningNow?.agent_id } : undefined;
       setThread((p) => {
         if (!startedLiveBubble.current.has(id)) {
           startedLiveBubble.current.add(id);
-          return [...p, { who: "ai", text: liveText, time: nowTime(), live: true, taskId: id }];
+          return [...p, { who: "ai", text: liveText, time: nowTime(), live: true, taskId: id, planSteps, cta }];
         }
         const i = p.findIndex((m) => m.taskId === id);
-        if (i < 0 || p[i].text === liveText) return p;
+        if (i < 0) return p;
+        const prev = p[i];
+        if (prev.text === liveText && JSON.stringify(prev.planSteps) === JSON.stringify(planSteps)) return p;
         const next = [...p];
-        next[i] = { ...next[i], text: liveText };
+        next[i] = { ...next[i], text: liveText, planSteps, cta };
         return next;
       });
       return;
@@ -1393,6 +1471,12 @@ export default function MrLxwaDashboard({
   // Mr. Keyword's own rows for this order, and the topic it was searching — used by the live
   // keyword screen below.
   const keywordItems = producedItems.filter((it) => it.kind === "keyword");
+  // gpt-researcher's own live events (agents/writer.ts's onProgress, forwarded verbatim — see
+  // conduct_research.py) — real, while the research step runs, before the outline exists. Once
+  // "research" (the researcher's own resolve) or "section" (the outline moved past it) shows
+  // up, research is over and the writer screen below takes back the live visual.
+  const researchProgressItems = producedItems.filter((it) => it.kind === "research_progress");
+  const researchDone = producedItems.some((it) => it.kind === "research" || it.kind === "section");
   const taskTopic =
     (task?.items.find((it) => it.kind === "topic_picked")?.payload?.topic as string | undefined) ??
     (task?.echo ? String(task.echo).match(/"([^"]+)"/)?.[1] : undefined) ??
@@ -1498,6 +1582,8 @@ export default function MrLxwaDashboard({
                     running={!!runningStep}
                     onWriteArticle={orderArticleFor}
                   />
+                ) : panelAgent?.id === "writer" && !researchDone && (researchProgressItems.length > 0 || !!runningStep) ? (
+                  <ResearchScreen items={researchProgressItems} running={!!runningStep} />
                 ) : producedItems.length === 0 ? (
                   <div className="flex items-center gap-2.5">
                     {isFlowing(task, now) ? (
@@ -1720,7 +1806,39 @@ export default function MrLxwaDashboard({
                     borderColor: m.live && m.taskId ? "rgba(34,211,238,.35)" : undefined,
                   }}
                 >
-                  {m.text ? boldText(m.text, `m${i}`) : m.live ? (m.slow ? "Still working — taking a little longer than usual…" : "…") : ""}
+                  {m.planSteps?.length ? (
+                    <>
+                      <div>Got it! I&apos;ve assigned the task to my team and we&apos;ve started working. Here&apos;s the plan:</div>
+                      <ul className="mt-2 space-y-1.5">
+                        {m.planSteps.map((s, si) => {
+                          const done = s.status === "done";
+                          const run = s.status === "running";
+                          const bad = s.status === "failed";
+                          return (
+                            <li key={si} className="lx-live-anim flex items-center gap-2" style={{ animationDelay: `${Math.min(si, 6) * 60}ms` }}>
+                              {done ? (
+                                <CheckCircle2 size={13} style={{ color: "#22c55e", flexShrink: 0 }} />
+                              ) : run ? (
+                                <ArrowRight size={13} style={{ color: "#3b82f6", flexShrink: 0 }} />
+                              ) : bad ? (
+                                <XCircle size={13} style={{ color: "#ef4444", flexShrink: 0 }} />
+                              ) : (
+                                <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: "#5c5c72" }} />
+                              )}
+                              <span style={{ color: run ? "#e6e6f2" : done ? "var(--lx-text)" : "var(--lx-mut)" }}>{s.label}</span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                      <div className="lx-10 lx-mut mt-2">You can watch live progress on the dashboard.</div>
+                    </>
+                  ) : m.text ? (
+                    boldText(m.text, `m${i}`)
+                  ) : m.live ? (
+                    m.slow ? "Still working — taking a little longer than usual…" : "…"
+                  ) : (
+                    ""
+                  )}
                 </div>
                 {m.chip && (
                   <div style={{ marginLeft: 30 }} className="mt-1.5">

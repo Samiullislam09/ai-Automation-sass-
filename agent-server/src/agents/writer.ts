@@ -117,12 +117,24 @@ export class WriterAgent extends Agent {
     // arrive at the live workspace (§24.4b) AS THEY FINISH, not split out of an already-done
     // draft — ctx.data below fires from writeArticlePipeline's onSection, mid-generation.
     const pipeline = await writeArticlePipeline(topic.trim(), blueprint, context, nimComplete, {
-      onSection: (section) => ctx.data("section", { h2: section.h2, words: section.words }),
-      researcher: researchTopic,
-      onResearch: (result) => ctx.data("research", { used: !!result, sources: result?.sources.length ?? 0 }),
+      // `text` added (2026-08-31, live Writing-tab preview) alongside the h2/words this already
+      // carried — the section's own real prose, exactly as written, nothing summarised.
+      onSection: (section) => ctx.data("section", { h2: section.h2, words: section.words, text: section.text }),
+      // Live "reading web pages" visual (2026-08-31) — researchTopic forwards whatever
+      // gpt-researcher itself reports, verbatim, as it happens; this never invents a page name,
+      // a URL or a percentage that gpt-researcher did not actually report.
+      researcher: (topic) => researchTopic(topic, { onProgress: (event) => ctx.data("research_progress", event) }),
+      // The real source list, not just a count (2026-08-31, live Research/References tabs) —
+      // `result.sources` is already {url,title}[] from gpt-researcher's own crawl, capped at
+      // 10 there (conduct_research.py). Never invented: `used:false` (or a thrown/skipped
+      // researcher) means this array is simply empty, and the tabs say so honestly.
+      onResearch: (result) => ctx.data("research", { used: !!result, sources: result?.sources ?? [] }),
     });
     const body = pipeline.body;
     const title = pipeline.title;
+    // The finished article, for the live "Output Preview" tab — fires here, once polish/meta
+    // are both done, never before: an in-progress assembly of raw sections is not "the output".
+    ctx.data("draft", { title, body });
 
     // The topic IS the primary keyword: buildBlueprint() writes it as "Primary keyword: …"
     // and the writer is told to answer it in the first 100 words. metaTitle/metaDescription
@@ -132,6 +144,10 @@ export class WriterAgent extends Agent {
     console.log(`[writer] "${title}" — ${summarizeGate(gate)}`);
 
     ctx.data("score", { quality: gate.score, passed: gate.passed, words: gate.wordCount, sections: gate.sections });
+    // The real links the article actually contains — for the live "References" tab. Same
+    // `gate.links` this already stored in content_items.meta, just also surfaced live instead
+    // of only being readable after the fact.
+    ctx.data("references", { links: gate.links });
 
     const meta: Record<string, unknown> = {
       wordCount: gate.wordCount,
