@@ -108,6 +108,25 @@ export class AuditAgent extends Agent {
     const previous = await previousScore(tenantId);
     const summary = summarizeAudit(result, previous);
 
+    // Who asked for this run — the scheduler's own weekly sweep (scheduler.ts: `source:
+    // "schedule"`) or a person clicking "Check my site now" (2026-09-05, the Audit report
+    // page's history table: "manual kab hua, schedule kab hua"). Anything else unrecognised
+    // defaults to "manual" rather than silently claiming a schedule that did not happen.
+    const trigger: "manual" | "schedule" = d.source === "schedule" ? "schedule" : "manual";
+
+    // A light per-page summary — status, redirect, response time — never the full `html`/
+    // `bytes` (that stays transient, this file's own reason for keeping checks.ts network-free
+    // already applies here too). This is what the report page's "Crawled Pages" breakdown and
+    // its "see more" full-page popup both read; before this it was computed, used once for
+    // `result`, and thrown away.
+    const pageSummary = pages.map((p) => ({
+      url: p.url,
+      status: p.status,
+      redirectedTo: p.finalUrl && p.finalUrl !== p.url ? p.finalUrl : null,
+      ms: p.ms,
+      error: p.error ?? null,
+    }));
+
     const seconds = Math.round((Date.now() - t0) / 1000);
     const { data: saved, error } = await supabase
       .from("site_audits")
@@ -125,6 +144,8 @@ export class AuditAgent extends Agent {
           seconds,
           limit,
           skipped: result.skipped,
+          trigger,
+          pages: pageSummary,
           // Per-page LCP/CLS/TBT — the derived issues are in `issues` above; this is the raw
           // numbers behind them, for a future report page that wants to chart them per page.
           performance: perf.pages,

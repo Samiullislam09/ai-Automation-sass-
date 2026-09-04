@@ -92,7 +92,12 @@ export type AuditResult = {
 
 /* ---------------------------------------------------------------- helpers --------------- */
 
-const PAGE_SAMPLE = 8; // how many example URLs an issue carries. The count is always exact.
+// How many example URLs an issue carries — `count` is always exact regardless. Raised 8 → 100
+// (2026-09-05, "see more" full-page popup on the Audit report page) so that view has real URLs
+// to show for nearly every issue on a small-business site, not just the first 8; still capped,
+// never the unbounded list, so one issue on a huge site cannot make the row heavier than the
+// rest of the report.
+const PAGE_SAMPLE = 100;
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));

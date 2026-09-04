@@ -31,9 +31,13 @@ export async function GET() {
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    // score/blocks/warns/pages_checked feed the Errors/Warnings trend charts and the history
+    // table (manual vs scheduled, MASTER_PLAN 2026-09-05); `run->trigger` pulls just that one
+    // key out of the jsonb column rather than the whole thing (`run.pages`/`run.performance`
+    // can be large — a 20-row history has no reason to carry 20 of those).
     supabase
       .from("site_audits")
-      .select("id, score, created_at")
+      .select("id, score, blocks, warns, pages_checked, created_at, run->trigger")
       .eq("tenant_id", tenantId)
       .order("created_at", { ascending: false })
       .limit(20),
@@ -65,6 +69,13 @@ export async function GET() {
           // Real Lighthouse results (agent-server/src/lib/audit/performance.ts) — already
           // stored in `run.performance` since that file shipped, never surfaced here until now.
           performance: Array.isArray((latest.run as any)?.performance) ? (latest.run as any).performance : [],
+          // Real per-page crawl summary (status/redirect/response time) — the Crawled Pages
+          // breakdown and the "see more" full-page popup both read this (2026-09-05).
+          pages: Array.isArray((latest.run as any)?.pages) ? (latest.run as any).pages : [],
+          // Who asked for this run — a person ("manual") or the weekly scheduler ("schedule").
+          // Older rows from before 2026-09-05 have no `run.trigger` at all; reported as null
+          // rather than guessed.
+          trigger: (latest.run as any)?.trigger === "schedule" ? "schedule" : (latest.run as any)?.trigger === "manual" ? "manual" : null,
           seconds: Number((latest.run as any)?.seconds) || null,
           summary: latest.summary ?? null,
           createdAt: latest.created_at,
@@ -72,7 +83,15 @@ export async function GET() {
       : null,
     // Oldest first, so a chart can render it without reversing and a reader can read it.
     history: (history ?? [])
-      .map((r: any) => ({ id: String(r.id), score: Number(r.score) || 0, createdAt: String(r.created_at) }))
+      .map((r: any) => ({
+        id: String(r.id),
+        score: Number(r.score) || 0,
+        blocks: Number(r.blocks) || 0,
+        warns: Number(r.warns) || 0,
+        pagesChecked: Number(r.pages_checked) || 0,
+        trigger: r.trigger === "schedule" ? "schedule" : r.trigger === "manual" ? "manual" : null,
+        createdAt: String(r.created_at),
+      }))
       .reverse(),
   });
 }
