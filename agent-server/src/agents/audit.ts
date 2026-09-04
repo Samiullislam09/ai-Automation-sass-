@@ -11,6 +11,8 @@ import { supabase } from "../supabase.js";
  *  deterministic catalogue above already covers every page for everything a browser is not
  *  needed for. */
 const PERFORMANCE_PAGE_LIMIT = 10;
+/** Absolute ceiling on the loading-speed phase (performance.ts's own 5-minute budget + slack). */
+const PERF_PHASE_CEILING_MS = 7 * 60_000;
 
 /** Mr. Audit — "is anything on my site broken or quietly costing me traffic?" (§7.4).
  *
@@ -72,31 +74,49 @@ export class AuditAgent extends Agent {
     const { data: crawledRows } = await supabase.from("site_pages").select("url").eq("tenant_id", tenantId).limit(limit * 2);
     const urls = chooseUrls(target.origin, site.sitemapUrls, (crawledRows ?? []).map((r: any) => String(r.url)), limit);
 
-    ctx.onProgress({ phase: "fetch", label: `Checking ${urls.length} pages…`, total: urls.length });
+    ctx.onProgress({ phase: "fetch", label: `Checking ${urls.length} pages…`, done: 0, total: urls.length, at: new Date().toISOString() });
 
     const pages = await fetchAllPages(urls, (done, total, url) => {
       // Every page, as it happens — this is what turns the workspace into a thing you watch
       // rather than a spinner (§24.4b). The renderer keys off `kind: "page"`.
       ctx.data("page", { url, done, total });
       ctx.progress(0.1 + 0.75 * (done / Math.max(1, total)), `Checked ${done} of ${total} pages`);
+      // …and into jobs_log (throttled by workers.ts), which is what the Audit page's own
+      // progress bar reads (2026-09-04) — `ctx.progress` above only reaches the live channel,
+      // and only for brain tasks; a manual audit is not one. `at` lets the reader tell a run
+      // that is still moving from one that has stopped writing.
+      ctx.onProgress({ phase: "fetch", label: `Checked ${done} of ${total} pages`, done, total, at: new Date().toISOString() });
     });
-
-    ctx.onProgress({ phase: "perf", label: "Measuring loading speed…" });
-    ctx.progress(0.9, "Measuring loading speed");
 
     // Homepage first (always in the sample), then whichever other pages were already fetched —
     // not necessarily "latest articles" (nothing here knows publish dates), but the same "the
     // pages that matter most" bias fetchAllPages/chooseUrls already applied upstream.
     const perfUrls = [target.origin, ...urls.filter((u) => u !== target.origin)].slice(0, PERFORMANCE_PAGE_LIMIT);
-    const perf: PerformanceRun = await runPerformanceAudit(perfUrls).catch((e: any) => ({
-      ran: false,
-      skippedReason: `Loading speed check crashed rather than measuring anything: ${e?.message ?? "unknown error"}.`,
-      pages: [],
-    }));
-    if (perf.ran) ctx.log(`Measured loading speed on ${perf.pages.length} page(s).`);
+    ctx.onProgress({ phase: "perf", label: `Measuring loading speed on ${perfUrls.length} pages…`, done: 0, total: perfUrls.length, at: new Date().toISOString() });
+    ctx.progress(0.9, "Measuring loading speed");
+
+    // performance.ts has its own per-page and whole-run ceilings; this outer one is the last
+    // line — if even those fail to return, the audit still files its report without a speed
+    // section rather than sitting here until pg-boss expires it (which is exactly what every
+    // audit did on 2026-09-04).
+    const perfGuard = new Promise<PerformanceRun>((resolve) =>
+      setTimeout(() => resolve({ ran: false, skippedReason: "Loading speed could not be measured this run — the browser stopped answering and the audit went on without it.", pages: [] }), PERF_PHASE_CEILING_MS),
+    );
+    const perf: PerformanceRun = await Promise.race([
+      runPerformanceAudit(perfUrls, (done, total, url) => {
+        ctx.data("page", { url, done, total, phase: "perf" });
+        ctx.onProgress({ phase: "perf", label: `Measured loading speed on ${done} of ${total} pages`, done, total, at: new Date().toISOString() });
+      }).catch((e: any) => ({
+        ran: false,
+        skippedReason: `Loading speed check crashed rather than measuring anything: ${e?.message ?? "unknown error"}.`,
+        pages: [],
+      })),
+      perfGuard,
+    ]);
+    if (perf.ran) ctx.log(`Measured loading speed on ${perf.pages.filter((p) => p.ok).length} of ${perf.pages.length} page(s).`);
     else if (perf.skippedReason) ctx.log(perf.skippedReason, "warn");
 
-    ctx.onProgress({ phase: "checks", label: "Looking for problems…" });
+    ctx.onProgress({ phase: "checks", label: "Looking for problems…", at: new Date().toISOString() });
     ctx.progress(0.95, "Looking for problems");
 
     const result = auditSite(pages, site, {

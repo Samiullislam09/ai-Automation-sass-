@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { auditSite, describeTrend, summarizeAudit, topIssues, type AuditPage, type SiteContext } from "./checks.js";
-import { chooseUrls, parseSitemap, auditTarget } from "./fetchSite.js";
+import { chooseUrls, parseSitemap, auditTarget, fetchSiteContext } from "./fetchSite.js";
 
 /** Mr. Audit's catalogue, tested the way seoChecks.ts is: from fixtures, with no network, and
  *  with a test per claim the report makes to a customer. The two that matter most are the ones
@@ -580,6 +580,29 @@ test("the cap is a cap, and the same page listed twice is one page", () => {
 
 test("with no sitemap we audit what we already crawled", () => {
   assert.deepEqual(chooseUrls(ORIGIN, null, [`${ORIGIN}/known`], 10), [`${ORIGIN}/`, `${ORIGIN}/known`]);
+});
+
+test("a sitemap file, an xsl or a feed is never chosen as a page — even when the sitemap or the crawl table lists it", () => {
+  const urls = chooseUrls(ORIGIN, [`${ORIGIN}/post-sitemap.xml`, `${ORIGIN}/about`], [`${ORIGIN}/feed.rss`, `${ORIGIN}/main-sitemap.xsl`, `${ORIGIN}/contact`], 10);
+  assert.deepEqual(urls, [`${ORIGIN}/`, `${ORIGIN}/about`, `${ORIGIN}/contact`]);
+});
+
+test("a sitemap index is followed to its child sitemaps, and the pages come from the children", async () => {
+  const index = `<?xml version="1.0"?><sitemapindex><sitemap><loc>${ORIGIN}/post-sitemap.xml</loc></sitemap><sitemap><loc>${ORIGIN}/page-sitemap.xml</loc></sitemap></sitemapindex>`;
+  const posts = `<urlset><url><loc>${ORIGIN}/post-1/</loc></url><url><loc>${ORIGIN}/post-2/</loc></url></urlset>`;
+  const pagesXml = `<urlset><url><loc>${ORIGIN}/about/</loc></url></urlset>`;
+  const files: Record<string, string> = { "/robots.txt": `User-agent: *\nSitemap: ${ORIGIN}/sitemap_index.xml`, "/sitemap_index.xml": index, "/post-sitemap.xml": posts, "/page-sitemap.xml": pagesXml };
+  const fetched: string[] = [];
+  const fakeFetch = (async (input: any) => {
+    const path = new URL(String(input)).pathname;
+    fetched.push(path);
+    const body = files[path];
+    return new Response(body ?? "not found", { status: body ? 200 : 404 });
+  }) as unknown as typeof fetch;
+  const ctx = await fetchSiteContext(ORIGIN, fakeFetch);
+  assert.deepEqual(ctx.sitemapUrls, [`${ORIGIN}/post-1/`, `${ORIGIN}/post-2/`, `${ORIGIN}/about/`]);
+  assert.equal(ctx.sitemapMalformed, false);
+  assert.ok(fetched.includes("/post-sitemap.xml") && fetched.includes("/page-sitemap.xml"), "both children were read");
 });
 
 test("a sitemap index is parsed for its locations like any other sitemap", () => {

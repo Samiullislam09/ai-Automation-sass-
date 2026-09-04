@@ -26,8 +26,12 @@ const QUEUE_OPTIONS = {
 // The analyst belongs in the same class: six LLM calls plus one embedding per Search Console
 // query it checks, all of them through the shared 30 rpm limiter (lib/nvidia.ts), so a busy
 // account can put it well past 15 minutes even though it is doing nothing wrong.
+//
+// The audit too (2026-09-04): 200 pages at 400ms apart plus up to ten Lighthouse runs is
+// 8-10 minutes on a normal day. At the 15-minute default, one slow site meant pg-boss expired
+// and retried it three times — every retry stuck in the same place, no report ever filed.
 const CRAWLER_QUEUE_OPTIONS = { ...QUEUE_OPTIONS, expireInSeconds: 3600 };
-const LONG_RUNNING: AgentType[] = ["crawler", "analyst"];
+const LONG_RUNNING: AgentType[] = ["crawler", "analyst", "audit"];
 
 /** The brain's own queue. Not an agent: the only thing it carries is "look at task X again",
  *  which is how a retry survives its backoff and how a step wakes up after a delay. Kept off
@@ -43,7 +47,12 @@ const BRAIN_QUEUE_OPTIONS = { retryLimit: 0 };
 export async function initQueues() {
   await ensureBossStarted();
   for (const type of AGENT_TYPES) {
-    await boss.createQueue(type, LONG_RUNNING.includes(type) ? CRAWLER_QUEUE_OPTIONS : QUEUE_OPTIONS);
+    const options = LONG_RUNNING.includes(type) ? CRAWLER_QUEUE_OPTIONS : QUEUE_OPTIONS;
+    await boss.createQueue(type, options);
+    // createQueue is a no-op for a queue that already exists, so a changed expiry (audit,
+    // above) would never reach a database that has had the queue since day one. updateQueue
+    // applies the options to the existing row.
+    await boss.updateQueue(type, options).catch((e: any) => console.error(`[queues] updateQueue ${type} failed:`, e?.message));
   }
   await boss.createQueue(BRAIN_QUEUE, BRAIN_QUEUE_OPTIONS);
 }

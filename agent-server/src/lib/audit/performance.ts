@@ -50,8 +50,50 @@ const LCP_GOOD_MS = 2500; // web.dev's own "Good" threshold
 const CLS_GOOD = 0.1;
 const TBT_GOOD_MS = 200;
 
+/** Hard ceilings, because Lighthouse can hang instead of failing. Found live 2026-09-04: four
+ *  audits in a row sat in "Measuring loading speed" until pg-boss's 15-minute expiry killed and
+ *  retried them (three tries each, same result), so NO audit filed a report all day and the
+ *  report page just said "taking longer than usual". A page that does not answer inside
+ *  PAGE_TIMEOUT_MS is recorded as not measured and Chrome is restarted for the next one; once
+ *  RUN_BUDGET_MS is spent the remaining pages are recorded as not measured without being tried.
+ *  Either way the audit goes on to file its report — a missing speed number is a row that says
+ *  so, never a run that never ends. */
+const PAGE_TIMEOUT_MS = 75_000;
+const RUN_BUDGET_MS = 5 * 60_000;
+const LAUNCH_TIMEOUT_MS = 30_000;
+
 function chromePath(): string | undefined {
   return process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_PATH || undefined;
+}
+
+/** A promise with a ceiling. On timeout the ORIGINAL keeps running (nothing can cancel a
+ *  Lighthouse run from outside) — the caller's job is to kill the Chrome it was talking to. */
+function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  let t: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    t = setTimeout(() => reject(new Error(`${what} did not finish within ${Math.round(ms / 1000)}s`)), ms);
+  });
+  return Promise.race([p, timeout]).finally(() => clearTimeout(t)) as Promise<T>;
+}
+
+async function launchChrome(): Promise<chromeLauncher.LaunchedChrome> {
+  return withTimeout(
+    chromeLauncher.launch({
+      chromeFlags: ["--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
+      chromePath: chromePath(),
+    }),
+    LAUNCH_TIMEOUT_MS,
+    "Chrome launch",
+  );
+}
+
+function killChrome(chrome: chromeLauncher.LaunchedChrome | null) {
+  if (!chrome) return;
+  try {
+    chrome.kill();
+  } catch {
+    /* best-effort — the process may already be gone */
+  }
 }
 
 /** Runs Lighthouse (mobile, simulated throttling — Google's own default) against each URL, one
@@ -60,16 +102,14 @@ function chromePath(): string | undefined {
  *  rest of the audit (checks.ts's deterministic catalogue) has to file its report either way.
  *
  *  `urls` should be short — homepage + a handful of recent articles (§17.3), not the whole
- *  site. Each page takes 10-20s; ten pages is already 2-3 minutes. */
-export async function runPerformanceAudit(urls: string[]): Promise<PerformanceRun> {
+ *  site. Each page takes 10-20s; ten pages is already 2-3 minutes. `onPage` fires after each
+ *  page (done, total, url) so the caller can show real progress. */
+export async function runPerformanceAudit(urls: string[], onPage?: (done: number, total: number, url: string) => void): Promise<PerformanceRun> {
   if (!urls.length) return { ran: false, skippedReason: null, pages: [] };
 
-  let chrome: chromeLauncher.LaunchedChrome;
+  let chrome: chromeLauncher.LaunchedChrome | null;
   try {
-    chrome = await chromeLauncher.launch({
-      chromeFlags: ["--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
-      chromePath: chromePath(),
-    });
+    chrome = await launchChrome();
   } catch (e: any) {
     return {
       ran: false,
@@ -78,11 +118,38 @@ export async function runPerformanceAudit(urls: string[]): Promise<PerformanceRu
     };
   }
 
+  const started = Date.now();
   const pages: PageVitals[] = [];
   try {
-    for (const url of urls) pages.push(await auditOne(url, chrome.port));
+    for (const [i, url] of urls.entries()) {
+      const empty = { url, performanceScore: null, lcpMs: null, cls: null, tbtMs: null };
+      if (Date.now() - started > RUN_BUDGET_MS) {
+        pages.push({ ...empty, ok: false, error: `Not measured — the ${Math.round(RUN_BUDGET_MS / 60_000)}-minute loading-speed budget for this audit was used up by the pages before it` });
+        onPage?.(i + 1, urls.length, url);
+        continue;
+      }
+      if (!chrome) {
+        try {
+          chrome = await launchChrome();
+        } catch (e: any) {
+          pages.push({ ...empty, ok: false, error: `Not measured — Chrome could not be restarted after a hung page (${e?.message ?? "launch failed"})` });
+          onPage?.(i + 1, urls.length, url);
+          continue;
+        }
+      }
+      try {
+        pages.push(await withTimeout(auditOne(url, chrome.port), PAGE_TIMEOUT_MS, "Lighthouse"));
+      } catch (e: any) {
+        // The hung run still holds this Chrome — throw the browser away, the next page gets a
+        // fresh one. Leaving it would make every following page hang the same way.
+        pages.push({ ...empty, ok: false, error: `Not measured — ${e?.message ?? "Lighthouse hung"}` });
+        killChrome(chrome);
+        chrome = null;
+      }
+      onPage?.(i + 1, urls.length, url);
+    }
   } finally {
-    try { chrome.kill(); } catch { /* best-effort — the process may already be gone */ }
+    killChrome(chrome);
   }
 
   return { ran: true, skippedReason: null, pages };
@@ -99,6 +166,10 @@ async function auditOne(url: string, port: number): Promise<PageVitals> {
       formFactor: "mobile",
       screenEmulation: { mobile: true, width: 412, height: 823, deviceScaleFactor: 1.75, disabled: false },
       throttlingMethod: "simulate",
+      // Lighthouse's own per-phase ceilings, so a page that never fires `load` under simulated
+      // throttling gives up inside PAGE_TIMEOUT_MS instead of waiting on the default (45s + 45s).
+      maxWaitForFcp: 20_000,
+      maxWaitForLoad: 40_000,
     });
     const lhr = result?.lhr;
     if (!lhr) return { ...empty, ok: false, error: "Lighthouse returned no result" };

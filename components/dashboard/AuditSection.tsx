@@ -1,5 +1,4 @@
 "use client";
-import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
 
@@ -78,19 +77,65 @@ type Report = {
 
 type HistoryRow = { id: string; score: number; blocks: number; warns: number; pagesChecked: number; trigger: Trigger; createdAt: string };
 type Payload = { ok: boolean; schemaReady: boolean; latest: Report | null; history: HistoryRow[] };
+/** /api/site-audit/status — the audit job as jobs_log has it right now (2026-09-04). */
+type AuditJob = {
+  id: string;
+  status: "queued" | "running" | "success" | "error" | "skipped" | string;
+  action: string;
+  createdAt: string;
+  stalled: boolean;
+  progress: { phase: string | null; label: string | null; done: number | null; total: number | null; at: string | null };
+  error: { message: string; cause: string | null; hint: string | null; attempt: number | null; attempts: number | null; durationMs: number | null } | null;
+};
 
 type Tab = "overview" | "issues" | "pages" | "statistics" | "compare" | "progress";
 type Bucket = "Healthy" | "Broken" | "Have issues" | "Redirects" | "Blocked";
 
 const RANK: Record<Severity, number> = { block: 0, warn: 1, info: 2 };
 const ISSUES_COLLAPSED_COUNT = 5;
-const POLL_MS = 6000;
-const POLL_TIMEOUT_MS = 8 * 60_000; // ~8 min — real audits (200 pages + 10 Lighthouse runs) can genuinely take this long
+const POLL_MS = 3000;
+// The server now gives up on a hung page after 75s and on the whole speed phase after 7 min
+// (agent-server performance.ts / agents/audit.ts, 2026-09-04), so a real audit is ~2-10 min;
+// 15 is the "something else is wrong" line, and /api/site-audit/status's `stalled` usually
+// says so first.
+const POLL_TIMEOUT_MS = 15 * 60_000;
 
 function tone(score: number): "good" | "ok" | "bad" {
   return score >= 85 ? "good" : score >= 60 ? "ok" : "bad";
 }
 const TONE_COLOR: Record<string, string> = { good: "#34d399", ok: "#fbbf24", bad: "#f87171" };
+
+/** What a Site Health number means, in words (owner 2026-09-04: "kaunsa best hai, kaisa user
+ *  samjhe"). Bands follow the house formula's own arithmetic — 100 − 25·block − 5·warn — so
+ *  "Excellent" is a site with nothing serious and at most two warnings, "Poor" is a site with
+ *  two or more serious problems. */
+const HEALTH_BANDS: { min: number; label: string; meaning: string }[] = [
+  { min: 90, label: "Excellent", meaning: "Nothing serious, a couple of things worth polishing." },
+  { min: 70, label: "Good", meaning: "No more than one serious problem. Fix it and you are in the top band." },
+  { min: 50, label: "Needs work", meaning: "One or two serious problems plus a handful of warnings. Errors first." },
+  { min: 0, label: "Poor", meaning: "Several serious problems — pages Google cannot reach or read. Start with the Errors list." },
+];
+function healthBand(score: number) {
+  return HEALTH_BANDS.find((b) => score >= b.min) ?? HEALTH_BANDS[HEALTH_BANDS.length - 1];
+}
+
+/** The audit's five phases, in order, with the share of the bar each one owns — the same
+ *  fractions agents/audit.ts reports to its live channel, so the bar here and the Workspace
+ *  agree. Inside "fetch" and "perf" the bar moves with the real done/total. */
+const AUDIT_PHASES: { id: string; label: string; from: number; to: number }[] = [
+  { id: "target", label: "Finding your site", from: 0, to: 0.05 },
+  { id: "map", label: "Reading robots.txt and sitemap", from: 0.05, to: 0.1 },
+  { id: "fetch", label: "Checking pages", from: 0.1, to: 0.8 },
+  { id: "perf", label: "Measuring loading speed", from: 0.8, to: 0.95 },
+  { id: "checks", label: "Looking for problems", from: 0.95, to: 1 },
+];
+function jobFraction(p: AuditJob["progress"] | null): number {
+  if (!p?.phase) return 0.01;
+  const ph = AUDIT_PHASES.find((x) => x.id === p.phase);
+  if (!ph) return 0.01;
+  const inner = p.total && p.done != null ? Math.min(1, p.done / p.total) : 0;
+  return ph.from + (ph.to - ph.from) * inner;
+}
 const SEV_LABEL: Record<Severity, string> = { block: "Error", warn: "Warning", info: "Notice" };
 const SEV_COLOR: Record<Severity, string> = { block: "#f87171", warn: "#fbbf24", info: "var(--lx-mut)" };
 const TRIGGER_LABEL: Record<NonNullable<Trigger>, string> = { manual: "Manual", schedule: "Scheduled" };
@@ -150,7 +195,10 @@ export default function AuditSection() {
   const [state, setState] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
-  const [polling, setPolling] = useState<{ sinceId: string | null; startedAt: number } | null>(null);
+  // `sinceJobId`: the jobs_log row that existed when polling began — the previous run's — so
+  // a "success" that is still the OLD row is not mistaken for the new run finishing.
+  const [polling, setPolling] = useState<{ sinceId: string | null; sinceJobId: string | null; startedAt: number } | null>(null);
+  const [job, setJob] = useState<AuditJob | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
   const [pagesModal, setPagesModal] = useState<Issue | null>(null);
   const [fixModal, setFixModal] = useState<Issue | null>(null);
@@ -209,26 +257,61 @@ export default function AuditSection() {
       .finally(() => setLoading(false));
   }, [toast]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  /** The audit job as jobs_log has it now — progress while it runs, the diagnosable error
+   *  when it failed. Null when the status endpoint could not be read (never a guess). */
+  const fetchStatus = useCallback(async (): Promise<AuditJob | null> => {
+    try {
+      const d = await fetch("/api/site-audit/status").then((r) => r.json());
+      if (d.ok) {
+        setJob(d.job ?? null);
+        return d.job ?? null;
+      }
+    } catch {
+      /* the next poll will try again */
+    }
+    return null;
+  }, []);
 
-  // Real progress, not a fire-and-forget toast — polls the same read endpoint until a NEW
-  // report id appears (or times out), so "audit progress" is an honest "still going" / "here's
-  // your result" rather than a spinner nobody can check on without leaving the page.
+  useEffect(() => {
+    // A run the weekly schedule (or another tab) started is shown the same way as one started
+    // here: if jobs_log says "running" when the page opens, follow it.
+    load().then(async (d) => {
+      const j = await fetchStatus();
+      if (j && j.status === "running" && !j.stalled) {
+        setPolling({ sinceId: d?.latest?.id ?? null, sinceJobId: null, startedAt: Date.parse(j.createdAt) || Date.now() });
+      }
+    });
+  }, [load, fetchStatus]);
+
+  // Real progress: polls jobs_log (via /api/site-audit/status) for the run's own phase and
+  // done/total, and the report endpoint for the finished report. Ends on the new report, on
+  // the job's own error row, on a stall, or on the ceiling — each with its own sentence.
   useEffect(() => {
     if (!polling) return;
     pollTimer.current = setInterval(async () => {
-      const d = await load();
-      const latestId = d?.latest?.id ?? null;
-      if (latestId && latestId !== polling.sinceId) {
+      const j = await fetchStatus();
+      const isNewRow = !!j && j.id !== polling.sinceJobId;
+      if (j && isNewRow && (j.status === "error" || j.status === "skipped")) {
         setPolling(null);
-        toast("Audit finished.");
+        toast("The audit failed — the reason is on the page.", "error");
         return;
+      }
+      if (j && isNewRow && j.stalled) {
+        setPolling(null);
+        toast("The audit stopped responding — details on the page.", "error");
+        return;
+      }
+      if (j && isNewRow && j.status === "success") {
+        const d = await load();
+        if ((d?.latest?.id ?? null) !== polling.sinceId) {
+          setPolling(null);
+          toast("Audit finished.");
+          return;
+        }
       }
       if (Date.now() - polling.startedAt > POLL_TIMEOUT_MS) {
         setPolling(null);
-        toast("This is taking longer than usual — check Workspace to see if it hit an error.", "error");
+        toast("This is taking far longer than it should — the last thing it reported is on the page.", "error");
       }
     }, POLL_MS);
     return () => {
@@ -248,7 +331,7 @@ export default function AuditSection() {
       const d = await res.json();
       if (d.ok) {
         toast("Checking your whole site — this takes a few minutes.");
-        setPolling({ sinceId: state?.latest?.id ?? null, startedAt: Date.now() });
+        setPolling({ sinceId: state?.latest?.id ?? null, sinceJobId: job?.id ?? null, startedAt: Date.now() });
       } else {
         toast(d.error || "Couldn't start the audit.", "error");
       }
@@ -264,7 +347,6 @@ export default function AuditSection() {
       <button className="lx-grad lx-11 px-3 py-1.5" disabled={starting || !!polling} onClick={runAudit}>
         {starting ? "Starting…" : polling ? "Auditing…" : "Check my site now"}
       </button>
-      <Link href="/dashboard/workspace" className="lx-ghost">Watch it work →</Link>
       <button className="lx-ghost" onClick={() => window.print()} title="Opens your browser's print dialog — choose 'Save as PDF' as the destination">
         Export as PDF
       </button>
@@ -283,13 +365,19 @@ export default function AuditSection() {
     </div>
   );
 
-  const progressBanner = polling && (
-    <div className="lx-card2 lx-audit-noprint flex items-center gap-3 p-3" style={{ borderColor: "var(--lx-cyan)" }}>
-      <span className="lx-pulse h-2 w-2 shrink-0 rounded-full" style={{ background: "var(--lx-cyan)" }} />
-      <span className="lx-11 flex-1">Auditing your site now — checking pages, then measuring loading speed. This usually takes a few minutes.</span>
-      <ElapsedLabel startedAt={polling.startedAt} />
-    </div>
-  );
+  // The running job's own row, if the one on file is the new run (not the previous run's row
+  // still sitting there while pg-boss hands the new job to a worker).
+  const liveJob = polling && job && job.id !== polling.sinceJobId && job.status === "running" ? job : null;
+  const progressBanner = polling && <AuditProgress job={liveJob} startedAt={polling.startedAt} />;
+
+  // The last run's failure, shown until a newer report exists — the "proper error log" a
+  // person can read without opening Workspace (owner, 2026-09-04). A stalled run (no progress
+  // write for 12 minutes) is the same card with what it last reported.
+  const failedJob =
+    !polling && job && (job.status === "error" || job.status === "skipped" || job.stalled) && (!state?.latest || Date.parse(job.createdAt) > Date.parse(state.latest.createdAt))
+      ? job
+      : null;
+  const failureCard = failedJob && <AuditFailure job={failedJob} onRetry={runAudit} busy={starting} />;
 
   if (loading && !state) {
     // First open: the report's own layout as a skeleton, so the page does not flash a generic
@@ -317,6 +405,7 @@ export default function AuditSection() {
       <div className="space-y-4">
         {head}
         {progressBanner}
+        {failureCard}
         <div className="lx-card2 flex flex-col items-center gap-2 p-8 text-center">
           <div className="text-2xl">🩺</div>
           <b className="lx-12">No audit yet</b>
@@ -340,7 +429,10 @@ export default function AuditSection() {
   const notices = bySev("info").length;
 
   const vitals = r.performance ?? [];
-  const measured = vitals.filter((p) => p.ok);
+  // "Measured" means a number came back. Reports from before performance.ts learned to call a
+  // numberless Lighthouse run a failure (2026-09-04) have ok:true rows with every metric null;
+  // those are not measurements and are not counted as any.
+  const measured = vitals.filter((p) => p.ok && (p.lcpMs != null || p.cls != null || p.tbtMs != null || p.performanceScore != null));
   const avgLcp = avg(measured.map((p) => p.lcpMs));
   const avgCls = avg(measured.map((p) => p.cls));
 
@@ -409,6 +501,7 @@ export default function AuditSection() {
         {actions}
       </div>
       {progressBanner}
+      {failureCard}
 
       {/* TABS — Semrush's own top nav (the ones this app has real data for; Statistics /
           Compare Crawls / JS Impact are §27 rounds A and C). */}
@@ -425,13 +518,32 @@ export default function AuditSection() {
       {/* ══════════════════════════════════════════ OVERVIEW ══════════════════════════════ */}
       {tab === "overview" && (
         <>
+          {/* LAST RUN — one line, right under the tabs (owner 2026-09-04: "last audit ka tab
+              upar karo nav ke niche"). The full history is one click away. */}
+          {last && (
+            <div className="lx-card2 flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-3 lx-audit-noprint">
+              <b className="lx-12">Last audit</b>
+              <span className="lx-11 lx-mut">{new Date(last.createdAt).toLocaleString()}</span>
+              <span className="lx-11 lx-mut">{last.trigger ? TRIGGER_LABEL[last.trigger] : "—"}</span>
+              <span className="lx-11">Score <b style={{ color: TONE_COLOR[tone(last.score)] }}>{last.score}</b></span>
+              <span className="lx-11">{last.blocks} errors · {last.warns} warnings · {last.pagesChecked} pages</span>
+              <button className="lx-11 ml-auto underline" style={{ background: "transparent", border: "none", cursor: "pointer", color: "var(--lx-cyan)" }} onClick={() => setHistoryModal(true)}>
+                View all {history.length} run{history.length === 1 ? "" : "s"} →
+              </button>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <div className="lx-card2 p-4">
               <b className="lx-12">Site Health</b>
-              <div className="mt-3 flex flex-wrap items-center gap-6">
+              <div className="mt-3 flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-6">
                 <ScoreGauge score={r.score} />
-                <div className="min-w-40 flex-1">
-                  <p className="lx-11">
+                <div className="min-w-0 flex-1">
+                  <p className="lx-12">
+                    <b style={{ color: "var(--lx-violet)" }}>{healthBand(r.score).label}</b>
+                    <span className="lx-mut"> · {healthBand(r.score).meaning}</span>
+                  </p>
+                  <p className="lx-11 mt-1.5">
                     {diff === null
                       ? "First audit — nothing to compare it to yet."
                       : diff === 0
@@ -440,14 +552,21 @@ export default function AuditSection() {
                           ? `Up ${diff} since the last audit (was ${r.previousScore}).`
                           : `Down ${Math.abs(diff)} since the last audit (was ${r.previousScore}).`}
                   </p>
-                  <ul className="mt-2 space-y-1">
-                    <li className="flex items-center gap-2 lx-11">
-                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: "var(--lx-violet)" }} />
-                      <span className="flex-1">Your site</span>
-                      <b>{r.score}%</b>
-                    </li>
-                  </ul>
                 </div>
+              </div>
+              {/* The scale, so a number means something: which band this site is in, and what
+                  the others are. Text only — the gauge stays brand violet at every score. */}
+              <div className="mt-4 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                {[...HEALTH_BANDS].reverse().map((b, i, arr) => {
+                  const max = i === arr.length - 1 ? 100 : arr[i + 1].min - 1;
+                  const on = healthBand(r.score).min === b.min;
+                  return (
+                    <div key={b.label} className="rounded-md px-2 py-1.5" style={{ border: `1px solid ${on ? "var(--lx-violet)" : "var(--lx-border)"}`, background: on ? "rgba(139,92,246,.12)" : "transparent" }} title={b.meaning}>
+                      <span className="lx-10 block" style={{ color: on ? "var(--lx-text)" : "var(--lx-mut)", fontWeight: on ? 700 : 500 }}>{b.label}</span>
+                      <span className="lx-10 lx-mut">{b.min}–{max}</span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
@@ -507,21 +626,6 @@ export default function AuditSection() {
             </div>
           )}
 
-          {/* LAST RUN — one line, not the whole table (owner, 2026-09-05: "user sirf last audit
-              dekh sake, click karke popup pe all"). The full history is one click away. */}
-          {last && (
-            <div className="lx-card2 flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-3 lx-audit-noprint">
-              <b className="lx-12">Last audit</b>
-              <span className="lx-11 lx-mut">{new Date(last.createdAt).toLocaleString()}</span>
-              <span className="lx-11 lx-mut">{last.trigger ? TRIGGER_LABEL[last.trigger] : "—"}</span>
-              <span className="lx-11">Score <b style={{ color: TONE_COLOR[tone(last.score)] }}>{last.score}</b></span>
-              <span className="lx-11">{last.blocks} errors · {last.warns} warnings · {last.pagesChecked} pages</span>
-              <button className="lx-11 ml-auto underline" style={{ background: "transparent", border: "none", cursor: "pointer", color: "var(--lx-cyan)" }} onClick={() => setHistoryModal(true)}>
-                View all {history.length} run{history.length === 1 ? "" : "s"} →
-              </button>
-            </div>
-          )}
-
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <SeverityCard label="Errors" sub="Fix first" count={r.blocks} color="#f87171" points={history.map((h) => h.blocks)} />
             <SeverityCard label="Warnings" sub="Worth improving" count={r.warns} color="#fbbf24" points={history.map((h) => h.warns)} />
@@ -558,13 +662,15 @@ export default function AuditSection() {
           {vitals.length > 0 && (
             <div className="lx-card2 p-4">
               <b className="lx-12">Core Web Vitals</b>
-              <p className="lx-10 lx-mut mt-1">Real Chrome (Lighthouse), mobile, {measured.length} of {vitals.length} sampled page{vitals.length === 1 ? "" : "s"} measured.</p>
+              <p className="lx-10 lx-mut mt-1">
+                Real Chrome (Lighthouse), mobile. {measured.length} of {vitals.length} sampled page{vitals.length === 1 ? "" : "s"} measured — the sample is the home page plus up to {Math.max(0, vitals.length - 1)} more, because each Lighthouse run takes 10–20 seconds. Every crawled page&apos;s response time is in Crawled Pages.
+              </p>
               {measured.length === 0 ? (
-                <p className="lx-11 lx-mut mt-3">Could not measure this run — see the individual page errors below.</p>
+                <p className="lx-11 lx-mut mt-3">Nothing was measured in this run — each page below says why. The next audit tries again.</p>
               ) : (
                 <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-                  <VitalTile label="Largest Contentful Paint" value={avgLcp != null ? `${(avgLcp / 1000).toFixed(1)}s` : "—"} good={avgLcp != null && avgLcp <= 2500} />
-                  <VitalTile label="Cumulative Layout Shift" value={avgCls != null ? avgCls.toFixed(2) : "—"} good={avgCls != null && avgCls <= 0.1} />
+                  <VitalTile label="Largest Contentful Paint" value={avgLcp != null ? `${(avgLcp / 1000).toFixed(1)}s` : "—"} good={avgLcp == null ? null : avgLcp <= 2500} hint="Good is 2.5 s or under" />
+                  <VitalTile label="Cumulative Layout Shift" value={avgCls != null ? avgCls.toFixed(2) : "—"} good={avgCls == null ? null : avgCls <= 0.1} hint="Good is 0.1 or under" />
                 </div>
               )}
               <div className="lx-scroll mt-3" style={{ overflowX: "auto" }}>
@@ -581,14 +687,14 @@ export default function AuditSection() {
                     {vitals.map((p) => (
                       <tr key={p.url} style={{ borderTop: "1px solid var(--lx-border)" }}>
                         <td className="lx-11" style={{ padding: "8px", color: "#e6e6f2", maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={p.url}>{p.url}</td>
-                        {p.ok ? (
+                        {p.ok && (p.lcpMs != null || p.cls != null || p.performanceScore != null) ? (
                           <>
                             <td className="lx-11 lx-mut" style={{ padding: "8px", whiteSpace: "nowrap" }}>{p.lcpMs != null ? `${(p.lcpMs / 1000).toFixed(1)}s` : "—"}</td>
                             <td className="lx-11 lx-mut" style={{ padding: "8px", whiteSpace: "nowrap" }}>{p.cls != null ? p.cls.toFixed(2) : "—"}</td>
                             <td className="lx-11 lx-mut" style={{ padding: "8px", whiteSpace: "nowrap" }}>{p.performanceScore != null ? `${p.performanceScore}/100` : "—"}</td>
                           </>
                         ) : (
-                          <td className="lx-10" style={{ padding: "8px", color: "#f87171" }} colSpan={3}>Not measured{p.error ? ` — ${p.error}` : ""}</td>
+                          <td className="lx-10 lx-mut" style={{ padding: "8px" }} colSpan={3}>Not measured{p.error ? ` — ${p.error}` : " — Lighthouse returned no numbers for this page"}</td>
                         )}
                       </tr>
                     ))}
@@ -1104,6 +1210,85 @@ function ReportSkeleton({ actions }: { actions: React.ReactNode }) {
   );
 }
 
+/** The running audit, as a real bar: the phase it is in, how far through that phase (done of
+ *  total pages, from jobs_log), the five steps with the current one lit, and the clock. `job`
+ *  is null while pg-boss is still handing the job to a worker — said as "Queued", not faked
+ *  as progress. */
+function AuditProgress({ job, startedAt }: { job: AuditJob | null; startedAt: number }) {
+  const p = job?.progress ?? null;
+  const fraction = job ? jobFraction(p) : 0;
+  const pct = Math.max(1, Math.round(fraction * 100));
+  const phaseIdx = p?.phase ? AUDIT_PHASES.findIndex((x) => x.id === p.phase) : -1;
+  const label = !job ? "Queued — waiting for a worker to pick it up" : p?.label ?? "Starting…";
+  const detail = p?.total && p.done != null ? `${p.done} of ${p.total}` : null;
+  return (
+    <div className="lx-card2 lx-audit-noprint p-4" style={{ borderColor: "rgba(139,92,246,.45)" }} role="status" aria-live="polite">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="lx-pulse h-2 w-2 shrink-0 rounded-full" style={{ background: "var(--lx-violet)" }} />
+        <b className="lx-12 flex-1">{label}</b>
+        {detail && <span className="lx-11 lx-mut">{detail}</span>}
+        <b className="lx-12" style={{ color: "var(--lx-violet)" }}>{pct}%</b>
+        <ElapsedLabel startedAt={startedAt} />
+      </div>
+      <div className="mt-2.5 h-2 w-full overflow-hidden rounded-full" style={{ background: "var(--lx-border)" }}>
+        <div className="h-full" style={{ width: `${pct}%`, borderRadius: 999, transition: "width .6s ease", background: "linear-gradient(90deg,#4f46e5,#7c3aed,#8b5cf6)" }} />
+      </div>
+      <ol className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-1 sm:grid-cols-5">
+        {AUDIT_PHASES.map((ph, i) => {
+          const state = i < phaseIdx ? "done" : i === phaseIdx ? "now" : "next";
+          return (
+            <li key={ph.id} className="lx-10 flex items-center gap-1.5" style={{ color: state === "next" ? "var(--lx-mut)" : "var(--lx-text)", fontWeight: state === "now" ? 700 : 500 }}>
+              <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full" style={{ fontSize: 9, border: `1px solid ${state === "next" ? "var(--lx-border)" : "var(--lx-violet)"}`, background: state === "done" ? "var(--lx-violet)" : "transparent", color: state === "done" ? "#fff" : "var(--lx-violet)" }}>
+                {state === "done" ? "✓" : i + 1}
+              </span>
+              {ph.label}
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
+/** The last run's failure, readable on the page: what failed, the raw cause under it, what to
+ *  do, which attempt, how long it ran. Every field is jobs_log's own (workers.ts's
+ *  explainAgentError) — nothing here is composed by the page. A stalled run shows what it last
+ *  reported and when. */
+function AuditFailure({ job, onRetry, busy }: { job: AuditJob; onRetry: () => void; busy: boolean }) {
+  const stalled = job.status === "running" && job.stalled;
+  const e = job.error;
+  const mins = e?.durationMs != null ? Math.round(e.durationMs / 60000) : null;
+  return (
+    <div className="lx-card2 lx-audit-noprint p-4" style={{ borderColor: "rgba(248,113,113,.5)" }} role="alert">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <b className="lx-12" style={{ color: "#f87171" }}>{stalled ? "The last audit stopped responding" : "The last audit failed"}</b>
+          <p className="lx-11 mt-1">
+            {stalled
+              ? `It last reported "${job.progress.label ?? job.progress.phase ?? "starting"}"${job.progress.at ? ` at ${new Date(job.progress.at).toLocaleTimeString()}` : ""} and has written nothing since. Started ${new Date(job.createdAt).toLocaleString()}.`
+              : e?.message ?? "No reason was recorded."}
+          </p>
+          {!stalled && e?.cause && (
+            <pre className="lx-10 mt-2 overflow-x-auto rounded-md p-2" style={{ background: "rgba(0,0,0,.35)", border: "1px solid var(--lx-border)", whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--lx-mut)" }}>{e.cause}</pre>
+          )}
+          <p className="lx-11 mt-2" style={{ color: "var(--lx-text)" }}>
+            {stalled
+              ? "The server now gives up on a page that hangs for more than 75 seconds and on the whole speed check after 7 minutes, so a run started now cannot get stuck the same way."
+              : e?.hint ?? "Run it again. If it fails the same way twice, the cause above is what to send to support."}
+          </p>
+          <p className="lx-10 lx-mut mt-2">
+            {job.action}
+            {e?.attempt != null && e?.attempts != null && ` · attempt ${e.attempt} of ${e.attempts}`}
+            {mins != null && ` · ran ${mins || "<1"} min`}
+            {` · ${new Date(job.createdAt).toLocaleString()}`}
+          </p>
+        </div>
+        <button className="lx-grad lx-11 shrink-0 px-3 py-1.5" disabled={busy} onClick={onRetry}>{busy ? "Starting…" : "Run it again"}</button>
+      </div>
+    </div>
+  );
+}
+
 function ElapsedLabel({ startedAt }: { startedAt: number }) {
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -1336,14 +1521,17 @@ function CompareRow({ severity, what, category, note, onClick }: { severity: Sev
   );
 }
 
-function VitalTile({ label, value, good }: { label: string; value: string; good: boolean }) {
+/** `good` null = no number was measured — shown as exactly that, never as "Needs work". */
+function VitalTile({ label, value, good, hint }: { label: string; value: string; good: boolean | null; hint?: string }) {
+  const color = good === null ? "var(--lx-mut)" : good ? "#34d399" : "#fbbf24";
   return (
     <div className="rounded-lg px-3 py-2.5" style={{ border: "1px solid var(--lx-border)" }}>
       <span className="lx-10 lx-mut">{label}</span>
       <div className="mt-1 flex items-baseline gap-1.5">
-        <b className="font-extrabold" style={{ fontSize: 22, color: good ? "#34d399" : "#fbbf24" }}>{value}</b>
-        <span className="lx-10" style={{ color: good ? "#34d399" : "#fbbf24" }}>{good ? "Good" : "Needs work"}</span>
+        <b className="font-extrabold" style={{ fontSize: 22, color }}>{value}</b>
+        <span className="lx-10" style={{ color }}>{good === null ? "Not measured" : good ? "Good" : "Needs work"}</span>
       </div>
+      {hint && <span className="lx-10 lx-mut">{hint}</span>}
     </div>
   );
 }

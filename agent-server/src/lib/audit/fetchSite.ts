@@ -28,6 +28,12 @@ const TIMEOUT_MS = 15_000;
  *  design, not a bigger number here. A caller (agents/audit.ts's `pages` job param) can still
  *  ask for fewer. */
 export const DEFAULT_PAGE_LIMIT = 200;
+/** How many child sitemaps of a sitemap index are followed. Yoast splits at 1,000 URLs per
+ *  file, so 20 children is 20,000 URLs — far past the page cap either way. */
+const MAX_CHILD_SITEMAPS = 20;
+/** Addresses that are a file, not a page — never crawled as one even when a sitemap or the
+ *  site's own crawl table lists them. */
+const NOT_A_PAGE = /\.(xml|xsl|xslt|txt|json|rss|atom)$/i;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -84,10 +90,28 @@ export async function fetchSiteContext(origin: string, fetchImpl: Fetcher = fetc
   const declared = robotsTxt?.match(/^\s*sitemap:\s*(\S+)/im)?.[1] ?? null;
   const xml = declared ? await readAbsolute(declared, fetchImpl) : await read("/sitemap.xml");
 
+  // A sitemap INDEX (WordPress/Yoast/RankMath's default: post-sitemap.xml, page-sitemap.xml…)
+  // lists other sitemaps, not pages. Until 2026-09-04 those child addresses were handed to the
+  // crawl as if they were pages — the report showed "post-sitemap.xml" as an audited page and
+  // the site's real pages were never found ("all pages nahi hai"). Follow the children, in
+  // order, same manners (one at a time, GAP_MS apart), capped so a 500-sitemap index cannot
+  // turn the map phase into its own crawl.
+  let sitemapUrls: string[] | null = xml === null ? null : parseSitemap(xml);
+  if (xml !== null && /<sitemapindex[\s>]/i.test(xml) && sitemapUrls) {
+    const children = sitemapUrls.slice(0, MAX_CHILD_SITEMAPS);
+    const merged: string[] = [];
+    for (const child of children) {
+      await sleep(GAP_MS);
+      const childXml = await readAbsolute(child, fetchImpl);
+      if (childXml !== null) merged.push(...parseSitemap(childXml));
+    }
+    sitemapUrls = merged;
+  }
+
   return {
     origin,
     robotsTxt,
-    sitemapUrls: xml === null ? null : parseSitemap(xml),
+    sitemapUrls,
     sitemapUrl: declared ?? origin + "/sitemap.xml",
     // A file that answered 200 but is not a sitemap — an HTML "not found" page served with the
     // wrong status is the usual way this happens. Decided from the bytes already in hand, no
@@ -131,6 +155,7 @@ export function chooseUrls(origin: string, sitemapUrls: string[] | null, crawled
       return;
     }
     if (abs.origin.toLowerCase() !== origin.toLowerCase()) return;
+    if (NOT_A_PAGE.test(abs.pathname)) return;
     abs.hash = "";
     const key = abs.toString();
     if (seen.has(key)) return;
