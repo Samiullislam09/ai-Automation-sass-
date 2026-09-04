@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight, BadgeCheck, Bell, Calendar, Check, ChevronDown, ChevronLeft, ChevronRight, Clock,
   Copy, Eye, FileText, Loader2, Megaphone, MapPin, MoreVertical, Pencil, RefreshCw, Search,
-  SlidersHorizontal, UserRound, X, XCircle, CheckCircle2, Monitor, ExternalLink, History,
+  SlidersHorizontal, UserRound, X, XCircle, CheckCircle2, Monitor, ExternalLink, History, Plus,
 } from "lucide-react";
 import { renderMarkdown } from "@/lib/md";
 import { useStore } from "@/lib/store";
@@ -105,7 +105,18 @@ function historyOf(c: ContentItem): HistoryEvent[] {
 
 /* ---------------------------------------------------------------------------------------- */
 
-export default function ApprovalsSection() {
+/** The same screen serves /dashboard/approvals and /dashboard/content (owner, 2026-09-05:
+ *  "content page ka UI approval jaisa kardo") — it already lists every status with filters, so
+ *  Content is this list with its own title and a Create new button, not a second design. */
+export default function ApprovalsSection({
+  heading = "Approvals",
+  subtitle = "Review and manage all generated content",
+  createHref,
+}: {
+  heading?: string;
+  subtitle?: string;
+  createHref?: string;
+} = {}) {
   const { act, report, toast } = useStore();
   const [items, setItems] = useState<ContentItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -295,10 +306,10 @@ export default function ApprovalsSection() {
         <header className="flex flex-wrap items-center gap-3 px-4 pt-4 pb-3" style={{ borderBottom: "1px solid var(--lx-border)" }}>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <h1 className="ap-h1">Approvals</h1>
+              <h1 className="ap-h1">{heading}</h1>
               <BadgeCheck size={18} style={{ color: "#3b82f6", fill: "rgba(59,130,246,.25)" }} />
             </div>
-            <p className="lx-mut mt-0.5" style={{ fontSize: 12 }}>Review and manage all generated content</p>
+            <p className="lx-mut mt-0.5" style={{ fontSize: 12 }}>{subtitle}</p>
           </div>
           <div className="flex items-center gap-2">
             <label className="ap-search ap-hdr-search" style={{ width: 170 }}>
@@ -312,6 +323,11 @@ export default function ApprovalsSection() {
             <button className={`ap-icobtn ${showFilters ? "on" : ""}`} onClick={() => setShowFilters((v) => !v)} title="Toggle filters">
               <SlidersHorizontal size={16} />
             </button>
+            {createHref && (
+              <Link href={createHref} className="lx-grad ap-create" title="Ask the team for something new">
+                <Plus size={15} /> <span className="ap-create-t">Create new</span>
+              </Link>
+            )}
           </div>
         </header>
 
@@ -718,6 +734,8 @@ const CSS = `
 .ap-icobtn{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:9px;
   border:1px solid var(--lx-border);background:#0d0d16;color:#9a9ab2;cursor:pointer;transition:.15s;flex-shrink:0}
 .ap-icobtn:hover,.ap-icobtn.on{color:#fff;border-color:rgba(139,92,246,.55)}
+.ap-create{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;border-radius:9px;font-size:12.5px;font-weight:600;white-space:nowrap}
+@container ap (max-width:560px){.ap-create-t{display:none}.ap-create{padding:0 10px}}
 .ap-dot{position:absolute;top:8px;right:8px;width:6px;height:6px;border-radius:50%;background:#8b5cf6;box-shadow:0 0 6px #8b5cf6}
 .ap-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:8px}
 .ap-stat{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:11px;min-width:0;
