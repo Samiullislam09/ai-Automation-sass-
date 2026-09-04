@@ -348,7 +348,7 @@ export default function ApprovalsSection() {
           </div>
 
           {/* rows */}
-          <div className="mt-1.5 space-y-1.5">
+          <div className="mt-2 space-y-3">
             {loading ? (
               <div className="ap-row items-center justify-center py-10"><Loader2 size={18} className="ap-spin lx-mut" /><span className="lx-11 lx-mut ml-2">Loading…</span></div>
             ) : rows.length ? rows.map((c) => {
@@ -358,11 +358,11 @@ export default function ApprovalsSection() {
               return (
                 <div key={c.id} className={`ap-grid ap-row ${selected ? "on" : ""}`} onClick={() => openDetail(c)}>
                   {/* article */}
-                  <div className="ap-c-a flex min-w-0 items-center gap-3">
+                  <div className="ap-c-a flex min-w-0 items-center gap-4">
                     <Tile tile={tile} size={38} />
                     <div className="min-w-0">
                       <ClampTitle text={c.title || "Untitled"} />
-                      <div className="lx-10 lx-mut mt-1 flex items-center gap-1.5 overflow-hidden whitespace-nowrap">
+                      <div className="lx-10 lx-mut mt-1.5 flex items-center gap-1.5 overflow-hidden whitespace-nowrap">
                         <span className="truncate">{categoryOf(c)}</span><i className="ap-sep" /><span>{agentOf(c)}</span><i className="ap-sep" />
                         <span>{typeof c.meta?.wordCount === "number" ? `${c.meta.wordCount.toLocaleString()} words` : "— words"}</span><i className="ap-sep" /><span>{TYPE_LABEL[c.type] ?? c.type}</span>
                         <i className="ap-sep ap-inline-date" /><span className="ap-inline-date">{fmtBoth(c.updated_at ?? c.created_at)}</span>
@@ -734,7 +734,7 @@ const CSS = `
 .ap-select select{appearance:none;-webkit-appearance:none;background:none;border:none;outline:none;color:inherit;font:inherit;
   padding-right:2px;cursor:pointer}
 .ap-select select option{background:#12121c;color:#e8e8f2}
-.ap-grid{display:grid;grid-template-columns:minmax(0,1fr) 128px 56px 96px max-content;grid-template-areas:"a s v u x";align-items:center;gap:10px}
+.ap-grid{display:grid;grid-template-columns:minmax(0,1fr) 128px 56px 96px max-content;grid-template-areas:"a s v u x";align-items:center;gap:14px}
 .ap-c-a{grid-area:a;min-width:0}.ap-c-s{grid-area:s}.ap-c-v{grid-area:v}.ap-c-u{grid-area:u}.ap-c-x{grid-area:x}
 /* row actions are icon-only squares: the row stays compact, the label is the tooltip */
 .ap-act{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;flex-shrink:0;border-radius:8px;
@@ -760,8 +760,8 @@ const CSS = `
   .ap-c-u{display:none}
   .ap-inline-date{display:inline}
 }
-.ap-head{padding:0 12px;font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--lx-mut)}
-.ap-row{background:#0d0d16;border:1px solid var(--lx-border);border-radius:11px;padding:10px 12px;cursor:pointer;
+.ap-head{padding:0 18px;font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--lx-mut)}
+.ap-row{background:#0d0d16;border:1px solid var(--lx-border);border-radius:12px;padding:16px 18px;cursor:pointer;
   transition:border-color .15s,background .15s;display:grid;position:relative}
 .ap-row:hover{border-color:rgba(255,255,255,.14);background:#10101a;z-index:5}
 .ap-row.on{border-color:rgba(139,92,246,.5);box-shadow:0 0 0 1px rgba(139,92,246,.2),0 0 22px rgba(139,92,246,.12)}
