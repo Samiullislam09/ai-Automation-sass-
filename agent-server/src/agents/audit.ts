@@ -274,6 +274,8 @@ function auditRow(
       // Every check this run COULD have made, with its category — the exact denominator the
       // report page's thematic rings divide by (MASTER_PLAN §27). Stored per run.
       catalogue: result.catalogue,
+      // Per-category health, same arithmetic as the score itself.
+      thematic: result.thematic,
     },
     summary: summarizeAudit(result, previous),
   };

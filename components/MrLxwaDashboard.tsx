@@ -44,7 +44,6 @@ import { useLiveEvents, isTerminalTask, isFlowing, useNow, elapsedMs, clock, typ
 import { useStore, PLANS } from "@/lib/store";
 import {
   LayoutDashboard,
-  MessageSquare,
   Users,
   ClipboardList,
   ListChecks,
@@ -62,6 +61,7 @@ import {
   Clock,
   Send,
   Mic,
+  History,
   MoreVertical,
   CheckCircle2,
   BookOpen,
@@ -108,7 +108,6 @@ const GlobalStyle = LxGlobalStyle;
 type NavItem = { label: string; icon: React.ElementType; badge?: number; href?: string };
 const NAV: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
-  { label: "Chat", icon: MessageSquare },
   { label: "Office (Agents)", icon: Users, href: "/dashboard/workspace" },
   { label: "Approvals", icon: ListChecks, href: "/dashboard/approvals" },
   { label: "Connect", icon: Link2, href: "/dashboard/connect" },
@@ -1407,9 +1406,6 @@ export default function MrLxwaDashboard({
           <div className="text-sm font-bold leading-tight">Mr. Lxwa</div>
           <div className="lx-10 lx-mut leading-tight">AI Automation System</div>
         </div>
-        <button className="lx-icobtn ml-auto lg:hidden" onClick={() => setSideOpen(false)} aria-label="Close menu">
-          <X size={15} />
-        </button>
         {/* rendered conditionally, not class-toggled: "hidden lg:inline-flex lg:hidden" is two
             lg display utilities fighting, and inline-flex wins in Tailwind's output order */}
         {!mini && (
@@ -1418,15 +1414,22 @@ export default function MrLxwaDashboard({
           </button>
         )}
       </div>
-      {mini && (
-        <button className="lx-icobtn mx-auto mb-2 hidden lg:inline-flex" onClick={toggleMini} aria-label="Expand sidebar" title="Expand sidebar">
-          <PanelLeftOpen size={15} />
-        </button>
-      )}
 
       {/* nav — items with a real href (see NAV's own comment) are real next/link navigation
           to the still-live app/app/** pages; the rest stay a local highlight only. */}
       <nav className={`lx-scroll flex-1 space-y-1 overflow-y-auto ${mini ? "px-2" : "px-3"}`}>
+        {/* expand lives inside <nav>, styled as a nav row: any other container (mx-auto on the
+            68px rail) misses the scrollbar the nav reserves and the icon sits off-column. */}
+        {mini && (
+          <button
+            className="lx-nav relative mb-1 hidden lg:flex lg:justify-center lg:px-0"
+            onClick={toggleMini}
+            aria-label="Expand sidebar"
+            title="Expand sidebar"
+          >
+            <PanelLeftOpen size={16} strokeWidth={1.8} />
+          </button>
+        )}
         {NAV.map((it) => {
           // A sub-page keeps its section lit — /dashboard/content/<id> (the article reviewer)
           // is still "Content". Exact match everywhere else, so /dashboard never lights up for
@@ -1945,7 +1948,7 @@ export default function MrLxwaDashboard({
               if (opening) void refreshConvs();
             }}
           >
-            <MoreVertical size={15} />
+            <History size={15} />
           </button>
           <button className="lx-icobtn" onClick={closeAssistant} aria-label="Close assistant">
             <X size={14} />
@@ -2385,7 +2388,11 @@ export default function MrLxwaDashboard({
             the fold, so the vertical scrollbar appears and disappears; without a reserved
             gutter that changes the column's content width and every card lurches sideways
             each time (measured: the "whole page jolts" complaint). */}
-        <main className="lx-scroll flex-1 overflow-y-auto p-3 sm:p-4" style={{ scrollbarGutter: "stable" }}>
+        {/* lg:pr-14 — the floating "Open AI assistant" button below is fixed at right-4/top-4,
+            and every page whose header has buttons on the right had them sitting under it
+            (owner, 2026-09-05: the Audit page's "Export as PDF" half-covered by it). The
+            reserved strip is only on >=lg, which is the only size that button exists at. */}
+        <main className={`lx-scroll flex-1 overflow-y-auto p-3 sm:p-4 ${desktopAssistantOpen ? "" : "lg:pr-14"}`} style={{ scrollbarGutter: "stable" }}>
           {children ?? (
             <>
               {Workflow}

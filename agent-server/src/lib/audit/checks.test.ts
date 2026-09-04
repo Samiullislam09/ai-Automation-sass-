@@ -232,6 +232,46 @@ test("images with alt text are not reported; one image without it is", () => {
 
 /* ---------------------------------------------------------------- score and report ------ */
 
+test("Site Health is the average page's health, not a count of problem kinds", () => {
+  // The bug this replaced (2026-09-05): a real 156-page site tripped 1 block kind and 18
+  // warning kinds and scored 0/100 under 100 − 25·blocks − 5·warns, the same as a dead site.
+  const clean = Array.from({ length: 10 }, (_, i) => good(`${ORIGIN}/p${i}`, `Page ${i}`, `<a href="/p${(i + 1) % 10}">Page ${(i + 1) % 10}</a><a href="/p${(i + 2) % 10}">Page ${(i + 2) % 10}</a>`));
+  // One page with a single warning: no description.
+  clean[3] = page(`${ORIGIN}/p3`, (clean[3].html as string).replace(/<meta name="description"[^>]*>/, ""));
+  const r = auditSite(clean, { ...CTX, sitemapUrls: null });
+  assert.ok(r.warns >= 1);
+  assert.ok(r.score > 80, `one page with one warning should barely move the score, got ${r.score}`);
+
+  // A page Google cannot read at all costs that page everything, so half a broken site is ~50.
+  const half = [
+    ...Array.from({ length: 5 }, (_, i) => good(`${ORIGIN}/ok${i}`, `Ok ${i}`, `<a href="/ok${(i + 1) % 5}">Ok ${(i + 1) % 5}</a><a href="/ok${(i + 2) % 5}">Ok ${(i + 2) % 5}</a>`)),
+    ...Array.from({ length: 5 }, (_, i) => page(`${ORIGIN}/gone${i}`, "", { status: 404, html: null })),
+  ];
+  const halfBroken = auditSite(half, { ...CTX, sitemapUrls: null });
+  assert.ok(halfBroken.score > 30 && halfBroken.score < 70, `half a broken site is about half health, got ${halfBroken.score}`);
+
+  // Every page dead is 0, whatever the number of KINDS.
+  const dead = auditSite(Array.from({ length: 8 }, (_, i) => page(`${ORIGIN}/d${i}`, "", { status: 404, html: null })), { ...CTX, sitemapUrls: null });
+  assert.equal(dead.score, 0);
+});
+
+test("thematic health is the same arithmetic per category, and a category with no findings is 100", () => {
+  const r = auditSite([good(`${ORIGIN}/`, "Home", `<a href="/a">Roof repairs</a><a href="/b">Gutters</a>`), good(`${ORIGIN}/a`, "A", `<a href="/b">Gutters</a><a href="/">Home</a>`), good(`${ORIGIN}/b`, "B", `<a href="/a">Roof repairs</a><a href="/">Home</a>`)], CTX);
+  const intl = r.thematic.find((t) => t.category === "International SEO");
+  assert.ok(intl && intl.health === 100 && intl.issues === 0);
+  assert.ok(r.thematic.every((t) => t.health >= 0 && t.health <= 100 && t.checks > 0));
+  assert.ok(r.thematic.some((t) => t.category === "Content"));
+});
+
+test("notices do not put a page in the 'have issues' bucket", () => {
+  // A page whose only finding is a notice (a "click here" link) is not a page with a problem.
+  const home = good(`${ORIGIN}/`, "Home", `<a href="/a">click here</a><a href="/b">Gutter cleaning</a>`);
+  const r = auditSite([home, good(`${ORIGIN}/a`, "A", `<a href="/b">Gutters</a><a href="/">Home</a>`), good(`${ORIGIN}/b`, "B", `<a href="/a">Roofs</a><a href="/">Home</a>`)], CTX);
+  assert.ok(r.issues.some((i) => i.id === "generic-anchor"));
+  assert.equal(r.pagesWithIssues.includes(`${ORIGIN}/`), false, "a notice is a note, not a problem");
+  assert.equal(r.score, 100, "notices cost no health");
+});
+
 test("the score is the house formula, and a clean site scores 100", () => {
   // Three pages, each linked from two others with descriptive anchors — so no page is an
   // orphan, none has a single incoming link, and no anchor is "click here".
@@ -243,14 +283,10 @@ test("the score is the house formula, and a clean site scores 100", () => {
   assert.equal(clean.score, 100);
 
   const broken = auditSite([{ url: `${ORIGIN}/x`, status: null, finalUrl: null, html: null, bytes: 0, ms: null }], CTX);
-  assert.equal(broken.score, 100 - 25 * broken.blocks - 5 * broken.warns);
+  assert.equal(broken.score, 0, "the only page could not be loaded, so there is no health left");
 });
 
 test("the score never goes below zero however bad the site is", () => {
-  // Note what the score counts: KINDS of problem, not pages. Six unreachable pages are one
-  // finding with a count of six, so scoring by page would put a small broken site at zero and
-  // a large one at zero too, and the number would stop meaning anything. Five distinct kinds
-  // of serious problem is what actually gets you to the floor.
   const r = auditSite(
     [
       { url: `${ORIGIN}/a`, status: null, finalUrl: null, html: null, bytes: 0, ms: null },

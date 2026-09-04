@@ -73,6 +73,9 @@ type Report = {
   websiteUrl: string | null;
   aiSearch: BotAccess[] | null;
   catalogue: CatalogueEntry[];
+  /** Per-category health from the report itself (same arithmetic as the score). Empty on
+   *  reports from before 2026-09-05; the page then computes the old checks-passed fraction. */
+  thematic?: { category: string; health: number; issues: number; checks: number }[];
   trigger: Trigger;
   seconds: number | null;
   summary: string | null;
@@ -452,15 +455,19 @@ export default function AuditSection() {
   const pages = r.pages ?? [];
   const bucketCount = (b: Bucket) => pages.filter((p) => bucketOf(p) === b).length;
 
-  // Thematic Reports — Semrush's own category rings, each an exact fraction: checks in that
-  // category the run could make (`catalogue`, shipped per run) minus the distinct ones that
-  // fired, over the total. No catalogue on file (older report) → no rings, said plainly.
+  // Thematic Reports — Semrush's own category rings. The report now ships each category's
+  // health, worked out the same way as the headline score (the average page's health in that
+  // category), so a ring and the gauge can never disagree. Reports from before that fall back
+  // to the old "checks that did not fire / checks in the category" fraction, which read 0% for
+  // a category whose three checks all fired even when only a few pages were affected.
   const categories = Array.from(new Set(r.catalogue.map((c) => c.category)));
-  const thematic = categories.map((cat) => {
-    const total = r.catalogue.filter((c) => c.category === cat).length;
-    const fired = new Set(r.issues.filter((i) => i.category === cat).map((i) => i.id)).size;
-    return { cat, total, fired, pct: total ? Math.round(((total - fired) / total) * 100) : 100 };
-  });
+  const thematic = r.thematic?.length
+    ? r.thematic.map((t) => ({ cat: t.category, total: t.checks, fired: t.issues, pct: t.health }))
+    : categories.map((cat) => {
+        const total = r.catalogue.filter((c) => c.category === cat).length;
+        const fired = new Set(r.issues.filter((i) => i.category === cat).map((i) => i.id)).size;
+        return { cat, total, fired, pct: total ? Math.round(((total - fired) / total) * 100) : 100 };
+      });
   const issueCategories = Array.from(new Set(allIssues.map((i) => i.category ?? "Other")));
 
   const filteredIssues = allIssues.filter((i) => (sevFilter === "all" || i.severity === sevFilter) && (catFilter === "all" || (i.category ?? "Other") === catFilter));

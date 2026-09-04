@@ -139,6 +139,10 @@ export async function GET(req: Request) {
           // denominator for thematic-report % rings. Empty on older rows; the page then says so
           // instead of computing a % over a denominator it does not have.
           catalogue: Array.isArray((latest.run as any)?.catalogue) ? (latest.run as any).catalogue : [],
+          // Per-category health, computed by the same arithmetic as the headline score
+          // (agent-server checks.ts, 2026-09-05). Empty on older rows; the page then falls
+          // back to the checks-that-did-not-fire fraction it used to compute itself.
+          thematic: Array.isArray((latest.run as any)?.thematic) ? (latest.run as any).thematic : [],
           // Who asked for this run — a person ("manual") or the weekly scheduler ("schedule").
           // Older rows from before 2026-09-05 have no `run.trigger` at all; reported as null
           // rather than guessed.

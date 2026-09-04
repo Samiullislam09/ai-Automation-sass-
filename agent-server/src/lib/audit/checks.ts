@@ -117,7 +117,12 @@ export type PageStats = {
 };
 
 export type AuditResult = {
+  /** 0-100. The average crawled page's health, minus the site-wide findings — see the block
+   *  comment at the score itself for why it is no longer a count of problem kinds. */
   score: number;
+  /** The same arithmetic per Semrush thematic category — the report page's rings read this
+   *  rather than deriving their own, so a ring and the headline always agree. */
+  thematic: { category: string; health: number; issues: number; checks: number }[];
   pagesChecked: number;
   blocks: number;
   warns: number;
@@ -152,6 +157,12 @@ export type AuditResult = {
 // never the unbounded list, so one issue on a huge site cannot make the row heavier than the
 // rest of the report.
 const PAGE_SAMPLE = 100;
+
+/** Site Health arithmetic (see the block comment where the score is computed). A warning costs
+ *  a page 5 of its 100; a block costs it all of them; a notice costs nothing. A site-wide
+ *  finding (robots.txt, sitemap) is taken off the site's own average once. */
+const HEALTH_WARN = 5;
+const HEALTH_FILE_BLOCK = 25;
 
 /** Semrush's own thematic-report taxonomy, one entry per check this catalogue makes — MASTER_PLAN
  *  §27's own tables, transcribed. Every id here must match the `issue(...)` id it labels (the
@@ -555,7 +566,9 @@ export function auditFacts(
   /** A finding about one of the site's two text files rather than about pages — robots.txt or
    *  the sitemap. Not routed through `issue()` because those files are not crawled pages and
    *  must not land in `pagesWithIssues`. */
+  const fileIssueIds = new Set<string>();
   function fileIssue(id: string, severity: AuditSeverity, url: string, what: string, fix: string): AuditIssue {
+    fileIssueIds.add(id);
     return { id, severity, what, fix, pages: [url], count: 1 };
   }
 
@@ -1478,8 +1491,76 @@ export function auditFacts(
   /* ── score ──────────────────────────────────────────────────────────────────────────── */
 
   const found = issues.filter(Boolean) as AuditIssue[];
+  // "1 error · 18 warnings" on the report page: KINDS of problem, not pages. Unchanged.
   const blocks = found.filter((i) => i.severity === "block").length;
   const warns = found.filter((i) => i.severity === "warn").length;
+
+  // Performance issues arrive pre-built (performance.ts) rather than through `issue()`, so
+  // their pages are tallied here — otherwise a slow page would not count as a page with an
+  // issue and would not lose any health.
+  for (const i of performance?.issues ?? []) {
+    for (const u of i.pages) {
+      if (!pageIssueIds.has(u)) pageIssueIds.set(u, new Set());
+      pageIssueIds.get(u)!.add(i.id);
+    }
+  }
+  const severityOf = new Map(found.map((i) => [i.id, i.severity]));
+
+  /* ── SITE HEALTH ────────────────────────────────────────────────────────────────────
+   *
+   * The average crawled page's own health, not a count of problem KINDS.
+   *
+   * The old formula was 100 − 25·blockKinds − 5·warnKinds, from when this file made twelve
+   * checks. At seventy (MASTER_PLAN §27 Round A) it stopped meaning anything: a real
+   * 156-page site tripped one block and eighteen warning KINDS and scored 0/100 — the same
+   * as a site that is entirely down. Owner, 2026-09-05, looking at exactly that report:
+   * "site health 0 kyun hai, halanki ye sab sahi lag raha hai".
+   *
+   * So: every crawled page starts at 100 and loses HEALTH_WARN for each warning it has and
+   * everything for a block (a page Google cannot reach, read or index is not a page with a
+   * blemish — it is a lost page). Notices cost nothing; they are notes, and the report says
+   * so. Site Health is the mean, minus the site-wide findings (robots.txt, sitemap) which
+   * belong to no single page. Every page's own number is exact — the same per-page issue map
+   * the Crawled Pages breakdown uses — so the score can be explained page by page. */
+  const pageHealth = (issueIds: Set<string> | undefined): number => {
+    if (!issueIds?.size) return 100;
+    let penalty = 0;
+    for (const id of issueIds) {
+      const sev = severityOf.get(id);
+      if (sev === "block") return 0;
+      if (sev === "warn") penalty += HEALTH_WARN;
+    }
+    return clamp(100 - penalty, 0, 100);
+  };
+  const meanHealth = pages.length ? pages.reduce((sum, p) => sum + pageHealth(pageIssueIds.get(p.url)), 0) / pages.length : 100;
+  const filePenalty = found
+    .filter((i) => fileIssueIds.has(i.id))
+    .reduce((sum, i) => sum + (i.severity === "block" ? HEALTH_FILE_BLOCK : i.severity === "warn" ? HEALTH_WARN : 0), 0);
+  const score = clamp(Math.round(meanHealth - filePenalty), 0, 100);
+
+  // The same arithmetic per thematic category, so a ring and the headline can never disagree
+  // about the same site. A category whose checks all passed is 100 — and says "No issues".
+  const categories = Array.from(new Set(CHECK_CATALOGUE.map((c) => c.category)));
+  const thematic = categories.map((category) => {
+    const ids = new Set(found.filter((i) => (CHECK_CATEGORY[i.id] ?? "Other") === category).map((i) => i.id));
+    const mean = pages.length
+      ? pages.reduce((sum, p) => {
+          const own = pageIssueIds.get(p.url);
+          if (!own) return sum + 100;
+          const mine = new Set([...own].filter((id) => ids.has(id)));
+          return sum + pageHealth(mine);
+        }, 0) / pages.length
+      : 100;
+    const filePen = found
+      .filter((i) => ids.has(i.id) && fileIssueIds.has(i.id))
+      .reduce((sum, i) => sum + (i.severity === "block" ? HEALTH_FILE_BLOCK : i.severity === "warn" ? HEALTH_WARN : 0), 0);
+    return {
+      category,
+      health: clamp(Math.round(mean - filePen), 0, 100),
+      issues: ids.size,
+      checks: CHECK_CATALOGUE.filter((c) => c.category === category).length,
+    };
+  });
 
   // Real robots.txt evaluation (lib/audit/robots.ts) — the SAME parser the AI-bot access card
   // uses (agents/audit.ts), so a page or a bot is never "blocked" by one check and "allowed"
@@ -1515,7 +1596,8 @@ export function auditFacts(
   });
 
   return {
-    score: clamp(100 - 25 * blocks - 5 * warns, 0, 100),
+    score,
+    thematic,
     pagesChecked: pages.length,
     blocks,
     warns,
@@ -1524,7 +1606,12 @@ export function auditFacts(
     // is a visible smell, not a silent default — checks.test.ts asserts no check ever lands there.
     issues: found.map((i) => ({ ...i, category: CHECK_CATEGORY[i.id] ?? "Other" })),
     skipped,
-    pagesWithIssues: Array.from(pageIssueIds.keys()),
+    // Only pages with a real problem — a notice is a note, not a page "with issues" (it is
+    // what put 155 of 156 pages in that bucket on 2026-09-05 while the report itself said
+    // most of them were fine).
+    pagesWithIssues: Array.from(pageIssueIds.entries())
+      .filter(([, ids]) => [...ids].some((id) => severityOf.get(id) === "block" || severityOf.get(id) === "warn"))
+      .map(([url]) => url),
     blockedPages,
     catalogue: CHECK_CATALOGUE,
     pageStats,
