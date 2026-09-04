@@ -640,7 +640,7 @@ function Drawer({ c, loading, busy, tab, setTab, onClose, onApprove, onReject, o
           </button>
         </div>
         {c.type === "article" ? (
-          <Link href={`/dashboard/content/${c.id}`} className="ap-changes mt-3"><RefreshCw size={15} /> Request Changes</Link>
+          <Link href={`/dashboard/content/${c.id}`} className="ap-changes mt-3"><Monitor size={15} /> View</Link>
         ) : (
           <button className="ap-changes mt-3" onClick={onCopy}><Copy size={15} /> Copy text</button>
         )}
