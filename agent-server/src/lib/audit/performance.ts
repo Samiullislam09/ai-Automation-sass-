@@ -19,6 +19,8 @@
  *  file, just without a performance section, `skippedReason` says why.
  */
 import { readFileSync } from "node:fs";
+import * as v8 from "node:v8";
+import { runInNewContext } from "node:vm";
 import * as chromeLauncher from "chrome-launcher";
 import lighthouse from "lighthouse";
 
@@ -75,7 +77,7 @@ const LAUNCH_TIMEOUT_MS = 30_000;
  *     killer actually looks at); if less than MEMORY_HEADROOM_MB is free, the rest of the
  *     sample is recorded as not measured and the audit files with what it has — a report with
  *     seven speed measurements beats no report at all, which is what an OOM produced. */
-const MEMORY_HEADROOM_MB = 350;
+const MEMORY_HEADROOM_MB = 260;
 const CHROME_FLAGS = [
   "--headless=new",
   "--no-sandbox",
@@ -96,9 +98,38 @@ function chromePath(): string | undefined {
   return process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_PATH || undefined;
 }
 
+/** Ask V8 to collect and hand the pages back to the OS before Chrome is launched. The crawl
+ *  that ran just before this parsed 156 DOMs; the heap is free by now but the RSS the cgroup
+ *  counts is not, and that RSS is what leaves no room for a browser. `--expose_gc` is turned
+ *  on at runtime rather than requiring a start-command flag nobody would remember to keep.
+ *  Best effort by definition — a V8 that will not do it changes nothing. */
+function releaseMemory() {
+  try {
+    v8.setFlagsFromString("--expose_gc");
+    const gc = runInNewContext("gc") as undefined | (() => void);
+    gc?.();
+    gc?.();
+  } catch {
+    /* nothing to do — the guard below still refuses to launch when memory is short */
+  } finally {
+    try {
+      v8.setFlagsFromString("--no-expose_gc");
+    } catch {
+      /* leaving it exposed is harmless */
+    }
+  }
+}
+
 /** Container memory as the OOM killer sees it — cgroup v2 first, v1 second. null outside a
- *  container (or where the files are unreadable); then no guard, same as before. Read fresh
- *  each time: `memory.current` includes every process in the container, Chrome included. */
+ *  container (or where the files are unreadable); then no guard, same as before.
+ *
+ *  `memory.current` counts the RECLAIMABLE page cache too — every file this process has read
+ *  since boot. Counting that as "in use" is what made the guard refuse to launch Chrome at all
+ *  on the first real run after it shipped (2026-09-05: "only 291 MB left of 954", ten pages
+ *  not measured, on a container that had plenty of room): the kernel drops that cache under
+ *  pressure rather than killing anything. So the inactive file cache (and the reclaimable slab)
+ *  is subtracted — the standard "working set" approximation, and the number the OOM decision
+ *  actually turns on. */
 function containerMemoryMb(): { used: number; limit: number } | null {
   const readNum = (path: string): number | null => {
     try {
@@ -110,10 +141,31 @@ function containerMemoryMb(): { used: number; limit: number } | null {
       return null;
     }
   };
-  const v2 = { used: readNum("/sys/fs/cgroup/memory.current"), limit: readNum("/sys/fs/cgroup/memory.max") };
-  if (v2.used !== null && v2.limit !== null) return { used: v2.used / 1048576, limit: v2.limit / 1048576 };
-  const v1 = { used: readNum("/sys/fs/cgroup/memory/memory.usage_in_bytes"), limit: readNum("/sys/fs/cgroup/memory/memory.limit_in_bytes") };
-  if (v1.used !== null && v1.limit !== null && v1.limit < 2 ** 60) return { used: v1.used / 1048576, limit: v1.limit / 1048576 };
+  const statField = (path: string, key: string): number => {
+    try {
+      const line = readFileSync(path, "utf8")
+        .split("\n")
+        .find((l) => l.startsWith(key + " "));
+      const n = line ? Number(line.split(/\s+/)[1]) : NaN;
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    } catch {
+      return 0;
+    }
+  };
+
+  const v2Used = readNum("/sys/fs/cgroup/memory.current");
+  const v2Limit = readNum("/sys/fs/cgroup/memory.max");
+  if (v2Used !== null && v2Limit !== null) {
+    const reclaimable = statField("/sys/fs/cgroup/memory.stat", "inactive_file") + statField("/sys/fs/cgroup/memory.stat", "slab_reclaimable");
+    return { used: Math.max(0, v2Used - reclaimable) / 1048576, limit: v2Limit / 1048576 };
+  }
+
+  const v1Used = readNum("/sys/fs/cgroup/memory/memory.usage_in_bytes");
+  const v1Limit = readNum("/sys/fs/cgroup/memory/memory.limit_in_bytes");
+  if (v1Used !== null && v1Limit !== null && v1Limit < 2 ** 60) {
+    const reclaimable = statField("/sys/fs/cgroup/memory/memory.stat", "total_inactive_file");
+    return { used: Math.max(0, v1Used - reclaimable) / 1048576, limit: v1Limit / 1048576 };
+  }
   return null;
 }
 
@@ -151,6 +203,8 @@ function killChrome(chrome: chromeLauncher.LaunchedChrome | null) {
 export async function runPerformanceAudit(urls: string[], onPage?: (done: number, total: number, url: string) => void): Promise<PerformanceRun> {
   if (!urls.length) return { ran: false, skippedReason: null, pages: [] };
 
+  releaseMemory();
+
   let chrome: chromeLauncher.LaunchedChrome | null;
   try {
     chrome = await launchChrome();
@@ -177,6 +231,7 @@ export async function runPerformanceAudit(urls: string[], onPage?: (done: number
       continue;
     }
     const mem = containerMemoryMb();
+    if (mem && i === 0) console.log(`[performance] memory before the first page: ${Math.round(mem.used)} MB used of ${Math.round(mem.limit)} MB`);
     if (lowMemory || (mem && mem.limit - mem.used < MEMORY_HEADROOM_MB)) {
       lowMemory ??= `Not measured — the server had only ${Math.round(mem!.limit - mem!.used)} MB of memory left (of ${Math.round(mem!.limit)} MB) and a browser needs about ${MEMORY_HEADROOM_MB}; stopped rather than crash the audit`;
       pages.push({ ...empty, ok: false, error: lowMemory });
