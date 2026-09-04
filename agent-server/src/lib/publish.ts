@@ -21,9 +21,17 @@ import { supabase } from "../supabase.js";
 // guessing one from a title — see agents/publish.ts, which stores this in content_items.meta.
 export type PublishResult = { ok: boolean; url?: string; wpPostId?: number; error?: string };
 
+/** One of the article's own pictures, as agents/image.ts filed it (MASTER_PLAN §19.4).
+ *  `anchor` is the exact heading an inline image belongs under — the whole point of the image
+ *  plan is that a picture sits with the paragraph it is about, and that only survives the trip
+ *  to WordPress if the heading comes with it. */
+export type PublishImage = { slot: string; url: string; alt: string; anchor: string | null };
+
 export async function publishContentItem(
   tenantId: string,
-  item: { id: string; title: string | null; body: string | null; type: string }
+  item: { id: string; title: string | null; body: string | null; type: string },
+  /** The approved image set, if there is one. Absent or empty publishes exactly as before. */
+  images: PublishImage[] = []
 ): Promise<PublishResult> {
   // This client is service-role, so RLS is not doing the scoping — the tenant filter is.
   const { data: integrations, error } = await supabase
@@ -39,22 +47,35 @@ export async function publishContentItem(
 
   // Same order of preference as the app, so "Approve & publish" and an automatic run always
   // land in the same place.
-  if (wp) return publishToWordPress(wp.encrypted_credentials as any, item);
-  if (webhook) return deliverWebhook(webhook.encrypted_credentials as any, item);
+  if (wp) return publishToWordPress(wp.encrypted_credentials as any, item, images);
+  if (webhook) return deliverWebhook(webhook.encrypted_credentials as any, item, images);
   return { ok: false, error: "No connected publishing destination (WordPress or webhook) — add one in Connect (/app/connect) first." };
 }
 
 async function publishToWordPress(
   creds: { siteUrl: string; username: string; appPassword: string },
-  item: { title: string | null; body: string | null }
+  item: { title: string | null; body: string | null },
+  images: PublishImage[] = []
 ): Promise<PublishResult> {
   try {
     const auth = Buffer.from(`${creds.username}:${decrypt(creds.appPassword)}`).toString("base64");
-    const html = markdownToHtml(item.body ?? "");
+
+    // The pictures go into the customer's OWN media library, and the post refers to those
+    // copies. Hot-linking our storage would be easier and would also mean their post breaks
+    // the day we move a file — the images belong to them once published.
+    const uploaded = await uploadToMediaLibrary(creds.siteUrl, auth, images);
+    const featured = uploaded.find((u) => u.slot === "thumb") ?? uploaded.find((u) => u.slot === "hero");
+    const html = withImages(markdownToHtml(item.body ?? ""), uploaded);
+
     const res = await fetch(`${creds.siteUrl}/wp-json/wp/v2/posts`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Basic ${auth}` },
-      body: JSON.stringify({ title: item.title ?? "Untitled", content: html, status: "publish" }),
+      body: JSON.stringify({
+        title: item.title ?? "Untitled",
+        content: html,
+        status: "publish",
+        ...(featured ? { featured_media: featured.id } : {}),
+      }),
       signal: AbortSignal.timeout(30_000),
     });
     if (!res.ok) return { ok: false, error: `WordPress publish failed (${res.status}): ${(await res.text().catch(() => "")).slice(0, 300)}` };
@@ -65,15 +86,92 @@ async function publishToWordPress(
   }
 }
 
+type UploadedImage = PublishImage & { id: number; wpUrl: string };
+
+/** Puts each picture in the site's media library. Best effort per image: one that will not
+ *  upload is skipped and the post still goes out — a picture is not worth failing a publish
+ *  for, which is the same promise agents/image.ts makes when a provider is down. */
+async function uploadToMediaLibrary(siteUrl: string, auth: string, images: PublishImage[]): Promise<UploadedImage[]> {
+  const out: UploadedImage[] = [];
+  for (const image of images) {
+    try {
+      const got = await fetch(image.url, { signal: AbortSignal.timeout(20_000) });
+      if (!got.ok) continue;
+      const bytes = Buffer.from(await got.arrayBuffer());
+      // The filename is what WordPress turns into the media slug, and Google reads it — the
+      // slot name plus the article's own words beats "download (3).webp".
+      const name = `${image.slot}-${(image.alt || "image").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "image"}.webp`;
+      const res = await fetch(`${siteUrl}/wp-json/wp/v2/media`, {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${auth}`,
+          "Content-Type": "image/webp",
+          "Content-Disposition": `attachment; filename="${name}"`,
+        },
+        body: new Uint8Array(bytes),
+        signal: AbortSignal.timeout(45_000),
+      });
+      if (!res.ok) {
+        console.warn(`[publish] ${image.slot} could not be uploaded to the media library (${res.status}) — the post goes out without it`);
+        continue;
+      }
+      const data: any = await res.json();
+      if (typeof data?.id !== "number" || !data?.source_url) continue;
+      // Alt text is not accepted on the upload itself; it is a second, small call, and a
+      // failure there costs the alt text, not the image.
+      await fetch(`${siteUrl}/wp-json/wp/v2/media/${data.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Basic ${auth}` },
+        body: JSON.stringify({ alt_text: image.alt ?? "" }),
+        signal: AbortSignal.timeout(20_000),
+      }).catch(() => {});
+      out.push({ ...image, id: data.id, wpUrl: String(data.source_url) });
+    } catch (e: any) {
+      console.warn(`[publish] ${image.slot} upload failed (${String(e?.message ?? e).slice(0, 80)}) — the post goes out without it`);
+    }
+  }
+  return out;
+}
+
+/** Puts the hero above the first paragraph and each inline picture directly under the heading
+ *  it was made for. An image whose heading is not in the HTML is left out rather than dropped
+ *  somewhere arbitrary — a picture in the wrong place is worse than no picture (§19.4.3). */
+export function withImages(html: string, images: UploadedImage[]): string {
+  const figure = (i: UploadedImage) =>
+    `<figure class="wp-block-image size-large"><img src="${escapeAttr(i.wpUrl)}" alt="${escapeAttr(i.alt ?? "")}" loading="lazy"/></figure>`;
+
+  let out = html;
+  for (const image of images) {
+    if (!image.anchor) continue;
+    // Match the heading WordPress will render, whatever level markdownToHtml gave it.
+    const heading = new RegExp(`(<h[23][^>]*>\\s*${escapeRegExp(image.anchor.trim())}\\s*</h[23]>)`, "i");
+    if (heading.test(out)) out = out.replace(heading, `$1\n${figure(image)}`);
+  }
+
+  const hero = images.find((i) => i.slot === "hero");
+  if (hero) out = `${figure(hero)}\n${out}`;
+  return out;
+}
+
+function escapeAttr(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 async function deliverWebhook(
   creds: { url: string; secret: string },
-  item: { id: string; title: string | null; body: string | null; type: string }
+  item: { id: string; title: string | null; body: string | null; type: string },
+  images: PublishImage[] = []
 ): Promise<PublishResult> {
   try {
     const secret = decrypt(creds.secret);
     // Markdown, exactly as the app sends it — the customer's own endpoint renders it, and
-    // changing the shape here would break sites already parsing it.
-    const payload = JSON.stringify({ id: item.id, type: item.type, title: item.title, body: item.body });
+    // changing the shape here would break sites already parsing it. `images` is additive: an
+    // endpoint written before this existed ignores an extra key; one written after it can put
+    // the pictures where its own template wants them.
+    const payload = JSON.stringify({ id: item.id, type: item.type, title: item.title, body: item.body, images });
     const res = await fetch(creds.url, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-MrLxwa-Signature": signPayload(secret, payload) },

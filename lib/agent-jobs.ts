@@ -7,7 +7,10 @@
 // re-reading the site is what makes the profile fresh, and the crawler enqueues Mr. Analyst
 // itself when it finishes, so one job rebuilds the whole brain. "analyst" is separate because
 // a profile can also be rebuilt from pages already crawled, without paying for a crawl.
-export const AGENT_JOB_TYPES = ["boss", "keyword", "writer", "social", "seo", "crawler", "analyst", "audit"] as const;
+// "image" is here for the Approvals card's per-picture "another image" button (MASTER_PLAN
+// §19.4.7): it enqueues the same agent the article pipeline uses, with a `slot` so only that
+// one picture is redone and the day's image budget is not spent four times over.
+export const AGENT_JOB_TYPES = ["boss", "keyword", "writer", "social", "seo", "crawler", "analyst", "audit", "image"] as const;
 export type AgentJobType = (typeof AGENT_JOB_TYPES)[number];
 
 // One flat shape rather than a discriminated union on purpose: this repo compiles with

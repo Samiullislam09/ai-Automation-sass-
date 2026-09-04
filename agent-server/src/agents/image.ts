@@ -78,12 +78,22 @@ export class ImageAgent extends Agent {
     let budget = cap === null ? Number.POSITIVE_INFINITY : Math.max(0, cap - usedToday);
     if (cap !== null) ctx.log(`Image budget today: ${usedToday}/${cap} used${budget === 0 ? " — this article's pictures will be template cards" : ""}.`);
 
+    // "Another image" on ONE picture (the Approvals card's per-image button, §19.4.7): only
+    // that slot is redone, at seed + bump, and every other image on the article is left exactly
+    // as it is — a regenerate must never quietly change the four pictures nobody complained
+    // about, and it must not spend four more of the day's allowance either.
+    const onlySlot = String(d.slot ?? "").trim();
+    const slotsToDo = onlySlot ? plan.slots.filter((s) => s.slot === onlySlot) : plan.slots;
+    if (onlySlot && !slotsToDo.length) {
+      return { made: false, question: `This article has no "${onlySlot}" image to redo.`, images: [] };
+    }
+
     const out: ImageResultRow[] = [];
     let generated = 0;
     let fallbacks = 0;
 
-    for (const [i, slot] of plan.slots.entries()) {
-      ctx.onProgress({ phase: "rendering", label: `Making ${slot.slot}…`, done: i, total: plan.slots.length, at: new Date().toISOString() });
+    for (const [i, slot] of slotsToDo.entries()) {
+      ctx.onProgress({ phase: "rendering", label: `Making ${slot.slot}…`, done: i, total: slotsToDo.length, at: new Date().toISOString() });
       const row = await this.oneSlot({ tenantId, article, slot, plan, profile, brand, budget, bump: Number(d.bump) || 0 }, ctx);
       if (row.provider !== "template") {
         generated++;
@@ -96,8 +106,9 @@ export class ImageAgent extends Agent {
     }
 
     // The images are their own reviewable thing (§19.4.7) — approved, regenerated or rejected
-    // without touching the article.
-    const setId = await fileForReview(tenantId, article, out);
+    // without touching the article. A single-slot redo updates the card that already exists
+    // rather than filing a second one next to it.
+    const setId = onlySlot ? await updateReview(tenantId, article, out) : await fileForReview(tenantId, article, out);
 
     ctx.progress(1, `${out.length} image(s) ready`);
     return {
@@ -328,6 +339,35 @@ async function fileForReview(tenantId: string, article: LoadedArticle, images: I
     console.error("[image] images made, but the review card could not be filed:", error.message);
     return null;
   }
+  return String(data.id);
+}
+
+/** One slot was redone: swap that image into the review card the customer is looking at,
+ *  leaving every other image (and the card's own status) alone. */
+async function updateReview(tenantId: string, article: LoadedArticle, redone: ImageResultRow[]): Promise<string | null> {
+  const { data } = await supabase
+    .from("content_items")
+    .select("id, meta")
+    .eq("tenant_id", tenantId)
+    .eq("type", "image_set")
+    .eq("blueprint->>parent_article_id", article.id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!data) return null;
+
+  const meta = (data.meta as Record<string, any>) ?? {};
+  const existing: any[] = Array.isArray(meta.images) ? meta.images : [];
+  const bySlot = new Map(existing.map((i: any) => [String(i.slot), i]));
+  for (const r of redone) {
+    bySlot.set(r.slot, { slot: r.slot, url: r.url, alt: r.alt, anchor: r.anchor, provider: r.provider, kind: r.kind, note: r.note, width: r.width, height: r.height });
+  }
+  const images = [...bySlot.values()];
+  const { error } = await supabase
+    .from("content_items")
+    .update({ meta: { ...meta, images }, body: images.map((i: any) => `${i.slot}${i.anchor ? ` (${i.anchor})` : ""}: ${i.alt}`).join("\n") })
+    .eq("id", data.id);
+  if (error) console.error("[image] the redone picture was saved but the review card was not updated:", error.message);
   return String(data.id);
 }
 

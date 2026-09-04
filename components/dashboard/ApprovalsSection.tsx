@@ -5,6 +5,7 @@ import {
   ArrowRight, BadgeCheck, Bell, Calendar, Check, ChevronDown, ChevronLeft, ChevronRight, Clock,
   Copy, Eye, FileText, Loader2, Megaphone, MapPin, MoreVertical, Pencil, RefreshCw, Search,
   SlidersHorizontal, UserRound, X, XCircle, CheckCircle2, Monitor, ExternalLink, History, Plus,
+  Image as ImageIcon, Sparkles,
 } from "lucide-react";
 import { renderMarkdown } from "@/lib/md";
 import { useStore } from "@/lib/store";
@@ -42,7 +43,16 @@ type ContentItem = {
     wordCount?: number; sections?: number; links?: number; network?: string; copyOnly?: boolean; imageBrief?: string;
     editedByHuman?: boolean; editedAt?: string; publishedUrl?: string | null; publishError?: string;
     seo?: { score?: number; checkedAt?: string }; qualityGate?: { score?: number; passed?: boolean };
+    /** type "image_set" (MASTER_PLAN §19.4.7): every picture made for the parent article, each
+     *  with the heading it belongs under so a reviewer can see WHY it is that picture. */
+    images?: { slot: string; url: string; alt: string; anchor: string | null; provider: string; kind: string; note?: string; width?: number; height?: number }[];
+    /** type "web_story": the pages, in order. */
+    pages?: { headline: string; body?: string; image?: string }[];
+    storyUrl?: string | null;
   } | null;
+  /** Which article an image_set or web_story belongs to — the three reviewable parts of one
+   *  order are joined by this (§19.4.7). */
+  blueprint?: { parent_article_id?: string } | null;
   created_at: string;
   updated_at?: string;
 };
@@ -52,8 +62,8 @@ const PAGE_SIZE = 10;
 const NETWORK_LABEL: Record<string, string> = { facebook: "Facebook", instagram: "Instagram", linkedin: "LinkedIn", x: "X (Twitter)" };
 
 /** Which agent authored a row — by type; the writer/social agents are the only ones that create content_items. */
-const AGENT_BY_TYPE: Record<string, string> = { article: "Mr. Writer", social: "Miss Social", gbp: "Mr. Writer" };
-const TYPE_LABEL: Record<string, string> = { article: "Blog Post", social: "Social Post", gbp: "GBP Post" };
+const AGENT_BY_TYPE: Record<string, string> = { article: "Mr. Writer", social: "Miss Social", gbp: "Mr. Writer", image_set: "Mr. Image", web_story: "Mr. Story" };
+const TYPE_LABEL: Record<string, string> = { article: "Blog Post", social: "Social Post", gbp: "GBP Post", image_set: "Images", web_story: "Web Story" };
 
 const STATUS: Record<string, { label: string; color: string; bg: string; border: string }> = {
   awaiting_approval: { label: "Pending Review", color: "#fbbf24", bg: "rgba(251,191,36,.10)", border: "rgba(251,191,36,.35)" },
@@ -70,6 +80,8 @@ const TILE: Record<string, { from: string; to: string; border: string; glow: str
   article: { from: "#0f1a3a", to: "#1a0f3a", border: "rgba(99,102,241,.6)",  glow: "rgba(99,102,241,.35)",  Icon: FileText },
   social:  { from: "#1a0f3a", to: "#2a0f3a", border: "rgba(168,85,247,.6)",  glow: "rgba(168,85,247,.35)",  Icon: Megaphone },
   gbp:     { from: "#0a1f1a", to: "#0a2a1f", border: "rgba(34,197,94,.55)",  glow: "rgba(34,197,94,.3)",    Icon: MapPin },
+  image_set: { from: "#2a0f22", to: "#3a0f2a", border: "rgba(244,114,182,.6)", glow: "rgba(244,114,182,.35)", Icon: ImageIcon },
+  web_story: { from: "#0f2a2a", to: "#0f1a3a", border: "rgba(56,189,248,.6)",  glow: "rgba(56,189,248,.35)",  Icon: Sparkles },
 };
 const tileOf = (t: string) => TILE[t] ?? TILE.article;
 
@@ -550,6 +562,81 @@ function RowAction({ c, busy, onReview, onHistory }: { c: ContentItem; busy: boo
   }
 }
 
+/** The pictures made for one article, each shown with the heading it was made for
+ *  (MASTER_PLAN §19.4.7). The heading is the point of the review: it is how a reader checks
+ *  the promise that an image belongs to its own paragraph rather than being decoration.
+ *
+ *  A card (a section that explains a map, a chart or a set of steps) says so — those are drawn
+ *  from the section's own words on purpose, because an image model would draw a convincing
+ *  wrong map (§19.4.3). Each picture can be redone on its own; the others are left alone. */
+function ImageSetPreview({ c }: { c: ContentItem }) {
+  const { toast } = useStore();
+  const [redoing, setRedoing] = useState<string | null>(null);
+  const images = c.meta?.images ?? [];
+  const articleId = c.blueprint?.parent_article_id ?? null;
+
+  const redo = async (slot: string) => {
+    if (!articleId) return;
+    setRedoing(slot);
+    try {
+      const res = await fetch("/api/agents/trigger", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "image", articleId, slot, bump: 1, source: "manual" }),
+      });
+      const d = await res.json();
+      // The job is queued, not finished — the new picture appears when the run does, the same
+      // way every other agent works here. Saying "done" now would be a lie.
+      if (d.ok) toast("Making another one — refresh in a moment to see it.");
+      else toast(d.error || "Couldn't start that.", "error");
+    } catch {
+      toast("Couldn't start that — network error.", "error");
+    } finally {
+      setRedoing(null);
+    }
+  };
+
+  if (!images.length) {
+    return <div className="ap-card p-4"><p className="lx-11 lx-mut">No pictures on this item yet.</p></div>;
+  }
+
+  return (
+    <div className="ap-card p-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {images.map((img) => (
+          <figure key={img.slot} className="m-0 rounded-lg" style={{ border: "1px solid var(--lx-border)", overflow: "hidden", background: "#0d0d16" }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={img.url} alt={img.alt} loading="lazy" style={{ display: "block", width: "100%", height: "auto", background: "#0b0b12" }} />
+            <figcaption className="p-2.5">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="lx-10 rounded-full px-2 py-0.5 font-semibold" style={{ border: "1px solid var(--lx-border)", color: "#d6d6e4" }}>{img.slot.replace("_", " ")}</span>
+                {img.kind === "card" && (
+                  <span className="lx-10 rounded-full px-2 py-0.5" style={{ border: "1px solid rgba(56,189,248,.5)", color: "#38bdf8" }} title="Drawn from this section's own words — an image model cannot draw a map or a chart truthfully">
+                    from the text
+                  </span>
+                )}
+                {img.provider === "template" && img.kind !== "card" && (
+                  <span className="lx-10 rounded-full px-2 py-0.5" style={{ border: "1px solid rgba(251,191,36,.5)", color: "#fbbf24" }} title={img.note ?? ""}>
+                    template
+                  </span>
+                )}
+              </div>
+              {img.anchor && <p className="lx-10 lx-mut mt-1.5">for: <span style={{ color: "#d6d6e4" }}>{img.anchor}</span></p>}
+              <p className="lx-10 lx-mut mt-1" style={{ lineHeight: 1.5 }}>{img.alt}</p>
+              {img.note && <p className="lx-10 lx-mut mt-1" style={{ opacity: 0.75 }}>{img.note}</p>}
+              {articleId && (
+                <button className="lx-ghost lx-10 mt-2" disabled={redoing === img.slot} onClick={() => redo(img.slot)}>
+                  <RefreshCw size={12} className={redoing === img.slot ? "ap-spin" : ""} /> {redoing === img.slot ? "Starting…" : "Another image"}
+                </button>
+              )}
+            </figcaption>
+          </figure>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Drawer({ c, loading, busy, tab, setTab, onClose, onApprove, onReject, onCopy }: {
   c: ContentItem; loading: boolean; busy: boolean; tab: "details" | "preview" | "history";
   setTab: (t: "details" | "preview" | "history") => void; onClose: () => void; onApprove: () => void; onReject: () => void; onCopy: () => void;
@@ -615,7 +702,11 @@ function Drawer({ c, loading, busy, tab, setTab, onClose, onApprove, onReject, o
           </>
         )}
 
-        {tab === "preview" && (
+        {tab === "preview" && c.type === "image_set" && (
+          <ImageSetPreview c={c} />
+        )}
+
+        {tab === "preview" && c.type !== "image_set" && (
           <div className="ap-card p-4">
             {loading && typeof c.body !== "string" ? (
               <div className="flex items-center gap-2 lx-11 lx-mut"><Loader2 size={14} className="ap-spin" /> Loading content…</div>

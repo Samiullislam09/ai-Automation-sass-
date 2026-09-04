@@ -261,11 +261,14 @@ export const MANIFESTS: Manifest[] = [
         // seo_passed is required and NOT optional: a page on the customer's live site is the
         // one thing that cannot be quietly undone, so it does not go up unmeasured.
         //
-        // `images` is deliberately absent until an image agent exists. The plan's diagram has
-        // publish needing images — but a need nobody provides makes every publish plan fail,
-        // and an optional-need for a non-existent agent is noise in every outline. Add
-        // "images" here the same day agent-image gets a manifest, not before.
-        needs: ["article", "seo_passed"],
+        // `images` was deliberately absent while no image agent existed — a need nobody
+        // provides makes every publish plan fail — and the note here said to add it "the same
+        // day agent-image gets a manifest, not before". That day was 2026-09-05, so it is in.
+        // It is safe because make_images is `optional: true`: the
+        // planner schedules it, and if Mr. Image is unavailable the step is skipped with a
+        // note and the publish still runs — the article goes out with template cards rather
+        // than not at all (§19.4.4).
+        needs: ["article", "seo_passed", "images"],
         irreversible: true,
         estimated_seconds: 30, // measured: WP REST round-trip plus the 200 check
         cost_units: 2,

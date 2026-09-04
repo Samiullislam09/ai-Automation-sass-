@@ -130,16 +130,16 @@ test("row 3 · article likho, in the registry §5.5 describes → 4 steps, image
   ]);
 });
 
-test("row 3 · article likho, as the product actually stands today → keyword, writer, SEO", () => {
+test("row 3 · article likho, as the product actually stands today → keyword, writer, SEO ‖ images", () => {
   const p = okPlan(plan(intent("write_article", { topic: "solar panels for homes" }), TODAY));
 
-  // Mr. SEO stopped being a stub on 2026-08-27, so the real plan gained its check. There is
-  // still no image agent, and the plan does not invent one — an absent agent produces no step
-  // rather than a placeholder.
-  assert.deepEqual(shape(p.steps), ["1:keyword.find_keywords", "2:writer.write_article", "3:seo.check_seo"]);
-  assert.equal(p.estimated_seconds, 360);
-  assert.equal(p.cost_units, 51);
-  assert.ok(!p.steps.some((s) => s.agent_id === "image"), "no image agent exists, so no image step is planned");
+  // Mr. SEO stopped being a stub on 2026-08-27, so the real plan gained its check; Mr. Image
+  // shipped on 2026-09-05, so every article now gets pictures too (§19.4.2) — in the same
+  // parallel level, because neither waits on the other.
+  assert.deepEqual(shape(p.steps), ["1:keyword.find_keywords", "2:writer.write_article", "3:seo.check_seo", "3:image.make_images"]);
+  assert.equal(p.estimated_seconds, 360, "both step-3 agents take 40s, so the level still costs 40");
+  assert.equal(p.cost_units, 55); // +4 for Mr. Image
+  assert.ok(p.steps.some((s) => s.agent_id === "image"), "pictures are part of writing an article now, not an extra order");
 });
 
 // ══ ROW 4 · "article likh ke publish karo" → write_article + publish → 5 ═════════════════
@@ -181,10 +181,11 @@ test("row 4 · asking to publish today plans the whole chain, ending at the live
     "1:keyword.find_keywords",
     "2:writer.write_article",
     "3:seo.check_seo",
+    "3:image.make_images",
     "4:publish.publish_article",
   ]);
-  const publish = p.steps[3];
-  assert.deepEqual([...publish.needs].sort(), ["article", "seo_passed"], "nothing goes live unmeasured");
+  const publish = p.steps[4];
+  assert.deepEqual([...publish.needs].sort(), ["article", "images", "seo_passed"], "nothing goes live unmeasured, and it goes live with its pictures");
   assert.equal(publish.optional, false);
 });
 
@@ -216,14 +217,16 @@ test("row 5 · publishing an existing article, once it is routable, is the 1-2 s
   // carries the article that already exists, so nothing is re-written — exactly the table's
   // "1-2 (seo check agar nahi hua, phir publish)".
   const two = okPlan(plan(intent("publish_article", { content_item_id: "abc", article: { title: "solar" } }, "publish"), LIVE_WORLD));
-  assert.deepEqual(shape(two.steps), ["1:seo.check_seo", "2:publish.publish_article"]);
+  assert.deepEqual(shape(two.steps), ["1:seo.check_seo", "1:image.make_images", "2:publish.publish_article"]);
 
   // …and one step when the SEO check has already happened.
   const one = okPlan(
     plan(intent("publish_article", { content_item_id: "abc", article: { title: "solar" }, seo_passed: true }, "publish"), LIVE_WORLD),
   );
-  assert.deepEqual(shape(one.steps), ["1:publish.publish_article"]);
-  assert.deepEqual(one.steps[0].needs, [], "nothing to wait for — the user brought both inputs");
+  // Since 2026-09-05 publish also needs images, so the one thing still missing is planned:
+  // an existing article that has never had pictures gets them before it goes live (§19.4.2).
+  assert.deepEqual(shape(one.steps), ["1:image.make_images", "2:publish.publish_article"]);
+  assert.deepEqual(one.steps[0].needs, [], "the article came with the intent — nothing to wait for");
 });
 
 // ══ ROW 6 · "site audit karo" → audit_site → 1 ═══════════════════════════════════════════
@@ -283,13 +286,15 @@ test("2026-08-31 · 'article likho' with no topic no longer dead-ends on 'which 
   // rule still short-circuits it the instant a literal topic IS given (see the next test), and
   // only pulls Mr Lxwa's pick_topic in when it is genuinely blank.
   const p = okPlan(plan(intent("write_article", {}), TODAY));
-  assert.deepEqual(shape(p.steps), ["1:boss.pick_topic", "2:keyword.find_keywords", "3:writer.write_article", "4:seo.check_seo"]);
+  assert.deepEqual(shape(p.steps), ["1:boss.pick_topic", "2:keyword.find_keywords", "3:writer.write_article", "4:seo.check_seo", "4:image.make_images"]);
 });
 
 test("a topic literally given still skips Mr Lxwa entirely — no picking step for the common case", () => {
   const p = okPlan(plan(intent("write_article", { topic: "solar panels" }), TODAY));
   assert.equal(p.steps.some((s) => s.agent_id === "boss"), false, "the topic was given — nothing needed picking");
-  assert.deepEqual(shape(p.steps), ["1:keyword.find_keywords", "2:writer.write_article", "3:seo.check_seo"]);
+  // Mr. Image joined this plan on 2026-09-05 — every article gets pictures now (§19.4.2),
+  // in the same parallel level as the SEO check.
+  assert.deepEqual(shape(p.steps), ["1:keyword.find_keywords", "2:writer.write_article", "3:seo.check_seo", "3:image.make_images"]);
 });
 
 test("'sirf keywords do' with no topic also gets Mr Lxwa's pick, same as an article order", () => {

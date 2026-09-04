@@ -15,7 +15,11 @@ export async function GET(req: NextRequest) {
   const status = req.nextUrl.searchParams.get("status") || "awaiting_approval";
   let query = supabase
     .from("content_items")
-    .select("id, type, status, title, cluster, meta, created_at, updated_at")
+    // `blueprint` is here for the three reviewable parts of one order (MASTER_PLAN §19.4.7):
+    // an image_set and a web_story carry `blueprint.parent_article_id`, which is how Approvals
+    // groups them under their article and how the "another image" button knows which article
+    // to ask about.
+    .select("id, type, status, title, cluster, meta, blueprint, created_at, updated_at")
     .eq("tenant_id", tenantId)
     .order("created_at", { ascending: false })
     .limit(100);

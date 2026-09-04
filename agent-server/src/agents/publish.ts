@@ -1,6 +1,6 @@
 import type { Job } from "pg-boss";
 import { Agent, type AgentContext, type AgentJobData } from "./base.js";
-import { publishContentItem } from "../lib/publish.js";
+import { publishContentItem, type PublishImage } from "../lib/publish.js";
 import { supabase } from "../supabase.js";
 
 /** Mr. Publish — the only agent that touches the customer's live website.
@@ -81,12 +81,19 @@ export class PublishAgent extends Agent {
     ctx.onProgress({ label: `Publishing "${item.title ?? "the draft"}"…` });
     ctx.progress(0.5, `Publishing "${item.title ?? "the draft"}"…`);
 
-    const result = await publishContentItem(tenantId, {
-      id: item.id,
-      title: item.title,
-      body: item.body,
-      type: item.type,
-    });
+    // The article's own pictures go with it (MASTER_PLAN §19.4): the thumbnail becomes the
+    // featured image and each inline picture lands under the heading it was made for. Only
+    // APPROVED ones — an image set the customer has not looked at, or has rejected, must not
+    // appear on their live site, and an article whose images were rejected still publishes
+    // (plainly) rather than being held hostage by them.
+    const images = await approvedImages(tenantId, item.id);
+    if (images.length) ctx.log(`Publishing with ${images.length} approved image(s).`);
+
+    const result = await publishContentItem(
+      tenantId,
+      { id: item.id, title: item.title, body: item.body, type: item.type },
+      images,
+    );
 
     if (!result.ok) {
       // The failure text comes from publish.ts, which knows whether it was credentials, the
@@ -163,4 +170,29 @@ async function verifyLive(url: string | undefined, title: string | null): Promis
   } catch (e: any) {
     return { verified: false, note: `Page check nahi ho paya (${e?.message ?? "network error"}) — publish ho chuka hai.` };
   }
+}
+
+/** The approved image set for an article, in the order a post wants them: the thumbnail (which
+ *  becomes the featured image), the hero, then the inline pictures in their own order. Empty
+ *  when there is no set, or it is still awaiting review, or the customer rejected it — the
+ *  article goes out either way (§19.4.7). */
+async function approvedImages(tenantId: string, articleId: string): Promise<PublishImage[]> {
+  const { data, error } = await supabase
+    .from("content_items")
+    .select("meta, status")
+    .eq("tenant_id", tenantId)
+    .eq("type", "image_set")
+    .eq("blueprint->>parent_article_id", articleId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error || !data) return [];
+  if (data.status !== "approved" && data.status !== "published") return [];
+
+  const raw: any[] = Array.isArray((data.meta as any)?.images) ? (data.meta as any).images : [];
+  const order = (slot: string) => (slot === "thumb" ? 0 : slot === "hero" ? 1 : slot === "og" ? 99 : 2);
+  return raw
+    .filter((i) => i?.url && i?.slot !== "og") // the OG card is for the share preview, not the page
+    .map((i) => ({ slot: String(i.slot), url: String(i.url), alt: String(i.alt ?? ""), anchor: i.anchor ? String(i.anchor) : null }))
+    .sort((a, b) => order(a.slot) - order(b.slot) || a.slot.localeCompare(b.slot));
 }
