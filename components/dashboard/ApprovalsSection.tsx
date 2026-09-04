@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight, BadgeCheck, Bell, Calendar, Check, ChevronDown, ChevronLeft, ChevronRight, Clock,
   Copy, Eye, FileText, Loader2, Megaphone, MapPin, MoreVertical, Pencil, RefreshCw, Search,
-  SlidersHorizontal, UserRound, X, XCircle, CheckCircle2, Globe,
+  SlidersHorizontal, UserRound, X, XCircle, CheckCircle2, Monitor, ExternalLink,
 } from "lucide-react";
 import { renderMarkdown } from "@/lib/md";
 import { useStore } from "@/lib/store";
@@ -366,6 +366,11 @@ export default function ApprovalsSection() {
                         <span className="truncate">{categoryOf(c)}</span><i className="ap-sep" /><span>{agentOf(c)}</span><i className="ap-sep" />
                         <span>{typeof c.meta?.wordCount === "number" ? `${c.meta.wordCount.toLocaleString()} words` : "— words"}</span><i className="ap-sep" /><span>{TYPE_LABEL[c.type] ?? c.type}</span>
                       </div>
+                      {c.meta?.publishedUrl && (
+                        <a href={c.meta.publishedUrl} target="_blank" rel="noreferrer" className="ap-live" onClick={(e) => e.stopPropagation()} title={c.meta.publishedUrl}>
+                          <ExternalLink size={11} /><span className="truncate">{c.meta.publishedUrl.replace(/^https?:\/\//, "")}</span>
+                        </a>
+                      )}
                     </div>
                   </div>
                   {/* status */}
@@ -380,8 +385,8 @@ export default function ApprovalsSection() {
                   {/* actions */}
                   <div className="ap-c-x relative flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
                     {c.type === "article" && (
-                      <Link href={`/dashboard/content/${c.id}`} className="lx-ghost ap-bview" title="Open the full article review page">
-                        <Globe size={13} /><span>Browser View</span>
+                      <Link href={`/dashboard/content/${c.id}`} className="ap-bview" title="Open the full article review page">
+                        <Monitor size={13} /><span>Browser View</span>
                       </Link>
                     )}
                     <RowAction c={c} busy={isBusy} onReview={() => openDetail(c)} onHistory={() => openDetail(c, "history")} />
@@ -391,7 +396,7 @@ export default function ApprovalsSection() {
                     {menuFor === c.id && (
                       <div className="ap-menu" onClick={(e) => e.stopPropagation()}>
                         <button onClick={() => { openDetail(c, "preview"); setMenuFor(null); }}><Eye size={13} /> Preview</button>
-                        {c.type === "article" && <Link href={`/dashboard/content/${c.id}`}><Globe size={13} /> Browser View</Link>}
+                        {c.type === "article" && <Link href={`/dashboard/content/${c.id}`}><Monitor size={13} /> Browser View</Link>}
                         {c.type === "social" && <button onClick={() => { copyPost(c); setMenuFor(null); }}><Copy size={13} /> Copy text</button>}
                         {c.meta?.publishedUrl && <a href={c.meta.publishedUrl} target="_blank" rel="noreferrer"><ArrowRight size={13} /> Open live page</a>}
                         {c.status === "awaiting_approval" && (
@@ -638,7 +643,7 @@ function Drawer({ c, loading, busy, tab, setTab, onClose, onApprove, onReject, o
   );
 }
 
-/** Two-line clamped title; the full text pops up on hover ONLY when it was actually cut off
+/** One-line ellipsised title; the full text pops up on hover ONLY when it was actually cut off
  *  (measured, not guessed — a short title never gets a pointless tooltip). */
 function ClampTitle({ text }: { text: string }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -646,7 +651,7 @@ function ClampTitle({ text }: { text: string }) {
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const check = () => setClipped(el.scrollHeight > el.clientHeight + 1);
+    const check = () => setClipped(el.scrollWidth > el.clientWidth + 1);
     check();
     const ro = new ResizeObserver(check);
     ro.observe(el);
@@ -725,11 +730,14 @@ const CSS = `
 .ap-select select option{background:#12121c;color:#e8e8f2}
 .ap-grid{display:grid;grid-template-columns:minmax(0,1fr) 128px 56px 96px max-content;grid-template-areas:"a s v u x";align-items:center;gap:10px}
 .ap-c-a{grid-area:a;min-width:0}.ap-c-s{grid-area:s}.ap-c-v{grid-area:v}.ap-c-u{grid-area:u}.ap-c-x{grid-area:x}
-.ap-bview span{display:inline}
+.ap-bview{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:9px;font-size:11.5px;font-weight:600;white-space:nowrap;
+  color:#7dd3fc;background:rgba(56,189,248,.08);border:1px solid rgba(56,189,248,.35);transition:.15s}
+.ap-bview:hover{background:rgba(56,189,248,.16);color:#fff;border-color:rgba(56,189,248,.6)}
+.ap-live{display:inline-flex;align-items:center;gap:4px;max-width:100%;margin-top:3px;font-size:11px;color:#4ade80;text-decoration:none}
+.ap-live:hover{text-decoration:underline}
 @container ap (max-width:980px){
   .ap-grid{grid-template-columns:minmax(0,1fr) 118px max-content;grid-template-areas:"a s x";gap:8px}
   .ap-c-v,.ap-c-u{display:none}
-  .ap-bview{padding:6px 8px}.ap-bview span{display:none}
 }
 @container ap (max-width:620px){
   .ap-grid{grid-template-columns:minmax(0,1fr) max-content;grid-template-areas:"a a" "s x";row-gap:10px}
@@ -742,7 +750,7 @@ const CSS = `
 .ap-row:hover{border-color:rgba(255,255,255,.14);background:#10101a;z-index:5}
 .ap-row.on{border-color:rgba(139,92,246,.5);box-shadow:0 0 0 1px rgba(139,92,246,.2),0 0 22px rgba(139,92,246,.12)}
 .ap-title-wrap{position:relative;min-width:0}
-.ap-title{font-size:13.5px;font-weight:600;color:#fff;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
+.ap-title{font-size:13.5px;font-weight:600;color:#fff;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* full title on hover — a real tooltip, not the browser's slow native one */
 .ap-tip{position:absolute;left:0;top:calc(100% + 6px);z-index:40;max-width:min(460px,70vw);width:max-content;padding:8px 10px;border-radius:9px;
   background:#16161f;border:1px solid rgba(255,255,255,.12);box-shadow:0 12px 32px rgba(0,0,0,.6);
