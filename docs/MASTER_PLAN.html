@@ -1212,6 +1212,7 @@ ka text dekhta hai). Comment ab sahi wajah kehta hai.</p>
 <p>Article ke saath thumbnail, OG image, inline images, aur Web Story — ye do alag agents hain kyunki dono ka tool alag hai, dono ka failure alag hai, aur dono alag waqt pe chalte hain (Image writer ke baad, Story publish ke baad).</p>
 
 <h3>19.1 Mr. Image</h3>
+<p class="note"><strong>&sect;19.4 (FINAL, 2026-09-05) is subsection ke upar hai</strong> &mdash; Cloudflare ke asal numbers, image budget, aur prompt kaun likhta hai. Yahan ke andaaze (600 images/day, 1344&times;768, Playwright screenshot) wahan sudhre hue hain.</p>
 <h4>Free image generation — jo aaj sach me chalta hai</h4>
 <div class="tablewrap"><table>
 <tr><th>Option</th><th>Free?</th><th>Test 2026-08-27</th><th>Faisla</th></tr>
@@ -1235,6 +1236,7 @@ ka text dekhta hai). Comment ab sahi wajah kehta hai.</p>
 <p><strong>Manifest:</strong> <code>make_images</code> (input: article_id → output: hero, thumb, og, inline[]), <code>irreversible:false</code>, ~40s. <strong>User ko:</strong> Approvals card pe thumbnail dikhta hai, ek click "doosri image" (regenerate, max 3).</p>
 
 <h3>19.2 Mr. Story (Web Stories)</h3>
+<p class="note"><strong>&sect;19.4.5 yahan ke &ldquo;6-8 portrait briefs&rdquo; ko badal deta hai</strong> &mdash; ek Story sirf 2 AI images kharch karti hai, baaki article ki apni images ka reuse hai.</p>
 <div class="tablewrap"><table>
 <tr><th>Cheez</th><th>Sach</th></tr>
 <tr><td>Format</td><td>AMP Web Story = ek HTML page (<code>&lt;amp-story&gt;</code>, 5-10 <code>&lt;amp-story-page&gt;</code>), Google Discover/Search me alag carousel. Koi paid tool nahi chahiye.</td></tr>
@@ -1257,6 +1259,120 @@ ka text dekhta hai). Comment ab sahi wajah kehta hai.</p>
 <p>Mr Lxwa (brain) · Keyword · Writer · SEO · <strong>Image</strong> · Publish · <strong>Story</strong> · Site Audit · Leads · Social. Crawler Site-Audit ke andar. QA Writer ke andar. Phases: Image Phase 2 (article ke saath hi chahiye), Story Phase 3.</p>
 
 <!-- ============================================================ -->
+<h3>19.4 &middot; FINAL (2026-09-05) &mdash; image budget, kaun prompt likhta hai, aur Story ka reuse</h3>
+<p>Ye subsection 19.1&ndash;19.3 ke upar hai: jahan bhi takraav ho, <strong>yeh chalega</strong>. Do wajah se likha gaya &mdash; (a) Cloudflare ka endpoint aaj pehli baar sach me chala aur uske asal numbers 19.1 ke andaaze se alag nikle, (b) owner ne flow ko teen jagah se seedha kiya: image count article ki lambai se, Web Story article ki apni images reuse kare, aur har image ka prompt kisi ka <em>diya hua</em> ho &mdash; koi random image nahi.</p>
+
+<h4>19.4.1 Cloudflare, asal numbers (live test 2026-09-05)</h4>
+<table>
+<tr><th>Cheez</th><th>19.1 me likha tha</th><th>Sach (measured)</th><th>Iska matlab</th></tr>
+<tr><td>Endpoint</td><td>&ldquo;test baaki&rdquo;</td><td><code>POST /client/v4/accounts/{id}/ai/run/@cf/black-forest-labs/flux-1-schnell</code> &mdash; <strong>200 OK</strong></td><td>Primary confirm</td></tr>
+<tr><td>Latency</td><td>&mdash;</td><td><strong>3.7s</strong></td><td>Publish flow ke andar blocking step rakha ja sakta hai</td></tr>
+<tr><td>Output</td><td>1344&times;768 maan liya tha</td><td><strong>1024&times;1024 JPEG</strong>, base64 <code>result.image</code> me; <strong>width/height parameter hai hi nahi</strong> (sirf <code>prompt</code>, <code>steps</code> &le;8, <code>seed</code>)</td><td>Har aspect ratio <code>sharp</code> se crop hoga &mdash; hero 16:9, OG 1.91:1, story 9:16</td></tr>
+<tr><td>Cost</td><td>&ldquo;~600 images/day&rdquo;</td><td><strong>172.8 neurons/image</strong> &rarr; 10,000/day = <strong>~57 images/day</strong>, poore account ke liye (sab tenants milaakar), reset 00:00 UTC</td><td><span class="pill warn">Yahi is section ka sabse bada constraint hai</span> &mdash; AI image sasti nahi, <em>durlabh</em> hai</td></tr>
+</table>
+<p><strong>Faisla jo isse nikalta hai:</strong> AI image sirf wahan jahan wo asli farq daalti hai. Baaki sab <em>free aur unlimited</em> raaste se &mdash; template card, ya pehle se bani image ka naya crop. Ek article par AI calls ka default 1&ndash;4, ek Story par sirf 2.</p>
+
+<h4>19.4.2 Ek article ko kitni images milengi (lambai se, formula &mdash; guess nahi)</h4>
+<p>Mr. Writer pehle se <code>wordCount</code> aur <code>sections</code> deta hai (<code>agents/writer.ts</code>, quality gate ka output). Ladder wahi padhta hai:</p>
+<table>
+<tr><th>Article</th><th>Hero</th><th>Inline (body me)</th><th>Thumbnail + OG</th><th>AI calls</th></tr>
+<tr><td>&lt; 900 words</td><td>AI</td><td>&mdash;</td><td>hero ka crop + brand overlay</td><td><strong>1</strong></td></tr>
+<tr><td>900&ndash;1,799</td><td>AI</td><td>1 (sabse lambe section ke baad)</td><td>hero ka crop</td><td><strong>2</strong></td></tr>
+<tr><td>1,800&ndash;2,699</td><td>AI</td><td>2</td><td>hero ka crop</td><td><strong>3</strong></td></tr>
+<tr><td>2,700+</td><td>AI</td><td>3</td><td>hero ka crop</td><td><strong>4</strong></td></tr>
+</table>
+<p>Niyam jo iske upar lagte hain:</p>
+<ol>
+<li><strong>Inline image kabhi bhi section se zyada nahi.</strong> 3 inline chahiye par article me 2 hi H2 hain &rarr; 2 banengi. Image hamesha ek section ki hoti hai, hawa me nahi.</li>
+<li><strong>Thumbnail aur OG kabhi AI nahi.</strong> Wo hero ka crop hain (OG 1200&times;630, thumb 1280&times;720) jispe <code>sharp</code> se SVG overlay chipakta hai: headline, brand color (onboarding se), logo. Zero extra cost, aur poore blog me ek jaisa dikhta hai. <em>19.1 me yahan Playwright/Chrome screenshot likha tha &mdash; wo hata diya gaya: audit ke OOM ke baad ek aur Chrome is process me nahi ghusega, aur sharp+SVG deterministic bhi hai aur 20&times; halka bhi.</em></li>
+<li><strong>Per-tenant daily budget</strong>, wahi jagah jahan baaki caps hain (<code>config/caps.ts</code>): free 3, starter 8, growth 20, pro 40 AI images/din. Upar se ek account-level ceiling 50/day (10,000 neurons me se headroom chhodkar). Budget khatam &rarr; article phir bhi publish hota hai, images template card se banti hain aur report me ek line hoti hai: &ldquo;aaj ka image budget khatam, ye article template images ke saath gaya&rdquo;. <span class="pill ok">Kabhi fail nahi, kabhi jhooth nahi</span></li>
+<li><strong>Har image ka apna slot hota hai</strong> &mdash; <code>hero</code>, <code>og</code>, <code>thumb</code>, <code>inline_1..3</code>, <code>story_cover</code>, <code>story_2</code>. Slot hi reuse ki chaabi hai (19.4.5).</li>
+</ol>
+
+<h4>19.4.3 Prompt kaun likhta hai &mdash; &ldquo;koi random nahi&rdquo; ka poora jawab</h4>
+<p><strong>Ek hi rule:</strong> jiska content hai, brief wahi likhta hai. Mr. Image sirf <em>render</em> karta hai &mdash; wo apne mann se kabhi subject nahi chunta. Isliye Mr. Image ke do action hain, ek nahi:</p>
+<table>
+<tr><th>Action</th><th>Kaun bulaata hai</th><th>Input</th><th>Brief kahan banta hai</th></tr>
+<tr><td><code>make_images</code><br><span class="pill info">needs: article</span></td><td>Planner (article pipeline me, SEO check ke saath parallel)</td><td><code>{article_id}</code></td><td><strong>Mr. Image ke andar, step 1</strong> &mdash; ek LLM call jo article + Site Brain padhkar poora image plan likhta hai</td></tr>
+<tr><td><code>render_images</code><br><span class="pill info">needs: &mdash;</span></td><td>Mr. Story, Miss Social (aur aage koi bhi)</td><td><code>{briefs: [{slot, prompt, aspect, style, alt}]}</code></td><td><strong>Bulane wale ne pehle hi likha hai</strong> &mdash; Mr. Image ek shabd nahi badalta</td></tr>
+</table>
+<p><strong>Article ka brief kaise banta hai</strong> (Mr. Image ka step 1, ek <code>gpt-oss-20b</code> call, article ke saath Site Brain bhi context me):</p>
+<pre><code>{
+  "style": "photo" | "illustration" | "flat-vector",   // business type se, model ki pasand se nahi
+  "hero":   { "subject": "...", "alt": "..." },
+  "inline": [ { "after_heading": "H2 ka exact text", "subject": "...", "alt": "..." } ]
+}</code></pre>
+<p>Model sirf <em>subject</em> aur <em>alt</em> deta hai. Asal prompt code jodta hai, hamesha ek hi saanche se:</p>
+<pre><code>prompt = [subject, STYLE[style], SETTING(siteProfile.industry, siteProfile.city),
+          "natural light, sharp focus",
+          "no people, no text, no words, no watermark, no logo, no signage"].join(", ")
+seed   = int(sha1(article_id + slot).slice(0,8), 16)      // wahi article + wahi slot = wahi image</code></pre>
+<ul>
+<li><strong>Setting Site Brain se aata hai</strong>, model se nahi &mdash; isliye hospital ki site par kabhi &ldquo;office desk&rdquo; nahi aayega (&sect;25 ki table ne yahi maanga tha).</li>
+<li><strong>Seed deterministic hai.</strong> Wahi article dobara chala &rarr; bilkul wahi image, naya kharcha nahi. User &ldquo;doosri image&rdquo; dabaye &rarr; <code>seed+1</code> (max 3 baar) &mdash; yahi ek jagah hai jahan image badalti hai, aur wo bhi user ke kehne par.</li>
+<li><strong>Chehre aur brand kabhi nahi.</strong> &ldquo;no people&rdquo; default me hai; jahan asli insaan chahiye (restaurant, clinic) wahan stock (Unsplash/Pexels) &mdash; AI nahi.</li>
+</ul>
+
+<h4>19.4.4 Fail hone par kya (image ke bina publish kabhi nahi)</h4>
+<table>
+<tr><th>#</th><th>Raasta</th><th>Kab</th></tr>
+<tr><td>1</td><td>Cloudflare FLUX</td><td>Default. 3.7s.</td></tr>
+<tr><td>2</td><td>NVIDIA NIM FLUX</td><td>Cloudflare 429/5xx ya budget khatam <em>aur</em> job async hai. 120s ka apna timeout &mdash; blocking flow me kabhi nahi.</td></tr>
+<tr><td>3</td><td>Stock (Unsplash / Pexels)</td><td>Key ho, aur style <code>photo</code> ho. Attribution store hoti hai.</td></tr>
+<tr><td>4</td><td>Template card (sharp + SVG)</td><td>Hamesha chalta hai. Headline + brand color + logo. <strong>Yahi wajah hai ki &ldquo;image nahi mili&rdquo; kabhi publish nahi rokta.</strong></td></tr>
+</table>
+
+<h4>19.4.5 Web Story &mdash; article ki images reuse, sirf pehli do AI se</h4>
+<p>Owner, 2026-09-05: <em>&ldquo;web story ke liye jo thumbnail ka image ya jo article pe image hai uska hi reuse karunga, but 1-2 image jo web story pe first dikhai dega wo AI se generate karwayenge&rdquo;</em>. 19.2 me likha tha &ldquo;Mr. Image ko 6-8 portrait briefs (batch)&rdquo; &mdash; wo ab galat hai (8 AI images = din ke budget ka 14%, ek hi story par). Naya niyam:</p>
+<table>
+<tr><th>Story page</th><th>Image kahan se</th><th>AI call</th></tr>
+<tr><td>1 &mdash; cover (Discover carousel me yahi dikhta hai)</td><td><strong>AI, naya</strong>, 9:16 ke liye alag prompt (portrait composition)</td><td>1</td></tr>
+<tr><td>2 &mdash; hook</td><td><strong>AI, naya</strong></td><td>1</td></tr>
+<tr><td>3&hellip;N-1</td><td><strong>Article ki apni images ka reuse</strong> &mdash; hero, phir inline_1..3, <code>media</code> table se; <code>sharp</code> se 720&times;1280 smart-crop + neeche gradient + text</td><td>0</td></tr>
+<tr><td>N &mdash; CTA</td><td>Template card (brand color + &ldquo;Read the full article&rdquo;)</td><td>0</td></tr>
+</table>
+<p>Agar article ke paas pages se kam images hain: pehle wahi images <em>alag crop</em> ke saath dobara (top/center/bottom) &mdash; ek hi tasveer do baar bilkul same nahi dikhti &mdash; aur uske baad template card. <strong>Kabhi koi anjaan/random image nahi.</strong> Poster image (AMP maangta hai) = cover.</p>
+<p><strong>Ek Story ka kharcha: 2 AI images.</strong> 8 nahi.</p>
+
+<h4>19.4.6 Poora flow, ek order se doosre tak</h4>
+<pre><code>Mr. Writer  --{markdown, sections[], wordCount}-->  brain
+   |
+   |  planner: make_images.needs = ["article"]        (SEO check ke saath parallel)
+   v
+Mr. Image
+   1. plan    : LLM(article + Site Brain) -> {style, hero.subject, inline[].after_heading+subject}
+   2. budget  : caps.ts se tenant ka aaj ka balance; kam pade to slots template par gir jaate hain
+   3. render  : har slot -> prompt(saancha) + seed(sha1) -> Cloudflare -> 1024x1024 JPEG
+   4. derive  : sharp -> hero 16:9, og 1200x630 + overlay, thumb 1280x720 + overlay, inline 4:3
+   5. store   : Supabase Storage media/{tenant}/{article}/{slot}.webp  + `media` table row
+                (slot, url, w, h, prompt, seed, provider, neurons, alt, attribution)
+   v
+{hero, thumb, og, inline[]}  -->  brain  -->  Mr. Publish
+                                             (WP media library upload, featured image set)
+
+--- baad me, alag order ---
+
+Mr. Story  (needs: article + images)
+   1. outline : LLM(article) -> 6-8 pages {headline <=8 words, body <=25 words, image_intent}
+   2. assign  : page 1-2 ke liye APNA brief likhta hai (portrait, cover composition)
+                -> render_images({briefs}) -> Mr. Image sirf render karta hai
+                page 3..N-1 ke liye `media` table se article ki images uthata hai (koi call nahi)
+   3. render  : AMP HTML (3 fixed layouts, brand colors, logo)
+   4. validate: amphtml-validator -> invalid kabhi publish nahi
+   5. publish : WP web-story CPT / custom site /stories/slug + sitemap + canonical -> article</code></pre>
+
+<h4>19.4.7 Kya banega, kis kram me</h4>
+<table>
+<tr><th>#</th><th>Kaam</th><th>Kyun pehle</th></tr>
+<tr><td>1</td><td><code>media</code> table (migration) + Supabase Storage bucket + <code>lib/media/store.ts</code></td><td>Reuse isi par tika hai; iske bina Story ka plan hi nahi chalega</td></tr>
+<tr><td>2</td><td><code>lib/media/render.ts</code> &mdash; sharp: crop, WebP &lt;150KB, SVG overlay (headline/brand/logo), template card</td><td>Yahi &ldquo;kabhi fail nahi&rdquo; wali aakhri seedhi hai; AI ke bina bhi poora pipeline chal jaata hai</td></tr>
+<tr><td>3</td><td><code>lib/media/providers.ts</code> &mdash; Cloudflare, NVIDIA, stock; ek interface, budget aur fallback ladder andar</td><td>Provider badalna baad me ek file ka kaam rahe</td></tr>
+<tr><td>4</td><td><code>agents/image.ts</code> + manifest (<code>make_images</code>, <code>render_images</code>) + caps entry</td><td>Ab agent sirf jodne ka kaam hai</td></tr>
+<tr><td>5</td><td><code>publish_article.needs</code> me <code>"images"</code> jodo</td><td><code>manifests.ts</code> ka apna comment yahi kehta hai: &ldquo;add it the same day agent-image gets a manifest, not before&rdquo;</td></tr>
+<tr><td>6</td><td><code>agents/story.ts</code> + AMP template + validator</td><td>Phase 3, aur ye tabhi mumkin hai jab 1&ndash;4 ban chuke hon</td></tr>
+</table>
+<p><strong>Env:</strong> <code>CLOUDFLARE_ACCOUNT_ID</code> aur <code>CLOUDFLARE_API_TOKEN</code> dono <code>.env.local</code> aur <code>agent-server/.env</code> me hain (2026-09-05). Railway par bhi dono chahiye, warna Mr. Image seedha step 4 (template) par chala jaayega &mdash; chalega, par AI images nahi banengi.</p>
+
 <h2 id="anatomy">20 · Agent andar se kaise kaam karta hai (deep)</h2>
 <p>Section 17 me har agent ke <em>steps</em> hain. Ye section batata hai <em>mechanism</em>: ek order brain se agent tak, agent ke andar, aur wapas — kaunsi row kab likhi jaati hai, kya fail ho sakta hai, user ko kab kya dikhta hai. Pehle generic, phir Mr. Leads pe poora.</p>
 
@@ -1831,6 +1947,7 @@ aur commit ke saath &mdash; taaki kal koi (aap, main, ya 10 saal baad koi employ
 <tr><td>2026-09-05</td><td>(audit: the OOM was the checks, not only Lighthouse &mdash; PageFacts refactor)</td><td><strong>The next run after the two-stage save died too, 4 minutes in and BEFORE stage 1 filed &mdash; i.e. at the end of the crawl, inside <code>auditSite()</code>, with no push from us (<code>/version</code>: same commit, new <code>startedAt</code>).</strong> Cause: the checks held a cheerio DOM for every readable page at once (<code>parsed = ok.map(cheerio.load)</code>, plus a second clone per page for visible text). A DOM is ~10&times; its HTML; 156 Elementor pages of 300&ndash;800 KB is over a gigabyte &mdash; the container never reached Lighthouse. Fix: <code>checks.ts</code> now has <code>PageFacts</code> &mdash; every measurement a check needs (title, description, H1s, canonicals, viewport/charset/doctype flags, hreflangs, the anchor list with rel/text/alt/label, resource URLs, word count + text length + a sha1 of the visible text, latest stated date, div/semantic counts) read off ONE DOM per page in <code>extractPageFacts()</code> and kept as a few KB; <code>extractFacts(pages, releaseHtml)</code> also drops each page's HTML string; <code>auditFacts(facts, site, performance)</code> runs the whole catalogue over facts; <code>auditSite()</code> is now the thin wrapper the tests call. Every check's sentence and threshold unchanged; duplicate-content compares hashes instead of whole texts. <code>agents/audit.ts</code> extracts facts once after the crawl and both stages read them &mdash; no HTML is parsed twice. Peak memory is now one DOM + the compact facts, whatever the page count. Tests: 461/461 (two new: facts once + HTML released + both stages agree; unreadable page has empty facts). Also: the boot sweep now keeps a row's progress/attempt and says which step it stopped at.</td></tr>
 <tr><td>2026-09-05</td><td>(audit: Site Health rewritten &mdash; the average page, not a count of problem kinds)</td><td><strong>First full 156-page report filed (the OOM fixes held) and it scored 0/100 &mdash; owner: &ldquo;site health 0 kyun hai, halanki ye sab sahi lag raha hai&rdquo;. He was right: 1 error KIND + 18 warning KINDS under <code>100 &minus; 25&middot;blocks &minus; 5&middot;warns</code> is &minus;115, i.e. any real site with a 70-check catalogue (&sect;27 Round A) scores 0, the same as a site that is entirely down.</strong> New formula, in <code>checks.ts</code> with the reasoning in the code: every crawled page starts at 100, loses 5 per WARNING it has, and loses everything for a BLOCK (a page Google cannot reach, read or index is a lost page, not a blemished one); notices cost nothing. Site Health is the mean, minus the site-wide findings (robots.txt / sitemap) which belong to no page. It is explainable page by page, moves smoothly, and cannot collapse: half a broken site is ~50, all-broken is 0, one warning on one page of ten is ~99. <code>thematic</code> now ships per category from the SAME arithmetic (report page reads it; older reports fall back to the old checks-that-did-not-fire fraction) &mdash; that fraction was why Content and Performance read 0% while only a few pages were affected. <code>pagesWithIssues</code> (the Crawled Pages &ldquo;Have issues&rdquo; bucket) now counts errors and warnings only, not notices &mdash; a &ldquo;click here&rdquo; link had been enough to put 155 of 156 pages in that bucket. Performance issues, which arrive pre-built from performance.ts, are folded into the per-page map so a slow page loses health like any other. Trend note: a score from before this commit is on the old scale; the history chart shows both. Also fixed from the same screenshots: the floating &ldquo;Open AI assistant&rdquo; button (fixed right-4/top-4, &ge;lg) sat on top of every page's header buttons &mdash; the scroll container now reserves that strip (<code>lg:pr-14</code>) while the assistant is collapsed. Tests 464/464 (three new: average-page health incl. half-broken and all-broken sites, per-category health, notices excluded from the bucket).</td></tr>
 <tr><td>2026-09-05</td><td>(audit: the memory guard was reading the wrong number)</td><td>First run with the guard live finished cleanly but measured <strong>0 of 10</strong> pages: &ldquo;only 291 MB left of 954&rdquo;. <code>memory.current</code> counts the reclaimable page cache &mdash; every file read since boot &mdash; which the kernel drops under pressure instead of killing anything, so the guard was refusing to launch on a container with room. Now subtracts <code>inactive_file</code> + <code>slab_reclaimable</code> (v1: <code>total_inactive_file</code>) &mdash; the working-set number the OOM decision turns on &mdash; calls a runtime-enabled V8 gc to hand the crawl's 156 parsed DOMs back to the OS before launching, logs what it read before the first page, and asks for 260 MB rather than 350.</td></tr>
+<tr><td>2026-09-05</td><td>(Mr. Image / Mr. Story: &sect;19.4 FINAL &mdash; live Cloudflare numbers, image budget, prompt ownership)</td><td><strong>Cloudflare Workers AI ka endpoint pehli baar sach me chala</strong> (owner ne account id + token diye): <code>@cf/black-forest-labs/flux-1-schnell</code>, 200 OK, <strong>3.7s</strong>, <strong>1024&times;1024 JPEG</strong> base64 me &mdash; aur <strong>172.8 neurons per image</strong>, yaani 10,000/day = <strong>~57 images/day poore account ke liye</strong>, na ki &sect;19.1 ka andaaza ~600. Width/height parameter model me hai hi nahi. Isi par &sect;19.4 (FINAL) likha gaya, jo &sect;19.1&ndash;19.3 ke upar hai: image ladder article ki lambai se (&lt;900 words = 1 AI hero; 900/1800/2700 par 1/2/3 inline, max 4), thumbnail+OG kabhi AI nahi &mdash; hero ka crop + sharp/SVG overlay (Playwright screenshot wala purana plan hataya, audit ke OOM ke baad ek aur Chrome is process me nahi), per-tenant daily image budget <code>config/caps.ts</code> me aur account ceiling 50/day, budget khatam ho to template card &mdash; publish kabhi nahi rukta. <strong>Prompt ownership</strong> (owner: &ldquo;koi random nahi&rdquo;): jiska content hai brief wahi likhta hai. Mr. Image ke do action &mdash; <code>make_images</code> (needs: article; brief andar hi banta hai, article + Site Brain se) aur <code>render_images</code> (needs: kuch nahi; caller ke diye briefs, ek shabd nahi badalta &mdash; Mr. Story aur Miss Social isi se). Prompt ek fixed saanche se jurta hai (subject + style + Site Brain ka industry/city + &ldquo;no people/text/logo&rdquo;), aur seed = sha1(article_id+slot) &mdash; wahi article dobara chale to bilkul wahi image, aur &ldquo;doosri image&rdquo; sirf user ke dabane par seed+1 (max 3). <strong>Web Story</strong>: 19.2 ka &ldquo;6-8 portrait briefs&rdquo; hataya &mdash; sirf page 1 aur 2 (jo Discover carousel me dikhte hain) AI se, page 3..N-1 article ki apni images ka reuse <code>media</code> table se (sharp 720&times;1280 crop + gradient), aakhri page template CTA. Ek story = 2 AI images. Build order bhi likh diya (media table &rarr; sharp renderer &rarr; providers &rarr; agents/image.ts + manifest &rarr; publish_article.needs me images &rarr; agents/story.ts). Abhi tak koi code nahi &mdash; ye plan hai, aur &sect;19.1/19.2 ke sar par pointer laga diya taaki purane numbers current na lagen.</td></tr>
 </table></div>
 
 <h3>26.1 Abhi kya baaki hai (is order me)</h3>
