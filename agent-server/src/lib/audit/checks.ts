@@ -65,6 +65,15 @@ export type SiteContext = {
   robotsTxt: string | null;
   /** The URLs listed in sitemap.xml, or null when there is no readable sitemap. */
   sitemapUrls: string[] | null;
+  /** Where the sitemap was looked for (the robots.txt `Sitemap:` address, else /sitemap.xml) —
+   *  so a sitemap finding can name the file it is about. Optional: every fixture built before
+   *  Round A (2026-09-05) omits it, and the checks fall back to origin + "/sitemap.xml". */
+  sitemapUrl?: string | null;
+  /** True when a sitemap WAS fetched but is not a sitemap (no <urlset>/<sitemapindex> root) —
+   *  Semrush's "sitemap.xml format error", told from the same bytes fetchSite.ts already read. */
+  sitemapMalformed?: boolean;
+  /** Size of the sitemap file in bytes (0 / absent when there is none) — for the 50 MB cap. */
+  sitemapBytes?: number;
 };
 
 export type AuditIssue = {
@@ -131,30 +140,119 @@ const PAGE_SAMPLE = 100;
  *  table covers every issue that can reach a report. Ids and categories never change once
  *  shipped — the trend/compare views key off them. */
 export const CHECK_CATALOGUE: { id: string; category: string; severity: AuditSeverity }[] = [
+  // ── Crawlability ──
   { id: "unreachable", category: "Crawlability", severity: "block" },
+  { id: "unreachable-dns", category: "Crawlability", severity: "block" },
   { id: "server-error", category: "Crawlability", severity: "block" },
   { id: "not-found", category: "Crawlability", severity: "block" },
   { id: "noindex", category: "Crawlability", severity: "block" },
   { id: "robots-blocks-all", category: "Crawlability", severity: "block" },
+  { id: "robots-format-error", category: "Crawlability", severity: "warn" },
+  { id: "robots-not-found", category: "Crawlability", severity: "info" },
+  { id: "no-sitemap", category: "Crawlability", severity: "warn" },
+  { id: "sitemap-format-error", category: "Crawlability", severity: "warn" },
+  { id: "sitemap-bad-page", category: "Crawlability", severity: "warn" },
+  { id: "malformed-sitemap-url", category: "Crawlability", severity: "warn" },
+  { id: "sitemap-too-large", category: "Crawlability", severity: "warn" },
+  { id: "sitemap-not-in-robots", category: "Crawlability", severity: "warn" },
+  { id: "blocked-resources", category: "Crawlability", severity: "warn" },
+  { id: "malformed-link", category: "Crawlability", severity: "warn" },
+  { id: "long-link-url", category: "Crawlability", severity: "warn" },
+  { id: "underscore-url", category: "Crawlability", severity: "warn" },
+  { id: "too-many-params", category: "Crawlability", severity: "warn" },
+  { id: "long-url", category: "Crawlability", severity: "info" },
+  { id: "resource-as-link", category: "Crawlability", severity: "info" },
+  // ── HTTPS ──
+  { id: "mixed-content", category: "HTTPS", severity: "block" },
+  { id: "non-secure-page", category: "HTTPS", severity: "block" },
+  { id: "homepage-not-https", category: "HTTPS", severity: "warn" },
+  { id: "http-urls-in-sitemap", category: "HTTPS", severity: "warn" },
+  { id: "https-to-http-links", category: "HTTPS", severity: "warn" },
+  // ── Technical SEO ──
   { id: "redirect-chain", category: "Technical SEO", severity: "warn" },
   { id: "heavy-html", category: "Technical SEO", severity: "warn" },
+  { id: "missing-viewport", category: "Technical SEO", severity: "warn" },
+  { id: "viewport-no-width", category: "Technical SEO", severity: "warn" },
+  { id: "meta-refresh", category: "Technical SEO", severity: "warn" },
+  { id: "no-charset", category: "Technical SEO", severity: "warn" },
+  { id: "no-doctype", category: "Technical SEO", severity: "warn" },
+  { id: "plugin-content", category: "Technical SEO", severity: "warn" },
+  { id: "frames", category: "Technical SEO", severity: "warn" },
+  // ── On-Page SEO ──
   { id: "missing-title", category: "On-Page SEO", severity: "block" },
   { id: "long-title", category: "On-Page SEO", severity: "warn" },
+  { id: "short-title", category: "On-Page SEO", severity: "warn" },
   { id: "duplicate-title", category: "On-Page SEO", severity: "warn" },
+  { id: "h1-equals-title", category: "On-Page SEO", severity: "warn" },
   { id: "missing-meta", category: "On-Page SEO", severity: "warn" },
+  { id: "duplicate-meta", category: "On-Page SEO", severity: "warn" },
   { id: "missing-h1", category: "On-Page SEO", severity: "warn" },
   { id: "multiple-h1", category: "On-Page SEO", severity: "warn" },
   { id: "missing-canonical", category: "On-Page SEO", severity: "warn" },
+  { id: "multiple-canonical", category: "On-Page SEO", severity: "warn" },
   { id: "image-no-alt", category: "On-Page SEO", severity: "warn" },
-  { id: "mixed-content", category: "HTTPS", severity: "block" },
-  { id: "orphan-page", category: "Internal Linking", severity: "warn" },
+  { id: "invalid-structured-data", category: "On-Page SEO", severity: "warn" },
+  // ── Content ──
   { id: "thin-content", category: "Content", severity: "warn" },
+  { id: "duplicate-content", category: "Content", severity: "warn" },
+  { id: "low-text-ratio", category: "Content", severity: "warn" },
+  // ── Internal Linking ──
+  { id: "orphan-page", category: "Internal Linking", severity: "warn" },
+  { id: "internal-nofollow", category: "Internal Linking", severity: "warn" },
+  { id: "too-many-links", category: "Internal Linking", severity: "warn" },
+  { id: "one-incoming-link", category: "Internal Linking", severity: "info" },
+  { id: "deep-page", category: "Internal Linking", severity: "info" },
+  { id: "generic-anchor", category: "Internal Linking", severity: "info" },
+  { id: "empty-anchor", category: "Internal Linking", severity: "info" },
+  { id: "external-nofollow", category: "Internal Linking", severity: "info" },
+  // ── International SEO ──
+  { id: "hreflang-conflict", category: "International SEO", severity: "warn" },
+  { id: "hreflang-invalid", category: "International SEO", severity: "warn" },
+  { id: "no-lang", category: "International SEO", severity: "warn" },
+  { id: "hreflang-lang-mismatch", category: "International SEO", severity: "info" },
+  // ── AI Search ──
+  { id: "ai-too-much-content", category: "AI Search", severity: "info" },
+  { id: "ai-outdated-content", category: "AI Search", severity: "info" },
+  { id: "ai-low-semantic-html", category: "AI Search", severity: "info" },
+  // ── Performance / Core Web Vitals ──
   { id: "slow-response", category: "Performance", severity: "warn" },
   { id: "slow-lcp", category: "Core Web Vitals", severity: "warn" },
   { id: "layout-shift", category: "Core Web Vitals", severity: "warn" },
   { id: "slow-interactivity", category: "Core Web Vitals", severity: "info" },
   { id: "performance-check-failed", category: "Core Web Vitals", severity: "info" },
 ];
+// Severity above is the HOUSE scale (§7.4: score = 100 − 25·block − 5·warn, counted per KIND of
+// problem), not a transcription of Semrush's Error/Warning/Notice column — MASTER_PLAN §27
+// records which Semrush column each check sits in. Twenty new "block" kinds at −25 each would
+// put nearly every real site at 0/100 and the score would stop meaning anything, so "block"
+// stays reserved for what actually stops a page being found or trusted (unreachable, 5xx, 4xx,
+// noindex, robots-blocks-all, missing title, mixed content, a plain-http page).
+
+/** Semrush's own thresholds where it publishes one, ours where it does not — each stated in the
+ *  finding's own sentence, so a customer can see the line and never has to guess it. */
+const SHORT_TITLE_CHARS = 30;
+const LONG_URL_CHARS = 200;
+const MAX_URL_PARAMS = 4;
+const MAX_LINKS_PER_PAGE = 3000;
+const MIN_TEXT_RATIO = 0.1;
+const SITEMAP_MAX_URLS = 50_000;
+const SITEMAP_MAX_BYTES = 50 * 1024 * 1024;
+const MAX_CLICK_DEPTH = 3;
+const AI_TOO_MANY_WORDS = 4000;
+const AI_OUTDATED_MONTHS = 24;
+const AI_MIN_DIVS_FOR_SEMANTIC_CHECK = 30;
+const AI_MIN_SEMANTIC_RATIO = 0.05;
+/** Words that tell a reader (and a crawler) nothing about where the link goes. */
+const GENERIC_ANCHORS = new Set(["click here", "here", "read more", "more", "learn more", "link", "this", "this page", "click", "go", "continue", "see more", "view"]);
+/** Files that are a resource, not a page — an <a href> at one of these is a mis-typed link. */
+const RESOURCE_EXT = /\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|ttf|eot|otf|mp4|webm|mp3|zip)$/i;
+/** BCP-47 as far as hreflang uses it: language (2-3), optional script (4), optional region
+ *  (2 letters or 3 digits), or the literal x-default. */
+const HREFLANG_RE = /^(x-default|[a-z]{2,3}(-[a-z]{4})?(-([a-z]{2}|\d{3}))?)$/i;
+/** Every directive robots.txt (RFC 9309 + the ones Google/Yandex/Bing document) can contain. */
+const ROBOTS_DIRECTIVES = new Set(["user-agent", "disallow", "allow", "sitemap", "crawl-delay", "host", "clean-param", "request-rate", "visit-time", "noindex"]);
+/** What a fetch error says when the name did not resolve at all — Node's own words. */
+const DNS_ERROR = /ENOTFOUND|EAI_AGAIN|EAI_NONAME|getaddrinfo|dns/i;
 const CHECK_CATEGORY: Record<string, string> = Object.fromEntries(CHECK_CATALOGUE.map((c) => [c.id, c.category]));
 
 function clamp(n: number, lo: number, hi: number): number {
@@ -227,16 +325,61 @@ export function auditSite(
     return { id, severity, what: what(pageUrls.length), fix, pages: pageUrls.slice(0, PAGE_SAMPLE), count: pageUrls.length };
   }
 
+  /** A finding about one of the site's two text files rather than about pages — robots.txt or
+   *  the sitemap. Not routed through `issue()` because those files are not crawled pages and
+   *  must not land in `pagesWithIssues`. */
+  function fileIssue(id: string, severity: AuditSeverity, url: string, what: string, fix: string): AuditIssue {
+    return { id, severity, what, fix, pages: [url], count: 1 };
+  }
+
   const ok = pages.filter((p) => p.status !== null && p.status < 400 && p.html);
   const parsed = ok.map((p) => ({ page: p, $: cheerio.load(p.html as string) }));
 
+  let siteHost = "";
+  try {
+    siteHost = new URL(site.origin).host.toLowerCase();
+  } catch {
+    /* an origin that is not a URL never gets here — auditTarget() refuses it upstream */
+  }
+  const homeKey = canonicalKey(site.origin);
+  const sitemapFile = site.sitemapUrl ?? site.origin + "/sitemap.xml";
+  const robotsFile = site.origin + "/robots.txt";
+  const groups = site.robotsTxt === null ? null : parseRobotsTxt(site.robotsTxt);
+
+  /** The text a reader actually sees — script/style and the site furniture removed — computed
+   *  once per page here and read by thin-content, duplicate-content, text ratio and the AI
+   *  Search notices below, so all four agree on what "the text of the page" is. */
+  const visibleText = new Map<string, string>();
+  for (const { page, $ } of parsed) {
+    const clone = cheerio.load($.html());
+    clone("script, style, nav, header, footer, noscript").remove();
+    visibleText.set(page.url, clone("body").text().replace(/\s+/g, " ").trim());
+  }
+  const wordsOf = (url: string) => (visibleText.get(url) ?? "").split(" ").filter(Boolean).length;
+
   /* ── 1 · broken and unreachable ─────────────────────────────────────────────────────── */
+
+  // DNS failures are their own row (Semrush "couldn't be crawled: DNS resolution issue") because
+  // the fix is different from a timeout or a refused connection: the NAME is wrong, not the
+  // server. Split on the error text Node itself wrote — never inferred from the URL.
+  const dead = pages.filter((p) => p.status === null);
+  const dns = dead.filter((p) => DNS_ERROR.test(p.error ?? ""));
+  const dnsSet = new Set(dns.map((p) => p.url));
+  issues.push(
+    issue(
+      "unreachable-dns",
+      "block",
+      dns.map((p) => p.url),
+      (n) => `${n} ${n === 1 ? "address does" : "addresses do"} not resolve — the domain name itself could not be found`,
+      "Check the hostname in these links for a typo, and that the domain's DNS records exist. Nothing at a name that does not resolve can be reached by anyone, Google included.",
+    ),
+  );
 
   issues.push(
     issue(
       "unreachable",
       "block",
-      pages.filter((p) => p.status === null).map((p) => p.url),
+      dead.filter((p) => !dnsSet.has(p.url)).map((p) => p.url),
       (n) => `${n} ${n === 1 ? "page" : "pages"} could not be loaded at all`,
       "Open these in a browser. If they load for you, the server may be blocking automated visitors — which also blocks Google.",
     ),
@@ -256,8 +399,10 @@ export function auditSite(
     issue(
       "not-found",
       "block",
-      pages.filter((p) => p.status === 404).map((p) => p.url),
-      (n) => `${n} ${n === 1 ? "link points" : "links point"} at a page that no longer exists`,
+      // Every 4xx, not only 404 (Semrush "4XX status code"): a 403 or 410 loses the visitor and
+      // the ranking exactly the same way, and the fix — bring it back or redirect it — is the same.
+      pages.filter((p) => p.status !== null && p.status >= 400 && p.status < 500).map((p) => p.url),
+      (n) => `${n} ${n === 1 ? "link points" : "links point"} at a page that cannot be opened (4xx)`,
       "Either bring the page back or redirect it to the closest replacement. Deleting a page without a redirect throws away every link it earned.",
     ),
   );
@@ -289,27 +434,172 @@ export function auditSite(
 
   if (site.robotsTxt === null) {
     skipped.push("robots.txt could not be read, so the rules you give search engines were not checked.");
-  } else if (/^\s*disallow:\s*\/\s*$/im.test(site.robotsTxt) && /user-agent:\s*\*/i.test(site.robotsTxt)) {
-    issues.push({
-      id: "robots-blocks-all",
-      severity: "block",
-      what: "Your robots.txt tells every search engine to stay off the whole site",
-      fix: 'Remove the "Disallow: /" line from robots.txt. Until you do, nothing on the site can be found on Google.',
-      pages: [site.origin + "/robots.txt"],
-      count: 1,
-    });
+    // Also a row in the report (Semrush lists it as a Notice) — the skipped line above says
+    // what was NOT checked because of it; this says what to do.
+    issues.push(
+      fileIssue(
+        "robots-not-found",
+        "info",
+        robotsFile,
+        "There is no robots.txt",
+        "Add a robots.txt at the site root — even one that only names the sitemap. Without it every crawler has to guess what it may read, and some read less.",
+      ),
+    );
+  } else {
+    if (/^\s*disallow:\s*\/\s*$/im.test(site.robotsTxt) && /user-agent:\s*\*/i.test(site.robotsTxt)) {
+      issues.push(
+        fileIssue(
+          "robots-blocks-all",
+          "block",
+          robotsFile,
+          "Your robots.txt tells every search engine to stay off the whole site",
+          'Remove the "Disallow: /" line from robots.txt. Until you do, nothing on the site can be found on Google.',
+        ),
+      );
+    }
+
+    // Lines that are not a comment, not blank, and not `directive: value` for any directive a
+    // crawler knows — the same lines lib/audit/robots.ts's parser silently steps over. Counted
+    // here so the owner learns the file has a typo before wondering why a rule is not obeyed.
+    const badLines = site.robotsTxt
+      .split(/\r?\n/)
+      .map((l) => l.replace(/#.*$/, "").trim())
+      .filter((l) => l && !ROBOTS_DIRECTIVES.has((l.match(/^([a-z-]+)\s*:/i)?.[1] ?? "").toLowerCase()));
+    if (badLines.length) {
+      issues.push(
+        fileIssue(
+          "robots-format-error",
+          "warn",
+          robotsFile,
+          `robots.txt has ${badLines.length} ${badLines.length === 1 ? "line" : "lines"} no crawler can read (e.g. "${badLines[0].slice(0, 60)}")`,
+          'Every line must be "Directive: value" — User-agent, Disallow, Allow, Sitemap, Crawl-delay — or a # comment. A crawler ignores a line it cannot parse, so a rule with a typo is a rule that is not applied.',
+        ),
+      );
+    }
+
+    if (site.sitemapUrls !== null && !/^\s*sitemap:/im.test(site.robotsTxt)) {
+      issues.push(
+        fileIssue(
+          "sitemap-not-in-robots",
+          "warn",
+          robotsFile,
+          "robots.txt does not name the sitemap",
+          `Add the line "Sitemap: ${sitemapFile}" to robots.txt. It is the one place every crawler looks for it without being told.`,
+        ),
+      );
+    }
   }
 
   if (site.sitemapUrls === null) {
-    issues.push({
-      id: "no-sitemap",
-      severity: "warn",
-      what: "There is no sitemap.xml",
-      fix: "Add one (every WordPress SEO plugin generates it) and list it in robots.txt. It is how Google finds pages nothing links to yet.",
-      pages: [site.origin + "/sitemap.xml"],
-      count: 1,
+    issues.push(
+      fileIssue(
+        "no-sitemap",
+        "warn",
+        sitemapFile,
+        "There is no sitemap.xml",
+        "Add one (every WordPress SEO plugin generates it) and list it in robots.txt. It is how Google finds pages nothing links to yet.",
+      ),
+    );
+  } else {
+    if (site.sitemapMalformed) {
+      issues.push(
+        fileIssue(
+          "sitemap-format-error",
+          "warn",
+          sitemapFile,
+          "The sitemap is not valid XML — it has no <urlset> or <sitemapindex>",
+          "Open the sitemap address in a browser. If it shows a web page instead of XML, the server is answering the wrong file; regenerate the sitemap with your SEO plugin and check the address in robots.txt.",
+        ),
+      );
+    }
+
+    if (site.sitemapUrls.length > SITEMAP_MAX_URLS || (site.sitemapBytes ?? 0) > SITEMAP_MAX_BYTES) {
+      issues.push(
+        fileIssue(
+          "sitemap-too-large",
+          "warn",
+          sitemapFile,
+          `The sitemap has ${site.sitemapUrls.length.toLocaleString()} URLs${(site.sitemapBytes ?? 0) > SITEMAP_MAX_BYTES ? " and is over 50 MB" : ""} — past what one sitemap file may hold`,
+          "Split it into several sitemaps of 50,000 URLs / 50 MB each and list them in a sitemap index. Crawlers stop reading at the limit and everything after it is never seen.",
+        ),
+      );
+    }
+
+    // Entries that are not URLs at all — `new URL()` refuses them, and so will Google.
+    const badEntries = site.sitemapUrls.filter((u) => {
+      try {
+        new URL(u);
+        return false;
+      } catch {
+        return true;
+      }
     });
+    issues.push(
+      issue(
+        "malformed-sitemap-url",
+        "warn",
+        badEntries,
+        (n) => `${n} ${n === 1 ? "entry" : "entries"} in the sitemap ${n === 1 ? "is" : "are"} not a valid address`,
+        "Every <loc> must be a full absolute URL — https://your-site.com/page — not a path or a bare domain. Fix the entries or regenerate the sitemap.",
+      ),
+    );
+
+    // Pages the sitemap lists that a crawler would then find are not really there to index — a
+    // 4xx/5xx, a redirect, or a noindex. Only judged on pages this run actually fetched.
+    const inSitemap = new Set(site.sitemapUrls.map(canonicalKey));
+    const wrong = pages
+      .filter((p) => inSitemap.has(canonicalKey(p.url)))
+      .filter((p) => {
+        if (p.status !== 200) return true;
+        if (p.finalUrl && canonicalKey(p.finalUrl) !== canonicalKey(p.url)) return true;
+        const entry = parsed.find((x) => x.page === p);
+        return !!entry && /noindex/i.test(entry.$('meta[name="robots"]').attr("content") ?? "");
+      })
+      .map((p) => p.url);
+    issues.push(
+      issue(
+        "sitemap-bad-page",
+        "warn",
+        wrong,
+        (n) => `${n} ${n === 1 ? "page" : "pages"} in the sitemap ${n === 1 ? "is" : "are"} not indexable (an error, a redirect, or noindex)`,
+        "A sitemap should list only live pages you want found. Remove these entries, or fix the page they point at — a sitemap full of dead ends teaches Google to trust it less.",
+      ),
+    );
+
+    if (site.origin.startsWith("https://")) {
+      issues.push(
+        issue(
+          "http-urls-in-sitemap",
+          "warn",
+          site.sitemapUrls.filter((u) => /^http:\/\//i.test(u)),
+          (n) => `${n} sitemap ${n === 1 ? "entry uses" : "entries use"} http:// on a site served over https://`,
+          "Regenerate the sitemap with https:// addresses. Each http:// entry sends the crawler through a redirect before it reaches the real page.",
+        ),
+      );
+    }
   }
+
+  if (!site.origin.startsWith("https://")) {
+    issues.push(
+      fileIssue(
+        "homepage-not-https",
+        "warn",
+        site.origin,
+        "The site's home address is not https://",
+        "Install a certificate (most hosts include one free) and redirect every http:// address to https://. Browsers mark plain http sites as not secure, and Google prefers the secure version.",
+      ),
+    );
+  }
+
+  issues.push(
+    issue(
+      "non-secure-page",
+      "block",
+      ok.filter((p) => /^http:\/\//i.test(p.finalUrl ?? p.url)).map((p) => p.url),
+      (n) => `${n} ${n === 1 ? "page is" : "pages are"} served over plain http://`,
+      'Serve every page over https:// and redirect the http:// address to it. A page without the padlock is labelled "Not secure" in the browser bar, and that label costs visitors before they read a word.',
+    ),
+  );
 
   /* ── 3 · the page's own basics ──────────────────────────────────────────────────────── */
 
@@ -395,6 +685,279 @@ export function auditSite(
     ),
   );
 
+  issues.push(
+    issue(
+      "short-title",
+      "warn",
+      parsed
+        .filter((p) => {
+          const n = titleOf(p).length;
+          return n > 0 && n < SHORT_TITLE_CHARS;
+        })
+        .map(({ page }) => page.url),
+      (n) => `${n} ${n === 1 ? "title is" : "titles are"} shorter than ${SHORT_TITLE_CHARS} characters`,
+      'A title that short wastes the space Google gives you. Say what the page is and where — "Roof repairs in Springfield | Example Roofing" — instead of one word.',
+    ),
+  );
+
+  const norm = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
+  const h1Of = ({ $ }: { $: cheerio.CheerioAPI }) => norm($("h1").first().text());
+  issues.push(
+    issue(
+      "h1-equals-title",
+      "warn",
+      parsed.filter((p) => !!h1Of(p) && h1Of(p) === norm(titleOf(p))).map(({ page }) => page.url),
+      (n) => `${n} ${n === 1 ? "page has" : "pages have"} an H1 identical to its title`,
+      "Let the title and the H1 do different jobs: the title earns the click in Google (add the place and the business), the H1 tells the reader they landed in the right spot.",
+    ),
+  );
+
+  const byMeta = new Map<string, string[]>();
+  for (const p of parsed) {
+    const m = metaOf(p).toLowerCase();
+    if (!m) continue;
+    byMeta.set(m, [...(byMeta.get(m) ?? []), p.page.url]);
+  }
+  issues.push(
+    issue(
+      "duplicate-meta",
+      "warn",
+      [...byMeta.values()].filter((urls) => urls.length > 1).flat(),
+      (n) => `${n} pages share a description with another page`,
+      "Write a description for each page that says what THAT page offers. The same sentence under every result tells the searcher nothing about which to open.",
+    ),
+  );
+
+  issues.push(
+    issue(
+      "multiple-canonical",
+      "warn",
+      parsed.filter(({ $ }) => $('link[rel="canonical"]').length > 1).map(({ page }) => page.url),
+      (n) => `${n} ${n === 1 ? "page names" : "pages name"} more than one canonical address`,
+      "Keep exactly one canonical link per page. Given two, Google ignores both — usually a theme and an SEO plugin each adding their own.",
+    ),
+  );
+
+  /* ── 3b · technical — what the <head> is missing ───────────────────────────────────── */
+
+  issues.push(
+    issue(
+      "meta-refresh",
+      "warn",
+      parsed
+        .filter(({ $ }) => $("meta[http-equiv]").toArray().some((el) => /^refresh$/i.test(($(el).attr("http-equiv") ?? "").trim())))
+        .map(({ page }) => page.url),
+      (n) => `${n} ${n === 1 ? "page redirects" : "pages redirect"} with a meta refresh tag`,
+      "Replace the meta refresh with a real 301 redirect on the server. A meta refresh is slow for the visitor and Google may not pass the old page's authority through it.",
+    ),
+  );
+
+  const viewportOf = ({ $ }: { $: cheerio.CheerioAPI }) => $('meta[name="viewport"]').first();
+  issues.push(
+    issue(
+      "missing-viewport",
+      "warn",
+      parsed.filter((p) => viewportOf(p).length === 0).map(({ page }) => page.url),
+      (n) => `${n} ${n === 1 ? "page has" : "pages have"} no viewport tag`,
+      'Add <meta name="viewport" content="width=device-width, initial-scale=1"> to every page. Without it phones render the desktop layout shrunk down, and Google ranks with the phone version.',
+    ),
+  );
+
+  issues.push(
+    issue(
+      "viewport-no-width",
+      "warn",
+      parsed
+        .filter((p) => viewportOf(p).length > 0 && !/width\s*=/i.test(viewportOf(p).attr("content") ?? ""))
+        .map(({ page }) => page.url),
+      (n) => `${n} viewport ${n === 1 ? "tag does" : "tags do"} not set a width`,
+      'The viewport tag needs "width=device-width" in its content. Without a width the phone falls back to the desktop layout as if the tag were not there.',
+    ),
+  );
+
+  issues.push(
+    issue(
+      "no-charset",
+      "warn",
+      parsed
+        .filter(
+          ({ $ }) =>
+            $("meta[charset]").length === 0 &&
+            !$("meta[http-equiv]")
+              .toArray()
+              .some((el) => /content-type/i.test($(el).attr("http-equiv") ?? "") && /charset=/i.test($(el).attr("content") ?? "")),
+        )
+        .map(({ page }) => page.url),
+      (n) => `${n} ${n === 1 ? "page does" : "pages do"} not declare a character encoding`,
+      'Add <meta charset="utf-8"> as the first line of <head>. Without it a browser guesses, and a wrong guess turns every accent and quote into garbage characters.',
+    ),
+  );
+
+  issues.push(
+    issue(
+      "no-doctype",
+      "warn",
+      // \uFEFF is a byte-order mark — some editors put one before the doctype, and it is not a defect.
+      parsed.filter(({ page }) => !/^\uFEFF?\s*(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*<!doctype/i.test(page.html ?? "")).map(({ page }) => page.url),
+      (n) => `${n} ${n === 1 ? "page has" : "pages have"} no doctype declaration`,
+      "Put <!DOCTYPE html> on the first line of every page. Without it browsers switch to quirks mode and lay the page out by 1990s rules, which breaks modern CSS.",
+    ),
+  );
+
+  issues.push(
+    issue(
+      "plugin-content",
+      "warn",
+      parsed
+        .filter(({ $ }) =>
+          $("object, embed, applet")
+            .toArray()
+            .some((el) => el.tagName === "applet" || /flash|shockwave|silverlight|\.swf\b|\.xap\b|clsid:/i.test(Object.values($(el).attr() ?? {}).join(" "))),
+        )
+        .map(({ page }) => page.url),
+      (n) => `${n} ${n === 1 ? "page embeds" : "pages embed"} a browser plugin (Flash, Silverlight or a Java applet)`,
+      "No current browser runs these — whatever it was showing is a blank box now. Replace it with an HTML5 video, an image, or plain HTML.",
+    ),
+  );
+
+  issues.push(
+    issue(
+      "frames",
+      "warn",
+      parsed.filter(({ $ }) => $("frame, frameset").length > 0).map(({ page }) => page.url),
+      (n) => `${n} ${n === 1 ? "page is" : "pages are"} built with frames`,
+      "Rebuild the page without <frameset>. Google indexes the frame contents as separate pages, so the page itself has no content of its own to rank.",
+    ),
+  );
+
+  // JSON-LD that a parser rejects, or that names no @type, is markup Google throws away whole.
+  const ldValid = (text: string): boolean => {
+    try {
+      const j = JSON.parse(text);
+      const items = Array.isArray(j) ? j : j && Array.isArray(j["@graph"]) ? j["@graph"] : [j];
+      return items.length > 0 && items.every((it: unknown) => !!it && typeof it === "object" && "@type" in (it as object));
+    } catch {
+      return false;
+    }
+  };
+  issues.push(
+    issue(
+      "invalid-structured-data",
+      "warn",
+      parsed
+        .filter(({ $ }) => $('script[type="application/ld+json"]').toArray().some((el) => !ldValid($(el).text())))
+        .map(({ page }) => page.url),
+      (n) => `${n} ${n === 1 ? "page has" : "pages have"} structured data that cannot be read`,
+      "Paste the page into Google's Rich Results Test. The JSON-LD is either not valid JSON or has no @type, and a block Google cannot parse earns none of the rich results it was added for.",
+    ),
+  );
+
+  /* ── 3c · international — hreflang and the page language ───────────────────────────── */
+
+  const hreflangsOf = ({ $ }: { $: cheerio.CheerioAPI }) =>
+    $('link[rel="alternate"][hreflang]')
+      .toArray()
+      .map((el) => ({ lang: ($(el).attr("hreflang") ?? "").trim(), href: ($(el).attr("href") ?? "").trim() }))
+      .filter((h) => h.lang);
+  const htmlLangOf = ({ $ }: { $: cheerio.CheerioAPI }) => ($("html").attr("lang") ?? "").trim();
+
+  issues.push(
+    issue(
+      "hreflang-conflict",
+      "warn",
+      parsed
+        .filter((p) => {
+          const seen = new Map<string, string>();
+          for (const h of hreflangsOf(p)) {
+            const key = h.lang.toLowerCase();
+            if (seen.has(key) && seen.get(key) !== h.href) return true;
+            seen.set(key, h.href);
+          }
+          return false;
+        })
+        .map(({ page }) => page.url),
+      (n) => `${n} ${n === 1 ? "page points" : "pages point"} the same language at two different addresses`,
+      "Each hreflang language may name one URL per page. Two different addresses for the same language and Google cannot tell which to show that country.",
+    ),
+  );
+
+  issues.push(
+    issue(
+      "hreflang-invalid",
+      "warn",
+      parsed.filter((p) => hreflangsOf(p).some((h) => !HREFLANG_RE.test(h.lang))).map(({ page }) => page.url),
+      (n) => `${n} ${n === 1 ? "page uses" : "pages use"} an hreflang code that is not a language`,
+      'hreflang takes a language code ("en"), optionally with a region ("en-GB"), or "x-default". Anything else — "english", "uk", "en_GB" with an underscore — is ignored.',
+    ),
+  );
+
+  issues.push(
+    issue(
+      "no-lang",
+      "warn",
+      parsed.filter((p) => !htmlLangOf(p) && hreflangsOf(p).length === 0).map(({ page }) => page.url),
+      (n) => `${n} ${n === 1 ? "page does" : "pages do"} not say what language it is in`,
+      'Add lang="en" (or the page\'s language) to the <html> tag. Screen readers pick a voice from it, and search engines use it to decide which country to show the page in.',
+    ),
+  );
+
+  issues.push(
+    issue(
+      "hreflang-lang-mismatch",
+      "info",
+      parsed
+        .filter((p) => {
+          const lang = htmlLangOf(p).toLowerCase().split("-")[0];
+          if (!lang) return false;
+          const self = hreflangsOf(p).find((h) => h.lang.toLowerCase() !== "x-default" && canonicalKey(h.href) === canonicalKey(p.page.url));
+          return !!self && self.lang.toLowerCase().split("-")[0] !== lang;
+        })
+        .map(({ page }) => page.url),
+      (n) => `${n} ${n === 1 ? "page's" : "pages'"} hreflang for itself disagrees with its <html lang>`,
+      "Make the page's own hreflang entry and its <html lang> name the same language. When they disagree, one of them is wrong, and Google guesses which.",
+    ),
+  );
+
+  /* ── 3d · the addresses themselves ─────────────────────────────────────────────────── */
+
+  const urlOf = (u: string): URL | null => {
+    try {
+      return new URL(u);
+    } catch {
+      return null;
+    }
+  };
+
+  issues.push(
+    issue(
+      "underscore-url",
+      "warn",
+      pages.filter((p) => urlOf(p.url)?.pathname.includes("_")).map((p) => p.url),
+      (n) => `${n} ${n === 1 ? "URL uses" : "URLs use"} underscores instead of hyphens`,
+      'Google reads "roof_repairs" as one word and "roof-repairs" as two. Use hyphens in new URLs; only rename an existing page if you also redirect the old address.',
+    ),
+  );
+
+  issues.push(
+    issue(
+      "too-many-params",
+      "warn",
+      pages.filter((p) => [...(urlOf(p.url)?.searchParams ?? [])].length > MAX_URL_PARAMS).map((p) => p.url),
+      (n) => `${n} ${n === 1 ? "URL has" : "URLs have"} more than ${MAX_URL_PARAMS} query parameters`,
+      "Every combination of parameters is a separate page to Google, and most of them are the same page. Give the page a clean address and canonicalise the filtered versions to it.",
+    ),
+  );
+
+  issues.push(
+    issue(
+      "long-url",
+      "info",
+      pages.filter((p) => p.url.length > LONG_URL_CHARS).map((p) => p.url),
+      (n) => `${n} ${n === 1 ? "URL is" : "URLs are"} longer than ${LONG_URL_CHARS} characters`,
+      "Shorter addresses are easier to share and get cut off less in search results. Trim the slug to the words that matter — with a redirect from the old one.",
+    ),
+  );
+
   /* ── 4 · images and links ───────────────────────────────────────────────────────────── */
 
   const noAlt = parsed
@@ -422,46 +985,345 @@ export function auditSite(
     ),
   );
 
-  // Orphans: a page in the sitemap that nothing on the site links to. Google can still find it,
-  // but nothing passes it any authority and visitors never stumble into it.
-  const linked = new Set<string>();
+  // Resources the site's own robots.txt hides from the crawler — a blocked stylesheet or script
+  // means Google renders the page without it and judges what it sees. Same parser as the
+  // AI-bot card and blockedPages below, so "blocked" means one thing everywhere.
+  if (groups !== null) {
+    issues.push(
+      issue(
+        "blocked-resources",
+        "warn",
+        parsed
+          .filter(({ page, $ }) =>
+            $('script[src], link[rel="stylesheet"][href], img[src]')
+              .toArray()
+              .some((el) => {
+                try {
+                  const abs = new URL($(el).attr("src") ?? $(el).attr("href") ?? "", page.finalUrl ?? page.url);
+                  return sameOrigin(abs.toString(), site.origin) && isBlocked(abs.pathname, "*", groups);
+                } catch {
+                  return false;
+                }
+              }),
+          )
+          .map(({ page }) => page.url),
+        (n) => `${n} ${n === 1 ? "page loads" : "pages load"} a script, stylesheet or image that robots.txt blocks`,
+        "Allow the /wp-content/, /assets/ or /static/ folder (whichever holds them) in robots.txt. Google renders pages like a browser; hide the CSS and it sees a broken page.",
+      ),
+    );
+  }
+
+  /* ── 4b · the link graph — built once, read by seven checks ─────────────────────────── */
+
+  // Every same-origin <a href> on every readable page, as page → page edges keyed the way
+  // canonicalKey() keys them (so /about, /about/ and /about#team are one node). Orphans,
+  // in-degree, click depth and the per-link findings all read this one structure, which is
+  // what keeps "orphan" and "one incoming link" from disagreeing about the same page.
+  const outLinks = new Map<string, Set<string>>();
+  const inSources = new Map<string, Set<string>>();
+  const linkFlags = {
+    malformed: [] as string[],
+    long: [] as string[],
+    httpsToHttp: [] as string[],
+    resource: [] as string[],
+    internalNofollow: [] as string[],
+    externalNofollow: [] as string[],
+    generic: [] as string[],
+    empty: [] as string[],
+    tooMany: [] as string[],
+  };
+  const SKIP_SCHEME = /^(mailto|tel|sms|javascript|data|ftp|file):/i;
+  const LOOKS_LIKE_URL = /^(https?:\/\/|www\.)\S+$/i;
+
   for (const { page, $ } of parsed) {
-    for (const el of $("a[href]").toArray()) {
-      const href = $(el).attr("href") ?? "";
-      if (!href || href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("tel:")) continue;
+    const fromKey = canonicalKey(page.url);
+    const anchors = $("a[href]").toArray();
+    if (anchors.length > MAX_LINKS_PER_PAGE) linkFlags.tooMany.push(page.url);
+    const hit = { malformed: false, long: false, httpsToHttp: false, resource: false, internalNofollow: false, externalNofollow: false, generic: false, empty: false };
+
+    for (const el of anchors) {
+      const href = ($(el).attr("href") ?? "").trim();
+      if (!href || href.startsWith("#") || SKIP_SCHEME.test(href)) continue;
+      let abs: URL;
       try {
-        const abs = new URL(href, page.finalUrl ?? page.url).toString();
-        if (sameOrigin(abs, site.origin)) linked.add(canonicalKey(abs));
+        abs = new URL(href, page.finalUrl ?? page.url);
       } catch {
-        /* an unparseable href is the browser's problem, not a finding worth a row */
+        hit.malformed = true;
+        continue;
+      }
+      if (abs.protocol !== "http:" && abs.protocol !== "https:") continue;
+
+      const rel = ($(el).attr("rel") ?? "").toLowerCase();
+      const nofollow = /\bnofollow\b/.test(rel);
+      const text = $(el).text().replace(/\s+/g, " ").trim();
+      const imgAlt = $(el)
+        .find("img")
+        .toArray()
+        .some((img) => ($(img).attr("alt") ?? "").trim());
+      const labelled = !!(($(el).attr("aria-label") ?? "").trim() || ($(el).attr("title") ?? "").trim());
+      if (!text && !imgAlt && !labelled) hit.empty = true;
+      else if (text && (GENERIC_ANCHORS.has(text.toLowerCase()) || LOOKS_LIKE_URL.test(text))) hit.generic = true;
+      if (abs.toString().length > LONG_URL_CHARS) hit.long = true;
+      if (abs.host.toLowerCase() === siteHost && abs.protocol === "http:" && page.url.startsWith("https://")) hit.httpsToHttp = true;
+
+      if (sameOrigin(abs.toString(), site.origin)) {
+        if (RESOURCE_EXT.test(abs.pathname)) hit.resource = true;
+        if (nofollow) hit.internalNofollow = true;
+        const toKey = canonicalKey(abs.toString());
+        if (toKey === fromKey) continue;
+        if (!outLinks.has(fromKey)) outLinks.set(fromKey, new Set());
+        outLinks.get(fromKey)!.add(toKey);
+        if (!inSources.has(toKey)) inSources.set(toKey, new Set());
+        inSources.get(toKey)!.add(fromKey);
+      } else if (nofollow) {
+        hit.externalNofollow = true;
       }
     }
+    for (const k of Object.keys(hit) as (keyof typeof hit)[]) if (hit[k]) linkFlags[k].push(page.url);
   }
-  const orphans = ok.map((p) => p.url).filter((u) => !linked.has(canonicalKey(u)) && canonicalKey(u) !== canonicalKey(site.origin));
+
+  issues.push(
+    issue(
+      "malformed-link",
+      "warn",
+      linkFlags.malformed,
+      (n) => `${n} ${n === 1 ? "page has" : "pages have"} a link whose address is not a valid URL`,
+      "Find the <a href> a browser cannot parse — usually a stray space, quote or bracket in the address — and fix it. A link nobody can follow is a link that passes nothing on.",
+    ),
+  );
+
+  issues.push(
+    issue(
+      "long-link-url",
+      "warn",
+      linkFlags.long,
+      (n) => `${n} ${n === 1 ? "page links" : "pages link"} to an address longer than ${LONG_URL_CHARS} characters`,
+      "Shorten the address being linked to, or link to its clean canonical version. Very long URLs are usually tracking parameters that should not be in an internal link at all.",
+    ),
+  );
+
+  issues.push(
+    issue(
+      "https-to-http-links",
+      "warn",
+      linkFlags.httpsToHttp,
+      (n) => `${n} secure ${n === 1 ? "page links" : "pages link"} to the http:// version of this site`,
+      "Change the links to https://. Each one sends the visitor through a redirect, and a page linked as http:// is a page Google may keep as the http:// version.",
+    ),
+  );
+
+  issues.push(
+    issue(
+      "resource-as-link",
+      "info",
+      linkFlags.resource,
+      (n) => `${n} ${n === 1 ? "page links" : "pages link"} to a file (image, script, stylesheet) as if it were a page`,
+      "A visitor who clicks it gets a raw file, and a crawler spends a fetch on something it cannot rank. Link to the page that shows the file instead, or remove the link.",
+    ),
+  );
+
+  issues.push(
+    issue(
+      "internal-nofollow",
+      "warn",
+      linkFlags.internalNofollow,
+      (n) => `${n} ${n === 1 ? "page marks" : "pages mark"} a link to its own site as nofollow`,
+      'Remove rel="nofollow" from links between your own pages. It tells Google not to trust the page you are linking to — your own page.',
+    ),
+  );
+
+  issues.push(
+    issue(
+      "external-nofollow",
+      "info",
+      linkFlags.externalNofollow,
+      (n) => `${n} ${n === 1 ? "page marks" : "pages mark"} every outgoing link nofollow`,
+      "Nothing to fix if that is deliberate (paid or user-posted links should be nofollow). For links to sources and partners you vouch for, a normal link is fine and reads more naturally to Google.",
+    ),
+  );
+
+  issues.push(
+    issue(
+      "generic-anchor",
+      "info",
+      linkFlags.generic,
+      (n) => `${n} ${n === 1 ? "page has" : "pages have"} links that just say "click here", "read more" or a bare URL`,
+      'Make the link text say where it goes — "our roof repair prices" rather than "click here". The words in a link are one of the strongest hints about the page it points to.',
+    ),
+  );
+
+  issues.push(
+    issue(
+      "empty-anchor",
+      "info",
+      linkFlags.empty,
+      (n) => `${n} ${n === 1 ? "page has" : "pages have"} links with no text at all`,
+      "Give every link visible text, or an image with alt text, or an aria-label. An empty link is invisible to a screen reader and tells Google nothing about its target.",
+    ),
+  );
+
+  issues.push(
+    issue(
+      "too-many-links",
+      "warn",
+      linkFlags.tooMany,
+      (n) => `${n} ${n === 1 ? "page has" : "pages have"} more than ${MAX_LINKS_PER_PAGE.toLocaleString()} links on it`,
+      "That many links is almost always a sitemap page or a runaway tag cloud. Split it up — a page that links to everything passes almost nothing to anything.",
+    ),
+  );
+
+  // Orphans: a page nothing on the site links to. Google can still find it through the sitemap,
+  // but nothing passes it any authority and visitors never stumble into it.
+  const okKeys = ok.map((p) => ({ url: p.url, key: canonicalKey(p.url) }));
   issues.push(
     issue(
       "orphan-page",
       "warn",
-      orphans,
+      okKeys.filter(({ key }) => key !== homeKey && !inSources.has(key)).map(({ url }) => url),
       (n) => `${n} ${n === 1 ? "page is" : "pages are"} not linked from anywhere on the site`,
       "Link to these from a relevant page or your menu. A page nothing links to reads as unimportant to Google and is invisible to visitors browsing.",
     ),
   );
 
-  const thin = parsed
-    .filter(({ $ }) => {
-      const clone = cheerio.load($.html());
-      clone("script, style, nav, header, footer, noscript").remove();
-      return clone("body").text().replace(/\s+/g, " ").trim().split(" ").filter(Boolean).length < 150;
-    })
-    .map(({ page }) => page.url);
+  issues.push(
+    issue(
+      "one-incoming-link",
+      "info",
+      okKeys.filter(({ key }) => key !== homeKey && inSources.get(key)?.size === 1).map(({ url }) => url),
+      (n) => `${n} ${n === 1 ? "page is" : "pages are"} reachable from only one other page`,
+      "Add a second link to each — from a related page, the footer or the menu. One link is one point of failure: remove it in a redesign and the page becomes an orphan.",
+    ),
+  );
+
+  // Click depth: breadth-first from the home page over the graph above. Only pages that are
+  // reachable get a depth — an orphan is already its own finding, not also a "deep" page.
+  const depth = new Map<string, number>([[homeKey, 0]]);
+  const queue = [homeKey];
+  while (queue.length) {
+    const cur = queue.shift()!;
+    for (const next of outLinks.get(cur) ?? []) {
+      if (depth.has(next)) continue;
+      depth.set(next, depth.get(cur)! + 1);
+      queue.push(next);
+    }
+  }
+  issues.push(
+    issue(
+      "deep-page",
+      "info",
+      okKeys.filter(({ key }) => (depth.get(key) ?? 0) > MAX_CLICK_DEPTH).map(({ url }) => url),
+      (n) => `${n} ${n === 1 ? "page is" : "pages are"} more than ${MAX_CLICK_DEPTH} clicks from the home page`,
+      "Link to these from somewhere higher up — a category page, the menu, the home page. Both crawlers and visitors give up before the fourth click.",
+    ),
+  );
+
+  /* ── 4c · content ───────────────────────────────────────────────────────────────────── */
+
   issues.push(
     issue(
       "thin-content",
       "warn",
-      thin,
+      parsed.filter(({ page }) => wordsOf(page.url) < 150).map(({ page }) => page.url),
       (n) => `${n} ${n === 1 ? "page has" : "pages have"} almost no text on it`,
       "Either write these properly or remove them. A page with a heading and two lines rarely ranks for anything and drags the rest down.",
+    ),
+  );
+
+  // Identical visible text on two URLs that each claim to be the real one. A page whose canonical
+  // points elsewhere has already declared itself the copy and is left out.
+  const selfCanonical = ({ page, $ }: { page: AuditPage; $: cheerio.CheerioAPI }) => {
+    const href = $('link[rel="canonical"]').first().attr("href");
+    if (!href) return true;
+    try {
+      return canonicalKey(new URL(href, page.url).toString()) === canonicalKey(page.url);
+    } catch {
+      return true;
+    }
+  };
+  const byText = new Map<string, string[]>();
+  for (const p of parsed) {
+    if (wordsOf(p.page.url) < 50 || !selfCanonical(p)) continue;
+    const t = (visibleText.get(p.page.url) ?? "").toLowerCase();
+    byText.set(t, [...(byText.get(t) ?? []), p.page.url]);
+  }
+  issues.push(
+    issue(
+      "duplicate-content",
+      "warn",
+      [...byText.values()].filter((urls) => urls.length > 1).flat(),
+      (n) => `${n} pages have exactly the same text as another page`,
+      "Keep one and redirect the other to it, or add a canonical link on the copy pointing at the original. Two identical pages split the ranking between them and Google picks one at random.",
+    ),
+  );
+
+  issues.push(
+    issue(
+      "low-text-ratio",
+      "warn",
+      parsed
+        .filter(({ page }) => page.bytes > 0 && (visibleText.get(page.url) ?? "").length / page.bytes < MIN_TEXT_RATIO)
+        .map(({ page }) => page.url),
+      (n) => `${n} ${n === 1 ? "page is" : "pages are"} less than ${Math.round(MIN_TEXT_RATIO * 100)}% text by size`,
+      "The page is mostly markup and script, not words. Usually a page builder's output — worth showing your developer, and worth adding the text a reader actually came for.",
+    ),
+  );
+
+  /* ── 4d · AI Search — what an answer engine needs that Google alone did not ─────────── */
+
+  issues.push(
+    issue(
+      "ai-too-much-content",
+      "info",
+      parsed.filter(({ page }) => wordsOf(page.url) > AI_TOO_MANY_WORDS).map(({ page }) => page.url),
+      (n) => `${n} ${n === 1 ? "page has" : "pages have"} more than ${AI_TOO_MANY_WORDS.toLocaleString()} words on it`,
+      "AI answer engines quote a passage, not a page, and lose the thread in a very long one. Split it into pages with one question each, or add a summary and headings that name each section.",
+    ),
+  );
+
+  // Only judged when the page itself carries a date. A page with no date is not called stale —
+  // that would be guessing, and this file does not guess.
+  const latestDateOf = ({ $ }: { $: cheerio.CheerioAPI }): number | null => {
+    const raw: string[] = [];
+    $("time[datetime]").each((_, el) => {
+      raw.push($(el).attr("datetime") ?? "");
+    });
+    $('meta[property="article:modified_time"], meta[property="article:published_time"], meta[name="last-modified"], meta[itemprop="dateModified"], meta[itemprop="datePublished"]').each((_, el) => {
+      raw.push($(el).attr("content") ?? "");
+    });
+    $('script[type="application/ld+json"]').each((_, el) => {
+      for (const m of $(el).text().matchAll(/"date(?:Modified|Published)"\s*:\s*"([^"]+)"/g)) raw.push(m[1]);
+    });
+    const times = raw.map((d) => Date.parse(d)).filter((t) => Number.isFinite(t));
+    return times.length ? Math.max(...times) : null;
+  };
+  const staleBefore = Date.now() - AI_OUTDATED_MONTHS * 30.44 * 24 * 3600 * 1000;
+  issues.push(
+    issue(
+      "ai-outdated-content",
+      "info",
+      parsed
+        .filter((p) => {
+          const t = latestDateOf(p);
+          return t !== null && t < staleBefore;
+        })
+        .map(({ page }) => page.url),
+      (n) => `${n} ${n === 1 ? "page was" : "pages were"} last updated more than ${AI_OUTDATED_MONTHS / 12} years ago, by its own date`,
+      "Refresh the page and update its published/modified date. AI answer engines favour recent sources, and a page that says it is two years old is passed over for one that says it is two months old.",
+    ),
+  );
+
+  issues.push(
+    issue(
+      "ai-low-semantic-html",
+      "info",
+      parsed
+        .filter(({ $ }) => {
+          const divs = $("div").length;
+          return divs >= AI_MIN_DIVS_FOR_SEMANTIC_CHECK && $("main, article, section, nav, header, footer, aside").length / divs < AI_MIN_SEMANTIC_RATIO;
+        })
+        .map(({ page }) => page.url),
+      (n) => `${n} ${n === 1 ? "page is" : "pages are"} built almost entirely from <div>s`,
+      "Wrap the content in <main> and <article>, the menu in <nav>, sidebars in <aside>. AI engines use those tags to find the part of the page that is the answer; a wall of <div>s gives them nothing to hold.",
     ),
   );
 
@@ -514,20 +1376,17 @@ export function auditSite(
   // by the other. Empty (not a guess) when robots.txt could not be read — `skipped` above
   // already says why.
   const blockedPages =
-    site.robotsTxt === null
+    groups === null
       ? []
-      : (() => {
-          const groups = parseRobotsTxt(site.robotsTxt);
-          return pages
-            .map((p) => p.url)
-            .filter((url) => {
-              try {
-                return isBlocked(new URL(url).pathname, "*", groups);
-              } catch {
-                return false;
-              }
-            });
-        })();
+      : pages
+          .map((p) => p.url)
+          .filter((url) => {
+            try {
+              return isBlocked(new URL(url).pathname, "*", groups);
+            } catch {
+              return false;
+            }
+          });
 
   return {
     score: clamp(100 - 25 * blocks - 5 * warns, 0, 100),

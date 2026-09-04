@@ -13,17 +13,23 @@ function page(url: string, html: string, over: Partial<AuditPage> = {}): AuditPa
   return { url, status: 200, finalUrl: null, html, bytes: Buffer.byteLength(html, "utf8"), ms: 200, error: null, ...over };
 }
 
-/** A page with nothing wrong with it, so a test's fixture only has to state its own defect. */
+/** A page with nothing wrong with it, so a test's fixture only has to state its own defect.
+ *  "Nothing wrong" grew with Round A (2026-09-05): a doctype, a charset, a viewport, a lang, a
+ *  title long enough to be a title, and an H1 that is not a copy of it. */
 function good(url: string, title: string, extra = ""): AuditPage {
   const body = `<p>${"word ".repeat(200)}</p>`;
   return page(
     url,
-    `<html><head><title>${title}</title><meta name="description" content="A description of ${title}."><link rel="canonical" href="${url}"></head>` +
-      `<body><h1>${title}</h1>${body}${extra}</body></html>`
+    `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">` +
+      `<title>${title} — Example Roofing, Springfield</title><meta name="description" content="A description of ${title}."><link rel="canonical" href="${url}"></head>` +
+      `<body><h1>About ${title}</h1>${body}${extra}</body></html>`
   );
 }
 
-const CTX: SiteContext = { origin: ORIGIN, robotsTxt: "User-agent: *\nAllow: /", sitemapUrls: [`${ORIGIN}/`] };
+const CTX: SiteContext = { origin: ORIGIN, robotsTxt: `User-agent: *\nAllow: /\nSitemap: ${ORIGIN}/sitemap.xml`, sitemapUrls: [`${ORIGIN}/`] };
+
+/** A bare page: the shape most Round A checks are looking for. */
+const bare = (body: string, head = "") => `<html><head>${head}</head><body>${body}</body></html>`;
 
 /* ---------------------------------------------------------------- broken ---------------- */
 
@@ -227,8 +233,12 @@ test("images with alt text are not reported; one image without it is", () => {
 /* ---------------------------------------------------------------- score and report ------ */
 
 test("the score is the house formula, and a clean site scores 100", () => {
-  const home = good(`${ORIGIN}/`, "Home", `<a href="/a">A</a>`);
-  const clean = auditSite([home, good(`${ORIGIN}/a`, "A")], CTX);
+  // Three pages, each linked from two others with descriptive anchors — so no page is an
+  // orphan, none has a single incoming link, and no anchor is "click here".
+  const home = good(`${ORIGIN}/`, "Home", `<a href="/a">Roof repairs</a><a href="/b">Gutter cleaning</a>`);
+  const a = good(`${ORIGIN}/a`, "Roof repairs", `<a href="/b">Gutter cleaning</a><a href="/">Example Roofing home</a>`);
+  const b = good(`${ORIGIN}/b`, "Gutter cleaning", `<a href="/a">Roof repairs</a><a href="/">Example Roofing home</a>`);
+  const clean = auditSite([home, a, b], CTX);
   assert.equal(clean.issues.length, 0, JSON.stringify(clean.issues.map((i) => i.id)));
   assert.equal(clean.score, 100);
 
@@ -306,6 +316,253 @@ test("the summary is measurements, and it says how many pages were checked", () 
   assert.match(s, new RegExp(`${r.score}/100`));
   assert.match(s, /1 pages/);
   assert.match(s, /was 61/);
+});
+
+/* ---------------------------------------------------------------- Round A (2026-09-05, MASTER_PLAN §27.5) ---------------- */
+
+const ids = (r: ReturnType<typeof auditSite>) => new Set(r.issues.map((i) => i.id));
+const has = (r: ReturnType<typeof auditSite>, id: string) => ids(r).has(id);
+
+test("Round A: every new id is in the catalogue, so the thematic rings have their denominator", () => {
+  const r = auditSite([good(`${ORIGIN}/`, "Home")], CTX);
+  const catalogue = new Set(r.catalogue.map((c) => c.id));
+  const roundA = [
+    "unreachable-dns", "robots-format-error", "robots-not-found", "sitemap-format-error", "sitemap-bad-page", "malformed-sitemap-url",
+    "sitemap-too-large", "sitemap-not-in-robots", "blocked-resources", "malformed-link", "long-link-url", "underscore-url", "too-many-params",
+    "long-url", "resource-as-link", "non-secure-page", "homepage-not-https", "http-urls-in-sitemap", "https-to-http-links", "missing-viewport",
+    "viewport-no-width", "meta-refresh", "no-charset", "no-doctype", "plugin-content", "frames", "short-title", "h1-equals-title", "duplicate-meta",
+    "multiple-canonical", "invalid-structured-data", "duplicate-content", "low-text-ratio", "internal-nofollow", "too-many-links",
+    "one-incoming-link", "deep-page", "generic-anchor", "empty-anchor", "external-nofollow", "hreflang-conflict", "hreflang-invalid", "no-lang",
+    "hreflang-lang-mismatch", "ai-too-much-content", "ai-outdated-content", "ai-low-semantic-html",
+  ];
+  for (const id of roundA) assert.ok(catalogue.has(id), `${id} missing from CHECK_CATALOGUE`);
+});
+
+test("a DNS failure is its own row, separate from a timeout — the fix is the name, not the server", () => {
+  const r = auditSite(
+    [
+      { url: `${ORIGIN}/dns`, status: null, finalUrl: null, html: null, bytes: 0, ms: null, error: "getaddrinfo ENOTFOUND example.com" },
+      { url: `${ORIGIN}/slow`, status: null, finalUrl: null, html: null, bytes: 0, ms: null, error: "The operation was aborted due to timeout" },
+    ],
+    CTX
+  );
+  assert.deepEqual(r.issues.find((i) => i.id === "unreachable-dns")?.pages, [`${ORIGIN}/dns`]);
+  assert.deepEqual(r.issues.find((i) => i.id === "unreachable")?.pages, [`${ORIGIN}/slow`]);
+});
+
+test("a 403 or 410 is a 4xx finding like a 404", () => {
+  const r = auditSite([page(`${ORIGIN}/a`, "", { status: 403, html: null }), page(`${ORIGIN}/b`, "", { status: 410, html: null })], CTX);
+  assert.equal(r.issues.find((i) => i.id === "not-found")?.count, 2);
+});
+
+test("robots.txt rows: missing is a notice, a typo line is a format error, a sitemap it does not name is a row", () => {
+  const none = auditSite([good(`${ORIGIN}/`, "Home")], { ...CTX, robotsTxt: null });
+  assert.equal(none.issues.find((i) => i.id === "robots-not-found")?.severity, "info");
+
+  const typo = auditSite([good(`${ORIGIN}/`, "Home")], { ...CTX, robotsTxt: `User-agent: *\nDissalow: /wp-admin/\nSitemap: ${ORIGIN}/sitemap.xml` });
+  assert.ok(has(typo, "robots-format-error"));
+  assert.match(typo.issues.find((i) => i.id === "robots-format-error")!.what, /Dissalow/);
+  assert.equal(has(typo, "sitemap-not-in-robots"), false);
+
+  const comments = auditSite([good(`${ORIGIN}/`, "Home")], { ...CTX, robotsTxt: `# hello\nUser-agent: *   # everyone\n\nAllow: /\nCrawl-delay: 5\nSitemap: ${ORIGIN}/sitemap.xml` });
+  assert.equal(has(comments, "robots-format-error"), false, "comments, blank lines and known directives are not errors");
+
+  const unnamed = auditSite([good(`${ORIGIN}/`, "Home")], { ...CTX, robotsTxt: "User-agent: *\nAllow: /" });
+  assert.ok(has(unnamed, "sitemap-not-in-robots"));
+  assert.equal(has(auditSite([good(`${ORIGIN}/`, "Home")], { ...CTX, robotsTxt: "User-agent: *\nAllow: /", sitemapUrls: null }), "sitemap-not-in-robots"), false, "no sitemap → the no-sitemap row, not this one");
+});
+
+test("sitemap rows: format error, an entry that is not a URL, a listed page that is not indexable, http entries, too large", () => {
+  const malformed = auditSite([good(`${ORIGIN}/`, "Home")], { ...CTX, sitemapUrls: [], sitemapMalformed: true });
+  assert.ok(has(malformed, "sitemap-format-error"));
+  assert.equal(has(auditSite([good(`${ORIGIN}/`, "Home")], CTX), "sitemap-format-error"), false);
+
+  const junk = auditSite([good(`${ORIGIN}/`, "Home")], { ...CTX, sitemapUrls: [`${ORIGIN}/`, "not a url", "/relative"] });
+  assert.equal(junk.issues.find((i) => i.id === "malformed-sitemap-url")?.count, 2);
+
+  const listed = auditSite(
+    [
+      good(`${ORIGIN}/`, "Home"),
+      page(`${ORIGIN}/gone`, "", { status: 404, html: null }),
+      { ...good(`${ORIGIN}/moved`, "Moved"), finalUrl: `${ORIGIN}/elsewhere` },
+      page(`${ORIGIN}/hidden`, bare(`<h1>H</h1>`, `<title>Hidden page of Example Roofing</title><meta name="robots" content="noindex">`)),
+      good(`${ORIGIN}/fine-but-unlisted`, "Unlisted"),
+    ],
+    { ...CTX, sitemapUrls: [`${ORIGIN}/`, `${ORIGIN}/gone`, `${ORIGIN}/moved`, `${ORIGIN}/hidden`] }
+  );
+  assert.deepEqual(listed.issues.find((i) => i.id === "sitemap-bad-page")?.pages.sort(), [`${ORIGIN}/gone`, `${ORIGIN}/hidden`, `${ORIGIN}/moved`]);
+
+  const http = auditSite([good(`${ORIGIN}/`, "Home")], { ...CTX, sitemapUrls: [`${ORIGIN}/`, "http://example.com/old"] });
+  assert.equal(http.issues.find((i) => i.id === "http-urls-in-sitemap")?.count, 1);
+
+  const huge = auditSite([good(`${ORIGIN}/`, "Home")], { ...CTX, sitemapUrls: [`${ORIGIN}/`], sitemapBytes: 60 * 1024 * 1024 });
+  assert.ok(has(huge, "sitemap-too-large"));
+});
+
+test("HTTPS rows: an http:// site is a warn at the root and a block per page; an https site has neither", () => {
+  const r = auditSite([good("http://old.example/", "Home")], { ...CTX, origin: "http://old.example" });
+  assert.equal(r.issues.find((i) => i.id === "homepage-not-https")?.severity, "warn");
+  assert.equal(r.issues.find((i) => i.id === "non-secure-page")?.severity, "block");
+  const s = auditSite([good(`${ORIGIN}/`, "Home")], CTX);
+  assert.equal(has(s, "homepage-not-https") || has(s, "non-secure-page"), false);
+});
+
+test("a short title and an H1 that copies the title are separate rows; a proper page has neither", () => {
+  const r = auditSite([page(`${ORIGIN}/x`, bare(`<h1>Roofing</h1><p>${"word ".repeat(200)}</p>`, `<title>Roofing</title>`))], CTX);
+  assert.ok(has(r, "short-title"));
+  assert.ok(has(r, "h1-equals-title"));
+  const thirty = auditSite([page(`${ORIGIN}/x`, bare(`<h1>Other</h1>`, `<title>${"x".repeat(30)}</title>`))], CTX);
+  assert.equal(has(thirty, "short-title"), false, "30 characters is the line, not under it");
+  const g = auditSite([good(`${ORIGIN}/x`, "Roofing")], CTX);
+  assert.equal(has(g, "short-title") || has(g, "h1-equals-title"), false);
+});
+
+test("duplicate descriptions and two canonical tags are found", () => {
+  const dup = auditSite([good(`${ORIGIN}/a`, "Same"), good(`${ORIGIN}/b`, "Same")], CTX);
+  assert.equal(dup.issues.find((i) => i.id === "duplicate-meta")?.count, 2);
+  const two = auditSite([good(`${ORIGIN}/a`, "A", `<link rel="canonical" href="${ORIGIN}/a?v=2">`)], CTX);
+  assert.ok(has(two, "multiple-canonical"));
+});
+
+test("doctype, charset, viewport and lang: missing on a bare page, present on a proper one, and a BOM before the doctype is fine", () => {
+  const b = auditSite([page(`${ORIGIN}/x`, bare(`<h1>X</h1>`))], CTX);
+  for (const id of ["no-doctype", "no-charset", "missing-viewport", "no-lang"]) assert.ok(has(b, id), `expected ${id}`);
+  const g = auditSite([good(`${ORIGIN}/x`, "X")], CTX);
+  for (const id of ["no-doctype", "no-charset", "missing-viewport", "no-lang", "viewport-no-width"]) assert.equal(has(g, id), false, `${id} must not fire on a proper page`);
+
+  const bom = auditSite([page(`${ORIGIN}/x`, "\uFEFF<!DOCTYPE html>" + bare(`<h1>X</h1>`))], CTX);
+  assert.equal(has(bom, "no-doctype"), false);
+  const legacyCharset = auditSite([page(`${ORIGIN}/x`, bare(`<h1>X</h1>`, `<meta http-equiv="Content-Type" content="text/html; charset=utf-8">`))], CTX);
+  assert.equal(has(legacyCharset, "no-charset"), false);
+  const noWidth = auditSite([page(`${ORIGIN}/x`, bare(`<h1>X</h1>`, `<meta name="viewport" content="initial-scale=1">`))], CTX);
+  assert.ok(has(noWidth, "viewport-no-width"));
+  assert.equal(has(noWidth, "missing-viewport"), false);
+});
+
+test("meta refresh, frames (an iframe is not a frame) and plugin content", () => {
+  const refresh = auditSite([page(`${ORIGIN}/x`, bare(`<h1>X</h1>`, `<meta http-equiv="refresh" content="0;url=/y">`))], CTX);
+  assert.ok(has(refresh, "meta-refresh"));
+  const frames = auditSite([page(`${ORIGIN}/x`, `<html><head></head><frameset><frame src="/a"></frameset></html>`)], CTX);
+  assert.ok(has(frames, "frames"));
+  const iframe = auditSite([page(`${ORIGIN}/x`, bare(`<h1>X</h1><iframe src="https://www.youtube.com/embed/1"></iframe>`))], CTX);
+  assert.equal(has(iframe, "frames"), false);
+  const flash = auditSite([page(`${ORIGIN}/x`, bare(`<h1>X</h1><embed src="/intro.swf" type="application/x-shockwave-flash">`))], CTX);
+  assert.ok(has(flash, "plugin-content"));
+  const video = auditSite([page(`${ORIGIN}/x`, bare(`<h1>X</h1><object data="/doc.pdf" type="application/pdf"></object>`))], CTX);
+  assert.equal(has(video, "plugin-content"), false);
+});
+
+test("structured data: broken JSON or no @type is a row; a valid block or a @graph is not", () => {
+  const bad = auditSite([page(`${ORIGIN}/x`, bare(`<h1>X</h1>`, `<script type="application/ld+json">{"name": "x",}</script>`))], CTX);
+  assert.ok(has(bad, "invalid-structured-data"));
+  const untyped = auditSite([page(`${ORIGIN}/x`, bare(`<h1>X</h1>`, `<script type="application/ld+json">{"name": "x"}</script>`))], CTX);
+  assert.ok(has(untyped, "invalid-structured-data"));
+  const ok = auditSite([page(`${ORIGIN}/x`, bare(`<h1>X</h1>`, `<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Organization","name":"x"}]}</script>`))], CTX);
+  assert.equal(has(ok, "invalid-structured-data"), false);
+});
+
+test("hreflang: a conflict, an invalid code, and a self-entry disagreeing with <html lang>; a correct set is silent", () => {
+  const url = `${ORIGIN}/x`;
+  const conflict = auditSite([page(url, bare(`<h1>X</h1>`, `<link rel="alternate" hreflang="en" href="${url}"><link rel="alternate" hreflang="en" href="${ORIGIN}/y">`))], CTX);
+  assert.ok(has(conflict, "hreflang-conflict"));
+  const invalid = auditSite([page(url, bare(`<h1>X</h1>`, `<link rel="alternate" hreflang="english" href="${url}">`))], CTX);
+  assert.ok(has(invalid, "hreflang-invalid"));
+  assert.equal(has(invalid, "no-lang"), false, "hreflang entries count as a language declaration");
+  const mismatch = auditSite([page(url, `<html lang="fr"><head><link rel="alternate" hreflang="en" href="${url}"></head><body><h1>X</h1></body></html>`)], CTX);
+  assert.ok(has(mismatch, "hreflang-lang-mismatch"));
+  const fine = auditSite(
+    [page(url, `<html lang="en-GB"><head><link rel="alternate" hreflang="en-GB" href="${url}"><link rel="alternate" hreflang="fr" href="${ORIGIN}/fr/x"><link rel="alternate" hreflang="x-default" href="${url}"></head><body><h1>X</h1></body></html>`)],
+    CTX
+  );
+  for (const id of ["hreflang-conflict", "hreflang-invalid", "hreflang-lang-mismatch", "no-lang"]) assert.equal(has(fine, id), false, id);
+});
+
+test("URL rows: underscores, more than four parameters, and over 200 characters", () => {
+  const r = auditSite(
+    [
+      good(`${ORIGIN}/roof_repairs`, "A"),
+      good(`${ORIGIN}/s?a=1&b=2&c=3&d=4&e=5`, "B"),
+      good(`${ORIGIN}/s?a=1&b=2&c=3&d=4`, "C"),
+      good(`${ORIGIN}/${"long-".repeat(50)}`, "D"),
+    ],
+    CTX
+  );
+  assert.deepEqual(r.issues.find((i) => i.id === "underscore-url")?.pages, [`${ORIGIN}/roof_repairs`]);
+  assert.deepEqual(r.issues.find((i) => i.id === "too-many-params")?.pages, [`${ORIGIN}/s?a=1&b=2&c=3&d=4&e=5`]);
+  assert.equal(r.issues.find((i) => i.id === "long-url")?.count, 1);
+});
+
+test("link rows: malformed, long, https→http, resource, nofollow in and out, generic and empty anchors", () => {
+  const links =
+    `<a href="http://exa mple.com/x">broken</a>` +
+    `<a href="/p?${"q=1&".repeat(60)}">very long</a>` +
+    `<a href="http://example.com/old">plain http</a>` +
+    `<a href="/logo.png">logo file</a>` +
+    `<a href="/pdfs/brochure.pdf">brochure</a>` +
+    `<a href="/team" rel="nofollow">our team</a>` +
+    `<a href="https://other.example/" rel="nofollow noopener">partner</a>` +
+    `<a href="/prices">click here</a>` +
+    `<a href="/faq">https://example.com/faq</a>` +
+    `<a href="/empty"></a>` +
+    `<a href="/img-ok"><img src="/i.png" alt="Our office"></a>` +
+    `<a href="/aria-ok" aria-label="Contact us"></a>` +
+    `<a href="mailto:hi@example.com">email</a>`;
+  const r = auditSite([good(`${ORIGIN}/`, "Home", links)], CTX);
+  for (const id of ["malformed-link", "long-link-url", "https-to-http-links", "resource-as-link", "internal-nofollow", "external-nofollow", "generic-anchor", "empty-anchor"]) {
+    assert.ok(has(r, id), `expected ${id}`);
+  }
+  const clean = auditSite([good(`${ORIGIN}/`, "Home", `<a href="/pdfs/brochure.pdf">brochure</a><a href="mailto:hi@example.com">email</a><a href="/img-ok"><img src="/i.png" alt="Our office"></a>`)], CTX);
+  for (const id of ["malformed-link", "resource-as-link", "empty-anchor", "generic-anchor"]) assert.equal(has(clean, id), false, `${id} false positive`);
+});
+
+test("one incoming link and click depth come from the same graph the orphan check uses", () => {
+  const chain = [
+    good(`${ORIGIN}/`, "Home", `<a href="/a">Roof repairs</a>`),
+    good(`${ORIGIN}/a`, "A", `<a href="/b">Gutters</a>`),
+    good(`${ORIGIN}/b`, "B", `<a href="/c">Skylights</a>`),
+    good(`${ORIGIN}/c`, "C", `<a href="/d">Chimneys</a>`),
+    good(`${ORIGIN}/d`, "D"),
+  ];
+  const r = auditSite(chain, CTX);
+  assert.equal(has(r, "orphan-page"), false);
+  assert.deepEqual(r.issues.find((i) => i.id === "one-incoming-link")?.pages, [`${ORIGIN}/a`, `${ORIGIN}/b`, `${ORIGIN}/c`, `${ORIGIN}/d`]);
+  assert.deepEqual(r.issues.find((i) => i.id === "deep-page")?.pages, [`${ORIGIN}/d`], "d is 4 clicks away; c at 3 is the line");
+});
+
+test("a resource robots.txt blocks is a row, using the same parser as blockedPages", () => {
+  const p = good(`${ORIGIN}/`, "Home", `<script src="/assets/app.js"></script>`);
+  assert.ok(has(auditSite([p], { ...CTX, robotsTxt: `User-agent: *\nDisallow: /assets/\nSitemap: ${ORIGIN}/sitemap.xml` }), "blocked-resources"));
+  assert.equal(has(auditSite([p], { ...CTX, robotsTxt: `User-agent: *\nDisallow: /private/\nSitemap: ${ORIGIN}/sitemap.xml` }), "blocked-resources"), false);
+});
+
+test("duplicate content names both copies, unless one of them canonicalises to the other", () => {
+  const text = `<p>${"same words here ".repeat(60)}</p>`;
+  const both = auditSite([good(`${ORIGIN}/a`, "Same", text), good(`${ORIGIN}/b`, "Same", text)], CTX);
+  assert.equal(both.issues.find((i) => i.id === "duplicate-content")?.count, 2);
+  const copy = { ...good(`${ORIGIN}/b`, "Same", text), html: good(`${ORIGIN}/b`, "Same", text).html!.replace(`href="${ORIGIN}/b"`, `href="${ORIGIN}/a"`) };
+  assert.equal(has(auditSite([good(`${ORIGIN}/a`, "Same", text), copy], CTX), "duplicate-content"), false);
+});
+
+test("a page that is mostly markup by size is a low text ratio row", () => {
+  const r = auditSite([{ ...good(`${ORIGIN}/x`, "X"), bytes: 200_000 }], CTX);
+  assert.ok(has(r, "low-text-ratio"));
+  assert.equal(has(auditSite([good(`${ORIGIN}/x`, "X")], CTX), "low-text-ratio"), false);
+});
+
+test("AI Search notices: too many words, a stated date older than two years, and a wall of divs", () => {
+  const long = auditSite([good(`${ORIGIN}/x`, "X", `<p>${"more ".repeat(4200)}</p>`)], CTX);
+  assert.ok(has(long, "ai-too-much-content"));
+
+  const old = auditSite([good(`${ORIGIN}/x`, "X", `<time datetime="2015-03-01">1 March 2015</time>`)], CTX);
+  assert.ok(has(old, "ai-outdated-content"));
+  const undated = auditSite([good(`${ORIGIN}/x`, "X")], CTX);
+  assert.equal(has(undated, "ai-outdated-content"), false, "no date on the page → nothing is claimed about its age");
+  const recent = auditSite([good(`${ORIGIN}/x`, "X", `<time datetime="2015-03-01">old</time><script type="application/ld+json">{"@type":"Article","dateModified":"${new Date().toISOString()}"}</script>`)], CTX);
+  assert.equal(has(recent, "ai-outdated-content"), false, "the latest date on the page is the one that counts");
+
+  const divs = "<div>x</div>".repeat(40);
+  assert.ok(has(auditSite([good(`${ORIGIN}/x`, "X", divs)], CTX), "ai-low-semantic-html"));
+  assert.equal(has(auditSite([good(`${ORIGIN}/x`, "X", `<main><article>${divs}</article><nav></nav></main>`)], CTX), "ai-low-semantic-html"), false);
 });
 
 /* ---------------------------------------------------------------- choosing pages -------- */

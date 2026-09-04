@@ -84,7 +84,17 @@ export async function fetchSiteContext(origin: string, fetchImpl: Fetcher = fetc
   const declared = robotsTxt?.match(/^\s*sitemap:\s*(\S+)/im)?.[1] ?? null;
   const xml = declared ? await readAbsolute(declared, fetchImpl) : await read("/sitemap.xml");
 
-  return { origin, robotsTxt, sitemapUrls: xml === null ? null : parseSitemap(xml) };
+  return {
+    origin,
+    robotsTxt,
+    sitemapUrls: xml === null ? null : parseSitemap(xml),
+    sitemapUrl: declared ?? origin + "/sitemap.xml",
+    // A file that answered 200 but is not a sitemap — an HTML "not found" page served with the
+    // wrong status is the usual way this happens. Decided from the bytes already in hand, no
+    // second request (MASTER_PLAN §27.1 #13).
+    sitemapMalformed: xml !== null && !/<(urlset|sitemapindex)[\s>]/i.test(xml),
+    sitemapBytes: xml === null ? 0 : Buffer.byteLength(xml, "utf8"),
+  };
 }
 
 async function readAbsolute(url: string, fetchImpl: Fetcher): Promise<string | null> {

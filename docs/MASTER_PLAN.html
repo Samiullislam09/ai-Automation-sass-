@@ -1822,6 +1822,7 @@ aur commit ke saath &mdash; taaki kal koi (aap, main, ya 10 saal baad koi employ
 <tr><td>2026-09-05</td><td>(audit page, Semrush structure)</td><td><strong>Owner sent a real Semrush Site Audit screenshot: &ldquo;100% same UI... but sirf brand hamara&rdquo;.</strong> Rebuilt to match its structure with data this app actually has: Site Health gauge (kept, no industry-benchmark line — no such dataset exists here), a new <strong>Crawled Pages</strong> card (Healthy/Redirects/Broken, a stacked bar + counts, computed EXACTLY from real per-page status/redirect data — a &ldquo;Have issues&rdquo;/&ldquo;Blocked&rdquo; 4th/5th bucket was deliberately left out rather than approximated from data this app cannot fully attribute per-page yet), <strong>Errors</strong>/<strong>Warnings</strong> cards each with a real SVG trend line from audit history (was score-only before), a collapsible issue list (top 5, &ldquo;View all N issues&rdquo;), and a full-page <strong>&ldquo;see more&rdquo;</strong> popup (one modal, every real URL + status + redirect target) reused for both &ldquo;see all pages&rdquo; and each issue's own page list. Explicitly NOT built, and why: Semrush's &ldquo;AI Search Health&rdquo;/&ldquo;Blocked from AI Search&rdquo; cards are its own bot-traffic product — this app logs no such data, and inventing hit counts for ChatGPT-User/Googlebot would be exactly the fabricated-number problem this whole product refuses to ship (lib/seoChecks.ts's own header). Backend: <code>agents/audit.ts</code> now persists a real per-page summary (<code>run.pages</code> — status/redirect/response time, previously computed and thrown away) and which asked for the run (<code>run.trigger</code>: &ldquo;manual&rdquo; vs the scheduler's own &ldquo;schedule&rdquo;, scheduler.ts already sent this, nothing read it until now); <code>checks.ts</code>'s <code>PAGE_SAMPLE</code> raised 8&rarr;100 so the popup has real URLs to show, not just the first 8; <code>/api/site-audit</code>'s history array now carries blocks/warns/pagesChecked/trigger, not score alone. New &ldquo;Check my site now&rdquo; button passes <code>source:"manual"</code> and polls the same read endpoint for a NEW report id (real progress — &ldquo;audit progress&rdquo;, owner's own ask — not a fire-and-forget toast); a new <strong>Audit history</strong> table lists every past run with its trigger, date, score, and counts (&ldquo;schedule ho ke kab hua, manual kab hua&rdquo;).</td><td>agent-server tsc clean, 419/419 (checks.test.ts unaffected by the PAGE_SAMPLE raise — no hardcoded-8 assertion existed); web tsc clean, 120/120. Live browser verify still pending — Chrome extension disconnected all session; a real audit run against this new code (to confirm the Lighthouse fix and the new page-breakdown numbers) has not happened yet either.</td></tr>
 <tr><td>2026-09-05</td><td>(audit: AI Search real, UI bugs from a live screenshot)</td><td><strong>Owner sent their own real Semrush report (6 screenshots, wca-global.com) and a live screenshot of THIS app's own bugs.</strong> Two things: (1) the earlier entry above wrongly assumed &ldquo;AI Search Health&rdquo;/&ldquo;Blocked from AI Search&rdquo; were Semrush's own bot-traffic product with no real source here — wrong. They are a robots.txt DIRECTIVE check (does robots.txt let GPTBot/ChatGPT-User/Google-Extended/etc. in), and this app already fetches robots.txt for every audit. Built for real: new <code>lib/audit/robots.ts</code> (RFC 9309's core longest-pattern-wins matching, real parser, 13 tests) exports <code>aiSearchAccess()</code> (agents/audit.ts, persisted as <code>run.aiSearch</code>) and <code>isBlocked()</code> (now also used by checks.ts's per-page &ldquo;Blocked&rdquo; bucket, same parser both places so a page/bot can never be blocked by one check and allowed by the other). <code>checks.ts</code>'s <code>issue()</code> became a closure over a real, EXACT per-page issue tally (`pageIssueIds` — built from the FULL affected-page list before PAGE_SAMPLE trims it, not a lossy sum of the capped samples) — <code>AuditResult</code> gained real <code>pagesWithIssues</code>/<code>blockedPages</code>. Crawled Pages is now the real 5-bucket breakdown (Healthy/Broken/Have issues/Redirects/Blocked), mutually exclusive by priority. New AI Search Health + AI Crawler Access cards render `run.aiSearch` for real. (2) Live screenshot of the FIRST build found 3 real bugs: &ldquo;Crawled Pages: 0 pages&rdquo; on an older report (no `run.pages` yet — now says so honestly instead of looking broken); a solid yellow block instead of a Warnings trend line (a flat-line-at-max degenerates the area fill to 100% height with the stroke clipped at the SVG edge — fixed with real y-axis padding); chunky bar-chart &ldquo;yellow&rdquo; under Site Health that Semrush's own reference never has — removed, and the Score gauge recoloured to this app's own brand violet gradient (matching `.lx-grad`) instead of a red/amber/green tone, since Semrush's own gauge doesn't shift colour by score either. Buttons were stacking Tailwind padding ON TOP of `.lx-ghost`/`.lx-grad`'s own built-in padding (oversized) — fixed to the exact convention already used elsewhere in MrLxwaDashboard.tsx. Export as PDF and Audit History both moved up near the top (were buried at the bottom / inside a card). The real site domain is now a big heading (&ldquo;Site Audit: wca-global.com&rdquo;-style), from `run.websiteUrl` (real, agents/audit.ts's own `target.origin`). Still not built: Semrush's Thematic Reports category rings (Crawlability/HTTPS/Internal Linking/Markup %) and the separate Issues-tab-with-filter-chips layout — need a real per-check category taxonomy, noted as the next round, not silently dropped.</td><td>agent-server 436 green (+13 robots.test.ts, +4 checks.test.ts), tsc clean; web tsc clean, 120/120. Live browser verify + a real audit run against this code still pending.</td></tr>
 <tr><td>2026-09-05</td><td>(audit: tabs, popups, thematic taxonomy — §27 &ldquo;this round&rdquo;)</td><td><strong>Semrush's own page structure, on real data, live-verified in the browser this time.</strong> <code>AuditSection.tsx</code> rebuilt around tabs — <strong>Overview / Issues / Crawled Pages / Progress</strong> (the four this app has real data for; Statistics / Compare Crawls / JS Impact are §27 rounds A and C). &ldquo;How to fix&rdquo; is a <strong>popup</strong> now (severity, category, the check's own real fix text, a button through to the affected pages) — no invented &ldquo;About the issue&rdquo; paragraph, the check never wrote one. Audit history collapsed to a one-line <strong>&ldquo;Last audit&rdquo;</strong> strip with <strong>&ldquo;View all N runs &rarr;&rdquo;</strong> opening the full table in a popup (owner: &ldquo;user sirf last audit dekh sake, click karke popup pe all&rdquo;). Issues tab: severity chips (All/Errors/Warnings/Notices with counts), category chips, sections grouped by severity with a coloured rule — Semrush's own Issues layout. Crawled Pages tab: every page with status / health bucket / response time / redirect target, bucket filter chips, and the Overview's bucket rows deep-link into it. Progress tab: Site Health, Errors and Warnings over time (dots per run) + every run. <strong>Thematic Reports</strong> rings are real: every check in <code>checks.ts</code> now carries a <code>category</code> from one table (<code>CHECK_CATALOGUE</code> — Semrush's own taxonomy transcribed from §27, covering performance.ts's ids and the inline robots finding too), stamped by one lookup at the end of <code>auditSite()</code>; the catalogue itself is persisted per run (<code>run.catalogue</code>) so each ring is an exact fraction — checks in that category that did NOT fire over checks the run could make — and a six-month-old report's % still means what it meant that day. Older rows have no catalogue and say &ldquo;not on file&rdquo; instead of computing a % over a denominator they don't have. Two regression tests pin that no issue can leave <code>auditSite()</code> without a category and that the catalogue names every id that can fire. Chart dots added (Semrush draws them); the CrawledRow counts are now brand violet. <strong>Verified live</strong> (Chrome extension reconnected): tabs switch, fix popup opens with the real sentence, history popup lists all 4 runs, Progress renders three trend cards + table; older report correctly shows &ldquo;not on file&rdquo; for Crawled Pages / Thematic until a fresh audit runs against this backend.</td><td>agent-server 438 green (+2 category/catalogue tests), tsc clean; web tsc clean, 120/120; live browser verify done for tabs/fix popup/history popup/Progress. A real audit run against this backend (Railway still on <code>b8c7be7</code>) still pending — Crawled Pages buckets, AI Search cards, Thematic rings all light up only after it.</td></tr>
+<tr><td>2026-09-05</td><td>(audit: Round A &mdash; &sect;27.5 HTML-only checks)</td><td><strong>&sect;27 Round A delivered in <code>lib/audit/checks.ts</code>: 47 new deterministic checks, every one fixture-tested, no new network call.</strong> Every &#9679; HTML row in &sect;27.1&ndash;27.3 is now &#10003; with its <code>id</code> next to it. What was built, by category: <em>Crawlability</em> &mdash; DNS failures split from other unreachable pages (<code>unreachable-dns</code>, on Node's own error text), 4xx widened past 404, robots.txt format errors, robots.txt-not-found as a Notice row, sitemap format error / bad entries / non-indexable listed pages / too large / not named in robots.txt, blocked same-origin resources (robots.ts <code>isBlocked()</code>), malformed and over-long links, underscores and &gt;4 params and &gt;200 chars in URLs, resources linked as pages. <em>HTTPS</em> &mdash; plain-http pages (block), http homepage, http entries in an https sitemap, https pages linking to http. <em>Technical</em> &mdash; viewport missing / without width, meta refresh, charset, doctype (BOM/XML-prolog tolerant), plugin content, frames (iframe deliberately NOT counted). <em>On-Page</em> &mdash; short title, H1 = title, duplicate descriptions, multiple canonicals, unreadable JSON-LD. <em>Content</em> &mdash; duplicate content (identical visible text, canonicalised copies excluded), text-to-HTML ratio. <em>Internal Linking</em> &mdash; the orphan check's link loop became one link GRAPH (out-links, in-sources, BFS depth from the origin) read by orphan / one-incoming-link / deep-page / nofollow / generic and empty anchors / &gt;3000 links, so those rows can never disagree about the same page. <em>International</em> &mdash; hreflang conflicts, invalid codes, no lang, self-entry vs &lt;html lang&gt;. <em>AI Search</em> &mdash; &gt;4000 words, outdated ONLY when the page states a date (never guessed), div-wall vs semantic tags. Two decisions worth recording: (1) severity is the HOUSE scale, not Semrush's Error/Warning/Notice column &mdash; only <code>unreachable-dns</code> and <code>non-secure-page</code> are new blocks, the rest warn/info, because 20 new &minus;25 kinds would put every real site at 0/100 and the score would stop meaning anything; the &sect;27 tables keep Semrush's column for reference. (2) the test fixture's idea of a &ldquo;clean page&rdquo; grew with the catalogue (doctype, charset, viewport, lang, a 30+ char title, an H1 that is not the title, two incoming links per page) &mdash; <code>checks.test.ts</code> 54 tests, agent-server suite 457/457. <code>fetchSite.ts</code> now also hands the checks <code>sitemapUrl</code>, <code>sitemapMalformed</code>, <code>sitemapBytes</code> from the bytes it already read. The report page needs no change: <code>AuditSection.tsx</code> derives categories from <code>r.catalogue</code>, so the new International SEO / AI Search / Content rings appear on the next real run. Still Round A per &sect;27.4: Statistics tab and Compare Crawls tab (next). Not yet run against a live site &mdash; Railway deploy of this commit pending.</td></tr>
 </table></div>
 
 <h3>26.1 Abhi kya baaki hai (is order me)</h3>
@@ -1842,7 +1843,7 @@ aur commit ke saath &mdash; taaki kal koi (aap, main, ya 10 saal baad koi employ
 <p>Owner ka order: &ldquo;Semrush pe jo jo details dikhta hai uska report nikalna aur phir wo sab add karna.&rdquo; Ye wo report hai. Source: Semrush ka apna KB article <a href="https://www.semrush.com/kb/542-site-audit-issues-list">&ldquo;What Issues Can Site Audit Identify?&rdquo;</a> (41 Errors + 34 Warnings + 25 Notices = <strong>100 checks</strong>), plus owner ke 6 real screenshots (Overview widgets, Issues tab, Thematic Reports). Har check ke saamne <strong>hamari asli capability</strong> &mdash; koi dummy nahi, isliye teen honest buckets:</p>
 <ul>
 <li><strong>&#10003; BUILT</strong> &mdash; <code>lib/audit/checks.ts</code> / <code>performance.ts</code> / <code>robots.ts</code> me already hai.</li>
-<li><strong>&#9679; HTML-ONLY</strong> &mdash; jo HTML/status/robots/sitemap hum already fetch karte hain usse deterministic ban sakta hai, koi naya network call nahi. <em>Round A.</em></li>
+<li><strong>&#9679; HTML-ONLY</strong> &mdash; jo HTML/status/robots/sitemap hum already fetch karte hain usse deterministic ban sakta hai, koi naya network call nahi. <em>Round A &mdash; delivered 2026-09-05, every such row below is now &#10003; with its id.</em></li>
 <li><strong>&#9675; NEEDS INFRA</strong> &mdash; ek naya real data-layer chahiye (response headers + redirect chain capture, TLS cert inspect, link/resource HEAD checks, resource fetch, llms.txt fetch). Real, buildable, par crawl slow/heavy hota hai. <em>Round B/C.</em></li>
 <li><strong>&#10007; NOT HONESTLY</strong> &mdash; Semrush ka proprietary judgement ya alag product; bina fabricate kiye nahi ban sakta.</li>
 </ul>
@@ -1850,28 +1851,28 @@ aur commit ke saath &mdash; taaki kal koi (aap, main, ya 10 saal baad koi employ
 <h3>27.1 Errors (41)</h3>
 <table>
 <tr><th>#</th><th>Semrush check</th><th>Category</th><th>Status</th><th>Kaise / kyun</th></tr>
-<tr><td>1</td><td>Hreflang conflicts in source</td><td>Intl SEO</td><td>&#9679; HTML</td><td>&lt;link hreflang&gt; parse, conflicting entries</td></tr>
+<tr><td>1</td><td>Hreflang conflicts in source</td><td>Intl SEO</td><td>&#10003;</td><td><code>hreflang-conflict</code></td></tr>
 <tr><td>2</td><td>5XX status</td><td>Crawlability</td><td>&#10003;</td><td><code>server-error</code></td></tr>
 <tr><td>3</td><td>No title tag</td><td>On-Page</td><td>&#10003;</td><td><code>missing-title</code></td></tr>
 <tr><td>4</td><td>Duplicate title tags</td><td>On-Page</td><td>&#10003;</td><td><code>duplicate-title</code></td></tr>
-<tr><td>5</td><td>Duplicate content</td><td>Content</td><td>&#9679; HTML</td><td>normalised body-text hash across pages</td></tr>
+<tr><td>5</td><td>Duplicate content</td><td>Content</td><td>&#10003;</td><td><code>duplicate-content</code> &mdash; identical visible text, &ge;50 words, self/absent canonical only</td></tr>
 <tr><td>6</td><td>Broken internal links</td><td>Internal Linking</td><td>&#9675; infra</td><td>HEAD every internal href not in crawl set (throttled)</td></tr>
 <tr><td>7</td><td>Couldn't be crawled</td><td>Crawlability</td><td>&#10003;</td><td><code>unreachable</code></td></tr>
-<tr><td>8</td><td>Couldn't be crawled (DNS)</td><td>Crawlability</td><td>&#9679; HTML</td><td>split <code>unreachable</code> by error class (ENOTFOUND)</td></tr>
-<tr><td>9</td><td>Couldn't be crawled (bad URL format)</td><td>Crawlability</td><td>&#9679; HTML</td><td><code>new URL()</code> throws on sitemap/link entries</td></tr>
+<tr><td>8</td><td>Couldn't be crawled (DNS)</td><td>Crawlability</td><td>&#10003;</td><td><code>unreachable-dns</code> &mdash; split from <code>unreachable</code> on Node's own ENOTFOUND/getaddrinfo text</td></tr>
+<tr><td>9</td><td>Couldn't be crawled (bad URL format)</td><td>Crawlability</td><td>&#10003;</td><td><code>malformed-sitemap-url</code>, <code>malformed-link</code></td></tr>
 <tr><td>10</td><td>Broken internal images</td><td>On-Page</td><td>&#9675; infra</td><td>HEAD each same-origin &lt;img src&gt;</td></tr>
-<tr><td>11</td><td>Duplicate meta descriptions</td><td>On-Page</td><td>&#9679; HTML</td><td>same as duplicate-title, on description</td></tr>
-<tr><td>12</td><td>robots.txt format errors</td><td>Crawlability</td><td>&#9679; HTML</td><td>robots.ts parser: lines that match no directive</td></tr>
-<tr><td>13</td><td>sitemap.xml format errors</td><td>Crawlability</td><td>&#9679; HTML</td><td>fetchSite.ts parseSitemap: XML parse failure</td></tr>
-<tr><td>14</td><td>Incorrect pages in sitemap</td><td>Crawlability</td><td>&#9679; HTML</td><td>sitemap URL that crawled non-200 / noindex / redirect</td></tr>
+<tr><td>11</td><td>Duplicate meta descriptions</td><td>On-Page</td><td>&#10003;</td><td><code>duplicate-meta</code></td></tr>
+<tr><td>12</td><td>robots.txt format errors</td><td>Crawlability</td><td>&#10003;</td><td><code>robots-format-error</code> &mdash; non-comment lines matching no known directive</td></tr>
+<tr><td>13</td><td>sitemap.xml format errors</td><td>Crawlability</td><td>&#10003;</td><td><code>sitemap-format-error</code> &mdash; fetched file has no &lt;urlset&gt;/&lt;sitemapindex&gt; root (fetchSite.ts <code>sitemapMalformed</code>)</td></tr>
+<tr><td>14</td><td>Incorrect pages in sitemap</td><td>Crawlability</td><td>&#10003;</td><td><code>sitemap-bad-page</code> &mdash; listed URL that crawled non-200 / redirected / noindex</td></tr>
 <tr><td>15</td><td>WWW resolve issue</td><td>Crawlability</td><td>&#9675; infra</td><td>1 extra fetch of the other host variant</td></tr>
-<tr><td>16</td><td>No viewport tag</td><td>Technical</td><td>&#9679; HTML</td><td>&lt;meta name=viewport&gt; absent</td></tr>
+<tr><td>16</td><td>No viewport tag</td><td>Technical</td><td>&#10003;</td><td><code>missing-viewport</code></td></tr>
 <tr><td>17</td><td>HTML too large</td><td>Technical</td><td>&#10003;</td><td><code>heavy-html</code></td></tr>
 <tr><td>18</td><td>AMP no canonical</td><td>AMP</td><td>&#10007;</td><td>AMP validation needs the AMP validator; skip (no AMP on target sites anyway)</td></tr>
-<tr><td>19</td><td>Hreflang values invalid</td><td>Intl SEO</td><td>&#9679; HTML</td><td>ISO 639-1/3166 code check</td></tr>
-<tr><td>20</td><td>4XX status</td><td>Crawlability</td><td>&#10003;</td><td><code>not-found</code> (404) &mdash; widen to all 4xx</td></tr>
+<tr><td>19</td><td>Hreflang values invalid</td><td>Intl SEO</td><td>&#10003;</td><td><code>hreflang-invalid</code> &mdash; BCP-47 shape (lang[-Script][-REGION]) or x-default</td></tr>
+<tr><td>20</td><td>4XX status</td><td>Crawlability</td><td>&#10003;</td><td><code>not-found</code> &mdash; widened to every 4xx (2026-09-05)</td></tr>
 <tr><td>21</td><td>Incorrect hreflang links</td><td>Intl SEO</td><td>&#9675; infra</td><td>hreflang target must return 200 &mdash; HEAD</td></tr>
-<tr><td>22</td><td>Non-secure pages</td><td>HTTPS</td><td>&#9679; HTML</td><td>crawled URL scheme is http://</td></tr>
+<tr><td>22</td><td>Non-secure pages</td><td>HTTPS</td><td>&#10003;</td><td><code>non-secure-page</code></td></tr>
 <tr><td>23</td><td>Expiring/expired certificate</td><td>HTTPS</td><td>&#9675; infra</td><td>Node <code>tls.connect</code> &rarr; cert validTo</td></tr>
 <tr><td>24</td><td>Old security protocol</td><td>HTTPS</td><td>&#9675; infra</td><td>tls socket <code>getProtocol()</code> &lt; TLS 1.2</td></tr>
 <tr><td>25</td><td>Incorrect certificate name</td><td>HTTPS</td><td>&#9675; infra</td><td>cert SAN vs host</td></tr>
@@ -1880,50 +1881,50 @@ aur commit ke saath &mdash; taaki kal koi (aap, main, ya 10 saal baad koi employ
 <tr><td>28</td><td>Redirect chains &amp; loops</td><td>Technical</td><td>&#9675; infra</td><td>fetch with <code>redirect:"manual"</code>, walk hops</td></tr>
 <tr><td>29&ndash;31</td><td>AMP HTML / style / templating</td><td>AMP</td><td>&#10007;</td><td>same as #18</td></tr>
 <tr><td>32</td><td>Broken canonical link</td><td>On-Page</td><td>&#9675; infra</td><td>HEAD the canonical target</td></tr>
-<tr><td>33</td><td>Multiple canonical URLs</td><td>On-Page</td><td>&#9679; HTML</td><td>&gt;1 &lt;link rel=canonical&gt;</td></tr>
-<tr><td>34</td><td>Meta refresh tag</td><td>Technical</td><td>&#9679; HTML</td><td>&lt;meta http-equiv=refresh&gt;</td></tr>
+<tr><td>33</td><td>Multiple canonical URLs</td><td>On-Page</td><td>&#10003;</td><td><code>multiple-canonical</code></td></tr>
+<tr><td>34</td><td>Meta refresh tag</td><td>Technical</td><td>&#10003;</td><td><code>meta-refresh</code></td></tr>
 <tr><td>35</td><td>Broken internal JS/CSS</td><td>Technical</td><td>&#9675; infra</td><td>HEAD each same-origin script/link href</td></tr>
 <tr><td>36</td><td>Weak encryption algorithms</td><td>HTTPS</td><td>&#9675; infra</td><td>tls socket <code>getCipher()</code></td></tr>
-<tr><td>37</td><td>sitemap.xml too large</td><td>Crawlability</td><td>&#9679; HTML</td><td>&gt;50k URLs or &gt;50MB (we already parse it)</td></tr>
+<tr><td>37</td><td>sitemap.xml too large</td><td>Crawlability</td><td>&#10003;</td><td><code>sitemap-too-large</code> &mdash; &gt;50k URLs or &gt;50 MB</td></tr>
 <tr><td>38</td><td>Slow load speed</td><td>Performance</td><td>&#10003;</td><td>Lighthouse LCP/TBT (10-page sample) + TTFB <code>ms</code> for all</td></tr>
-<tr><td>39</td><td>Invalid structured data</td><td>On-Page</td><td>&#9679; HTML</td><td>JSON-LD parse + @context/@type presence (shallow, honest label)</td></tr>
-<tr><td>40</td><td>Malformed links</td><td>Crawlability</td><td>&#9679; HTML</td><td>href that <code>new URL()</code> rejects</td></tr>
-<tr><td>41</td><td>Missing viewport width</td><td>Technical</td><td>&#9679; HTML</td><td>viewport content without <code>width=</code></td></tr>
+<tr><td>39</td><td>Invalid structured data</td><td>On-Page</td><td>&#10003;</td><td><code>invalid-structured-data</code> &mdash; JSON-LD that fails JSON.parse or names no @type (shallow, and the row says so)</td></tr>
+<tr><td>40</td><td>Malformed links</td><td>Crawlability</td><td>&#10003;</td><td><code>malformed-link</code></td></tr>
+<tr><td>41</td><td>Missing viewport width</td><td>Technical</td><td>&#10003;</td><td><code>viewport-no-width</code></td></tr>
 </table>
 
 <h3>27.2 Warnings (34)</h3>
 <table>
 <tr><th>#</th><th>Semrush check</th><th>Category</th><th>Status</th><th>Kaise / kyun</th></tr>
 <tr><td>1</td><td>Title too long</td><td>On-Page</td><td>&#10003;</td><td><code>long-title</code></td></tr>
-<tr><td>2</td><td>Title too short</td><td>On-Page</td><td>&#9679; HTML</td><td>&lt;30 chars</td></tr>
-<tr><td>3</td><td>Low text-HTML ratio</td><td>Content</td><td>&#9679; HTML</td><td>text length / <code>bytes</code> &lt; 10%</td></tr>
+<tr><td>2</td><td>Title too short</td><td>On-Page</td><td>&#10003;</td><td><code>short-title</code> (&lt;30 chars)</td></tr>
+<tr><td>3</td><td>Low text-HTML ratio</td><td>Content</td><td>&#10003;</td><td><code>low-text-ratio</code> (visible text chars / <code>bytes</code> &lt; 10%)</td></tr>
 <tr><td>4</td><td>No meta description</td><td>On-Page</td><td>&#10003;</td><td><code>missing-meta</code></td></tr>
-<tr><td>5</td><td>Duplicate H1 and title</td><td>On-Page</td><td>&#9679; HTML</td><td>h1 text === title text</td></tr>
+<tr><td>5</td><td>Duplicate H1 and title</td><td>On-Page</td><td>&#10003;</td><td><code>h1-equals-title</code></td></tr>
 <tr><td>6</td><td>No H1</td><td>On-Page</td><td>&#10003;</td><td><code>missing-h1</code></td></tr>
-<tr><td>7</td><td>Underscore in URL</td><td>Crawlability</td><td>&#9679; HTML</td><td>pathname contains <code>_</code></td></tr>
-<tr><td>8</td><td>Sitemap not in robots.txt</td><td>Crawlability</td><td>&#9679; HTML</td><td>no <code>Sitemap:</code> line (parser already reads the file)</td></tr>
+<tr><td>7</td><td>Underscore in URL</td><td>Crawlability</td><td>&#10003;</td><td><code>underscore-url</code></td></tr>
+<tr><td>8</td><td>Sitemap not in robots.txt</td><td>Crawlability</td><td>&#10003;</td><td><code>sitemap-not-in-robots</code></td></tr>
 <tr><td>9</td><td>Low word count</td><td>Content</td><td>&#10003;</td><td><code>thin-content</code></td></tr>
 <tr><td>10</td><td>Temporary redirects (302/307)</td><td>Technical</td><td>&#9675; infra</td><td>needs redirect status capture (#28)</td></tr>
 <tr><td>11</td><td>Images without alt</td><td>On-Page</td><td>&#10003;</td><td><code>image-no-alt</code></td></tr>
 <tr><td>12</td><td>Broken external images</td><td>On-Page</td><td>&#9675; infra</td><td>HEAD external img</td></tr>
-<tr><td>13</td><td>Too many URL parameters</td><td>Crawlability</td><td>&#9679; HTML</td><td>&gt;4 query params</td></tr>
-<tr><td>14</td><td>No hreflang / lang attribute</td><td>Intl SEO</td><td>&#9679; HTML</td><td>&lt;html lang&gt; absent and no hreflang</td></tr>
-<tr><td>15</td><td>No charset declared</td><td>Technical</td><td>&#9679; HTML</td><td>&lt;meta charset&gt; / http-equiv absent</td></tr>
-<tr><td>16</td><td>No doctype</td><td>Technical</td><td>&#9679; HTML</td><td>HTML doesn't start with &lt;!doctype&gt;</td></tr>
-<tr><td>17</td><td>Incompatible plugin content</td><td>Technical</td><td>&#9679; HTML</td><td>&lt;object&gt;/&lt;embed&gt; flash/silverlight</td></tr>
-<tr><td>18</td><td>Frames</td><td>Technical</td><td>&#9679; HTML</td><td>&lt;frame&gt;/&lt;frameset&gt;/&lt;iframe&gt; as main content</td></tr>
+<tr><td>13</td><td>Too many URL parameters</td><td>Crawlability</td><td>&#10003;</td><td><code>too-many-params</code> (&gt;4)</td></tr>
+<tr><td>14</td><td>No hreflang / lang attribute</td><td>Intl SEO</td><td>&#10003;</td><td><code>no-lang</code></td></tr>
+<tr><td>15</td><td>No charset declared</td><td>Technical</td><td>&#10003;</td><td><code>no-charset</code></td></tr>
+<tr><td>16</td><td>No doctype</td><td>Technical</td><td>&#10003;</td><td><code>no-doctype</code> (BOM / XML prolog / comment before it allowed)</td></tr>
+<tr><td>17</td><td>Incompatible plugin content</td><td>Technical</td><td>&#10003;</td><td><code>plugin-content</code> &mdash; applet, or object/embed naming flash/shockwave/silverlight/.swf/.xap/clsid</td></tr>
+<tr><td>18</td><td>Frames</td><td>Technical</td><td>&#10003;</td><td><code>frames</code> &mdash; &lt;frame&gt;/&lt;frameset&gt; only; an &lt;iframe&gt; embed (YouTube, maps) is not a defect</td></tr>
 <tr><td>19</td><td>Broken external links</td><td>Internal Linking</td><td>&#9675; infra</td><td>HEAD external hrefs (throttled, capped)</td></tr>
-<tr><td>20</td><td>Internal nofollow links</td><td>Internal Linking</td><td>&#9679; HTML</td><td>rel=nofollow on same-origin &lt;a&gt;</td></tr>
-<tr><td>21</td><td>Too many on-page links</td><td>Internal Linking</td><td>&#9679; HTML</td><td>&gt;3000 &lt;a&gt; (Semrush's own threshold)</td></tr>
-<tr><td>22</td><td>Sitemap not found</td><td>Crawlability</td><td>&#10003;</td><td>fetchSite.ts already reports null sitemap (make it a finding)</td></tr>
+<tr><td>20</td><td>Internal nofollow links</td><td>Internal Linking</td><td>&#10003;</td><td><code>internal-nofollow</code></td></tr>
+<tr><td>21</td><td>Too many on-page links</td><td>Internal Linking</td><td>&#10003;</td><td><code>too-many-links</code> (&gt;3000)</td></tr>
+<tr><td>22</td><td>Sitemap not found</td><td>Crawlability</td><td>&#10003;</td><td><code>no-sitemap</code> &mdash; a finding row, not only a skipped line (2026-09-05)</td></tr>
 <tr><td>23</td><td>No SNI support</td><td>HTTPS</td><td>&#9675; infra</td><td>tls</td></tr>
-<tr><td>24</td><td>Homepage not HTTPS</td><td>HTTPS</td><td>&#9679; HTML</td><td>origin scheme</td></tr>
-<tr><td>25</td><td>HTTP URLs in sitemap (HTTPS site)</td><td>HTTPS</td><td>&#9679; HTML</td><td>sitemap entries starting http://</td></tr>
-<tr><td>26</td><td>HTTPS pages linking to HTTP</td><td>HTTPS</td><td>&#9679; HTML</td><td>same-origin href with http:// scheme</td></tr>
+<tr><td>24</td><td>Homepage not HTTPS</td><td>HTTPS</td><td>&#10003;</td><td><code>homepage-not-https</code></td></tr>
+<tr><td>25</td><td>HTTP URLs in sitemap (HTTPS site)</td><td>HTTPS</td><td>&#10003;</td><td><code>http-urls-in-sitemap</code></td></tr>
+<tr><td>26</td><td>HTTPS pages linking to HTTP</td><td>HTTPS</td><td>&#10003;</td><td><code>https-to-http-links</code></td></tr>
 <tr><td>27</td><td>Uncompressed pages</td><td>Performance</td><td>&#9675; infra</td><td><code>content-encoding</code> header (needs header capture)</td></tr>
-<tr><td>28</td><td>Blocked internal resources in robots.txt</td><td>Crawlability</td><td>&#9679; HTML</td><td>robots.ts <code>isBlocked()</code> on script/css/img paths</td></tr>
+<tr><td>28</td><td>Blocked internal resources in robots.txt</td><td>Crawlability</td><td>&#10003;</td><td><code>blocked-resources</code> &mdash; robots.ts <code>isBlocked()</code> on same-origin script/css/img paths</td></tr>
 <tr><td>29&ndash;33</td><td>JS/CSS uncompressed / uncached / too large / too many / unminified</td><td>Performance</td><td>&#9675; infra</td><td>fetch each resource + headers (heaviest; cap per page)</td></tr>
-<tr><td>34</td><td>Too long link URLs</td><td>Crawlability</td><td>&#9679; HTML</td><td>href &gt;200 chars</td></tr>
+<tr><td>34</td><td>Too long link URLs</td><td>Crawlability</td><td>&#10003;</td><td><code>long-link-url</code> (&gt;200 chars)</td></tr>
 </table>
 
 <h3>27.3 Notices (25)</h3>
@@ -1931,20 +1932,20 @@ aur commit ke saath &mdash; taaki kal koi (aap, main, ya 10 saal baad koi employ
 <tr><th>#</th><th>Semrush check</th><th>Category</th><th>Status</th><th>Kaise / kyun</th></tr>
 <tr><td>1</td><td>llms.txt not found</td><td>AI Search</td><td>&#9675; infra</td><td>1 fetch of <code>/llms.txt</code></td></tr>
 <tr><td>2</td><td>llms.txt format issues</td><td>AI Search</td><td>&#9675; infra</td><td>markdown H1 + sections per the llms.txt spec</td></tr>
-<tr><td>3</td><td>Too much content (AI)</td><td>AI Search</td><td>&#9679; HTML</td><td>word count above a stated threshold</td></tr>
-<tr><td>4</td><td>Outdated content (AI)</td><td>AI Search</td><td>&#9679; HTML</td><td>&lt;time&gt;/dateModified older than N months &mdash; only when a date exists, never guessed</td></tr>
-<tr><td>5</td><td>Low semantic HTML (AI)</td><td>AI Search</td><td>&#9679; HTML</td><td>ratio of &lt;article/section/nav/header/main&gt; to &lt;div&gt;</td></tr>
+<tr><td>3</td><td>Too much content (AI)</td><td>AI Search</td><td>&#10003;</td><td><code>ai-too-much-content</code> (&gt;4000 words)</td></tr>
+<tr><td>4</td><td>Outdated content (AI)</td><td>AI Search</td><td>&#10003;</td><td><code>ai-outdated-content</code> &mdash; latest &lt;time datetime&gt; / article:*_time / JSON-LD date* older than 24 months; no date on the page &rarr; nothing claimed</td></tr>
+<tr><td>5</td><td>Low semantic HTML (AI)</td><td>AI Search</td><td>&#10003;</td><td><code>ai-low-semantic-html</code> &mdash; &ge;30 divs and semantic/div ratio &lt;5%</td></tr>
 <tr><td>6</td><td>Content not optimized (AI)</td><td>AI Search</td><td>&#10007;</td><td>Semrush's proprietary model judgement &mdash; would be an invented score</td></tr>
-<tr><td>7</td><td>Only one incoming internal link</td><td>Internal Linking</td><td>&#9679; HTML</td><td>link graph in-degree === 1 (orphan check already builds the graph)</td></tr>
+<tr><td>7</td><td>Only one incoming internal link</td><td>Internal Linking</td><td>&#10003;</td><td><code>one-incoming-link</code> &mdash; link graph in-degree === 1</td></tr>
 <tr><td>8</td><td>External links returning 403</td><td>Crawlability</td><td>&#9675; infra</td><td>HEAD external</td></tr>
-<tr><td>9</td><td>Non-descriptive anchor text</td><td>Internal Linking</td><td>&#9679; HTML</td><td>&ldquo;click here&rdquo;, &ldquo;read more&rdquo;, &ldquo;here&rdquo;, bare URL</td></tr>
-<tr><td>10</td><td>&gt;3 clicks from homepage</td><td>Internal Linking</td><td>&#9679; HTML</td><td>BFS depth over the link graph from origin</td></tr>
-<tr><td>11</td><td>External nofollow links</td><td>Internal Linking</td><td>&#9679; HTML</td><td>rel=nofollow on external &lt;a&gt;</td></tr>
+<tr><td>9</td><td>Non-descriptive anchor text</td><td>Internal Linking</td><td>&#10003;</td><td><code>generic-anchor</code></td></tr>
+<tr><td>10</td><td>&gt;3 clicks from homepage</td><td>Internal Linking</td><td>&#10003;</td><td><code>deep-page</code> &mdash; BFS from origin over the link graph; unreachable pages are orphans, not deep</td></tr>
+<tr><td>11</td><td>External nofollow links</td><td>Internal Linking</td><td>&#10003;</td><td><code>external-nofollow</code></td></tr>
 <tr><td>12</td><td>No HSTS</td><td>HTTPS</td><td>&#9675; infra</td><td><code>strict-transport-security</code> header</td></tr>
-<tr><td>13</td><td>URL &gt;200 chars</td><td>Crawlability</td><td>&#9679; HTML</td><td>crawled URL length</td></tr>
+<tr><td>13</td><td>URL &gt;200 chars</td><td>Crawlability</td><td>&#10003;</td><td><code>long-url</code></td></tr>
 <tr><td>14</td><td>More than one H1</td><td>On-Page</td><td>&#10003;</td><td><code>multiple-h1</code></td></tr>
-<tr><td>15</td><td>robots.txt not found</td><td>Crawlability</td><td>&#10003;</td><td>currently a <code>skipped</code> line &mdash; make it a Notice finding</td></tr>
-<tr><td>16</td><td>Hreflang language mismatch</td><td>Intl SEO</td><td>&#9679; HTML</td><td>hreflang vs &lt;html lang&gt;</td></tr>
+<tr><td>15</td><td>robots.txt not found</td><td>Crawlability</td><td>&#10003;</td><td><code>robots-not-found</code> &mdash; a Notice row AND the skipped line (2026-09-05)</td></tr>
+<tr><td>16</td><td>Hreflang language mismatch</td><td>Intl SEO</td><td>&#10003;</td><td><code>hreflang-lang-mismatch</code> &mdash; page's own hreflang entry vs &lt;html lang&gt; primary subtag</td></tr>
 <tr><td>17</td><td>Blocked from crawling</td><td>Crawlability</td><td>&#10003;</td><td><code>blockedPages</code> (2026-09-05)</td></tr>
 <tr><td>18</td><td>Orphaned pages (GA)</td><td>Internal Linking</td><td>&#9675; infra</td><td>GA4 landing pages not in link graph &mdash; lib/insights.ts already has GA when connected</td></tr>
 <tr><td>19</td><td>Orphaned pages (sitemap)</td><td>Internal Linking</td><td>&#10003;</td><td><code>orphan-page</code> (sitemap URL with in-degree 0)</td></tr>
@@ -1952,8 +1953,8 @@ aur commit ke saath &mdash; taaki kal koi (aap, main, ya 10 saal baad koi employ
 <tr><td>21</td><td>Blocked external resources in robots.txt</td><td>Crawlability</td><td>&#10007;</td><td>needs the EXTERNAL host's robots.txt &mdash; out of scope of a single-site crawl</td></tr>
 <tr><td>22</td><td>Broken external JS/CSS</td><td>Performance</td><td>&#9675; infra</td><td>HEAD external resources</td></tr>
 <tr><td>23</td><td>Permanent redirect (301)</td><td>Technical</td><td>&#9675; infra</td><td>needs redirect status capture (#28)</td></tr>
-<tr><td>24</td><td>Links with no anchor text</td><td>Internal Linking</td><td>&#9679; HTML</td><td>&lt;a&gt; with empty text and no img alt</td></tr>
-<tr><td>25</td><td>Resources formatted as page link</td><td>Crawlability</td><td>&#9679; HTML</td><td>&lt;a href&gt; ending .css/.js/.png etc.</td></tr>
+<tr><td>24</td><td>Links with no anchor text</td><td>Internal Linking</td><td>&#10003;</td><td><code>empty-anchor</code> &mdash; no text, no img alt, no aria-label/title</td></tr>
+<tr><td>25</td><td>Resources formatted as page link</td><td>Crawlability</td><td>&#10003;</td><td><code>resource-as-link</code></td></tr>
 </table>
 
 <h3>27.4 Overview widgets, tabs, thematic reports</h3>
@@ -1965,7 +1966,7 @@ aur commit ke saath &mdash; taaki kal koi (aap, main, ya 10 saal baad koi employ
 <tr><td>AI Search Health + Blocked from AI Search</td><td>&#10003;</td><td>robots.ts, real directive check</td></tr>
 <tr><td>Errors / Warnings trend charts</td><td>&#10003;</td><td>history-fed SVG</td></tr>
 <tr><td>Top issues list + &ldquo;How to fix&rdquo;</td><td>&#10003;</td><td>popup coming this round</td></tr>
-<tr><td>Thematic Reports: Crawlability / HTTPS / Site Performance / Internal Linking / Markup / International SEO %</td><td>&#9679; Round A</td><td>the per-check <code>category</code> in the tables above IS the taxonomy; % = passed checks in category / total checks in category, computed from real findings</td></tr>
+<tr><td>Thematic Reports: Crawlability / HTTPS / Site Performance / Internal Linking / Markup / International SEO %</td><td>&#10003; (2026-09-05)</td><td>the per-check <code>category</code> in the tables above IS the taxonomy; % = passed checks in category / total checks in category, computed from real findings</td></tr>
 <tr><td>Thematic: Robots.txt card</td><td>&#10003;</td><td>have the file + parser</td></tr>
 <tr><td>Thematic: Core Web Vitals</td><td>&#10003;</td><td>Lighthouse (Semrush paywalls this one)</td></tr>
 <tr><td>Tabs: Overview / Issues / Crawled Pages / Progress</td><td>&#9679; this round</td><td>all from data already returned by /api/site-audit</td></tr>
