@@ -65,6 +65,10 @@ type Report = {
   issues: Issue[];
   skipped: string[];
   performance: PageVitals[];
+  /** True while the browser phase is still running for this report, or forever if it never
+   *  came back — the CWV card says which, by age. */
+  performancePending?: boolean;
+  startedAt?: string | null;
   pages: CrawledPage[];
   websiteUrl: string | null;
   aiSearch: BotAccess[] | null;
@@ -211,6 +215,7 @@ export default function AuditSection() {
   const [compareRun, setCompareRun] = useState<RunLite | null>(null);
   const [compareError, setCompareError] = useState<string | null>(null);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const reloadedFor = useRef<string | null>(null);
 
   // Default the comparison to the run before the latest, and fetch whichever run is picked.
   useEffect(() => {
@@ -291,13 +296,21 @@ export default function AuditSection() {
     pollTimer.current = setInterval(async () => {
       const j = await fetchStatus();
       const isNewRow = !!j && j.id !== polling.sinceJobId;
+      // Two-stage save: the crawl report is on file once the run reaches the browser phase —
+      // show it then (once per run), with its Core Web Vitals card saying "being measured".
+      if (j && isNewRow && (j.progress.phase === "perf" || j.progress.phase === "checks") && reloadedFor.current !== j.id) {
+        reloadedFor.current = j.id;
+        await load();
+      }
       if (j && isNewRow && (j.status === "error" || j.status === "skipped")) {
         setPolling(null);
+        await load(); // whatever stage 1 filed is still a real report
         toast("The audit failed — the reason is on the page.", "error");
         return;
       }
       if (j && isNewRow && j.stalled) {
         setPolling(null);
+        await load();
         toast("The audit stopped responding — details on the page.", "error");
         return;
       }
@@ -658,6 +671,19 @@ export default function AuditSection() {
               <p className="lx-11 lx-mut mt-3">Not on file for this report — the next audit will include per-category scores.</p>
             )}
           </div>
+
+          {r.performancePending && vitals.length === 0 && (
+            <div className="lx-card2 p-4">
+              <b className="lx-12">Core Web Vitals</b>
+              {polling ? (
+                <p className="lx-11 lx-mut mt-2">Being measured now — the rest of this report is already final; this section fills in when the browser finishes.</p>
+              ) : (
+                <p className="lx-11 mt-2" style={{ color: "#fbbf24" }}>
+                  The loading-speed check did not finish for this report — the server stopped during it (started {r.startedAt ? new Date(r.startedAt).toLocaleString() : new Date(r.createdAt).toLocaleString()}). Everything else on this page is complete. Re-audit to measure speed.
+                </p>
+              )}
+            </div>
+          )}
 
           {vitals.length > 0 && (
             <div className="lx-card2 p-4">

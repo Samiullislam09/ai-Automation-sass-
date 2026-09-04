@@ -156,8 +156,24 @@ export function pickDueKeyword(
   });
 }
 
+/** DataForSEO status codes that are about the ACCOUNT, not the request — an unverified account
+ *  (40104), bad credentials (40101), no balance (40200). Retrying those every tick cannot
+ *  succeed and only fills the Railway log with the same line (15 in a row on 2026-09-05, the
+ *  owner pasted them). One line, then rank tracking pauses for a day. */
+const ACCOUNT_ERROR = /\((4010[0-9]|40200)\)|verify your account|not enough money|invalid login|unauthori[sz]ed/i;
+const RANK_PAUSE_MS = 24 * 60 * 60_000;
+let rankPausedUntil = 0;
+let rankPauseReason = "";
+
+/** Exported for tests only. */
+export function _resetRankPause() {
+  rankPausedUntil = 0;
+  rankPauseReason = "";
+}
+
 export async function tickRanks(now: Date = new Date()): Promise<number> {
   if (!dataForSeoConfigured()) return 0;
+  if (now.getTime() < rankPausedUntil) return 0;
 
   const { data: tenants, error } = await supabase.from("tenants").select("id, website_url").not("website_url", "is", null).limit(500);
   if (error) {
@@ -213,10 +229,25 @@ export async function tickRanks(now: Date = new Date()): Promise<number> {
       started++;
       console.log(`[scheduler] tenant ${t.id}: rank checked for "${due.primary_keyword}"`);
     } catch (e: any) {
-      console.error(`[scheduler] rank check for tenant ${t.id} failed:`, e?.message);
+      const msg = String(e?.message ?? e);
+      if (ACCOUNT_ERROR.test(msg)) {
+        rankPausedUntil = now.getTime() + RANK_PAUSE_MS;
+        rankPauseReason = msg;
+        console.error(
+          `[scheduler] rank tracking PAUSED for 24h — the DataForSEO account itself is refusing requests, so retrying cannot help: ${msg}\n` +
+            "            Fix it at https://app.dataforseo.com/ (verify the account / add balance / check DATAFORSEO_LOGIN+PASSWORD). Rank checks resume on their own afterwards.",
+        );
+        return started;
+      }
+      console.error(`[scheduler] rank check for tenant ${t.id} failed:`, msg);
     }
   }
   return started;
+}
+
+/** For /version: why rank tracking is not running right now, or null. */
+export function rankTrackingPause(): { until: string; reason: string } | null {
+  return Date.now() < rankPausedUntil ? { until: new Date(rankPausedUntil).toISOString(), reason: rankPauseReason } : null;
 }
 
 export function stopScheduler() {

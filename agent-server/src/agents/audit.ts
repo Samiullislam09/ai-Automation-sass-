@@ -1,8 +1,8 @@
 import type { Job } from "pg-boss";
 import { Agent, type AgentContext, type AgentJobData } from "./base.js";
-import { auditSite, summarizeAudit, topIssues, type AuditIssue } from "../lib/audit/checks.js";
+import { auditSite, summarizeAudit, topIssues, type AuditIssue, type AuditPage, type AuditResult } from "../lib/audit/checks.js";
 import { auditTarget, chooseUrls, fetchAllPages, fetchSiteContext, DEFAULT_PAGE_LIMIT } from "../lib/audit/fetchSite.js";
-import { runPerformanceAudit, issuesFromVitals, type PerformanceRun } from "../lib/audit/performance.js";
+import { runPerformanceAudit, issuesFromVitals, type PageVitals, type PerformanceRun } from "../lib/audit/performance.js";
 import { aiSearchAccess } from "../lib/audit/robots.js";
 import { supabase } from "../supabase.js";
 
@@ -88,6 +88,45 @@ export class AuditAgent extends Agent {
       ctx.onProgress({ phase: "fetch", label: `Checked ${done} of ${total} pages`, done, total, at: new Date().toISOString() });
     });
 
+    /* ── STAGE 1: file the report from the crawl alone, BEFORE the browser phase ─────────────
+     *
+     * Railway killed this process out of memory three times on 2026-09-05, every time inside
+     * Lighthouse, and every time the 156-page crawl and its 40+ checks died with it — nothing
+     * was filed. So the deterministic report is written first (score, issues, pages, catalogue;
+     * `performancePending: true`, and a skipped line that says the speed check is still
+     * running). Stage 2 below measures speed and UPDATES this same row. If stage 2 never
+     * returns, the customer still has a complete audit minus one section, and the section says
+     * so — the report page reads `performancePending` and tells the truth about it. */
+    ctx.onProgress({ phase: "checks", label: "Looking for problems…", at: new Date().toISOString() });
+    ctx.progress(0.85, "Looking for problems");
+
+    const trigger: "manual" | "schedule" = d.source === "schedule" ? "schedule" : "manual";
+    const previous = await previousScore(tenantId);
+    const aiSearch = aiSearchAccess(site.robotsTxt);
+
+    const stage1 = auditSite(pages, site, {
+      issues: [],
+      skippedReason: "Loading speed (Core Web Vitals) is being measured now — this report updates itself when that finishes.",
+    });
+    for (const issue of stage1.issues) ctx.data("issue", issue);
+    ctx.data("score", { score: stage1.score, blocks: stage1.blocks, warns: stage1.warns, pages: stage1.pagesChecked });
+
+    const { data: saved, error: saveError } = await supabase
+      .from("site_audits")
+      .insert(auditRow(tenantId, stage1, previous, [], true, { startedAt, t0, limit, trigger, websiteUrl: target.origin, pages, aiSearch }))
+      .select("id")
+      .single();
+    if (saveError) {
+      // The audit is real whether or not it was filed. Losing the report is worth a loud log
+      // and a note to the user; it is not worth throwing away three minutes of measurement.
+      console.error("[audit] could not save the report:", saveError.message);
+      ctx.log(`The audit ran but the report could not be saved: ${saveError.message}`, "error");
+    } else {
+      ctx.log(`Report filed (score ${stage1.score}/100, ${stage1.pagesChecked} pages) — now measuring loading speed.`);
+    }
+
+    /* ── STAGE 2: real Chrome, on a sample, updating the row above ───────────────────────── */
+
     // Homepage first (always in the sample), then whichever other pages were already fetched —
     // not necessarily "latest articles" (nothing here knows publish dates), but the same "the
     // pages that matter most" bias fetchAllPages/chooseUrls already applied upstream.
@@ -116,108 +155,29 @@ export class AuditAgent extends Agent {
     if (perf.ran) ctx.log(`Measured loading speed on ${perf.pages.filter((p) => p.ok).length} of ${perf.pages.length} page(s).`);
     else if (perf.skippedReason) ctx.log(perf.skippedReason, "warn");
 
-    ctx.onProgress({ phase: "checks", label: "Looking for problems…", at: new Date().toISOString() });
-    ctx.progress(0.95, "Looking for problems");
+    ctx.onProgress({ phase: "checks", label: "Adding loading speed to the report…", at: new Date().toISOString() });
+    ctx.progress(0.97, "Adding loading speed to the report");
 
+    // Same catalogue, now with the real vitals folded in — the score can only move by the
+    // performance issues (slow-lcp / layout-shift / slow-interactivity), never by anything
+    // that changed underneath: the pages are the same objects stage 1 judged.
     const result = auditSite(pages, site, {
       issues: issuesFromVitals(perf.pages),
       skippedReason: perf.ran ? null : perf.skippedReason,
     });
-    for (const issue of result.issues) ctx.data("issue", issue);
+    for (const issue of result.issues) if (!stage1.issues.some((i) => i.id === issue.id)) ctx.data("issue", issue);
     ctx.data("score", { score: result.score, blocks: result.blocks, warns: result.warns, pages: result.pagesChecked });
-
-    const previous = await previousScore(tenantId);
     const summary = summarizeAudit(result, previous);
 
-    // Who asked for this run — the scheduler's own weekly sweep (scheduler.ts: `source:
-    // "schedule"`) or a person clicking "Check my site now" (2026-09-05, the Audit report
-    // page's history table: "manual kab hua, schedule kab hua"). Anything else unrecognised
-    // defaults to "manual" rather than silently claiming a schedule that did not happen.
-    const trigger: "manual" | "schedule" = d.source === "schedule" ? "schedule" : "manual";
-
-    // A light per-page summary — status, redirect, response time, and now (2026-09-05) which
-    // of the report's OWN two exact sets a page falls in (`result.pagesWithIssues`/
-    // `blockedPages` — never approximated, see checks.ts's own comment on those fields) — never
-    // the full `html`/`bytes` (that stays transient, this file's own reason for keeping
-    // checks.ts network-free already applies here too). Feeds the report page's Crawled Pages
-    // breakdown and its "see more" full-page popup; before this it was computed, used once for
-    // `result`, and thrown away.
-    const issuePages = new Set(result.pagesWithIssues);
-    const blockedPages = new Set(result.blockedPages);
-    // Per-page measurements for the report page's Statistics tab (MASTER_PLAN §27.4, Round A,
-    // 2026-09-05) — checks.ts's own `pageStats`, taken from the same link graph / title /
-    // description / word count the issue rows were judged on. null on a page with no HTML
-    // (a 404, a PDF, a timeout): not measured, not zero.
-    const stats = new Map(result.pageStats.map((s) => [s.url, s]));
-    const pageSummary = pages.map((p) => {
-      const st = stats.get(p.url) ?? null;
-      return {
-        url: p.url,
-        status: p.status,
-        redirectedTo: p.finalUrl && p.finalUrl !== p.url ? p.finalUrl : null,
-        ms: p.ms,
-        error: p.error ?? null,
-        hasIssue: issuePages.has(p.url),
-        blocked: blockedPages.has(p.url),
-        depth: st ? st.depth : null,
-        titleChars: st ? st.titleChars : null,
-        descriptionChars: st ? st.descriptionChars : null,
-        words: st ? st.words : null,
-        inLinks: st ? st.inLinks : null,
-        outLinks: st ? st.outLinks : null,
-      };
-    });
-
-    // Real robots.txt evaluation for the named AI crawlers (lib/audit/robots.ts) — the owner's
-    // own real Semrush report showed this as a real, non-fabricated card ("AI Search Health" /
-    // "Blocked from AI Search"): it is a directive check against data this audit already
-    // fetches (site.robotsTxt), not a traffic log this app has never had access to. `null` only
-    // when robots.txt itself could not be read — `result.skipped` already explains that.
-    const aiSearch = aiSearchAccess(site.robotsTxt);
-
-    const seconds = Math.round((Date.now() - t0) / 1000);
-    const { data: saved, error } = await supabase
-      .from("site_audits")
-      .insert({
-        tenant_id: tenantId,
-        score: result.score,
-        previous_score: previous,
-        pages_checked: result.pagesChecked,
-        blocks: result.blocks,
-        warns: result.warns,
-        issues: result.issues,
-        run: {
-          started_at: startedAt,
-          finished_at: new Date().toISOString(),
-          seconds,
-          limit,
-          skipped: result.skipped,
-          trigger,
-          // The real domain, for the report page's own big heading (Semrush shows "Site Audit:
-          // domain.com" — this is what makes that real instead of a static page title).
-          websiteUrl: target.origin,
-          pages: pageSummary,
-          // Per-page LCP/CLS/TBT — the derived issues are in `issues` above; this is the raw
-          // numbers behind them, for a future report page that wants to chart them per page.
-          performance: perf.pages,
-          // Real, named-bot robots.txt evaluation — null only when robots.txt itself could not
-          // be read (see `skipped`).
-          aiSearch,
-          // Every check this run COULD have made, with its category — the exact denominator the
-          // report page's thematic rings divide by (MASTER_PLAN §27). Stored per run, not read
-          // live from code, so a six-month-old report's % still means what it meant that day.
-          catalogue: result.catalogue,
-        },
-        summary,
-      })
-      .select("id")
-      .single();
-
-    if (error) {
-      // The audit is real whether or not it was filed. Losing the report is worth a loud log
-      // and a note to the user; it is not worth throwing away three minutes of measurement.
-      console.error("[audit] could not save the report:", error.message);
-      ctx.log(`The audit ran but the report could not be saved: ${error.message}`, "error");
+    if (saved?.id) {
+      const { error: updateError } = await supabase
+        .from("site_audits")
+        .update(auditRow(tenantId, result, previous, perf.pages, false, { startedAt, t0, limit, trigger, websiteUrl: target.origin, pages, aiSearch }))
+        .eq("id", saved.id);
+      if (updateError) {
+        console.error("[audit] report filed but the loading-speed update failed:", updateError.message);
+        ctx.log(`The report is filed, but the loading-speed section could not be added: ${updateError.message}`, "error");
+      }
     }
 
     ctx.progress(1, "Audit finished");
@@ -238,6 +198,81 @@ export class AuditAgent extends Agent {
       summary,
     };
   }
+}
+
+/** The site_audits row, built the same way for stage 1 (insert, no vitals yet) and stage 2
+ *  (update, vitals in) — one function so the two can never drift in shape. */
+function auditRow(
+  tenantId: string,
+  result: AuditResult,
+  previous: number | null,
+  performance: PageVitals[],
+  performancePending: boolean,
+  meta: { startedAt: string; t0: number; limit: number; trigger: "manual" | "schedule"; websiteUrl: string; pages: AuditPage[]; aiSearch: ReturnType<typeof aiSearchAccess> },
+) {
+  // A light per-page summary — status, redirect, response time, and (2026-09-05) which of the
+  // report's OWN two exact sets a page falls in (`result.pagesWithIssues`/`blockedPages` —
+  // never approximated, see checks.ts's own comment on those fields) plus checks.ts's
+  // per-page `pageStats` for the Statistics tab — never the full `html`/`bytes` (that stays
+  // transient; checks.ts's network-free reasoning applies here too). null on a page with no
+  // HTML (a 404, a PDF, a timeout): not measured, not zero.
+  const issuePages = new Set(result.pagesWithIssues);
+  const blockedPages = new Set(result.blockedPages);
+  const stats = new Map(result.pageStats.map((s) => [s.url, s]));
+  const pageSummary = meta.pages.map((p) => {
+    const st = stats.get(p.url) ?? null;
+    return {
+      url: p.url,
+      status: p.status,
+      redirectedTo: p.finalUrl && p.finalUrl !== p.url ? p.finalUrl : null,
+      ms: p.ms,
+      error: p.error ?? null,
+      hasIssue: issuePages.has(p.url),
+      blocked: blockedPages.has(p.url),
+      depth: st ? st.depth : null,
+      titleChars: st ? st.titleChars : null,
+      descriptionChars: st ? st.descriptionChars : null,
+      words: st ? st.words : null,
+      inLinks: st ? st.inLinks : null,
+      outLinks: st ? st.outLinks : null,
+    };
+  });
+
+  return {
+    tenant_id: tenantId,
+    score: result.score,
+    previous_score: previous,
+    pages_checked: result.pagesChecked,
+    blocks: result.blocks,
+    warns: result.warns,
+    issues: result.issues,
+    run: {
+      started_at: meta.startedAt,
+      finished_at: new Date().toISOString(),
+      seconds: Math.round((Date.now() - meta.t0) / 1000),
+      limit: meta.limit,
+      skipped: result.skipped,
+      // Who asked for this run — the scheduler's weekly sweep or a person. Anything
+      // unrecognised defaults to "manual" rather than claiming a schedule that did not happen.
+      trigger: meta.trigger,
+      // The real domain, for the report page's own big heading.
+      websiteUrl: meta.websiteUrl,
+      pages: pageSummary,
+      // Per-page LCP/CLS/TBT — the derived issues are in `issues` above; this is the raw
+      // numbers behind them. Empty in stage 1.
+      performance,
+      // True between stage 1 and stage 2. A row that still says true long after
+      // `started_at` is a run whose browser phase never came back (OOM, restart) — the report
+      // page says exactly that instead of "0 of 0 pages measured".
+      performancePending,
+      // Real, named-bot robots.txt evaluation — null only when robots.txt could not be read.
+      aiSearch: meta.aiSearch,
+      // Every check this run COULD have made, with its category — the exact denominator the
+      // report page's thematic rings divide by (MASTER_PLAN §27). Stored per run.
+      catalogue: result.catalogue,
+    },
+    summary: summarizeAudit(result, previous),
+  };
 }
 
 /** The chat card's row: what is wrong, what to do, how many pages. Not the full issue — the

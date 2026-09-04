@@ -18,6 +18,7 @@
  *  `CHROME_PATH` if set. Never throws when it cannot find one — the whole audit still has to
  *  file, just without a performance section, `skippedReason` says why.
  */
+import { readFileSync } from "node:fs";
 import * as chromeLauncher from "chrome-launcher";
 import lighthouse from "lighthouse";
 
@@ -62,8 +63,58 @@ const PAGE_TIMEOUT_MS = 75_000;
 const RUN_BUDGET_MS = 5 * 60_000;
 const LAUNCH_TIMEOUT_MS = 30_000;
 
+/** MEMORY. Railway killed the whole agent-server out of memory three times on 2026-09-05,
+ *  every time inside this file (the Railway notification says "Out of memory"; jobs_log shows
+ *  the run at page 9-10 of 10). Chrome + a Lighthouse trace is the heaviest thing this process
+ *  ever does, and a shared Chrome kept every page's tabs and caches until the end. So:
+ *   · one Chrome PER PAGE — launched, measured, killed — so memory returns between pages;
+ *   · the screenshot/thumbnail audits are skipped (the performance score does not need them
+ *     and the full-page screenshot alone can be tens of MB per page);
+ *   · Chrome is started with the flags that keep it smallest;
+ *   · and before each page the container's own memory is read from cgroup (what the OOM
+ *     killer actually looks at); if less than MEMORY_HEADROOM_MB is free, the rest of the
+ *     sample is recorded as not measured and the audit files with what it has — a report with
+ *     seven speed measurements beats no report at all, which is what an OOM produced. */
+const MEMORY_HEADROOM_MB = 350;
+const CHROME_FLAGS = [
+  "--headless=new",
+  "--no-sandbox",
+  "--disable-gpu",
+  "--disable-dev-shm-usage",
+  "--no-zygote",
+  "--disable-extensions",
+  "--disable-background-networking",
+  "--disable-default-apps",
+  "--disable-sync",
+  "--disable-translate",
+  "--mute-audio",
+  "--no-first-run",
+  "--js-flags=--max-old-space-size=256",
+];
+
 function chromePath(): string | undefined {
   return process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_PATH || undefined;
+}
+
+/** Container memory as the OOM killer sees it — cgroup v2 first, v1 second. null outside a
+ *  container (or where the files are unreadable); then no guard, same as before. Read fresh
+ *  each time: `memory.current` includes every process in the container, Chrome included. */
+function containerMemoryMb(): { used: number; limit: number } | null {
+  const readNum = (path: string): number | null => {
+    try {
+      const raw = readFileSync(path, "utf8").trim();
+      if (raw === "max") return null;
+      const n = Number(raw);
+      return Number.isFinite(n) && n > 0 ? n : null;
+    } catch {
+      return null;
+    }
+  };
+  const v2 = { used: readNum("/sys/fs/cgroup/memory.current"), limit: readNum("/sys/fs/cgroup/memory.max") };
+  if (v2.used !== null && v2.limit !== null) return { used: v2.used / 1048576, limit: v2.limit / 1048576 };
+  const v1 = { used: readNum("/sys/fs/cgroup/memory/memory.usage_in_bytes"), limit: readNum("/sys/fs/cgroup/memory/memory.limit_in_bytes") };
+  if (v1.used !== null && v1.limit !== null && v1.limit < 2 ** 60) return { used: v1.used / 1048576, limit: v1.limit / 1048576 };
+  return null;
 }
 
 /** A promise with a ceiling. On timeout the ORIGINAL keeps running (nothing can cancel a
@@ -77,14 +128,7 @@ function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
 }
 
 async function launchChrome(): Promise<chromeLauncher.LaunchedChrome> {
-  return withTimeout(
-    chromeLauncher.launch({
-      chromeFlags: ["--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
-      chromePath: chromePath(),
-    }),
-    LAUNCH_TIMEOUT_MS,
-    "Chrome launch",
-  );
+  return withTimeout(chromeLauncher.launch({ chromeFlags: CHROME_FLAGS, chromePath: chromePath() }), LAUNCH_TIMEOUT_MS, "Chrome launch");
 }
 
 function killChrome(chrome: chromeLauncher.LaunchedChrome | null) {
@@ -118,38 +162,44 @@ export async function runPerformanceAudit(urls: string[], onPage?: (done: number
     };
   }
 
+  // The first launch proved a browser exists; it is thrown away and every page gets its own.
+  killChrome(chrome);
+  chrome = null;
+
   const started = Date.now();
   const pages: PageVitals[] = [];
-  try {
-    for (const [i, url] of urls.entries()) {
-      const empty = { url, performanceScore: null, lcpMs: null, cls: null, tbtMs: null };
-      if (Date.now() - started > RUN_BUDGET_MS) {
-        pages.push({ ...empty, ok: false, error: `Not measured — the ${Math.round(RUN_BUDGET_MS / 60_000)}-minute loading-speed budget for this audit was used up by the pages before it` });
-        onPage?.(i + 1, urls.length, url);
-        continue;
-      }
-      if (!chrome) {
-        try {
-          chrome = await launchChrome();
-        } catch (e: any) {
-          pages.push({ ...empty, ok: false, error: `Not measured — Chrome could not be restarted after a hung page (${e?.message ?? "launch failed"})` });
-          onPage?.(i + 1, urls.length, url);
-          continue;
-        }
-      }
-      try {
-        pages.push(await withTimeout(auditOne(url, chrome.port), PAGE_TIMEOUT_MS, "Lighthouse"));
-      } catch (e: any) {
-        // The hung run still holds this Chrome — throw the browser away, the next page gets a
-        // fresh one. Leaving it would make every following page hang the same way.
-        pages.push({ ...empty, ok: false, error: `Not measured — ${e?.message ?? "Lighthouse hung"}` });
-        killChrome(chrome);
-        chrome = null;
-      }
+  let lowMemory: string | null = null;
+  for (const [i, url] of urls.entries()) {
+    const empty = { url, performanceScore: null, lcpMs: null, cls: null, tbtMs: null };
+    if (Date.now() - started > RUN_BUDGET_MS) {
+      pages.push({ ...empty, ok: false, error: `Not measured — the ${Math.round(RUN_BUDGET_MS / 60_000)}-minute loading-speed budget for this audit was used up by the pages before it` });
       onPage?.(i + 1, urls.length, url);
+      continue;
     }
-  } finally {
-    killChrome(chrome);
+    const mem = containerMemoryMb();
+    if (lowMemory || (mem && mem.limit - mem.used < MEMORY_HEADROOM_MB)) {
+      lowMemory ??= `Not measured — the server had only ${Math.round(mem!.limit - mem!.used)} MB of memory left (of ${Math.round(mem!.limit)} MB) and a browser needs about ${MEMORY_HEADROOM_MB}; stopped rather than crash the audit`;
+      pages.push({ ...empty, ok: false, error: lowMemory });
+      onPage?.(i + 1, urls.length, url);
+      continue;
+    }
+    try {
+      chrome = await launchChrome();
+    } catch (e: any) {
+      pages.push({ ...empty, ok: false, error: `Not measured — Chrome could not be started for this page (${e?.message ?? "launch failed"})` });
+      onPage?.(i + 1, urls.length, url);
+      continue;
+    }
+    try {
+      pages.push(await withTimeout(auditOne(url, chrome.port), PAGE_TIMEOUT_MS, "Lighthouse"));
+    } catch (e: any) {
+      pages.push({ ...empty, ok: false, error: `Not measured — ${e?.message ?? "Lighthouse hung"}` });
+    } finally {
+      // Every page's Chrome dies here, hung or not — the memory comes back before the next one.
+      killChrome(chrome);
+      chrome = null;
+    }
+    onPage?.(i + 1, urls.length, url);
   }
 
   return { ran: true, skippedReason: null, pages };
@@ -170,6 +220,10 @@ async function auditOne(url: string, port: number): Promise<PageVitals> {
       // throttling gives up inside PAGE_TIMEOUT_MS instead of waiting on the default (45s + 45s).
       maxWaitForFcp: 20_000,
       maxWaitForLoad: 40_000,
+      // The performance SCORE needs the trace, not pictures of the page — the screenshot
+      // audits are the biggest single memory cost per run and are read by nothing here.
+      disableFullPageScreenshot: true,
+      skipAudits: ["screenshot-thumbnails", "final-screenshot", "full-page-screenshot"],
     });
     const lhr = result?.lhr;
     if (!lhr) return { ...empty, ok: false, error: "Lighthouse returned no result" };

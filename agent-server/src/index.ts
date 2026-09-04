@@ -7,7 +7,7 @@ import { AGENT_TYPES, enqueue, initQueues, type AgentType } from "./queues.js";
 import { boss } from "./db.js";
 import { initSocket } from "./socket.js";
 import { startWorkers } from "./workers.js";
-import { startScheduler, stopScheduler } from "./scheduler.js";
+import { startScheduler, stopScheduler, rankTrackingPause } from "./scheduler.js";
 import { dailyUsage, sweepOrphanedJobs } from "./jobsLog.js";
 import { CAP_TABLE } from "./config/caps.js";
 import { nvidiaWindow } from "./lib/nvidia.js";
@@ -54,6 +54,9 @@ app.get("/version", (_req, res) => {
     // Cheap, honest capability flags — each one is a feature whose absence has previously
     // been mistaken for a bug in the web app rather than a stale deploy.
     features: { scheduler: true, keywordAiFallback: true, writerThinkingDisabled: true, brain: brainStatus() },
+    // Why rank tracking is not running, when it is not (an account-level DataForSEO refusal
+    // pauses it for a day rather than logging the same line every tick) — null when it is.
+    rankTrackingPaused: rankTrackingPause(),
     // Per-plan caps plus the runaway guard, so the dashboard can show a tenant their real
     // allowance ("3 of 30 runs used today") instead of letting them walk into an invisible
     // wall. null in here means that plan has no daily cap for that agent.

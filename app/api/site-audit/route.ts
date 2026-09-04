@@ -113,6 +113,11 @@ export async function GET(req: Request) {
           // Real Lighthouse results (agent-server/src/lib/audit/performance.ts) — already
           // stored in `run.performance` since that file shipped, never surfaced here until now.
           performance: Array.isArray((latest.run as any)?.performance) ? (latest.run as any).performance : [],
+          // Two-stage save (agents/audit.ts, 2026-09-05): true while the crawl report is filed
+          // and the browser phase is still running — or forever, if that phase never came back
+          // (OOM/restart). Absent on rows from before the split → false.
+          performancePending: (latest.run as any)?.performancePending === true,
+          startedAt: typeof (latest.run as any)?.started_at === "string" ? (latest.run as any).started_at : null,
           // Real per-page crawl summary (status/redirect/response time/hasIssue/blocked) — the
           // Crawled Pages breakdown and the "see more" full-page popup both read this.
           pages: Array.isArray((latest.run as any)?.pages) ? (latest.run as any).pages : [],
