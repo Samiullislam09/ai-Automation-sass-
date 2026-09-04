@@ -32,6 +32,17 @@ export type WriterContext = {
   /** The thing this article should send the reader to, taken from the offerings that match
    *  its keyword. Replaces the generic "contact us" the writer used to invent. */
   cta?: { name: string; url: string | null } | null;
+  /** Real proof this business has on file (Site Brain's own claims, never invented), each with
+   *  a URL when one exists — a case study, a certification page, a client result. Only entries
+   *  WITH a url are carried here (one with none has nothing to link). This is what lets an
+   *  article satisfy lib/seoChecks.ts's "Proof cited" E-E-A-T check on its own, instead of that
+   *  check only ever reporting it missing (2026-09-04). */
+  proof?: { claim: string; url: string }[];
+  /** The crawled About/Contact-style page — same detection lib/seoChecks.ts's "About/Contact
+   *  linked" E-E-A-T check uses, so the writer and the check can never disagree on which page
+   *  counts. A real Trustworthiness signal per Google's own guidelines; this is what lets an
+   *  article link to it on its own instead of the check only ever reporting it absent. */
+  trustPage?: { title: string; url: string } | null;
 };
 
 /** The rules every article is held to. Written down here (and checked afterwards by

@@ -11,6 +11,7 @@ import { publishContentItem } from "../lib/publish.js";
 import { loadActiveProfile, profileBlock, type SiteProfile } from "../lib/siteProfile.js";
 import { checkDuplicate, type DuplicateVerdict } from "../lib/dedupe.js";
 import { brainRefOf } from "../brain/adapter.js";
+import { TRUST_PAGE_PATTERN } from "../lib/seoChecks.js";
 
 /** Build Guide Step 11 — Mr. Writer drafts the article.
  *  Currently runs on NVIDIA (Lightning tier) as a temporary stand-in for the
@@ -347,6 +348,15 @@ async function loadWriterContext(tenantId: string, topic: string, profile: SiteP
     // generic "contact us" used to appear.
     const offering = matchOfferings(topic, profile, 1)[0] ?? null;
 
+    // E-E-A-T linking (2026-09-04) — real proof with a real URL, and the same trust page
+    // lib/seoChecks.ts's "About/Contact linked" check looks for (TRUST_PAGE_PATTERN, shared so
+    // the two can never disagree). Both are simply absent when there is nothing real to offer —
+    // never invented, never a guess at a URL the business does not actually have.
+    const proof = (profile?.proof ?? [])
+      .filter((p): p is typeof p & { url: string } => !!p.url)
+      .map((p) => ({ claim: p.claim, url: p.url }));
+    const trustPage = allPages.find((p) => TRUST_PAGE_PATTERN.test(p.url)) ?? null;
+
     return {
       businessName: tenant?.name ?? null,
       websiteUrl: tenant?.website_url ?? null,
@@ -357,6 +367,8 @@ async function loadWriterContext(tenantId: string, topic: string, profile: SiteP
       searchEvidence: writerBlock(insights),
       siteBrain: profileBlock(profile, { maxOfferings: 8, maxClusters: 6, maxGaps: 4 }),
       cta: offering ? { name: offering.name, url: offering.url } : null,
+      proof,
+      trustPage,
     };
   } catch (e: any) {
     // Context is an improvement, not a prerequisite — a lookup failure must not cost the

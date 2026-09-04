@@ -209,6 +209,12 @@ const SERP_MIN_READABLE = 3;
  *  the loop belongs to the orchestrator, the threshold belongs here). */
 export const SEO_PASS_SCORE = 75;
 
+/** What counts as an About/Contact-style trust page — exported so agents/writer.ts's
+ *  `loadWriterContext` finds the SAME page this file's own "About/Contact linked" check looks
+ *  for (2026-09-04). Two independent regexes finding two different pages would mean the writer
+ *  could link a page and the check still fail it. */
+export const TRUST_PAGE_PATTERN = /\/(about|about-us|contact|contact-us|team|who-we-are)(\/|$)/i;
+
 const BLOCK_PENALTY = 25;
 const WARN_PENALTY = 5;
 
@@ -862,7 +868,7 @@ export async function runSeoChecks(article: SeoArticle, opts: SeoOptions = {}): 
     // "Trust": Google names contact info and transparency explicitly. A crawled About/Contact
     // page is real evidence one exists; whether THIS article bothers to point at it is what
     // is actually checkable, so that is what gets scored, not "does the site have one".
-    const trustPage = pages.find((pg) => /\/(about|about-us|contact|contact-us|team|who-we-are)(\/|$)/i.test(pg.url ?? ""));
+    const trustPage = pages.find((pg) => TRUST_PAGE_PATTERN.test(pg.url ?? ""));
     if (!trustPage) {
       list.skip("eeat-trust-page", "About/Contact linked", "no About/Contact-style page was found among the crawled pages");
     } else {

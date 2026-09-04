@@ -193,6 +193,15 @@ export async function writeSection(
     contextLines(context),
     context?.siteBrain ? context.siteBrain : "",
     context?.cta ? `If this section is where a call to action fits naturally, point the reader at "${context.cta.name}"${context.cta.url ? ` (link it to ${context.cta.url})` : " (no URL on file — name it, do not invent a link)"}. Otherwise skip the CTA — it does not belong in every section.` : "",
+    // E-E-A-T linking (2026-09-04) — offered here as a soft, section-local fit, same pattern as
+    // the CTA line above; polishArticle below is the backstop that guarantees at least one
+    // actually lands, since not every section is a natural fit for either.
+    context?.proof?.length
+      ? `If a claim in this section is backed by real proof on file, link it: ${context.proof.slice(0, 4).map((p) => `"${p.claim}" (${p.url})`).join("; ")}. Only where it genuinely supports what this section says — do not force it in.`
+      : "",
+    context?.trustPage
+      ? `If this section is where a reader would naturally want to know who is behind this, link the site's own About/Contact page: ${context.trustPage.url}. Otherwise skip it here.`
+      : "",
     `SECTION HEADING: ${section.h2}`,
     `THIS SECTION'S JOB: ${section.goal}`,
     `THE READER'S QUESTION IT ANSWERS: ${section.readerQuestion}`,
@@ -227,6 +236,19 @@ export async function polishArticle(
 ): Promise<string> {
   const draft = [`# ${outline.title}`, "", ...sections.map((s) => s.text)].join("\n\n");
 
+  // E-E-A-T linking backstop (2026-09-04) — writeSection above already offers these per-section,
+  // but not every section is a natural fit for either, so nothing guarantees one actually
+  // landed. This is the one point in the pipeline that sees the WHOLE assembled draft, so it is
+  // the only place that can reliably check "is it already there?" before asking for it.
+  const proofLine = context?.proof?.length
+    ? `Real proof on file: ${context.proof.slice(0, 4).map((p) => `"${p.claim}" (${p.url})`).join("; ")}.`
+    : "";
+  const trustLine = context?.trustPage ? `The site's own About/Contact page: ${context.trustPage.url}.` : "";
+  const eeatFixLine =
+    proofLine || trustLine
+      ? `6. If the draft does not already link to real evidence anywhere, add ONE natural sentence that does. ${proofLine} ${trustLine} Link whichever genuinely fits what the article already says — never force an awkward mention, and never link anything not listed here. Skip this if the draft already links one of them.`
+      : "";
+
   const prompt = [
     `Polish this article draft on "${topic}". Do not shorten it or remove any section — every H2 below must still be present, in the same order.`,
     contextLines(context),
@@ -236,12 +258,13 @@ export async function polishArticle(
     `3. Remove repeated phrases and any AI-cliché wording (delve, tapestry, in today's fast-paced world, game-changer, unlock, unleash, and similar).`,
     `4. End with one concrete next step the reader can take.`,
     `5. Do NOT add facts that are not already in the draft or the context above.`,
+    eeatFixLine,
     ``,
     `DRAFT:`,
     draft,
     ``,
     `Output the complete polished article as markdown, starting with "# ${outline.title}" — no preamble, no explanation.`,
-  ].join("\n\n");
+  ].filter(Boolean).join("\n\n");
 
   const text = await complete(prompt, { maxTokens: 4096, label: "writer.polish" });
   return text.trim();

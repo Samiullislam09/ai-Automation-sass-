@@ -119,6 +119,33 @@ test("with no CTA on file, the prompt does not invent one to mention", async () 
   assert.doesNotMatch(seen[0].prompt, /call to action fits naturally/i);
 });
 
+test("real proof on file is offered to a section as a suggestion, with its real URL", async () => {
+  const { fn, seen } = fakeComplete({ "writer.section": () => "## X\n\ntext" });
+  await writeSection(
+    TOPIC,
+    OUTLINE,
+    OUTLINE.sections[0],
+    { proof: [{ claim: "ISO 9001 certified since 2019", url: "https://x.test/certifications" }] } as any,
+    fn
+  );
+  assert.match(seen[0].prompt, /ISO 9001 certified since 2019/);
+  assert.match(seen[0].prompt, /https:\/\/x\.test\/certifications/);
+  assert.match(seen[0].prompt, /do not force it in/i);
+});
+
+test("the trust page is offered to a section as a suggestion, with its real URL", async () => {
+  const { fn, seen } = fakeComplete({ "writer.section": () => "## X\n\ntext" });
+  await writeSection(TOPIC, OUTLINE, OUTLINE.sections[0], { trustPage: { title: "About Us", url: "https://x.test/about" } } as any, fn);
+  assert.match(seen[0].prompt, /https:\/\/x\.test\/about/);
+});
+
+test("with no proof or trust page on file, the section prompt invents neither", async () => {
+  const { fn, seen } = fakeComplete({ "writer.section": () => "## X\n\ntext" });
+  await writeSection(TOPIC, OUTLINE, OUTLINE.sections[0], undefined, fn);
+  assert.doesNotMatch(seen[0].prompt, /real proof on file/i);
+  assert.doesNotMatch(seen[0].prompt, /About\/Contact page/i);
+});
+
 /* ---------------------------------------------------------------- polish ----------------- */
 
 test("polishArticle's draft carries every section, in order, and asks nothing to be dropped", async () => {
@@ -130,6 +157,29 @@ test("polishArticle's draft carries every section, in order, and asks nothing to
   assert.match(polished, new RegExp(`^# ${OUTLINE.title}`));
   for (const s of sections) assert.match(seen[0].prompt, new RegExp(s.h2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(seen[0].prompt, /every H2 below must still be present/);
+});
+
+test("polishArticle's prompt guarantees the E-E-A-T links land, with the real proof/trust-page URLs", async () => {
+  const sections = OUTLINE.sections.map((s) => ({ h2: s.h2, text: `## ${s.h2}\n\nBody for ${s.h2}.`, words: 40 }));
+  const { fn, seen } = fakeComplete({ "writer.polish": () => `# ${OUTLINE.title}\n\nIntro.` });
+  await polishArticle(
+    OUTLINE,
+    TOPIC,
+    sections,
+    { proof: [{ claim: "5-star rated by 200+ customers", url: "https://x.test/reviews" }], trustPage: { title: "Contact", url: "https://x.test/contact" } } as any,
+    fn
+  );
+  assert.match(seen[0].prompt, /5-star rated by 200\+ customers/);
+  assert.match(seen[0].prompt, /https:\/\/x\.test\/reviews/);
+  assert.match(seen[0].prompt, /https:\/\/x\.test\/contact/);
+  assert.match(seen[0].prompt, /does not already link to real evidence/i);
+});
+
+test("with no proof or trust page on file, polishArticle's prompt has no E-E-A-T instruction at all", async () => {
+  const sections = OUTLINE.sections.map((s) => ({ h2: s.h2, text: `## ${s.h2}\n\nBody for ${s.h2}.`, words: 40 }));
+  const { fn, seen } = fakeComplete({ "writer.polish": () => `# ${OUTLINE.title}\n\nIntro.` });
+  await polishArticle(OUTLINE, TOPIC, sections, undefined, fn);
+  assert.doesNotMatch(seen[0].prompt, /does not already link to real evidence/i);
 });
 
 /* ---------------------------------------------------------------- meta ------------------- */
