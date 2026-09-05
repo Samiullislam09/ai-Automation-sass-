@@ -1,6 +1,6 @@
 import type { JobWithMetadata } from "pg-boss";
 import { boss, ensureBossStarted } from "./db.js";
-import { AGENT_TYPES, BRAIN_QUEUE, type AgentType } from "./queues.js";
+import { AGENT_TYPES, BRAIN_QUEUE, WORKER_POLLING, type AgentType } from "./queues.js";
 import { BossAgent } from "./agents/boss.js";
 import { KeywordAgent } from "./agents/keyword.js";
 import { WriterAgent } from "./agents/writer.js";
@@ -243,7 +243,7 @@ export async function startWorkers() {
     // includeMetadata gives the handler retryCount — without it a retry is indistinguishable
     // from a brand-new job, which is exactly why the dashboard looked like it was failing
     // and restarting for no reason.
-    await boss.work<AgentJobData>(type, { localConcurrency: concurrencyFor(type), includeMetadata: true }, async ([job]) =>
+    await boss.work<AgentJobData>(type, { localConcurrency: concurrencyFor(type), includeMetadata: true, ...WORKER_POLLING }, async ([job]) =>
       processJob(type, job as JobWithMetadata<AgentJobData>)
     );
   }
@@ -251,7 +251,7 @@ export async function startWorkers() {
   // The brain's own queue carries no work, only "look at task X again" — that is how a retry
   // survives its backoff. It is not in AGENT_TYPES because it has no agent, no cap and no room
   // in the office; giving it one would put a fake worker on the dashboard.
-  await boss.work<{ task_id: string; tenant_id: string }>(BRAIN_QUEUE, { localConcurrency: 4 }, async ([job]) => {
+  await boss.work<{ task_id: string; tenant_id: string }>(BRAIN_QUEUE, { localConcurrency: 4, ...WORKER_POLLING }, async ([job]) => {
     try {
       await handleBrainDispatch(job.data);
     } catch (e: any) {

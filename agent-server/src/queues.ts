@@ -17,7 +17,28 @@ const QUEUE_OPTIONS = {
   retryLimit: 2,
   retryBackoff: true,
   retryDelay: 3, // seconds
+  // Wake the worker with a Postgres NOTIFY the instant a job is created (db.ts turns the
+  // listener on). Without it, "start now" means "start within one polling interval" — and
+  // that interval is what WORKER_POLLING below stretches from 2s to 30s to stop this server
+  // from burning the Supabase free tier's egress while idle.
+  notify: true,
 };
+
+/** How often a worker asks the database for work when NOTIFY has not woken it.
+ *
+ *  pg-boss's default is every 2 seconds, per worker. Thirteen queues at that rate is ~6.5
+ *  queries a second, 24 hours a day, whether or not a single person is using the product —
+ *  roughly 560,000 queries a day of pure "anything for me?". That idling is what put the
+ *  project over Supabase's free 5 GB egress in four days (7.67 GB, 2026-09-05) with one
+ *  active user and a 36 MB database, and got the whole organisation restricted.
+ *
+ *  With `notify: true` above, a new job wakes its worker immediately, so this poll is only a
+ *  backstop for the case where the NOTIFY listener could not be established — hence 30s while
+ *  notify is live, and 15s as the base, which is the worst case a job would ever wait. The
+ *  Site Brain and Audit pages already say "Queued - waiting for a worker to pick it up", so
+ *  that wait is visible rather than mysterious. */
+const WORKER_POLLING = { pollingIntervalSeconds: 15, notifyPollingIntervalSeconds: 30 };
+export { WORKER_POLLING };
 
 // A full-site crawl (up to ~300 pages, one fetch+embed each, sequential) can genuinely run
 // long. pg-boss's default expireInSeconds (900 = 15min) would kill/retry it mid-crawl on a
@@ -40,7 +61,7 @@ const LONG_RUNNING: AgentType[] = ["crawler", "analyst", "audit"];
  *  retryLimit 0: re-dispatching is already idempotent (it reads the rows and sends whatever is
  *  ready), so a pg-boss retry on top would be a second opinion nobody asked for. */
 export const BRAIN_QUEUE = "brain-dispatch";
-const BRAIN_QUEUE_OPTIONS = { retryLimit: 0 };
+const BRAIN_QUEUE_OPTIONS = { retryLimit: 0, notify: true };
 
 /** Declares each agent's queue in Postgres. Must run once before send()/work() calls
  *  (pg-boss requires a queue to exist before it's used) — called from index.ts on boot. */
@@ -55,6 +76,7 @@ export async function initQueues() {
     await boss.updateQueue(type, options).catch((e: any) => console.error(`[queues] updateQueue ${type} failed:`, e?.message));
   }
   await boss.createQueue(BRAIN_QUEUE, BRAIN_QUEUE_OPTIONS);
+  await boss.updateQueue(BRAIN_QUEUE, BRAIN_QUEUE_OPTIONS).catch((e: any) => console.error(`[queues] updateQueue ${BRAIN_QUEUE} failed:`, e?.message));
 }
 
 /** Ask the brain to look at a task again, now or after a delay. */

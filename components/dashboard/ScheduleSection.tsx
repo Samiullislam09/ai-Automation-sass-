@@ -6,6 +6,7 @@ import {
   History, Loader2, Megaphone, Rocket, RotateCw, Send, Timer, TriangleAlert, X, Zap,
 } from "lucide-react";
 import { useStore } from "@/lib/store";
+import { startPolling } from "@/lib/poll";
 import { humanTime } from "@/lib/chat-context";
 
 /** /dashboard/schedule — rebuilt 2026-09-05 on the same look as Approvals / Content (owner:
@@ -209,13 +210,13 @@ export default function ScheduleSection() {
 
   const anyRunning = !!runs?.some((r) => r.status === "running");
   useEffect(() => {
-    const t = setInterval(() => void loadHistory(), anyRunning ? 20_000 : 120_000);
-    return () => clearInterval(t);
+    const t = startPolling(() => void loadHistory(), anyRunning ? 20_000 : 120_000);
+    return t;
   }, [anyRunning, loadHistory]);
 
   useEffect(() => {
-    const t = setInterval(() => void loadOrders(), 30_000);
-    return () => clearInterval(t);
+    const t = startPolling(() => void loadOrders(), 30_000);
+    return t;
   }, [loadOrders]);
 
   const set = (patch: Partial<Sched>) => setSched((s) => (s ? { ...s, ...patch } : s));

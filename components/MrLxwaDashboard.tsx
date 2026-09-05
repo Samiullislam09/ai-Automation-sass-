@@ -42,6 +42,7 @@ import { usePathname } from "next/navigation";
 import { LxGlobalStyle } from "@/components/lx-theme";
 import { useLiveEvents, isTerminalTask, isFlowing, useNow, elapsedMs, clock, type TaskState } from "@/lib/live";
 import { useStore, PLANS } from "@/lib/store";
+import { startPolling } from "@/lib/poll";
 import {
   LayoutDashboard,
   Users,
@@ -986,8 +987,8 @@ export default function MrLxwaDashboard({
         .then((d) => { if (alive && d.ok) setApprovalsCount(d.items?.length ?? 0); })
         .catch(() => {});
     load();
-    const t = setInterval(load, 60_000);
-    return () => { alive = false; clearInterval(t); };
+    const stop = startPolling(load, 60_000);
+    return () => { alive = false; stop(); };
   }, []);
 
   const [nav, setNav] = useState("Dashboard");

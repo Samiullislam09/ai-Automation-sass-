@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AGENTS, useStore, type AgentState } from "@/lib/store";
+import { startPolling } from "@/lib/poll";
 import { playError, playSuccess } from "@/lib/chime";
 
 /** The single live poll for the whole /app shell.
@@ -212,8 +213,8 @@ export default function LiveAgents() {
   useEffect(() => {
     stopped.current = false;
     poll();
-    const t = setInterval(poll, busy ? BUSY_POLL_MS : POLL_MS);
-    return () => { stopped.current = true; clearInterval(t); clearTimeout(flashTimer.current); };
+    const stop = startPolling(poll, busy ? BUSY_POLL_MS : POLL_MS);
+    return () => { stopped.current = true; stop(); clearTimeout(flashTimer.current); };
   }, [poll, busy]);
 
   return null;

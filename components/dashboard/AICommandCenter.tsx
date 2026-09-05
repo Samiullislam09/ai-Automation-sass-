@@ -46,6 +46,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useStore, PLANS } from "@/lib/store";
+import { startPolling } from "@/lib/poll";
 
 // ---------- SCENE MARKUP (converted 1:1 from the HTML build) ----------
 // Contains every base64 pixel-art asset, every inline SVG icon, and every
@@ -1466,7 +1467,7 @@ export default function AICommandCenter(): JSX.Element {
     }
 
     tick();
-    const pollId = window.setInterval(tick, 7000);
+    const stopPolling = startPolling(tick, 7000);
 
     // =========================================================================================
     // [BACKEND-CHAT] real POST /api/chat, streamed word-by-word into a live bubble
@@ -1535,7 +1536,7 @@ export default function AICommandCenter(): JSX.Element {
 
     return () => {
       cancelled = true;
-      clearInterval(pollId);
+      stopPolling();
       unpatchTimers();                       // no-op unless an exception left the patch installed
       engineAbort.abort();                   // drops the engine's document-level listeners
       delete (window as any).__aicSignal;

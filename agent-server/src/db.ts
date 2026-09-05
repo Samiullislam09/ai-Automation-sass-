@@ -34,6 +34,20 @@ export const boss = new PgBoss({
   // multiple Railway replicas) connect at the same time.
   max: 5,
   connectionTimeoutMillis: 15000,
+  // LISTEN/NOTIFY: a worker is woken the moment a job is created instead of finding it on its
+  // next poll, which is what lets the polling interval drop from 2s to 30s (queues.ts) without
+  // any job starting later than it does today.
+  //
+  // Why this matters on the money side: 13 queues polling every 2 seconds is ~560,000 queries
+  // a day against Supabase, forever, whether or not anybody uses the product — and on
+  // 2026-09-05 the free plan's 5 GB egress allowance was gone in four days (7.67 GB) with one
+  // active user, which restricted the whole org. This is the single biggest always-on
+  // consumer we control.
+  //
+  // Safe if it cannot be established: it needs a session-pinned connection (it will not work
+  // through a transaction-mode pooler), and when it fails pg-boss emits a warning and keeps
+  // polling. The polling interval is the correctness floor either way, never the only path.
+  useListenNotify: true,
 });
 
 boss.on("error", (err) => console.error("[pg-boss] error:", err.message));

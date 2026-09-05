@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { startPolling } from "@/lib/poll";
 import { PIPELINE, WRITING_RULES, QUALITY_GATE } from "@/lib/pipeline";
 import { AGENT_PROFILES } from "@/lib/agents-data";
 
@@ -55,7 +56,7 @@ export default function AgentStage({ id, onClose }: { id: string; onClose: () =>
     } finally { inFlight.current = false; }
   }, [id]);
 
-  useEffect(() => { setD(null); load(); const t = setInterval(load, 3000); return () => clearInterval(t); }, [load]);
+  useEffect(() => { setD(null); load(); return startPolling(load, 3000); }, [load]);
   useEffect(() => {
     const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onEsc);
