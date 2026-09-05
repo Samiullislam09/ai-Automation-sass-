@@ -115,9 +115,12 @@ export class CloudflarePool {
   /** Generates one image, walking the pool until an account answers. Round-robins the starting
    *  point so a long run does not always exhaust account 1 first while 2 and 3 sit idle.
    *
-   *  `seed` is what makes an image reproducible (§19.4.3): the same article + slot asks for the
-   *  same picture and gets it, so a re-run costs nothing new and "another image" (seed + 1) is
-   *  the only thing that changes it. */
+   *  `seed` was meant to make an image reproducible (§19.4.3) — same article + slot, same
+   *  picture. FLUX-1-schnell does not accept one (see the request body below), so on this rung
+   *  it is recorded, not obeyed: asking again gives a DIFFERENT picture. That costs us nothing,
+   *  because re-use never went back to Cloudflare anyway — a generated image is stored once and
+   *  read back from the `media` table (lib/media/store.ts). The seed still matters to the
+   *  providers below Cloudflare on the ladder, which do honour it. */
   async image(prompt: string, seed: number, opts: { steps?: number; fetchImpl?: typeof fetch; now?: () => number } = {}): Promise<ImageResult> {
     const fetchImpl = opts.fetchImpl ?? fetch;
     const now = opts.now ?? Date.now;
@@ -141,7 +144,12 @@ export class CloudflarePool {
         res = await fetchImpl(`https://api.cloudflare.com/client/v4/accounts/${state.account.id}/ai/run/${MODEL}`, {
           method: "POST",
           headers: { Authorization: `Bearer ${state.account.token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt, seed, steps: Math.min(8, Math.max(1, opts.steps ?? 4)) }),
+          // NO `seed` HERE, deliberately. FLUX-1-schnell's input schema on Workers AI is
+          // { prompt, steps } and nothing else: sending a seed makes Cloudflare reject the
+          // whole request with 5006 "Additional or unevaluated properties '/seed' at '/' not
+          // allowed" (measured live, 2026-09-06). The parameter stays on this method because
+          // the ladder's other rungs honour it and because the run log records it.
+          body: JSON.stringify({ prompt, steps: Math.min(8, Math.max(1, opts.steps ?? 4)) }),
           signal: AbortSignal.timeout(TIMEOUT_MS),
         });
       } catch (e: any) {
