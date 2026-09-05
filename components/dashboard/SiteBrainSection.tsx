@@ -47,6 +47,62 @@ type Payload = {
   history: ProfileVersion[];
 };
 
+/** One jobs_log row as /api/site-brain/status hands it over. */
+type BrainJob = {
+  id: string;
+  status: "queued" | "running" | "success" | "error" | "skipped" | string;
+  action: string;
+  createdAt: string;
+  stalled: boolean;
+  progress: { phase: string | null; label: string | null; done: number | null; total: number | null; current: string | null; at: string | null };
+  error: { message: string; cause: string | null; hint: string | null; attempt: number | null; attempts: number | null; durationMs: number | null } | null;
+};
+type BrainJobs = { crawler: BrainJob | null; analyst: BrainJob | null };
+
+const POLL_MS = 3000;
+// A crawl of a normal site plus six LLM calls is two to six minutes. Twelve is "something
+// else is wrong" — and /api/site-brain/status's own `stalled` usually says so first.
+const POLL_TIMEOUT_MS = 12 * 60_000;
+
+/** Filling the brain is two jobs in a row — the crawler reads the pages and then enqueues the
+ *  analyst (agent-server/src/agents/crawler.ts) — so the bar runs across both. The phase ids
+ *  are the ones those two agents actually report to `ctx.onProgress`; the fractions are how
+ *  much of the bar each stage owns, and inside a phase with done/total the bar moves with the
+ *  real count. Nothing here is a timer pretending to be progress. */
+const BRAIN_PHASES: { id: string; agent: "crawler" | "analyst"; label: string; from: number; to: number }[] = [
+  { id: "discovering", agent: "crawler", label: "Finding your pages", from: 0, to: 0.06 },
+  { id: "reading", agent: "crawler", label: "Reading them", from: 0.06, to: 0.3 },
+  { id: "summarising", agent: "crawler", label: "Working out the business", from: 0.3, to: 0.36 },
+  { id: "loading", agent: "analyst", label: "Opening what we know", from: 0.36, to: 0.4 },
+  { id: "reading", agent: "analyst", label: "What they do", from: 0.4, to: 0.46 },
+  { id: "offerings", agent: "analyst", label: "What they sell", from: 0.46, to: 0.54 },
+  { id: "proof", agent: "analyst", label: "What they can prove", from: 0.54, to: 0.62 },
+  { id: "voice", agent: "analyst", label: "How they write", from: 0.62, to: 0.7 },
+  { id: "commerce", agent: "analyst", label: "How they sell and charge", from: 0.7, to: 0.78 },
+  { id: "place", agent: "analyst", label: "Where they work", from: 0.78, to: 0.84 },
+  { id: "clustering", agent: "analyst", label: "Grouping the topics", from: 0.84, to: 0.9 },
+  { id: "gaps", agent: "analyst", label: "Checking Search Console", from: 0.9, to: 0.97 },
+  { id: "saving", agent: "analyst", label: "Writing the profile", from: 0.97, to: 1 },
+];
+// "reading" is a phase id both agents use, so a phase is only ever looked up together with
+// the agent whose row it came from.
+function phaseIndex(agent: "crawler" | "analyst", phase: string | null): number {
+  if (!phase) return -1;
+  return BRAIN_PHASES.findIndex((p) => p.agent === agent && p.id === phase);
+}
+/** The live stage: the analyst's row wins once it exists and is running, because by then the
+ *  crawler is finished and its row is only history. */
+function liveStage(jobs: BrainJobs | null, sinceCrawler: string | null, sinceAnalyst: string | null):
+  { agent: "crawler" | "analyst"; job: BrainJob } | null {
+  const a = jobs?.analyst;
+  if (a && a.id !== sinceAnalyst && (a.status === "running" || a.status === "queued")) return { agent: "analyst", job: a };
+  const c = jobs?.crawler;
+  if (c && c.id !== sinceCrawler && (c.status === "running" || c.status === "queued")) return { agent: "crawler", job: c };
+  if (a && a.id !== sinceAnalyst) return { agent: "analyst", job: a };
+  if (c && c.id !== sinceCrawler) return { agent: "crawler", job: c };
+  return null;
+}
+
 export default function SiteBrainSection() {
   const { toast, report } = useStore();
   const [state, setState] = useState<Payload | null>(null);
@@ -55,20 +111,98 @@ export default function SiteBrainSection() {
   const [refreshing, setRefreshing] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [openField, setOpenField] = useState<ProfileField | null>(null);
+  const [jobs, setJobs] = useState<BrainJobs | null>(null);
+  // `since*`: the rows that already existed when we started watching (the previous run's), so
+  // a finished older run is never mistaken for this one — and `sinceVersion` is the profile
+  // version we are waiting to see change.
+  const [polling, setPolling] = useState<{ sinceCrawler: string | null; sinceAnalyst: string | null; sinceVersion: number | null; startedAt: number } | null>(null);
 
-  const load = useCallback(() => {
+  const load = useCallback(async (): Promise<Payload | null> => {
     setLoading(true);
-    fetch("/api/site-brain")
-      .then((r) => r.json())
-      .then((data: Payload) => {
-        if (data.ok) setState({ ...data, profile: data.profile ? normalizeProfile(data.profile) : null });
-        else toast(data.error || "Couldn't load your Site Brain.", "error");
-      })
-      .catch(() => toast("Couldn't load your Site Brain — try refreshing.", "error"))
-      .finally(() => setLoading(false));
+    try {
+      const data: Payload = await fetch("/api/site-brain").then((r) => r.json());
+      if (data.ok) {
+        setState({ ...data, profile: data.profile ? normalizeProfile(data.profile) : null });
+        return data;
+      }
+      toast(data.error || "Couldn't load your Site Brain.", "error");
+    } catch {
+      toast("Couldn't load your Site Brain — try refreshing.", "error");
+    } finally {
+      setLoading(false);
+    }
+    return null;
   }, [toast]);
 
-  useEffect(load, [load]);
+  /** The two jobs as jobs_log has them right now. Null when the endpoint could not be read —
+   *  never a guess. */
+  const fetchStatus = useCallback(async (): Promise<BrainJobs | null> => {
+    try {
+      const d = await fetch("/api/site-brain/status").then((r) => r.json());
+      if (d.ok) {
+        setJobs(d.jobs ?? null);
+        return d.jobs ?? null;
+      }
+    } catch {
+      /* the next poll tries again */
+    }
+    return null;
+  }, []);
+
+  useEffect(() => {
+    // A run started elsewhere — the weekly schedule, another tab, the chat — is followed the
+    // same way as one started from this button.
+    load().then(async (d) => {
+      const j = await fetchStatus();
+      const live = liveStage(j, null, null);
+      if (live && (live.job.status === "running" || live.job.status === "queued") && !live.job.stalled) {
+        setPolling({
+          sinceCrawler: null,
+          sinceAnalyst: null,
+          sinceVersion: d?.version ?? null,
+          startedAt: Date.parse(live.job.createdAt) || Date.now(),
+        });
+      }
+    });
+  }, [load, fetchStatus]);
+
+  // Real progress: poll jobs_log until the analyst writes a new profile version, or a row
+  // fails, or a run goes quiet, or we hit the ceiling — each with its own sentence.
+  useEffect(() => {
+    if (!polling) return;
+    const timer = setInterval(async () => {
+      const j = await fetchStatus();
+      const live = liveStage(j, polling.sinceCrawler, polling.sinceAnalyst);
+      if (live && (live.job.status === "error" || live.job.status === "skipped")) {
+        setPolling(null);
+        await load();
+        toast("The run failed — the reason is on the page.", "error");
+        return;
+      }
+      if (live && live.job.stalled) {
+        setPolling(null);
+        await load();
+        toast("The run stopped responding — details on the page.", "error");
+        return;
+      }
+      // Finished means a NEW profile version is on file: the analyst's last act is saving it,
+      // so this is the only honest "done".
+      if (live && live.agent === "analyst" && live.job.status === "success") {
+        const d = await load();
+        if (d && d.version !== polling.sinceVersion) {
+          setPolling(null);
+          toast("Done — your Site Brain has been rebuilt.");
+          return;
+        }
+      }
+      if (Date.now() - polling.startedAt > POLL_TIMEOUT_MS) {
+        setPolling(null);
+        toast("This is taking far longer than it should — the last thing it reported is on the page.", "error");
+      }
+    }, POLL_MS);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [polling?.startedAt]);
 
   const save = async (field: ProfileField, value: unknown): Promise<boolean> => {
     setBusy(field);
@@ -103,6 +237,9 @@ export default function SiteBrainSection() {
 
   const refresh = async (type: "crawler" | "analyst") => {
     setRefreshing(true);
+    // Whatever is in jobs_log right now is the PREVIOUS run; remember it before the trigger so
+    // the progress bar never reads the old run's finished row as this one's.
+    const before = await fetchStatus();
     try {
       const res = await fetch("/api/agents/trigger", {
         method: "POST",
@@ -116,18 +253,44 @@ export default function SiteBrainSection() {
       }
       toast(
         type === "crawler"
-          ? "Reading your site — the fields fill in as it goes. Watch it in the Workspace."
+          ? "Reading your site — the progress is on this page."
           : "Rebuilding the profile from the pages we already have."
       );
-      // The run takes a couple of minutes on the agent server; poll a few times so the page
-      // fills itself in rather than waiting for the customer to hit refresh.
-      for (const delay of [20_000, 45_000, 90_000, 150_000]) setTimeout(load, delay);
+      setPolling({
+        sinceCrawler: before?.crawler?.id ?? null,
+        // A crawler run chains into the analyst, so the analyst's current row is also "before".
+        sinceAnalyst: before?.analyst?.id ?? null,
+        sinceVersion: state?.version ?? null,
+        startedAt: Date.now(),
+      });
     } catch {
       toast("Couldn't start the refresh — network error.", "error");
     } finally {
       setRefreshing(false);
     }
   };
+
+  // What to show above the page: the live bar while a run is being watched, or — when nothing
+  // is running — the last run's failure, if it failed after the profile we are looking at was
+  // written (an older failure is history, not news).
+  const live = liveStage(jobs, polling?.sinceCrawler ?? null, polling?.sinceAnalyst ?? null);
+  const running = live && (live.job.status === "running" || live.job.status === "queued") && !live.job.stalled ? live : null;
+  const newest = [jobs?.crawler, jobs?.analyst]
+    .filter(Boolean)
+    .sort((a, b) => Date.parse(b!.createdAt) - Date.parse(a!.createdAt))[0] as BrainJob | undefined;
+  const failed =
+    !polling &&
+    newest &&
+    (newest.status === "error" || newest.status === "skipped" || newest.stalled) &&
+    (!state?.builtAt || Date.parse(newest.createdAt) > Date.parse(state.builtAt))
+      ? newest
+      : null;
+  const banner = (
+    <>
+      {polling && <BrainProgress stage={running} startedAt={polling.startedAt} />}
+      {failed && <BrainFailure job={failed} busy={refreshing} onRetry={() => refresh("crawler")} />}
+    </>
+  );
 
   if (loading && !state) {
     return (
@@ -160,7 +323,7 @@ export default function SiteBrainSection() {
 
   if (!s.pagesCrawled) {
     return (
-      <Shell>
+      <Shell banner={banner}>
         <Empty
           Icon={PlugZap}
           title="We haven't read your site yet"
@@ -173,14 +336,14 @@ export default function SiteBrainSection() {
 
   if (!s.profile) {
     return (
-      <Shell>
+      <Shell banner={banner}>
         <Empty
           Icon={Search}
           title={`${s.pagesCrawled} pages read — nothing understood yet`}
           body="Mr. Analyst turns those pages into the profile every other agent reads. He may still be working; if not, start him here."
           action={
-            <button className="sb-primary" disabled={refreshing} onClick={() => refresh("analyst")}>
-              {refreshing ? "Starting…" : "Understand my site"}
+            <button className="sb-primary" disabled={refreshing || !!polling} onClick={() => refresh("analyst")}>
+              {refreshing ? "Starting…" : polling ? "Working…" : "Understand my site"}
             </button>
           }
         />
@@ -206,6 +369,7 @@ export default function SiteBrainSection() {
 
   return (
     <Shell
+      banner={banner}
       right={
         <>
           {/* the whole point: the customer shouldn't fill anything in. This runs Mr. Analyst
@@ -213,22 +377,14 @@ export default function SiteBrainSection() {
           {/* ONE button. It enqueues the crawler, which chains into the analyst itself
               (agent-server/src/agents/crawler.ts), so a single click re-reads the site and
               rewrites every field from it. */}
-          <button className="sb-primary" disabled={refreshing} onClick={() => refresh("crawler")} title="Read my site and fill all of this in">
-            {refreshing ? <Loader2 size={14} className="sb-spin" /> : <Sparkles size={14} />}
-            {refreshing ? "Starting…" : "Fill it in for me"}
+          <button className="sb-primary" disabled={refreshing || !!polling} onClick={() => refresh("crawler")} title="Read my site and fill all of this in">
+            {refreshing || polling ? <Loader2 size={14} className="sb-spin" /> : <Sparkles size={14} />}
+            {refreshing ? "Starting…" : polling ? "Working…" : "Fill it in for me"}
           </button>
           <Link href="/dashboard/workspace" className="sb-btn"><Activity size={14} /> Watch</Link>
         </>
       }
     >
-      {refreshing && (
-        <div className="sb-working">
-          <Loader2 size={14} className="sb-spin" />
-          <span>Reading your site — this page fills itself in as the team works.</span>
-          <Link href="/dashboard/workspace" className="sb-card-a" style={{ margin: 0 }}>Watch</Link>
-        </div>
-      )}
-
       {/* overview — cards, the same shape the Memory page's fact cards use */}
       <div className="sb-sec">Overview</div>
       <div className="sb-cards">
@@ -256,8 +412,8 @@ export default function SiteBrainSection() {
           <div className="sb-card-k">Read from your site</div>
           <div className="sb-card-v">{s.builtFrom?.pages ?? s.pagesCrawled} pages</div>
           <div className="sb-card-s">&nbsp;</div>
-          <button className="sb-card-a" disabled={refreshing} onClick={() => refresh("crawler")}>
-            {refreshing ? "Starting…" : "Read again"}
+          <button className="sb-card-a" disabled={refreshing || !!polling} onClick={() => refresh("crawler")}>
+            {refreshing ? "Starting…" : polling ? "Working…" : "Read again"}
           </button>
         </div>
 
@@ -333,7 +489,87 @@ export default function SiteBrainSection() {
 
 /* ---------------------------------------------------------------------------------------- */
 
-function Shell({ children, right }: { children: React.ReactNode; right?: React.ReactNode }) {
+/** The run in progress, as a real bar: which of the two agents is working, the step it is on,
+ *  how far through that step (done of total, straight from jobs_log), and the clock. `stage` is
+ *  null while pg-boss is still handing the job to a worker — said as "Queued", not faked as
+ *  progress. */
+function BrainProgress({ stage, startedAt }: { stage: { agent: "crawler" | "analyst"; job: BrainJob } | null; startedAt: number }) {
+  const p = stage?.job.progress ?? null;
+  const idx = stage ? phaseIndex(stage.agent, p?.phase ?? null) : -1;
+  const ph = idx >= 0 ? BRAIN_PHASES[idx] : null;
+  const inner = ph && p?.total && p.done != null ? Math.min(1, p.done / p.total) : 0;
+  const pct = Math.max(1, Math.round((ph ? ph.from + (ph.to - ph.from) * inner : 0.01) * 100));
+  const label = !stage
+    ? "Queued — waiting for a worker to pick it up"
+    : p?.label ?? (stage.agent === "crawler" ? "Reading your site…" : "Understanding your site…");
+  const detail = p?.total && p.done != null ? `${p.done} of ${p.total}` : null;
+  return (
+    <div className="sb-prog" role="status" aria-live="polite">
+      <div className="sb-prog-h">
+        <span className="sb-dot" />
+        <b className="sb-prog-l">{label}</b>
+        {detail && <span className="sb-prog-d">{detail}</span>}
+        <b className="sb-prog-p">{pct}%</b>
+        <BrainElapsed startedAt={startedAt} />
+      </div>
+      <div className="sb-prog-bar"><i style={{ width: `${pct}%` }} /></div>
+      <ol className="sb-steps">
+        {BRAIN_PHASES.map((x, i) => {
+          const st = idx < 0 ? "next" : i < idx ? "done" : i === idx ? "now" : "next";
+          return (
+            <li key={`${x.agent}-${x.id}`} className={`sb-step sb-step-${st}`}>
+              <span className="sb-step-n">{st === "done" ? "✓" : i + 1}</span>
+              {x.label}
+            </li>
+          );
+        })}
+      </ol>
+      {p?.current && <div className="sb-prog-c">{p.current}</div>}
+    </div>
+  );
+}
+
+/** The last run's failure, readable on the page: what failed, the raw cause, what to do next.
+ *  Every field is jobs_log's own (workers.ts's explainAgentError) — nothing is composed here. A
+ *  run that went quiet shows what it last reported and when. */
+function BrainFailure({ job, onRetry, busy }: { job: BrainJob; onRetry: () => void; busy: boolean }) {
+  const stalled = job.status !== "error" && job.status !== "skipped" && job.stalled;
+  const e = job.error;
+  const mins = e?.durationMs != null ? Math.round(e.durationMs / 60000) : null;
+  return (
+    <div className="sb-fail" role="alert">
+      <div className="sb-fail-b">
+        <b className="sb-fail-t">{stalled ? "The last run stopped responding" : "The last run failed"}</b>
+        <p className="sb-fail-p">
+          {stalled
+            ? `It last reported "${job.progress.label ?? job.progress.phase ?? "starting"}"${job.progress.at ? ` at ${new Date(job.progress.at).toLocaleTimeString()}` : ""} and has written nothing since.`
+            : e?.message ?? "No reason was recorded."}
+        </p>
+        {!stalled && e?.cause && <pre className="sb-fail-c">{e.cause}</pre>}
+        <p className="sb-fail-h">{stalled ? "Start it again — a fresh run is not affected by the one that hung." : e?.hint ?? "Run it again. If it fails the same way twice, the cause above is what to send to support."}</p>
+        <p className="sb-fail-m">
+          {job.action}
+          {e?.attempt != null && e?.attempts != null && ` · attempt ${e.attempt} of ${e.attempts}`}
+          {mins != null && ` · ran ${mins || "<1"} min`}
+          {` · ${new Date(job.createdAt).toLocaleString()}`}
+        </p>
+      </div>
+      <button className="sb-primary" disabled={busy} onClick={onRetry}>{busy ? "Starting…" : "Try again"}</button>
+    </div>
+  );
+}
+
+function BrainElapsed({ startedAt }: { startedAt: number }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const secs = Math.max(0, Math.round((Date.now() - startedAt) / 1000));
+  return <span className="sb-prog-d">{Math.floor(secs / 60)}:{String(secs % 60).padStart(2, "0")}</span>;
+}
+
+function Shell({ children, right, banner }: { children: React.ReactNode; right?: React.ReactNode; banner?: React.ReactNode }) {
   return (
     <div className="sb-wrap">
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
@@ -345,7 +581,10 @@ function Shell({ children, right }: { children: React.ReactNode; right?: React.R
           </div>
           {right && <div className="flex flex-wrap items-center gap-2">{right}</div>}
         </header>
-        <div className="lx-scroll flex-1 overflow-y-auto px-5 pb-6 pt-4">{children}</div>
+        <div className="lx-scroll flex-1 overflow-y-auto px-5 pb-6 pt-4">
+          {banner}
+          {children}
+        </div>
       </section>
     </div>
   );
@@ -510,6 +749,35 @@ const CSS = `
   background:#101018;border:1px dashed #232332}
 .sb-loading{display:flex;align-items:center;justify-content:center;gap:8px;padding:26px;border-radius:12px;background:#101018;
   border:1px solid #1e1e2b}
+.sb-prog{margin-bottom:14px;padding:13px 14px;border-radius:12px;background:#101018;border:1px solid rgba(99,102,241,.45)}
+.sb-prog-h{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.sb-prog-l{flex:1;min-width:160px;font-size:12.5px;color:#e6e6f0;font-weight:650}
+.sb-prog-d{font-size:11px;color:#7c7c95;font-variant-numeric:tabular-nums}
+.sb-prog-p{font-size:12.5px;color:#a5b4fc;font-variant-numeric:tabular-nums}
+.sb-dot{width:8px;height:8px;border-radius:999px;background:#818cf8;flex-shrink:0;animation:sbPulse 1.4s ease-in-out infinite}
+@keyframes sbPulse{0%,100%{opacity:1}50%{opacity:.25}}
+.sb-prog-bar{margin-top:10px;height:7px;border-radius:999px;background:#1e1e2b;overflow:hidden}
+.sb-prog-bar>i{display:block;height:100%;border-radius:999px;transition:width .6s ease;
+  background:linear-gradient(90deg,#4f46e5,#7c3aed,#8b5cf6)}
+.sb-steps{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px 12px;margin-top:11px;list-style:none;padding:0}
+@container sb (min-width:640px){.sb-steps{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.sb-step{display:flex;align-items:center;gap:6px;font-size:10.5px;color:#e6e6f0}
+.sb-step-next{color:#5f5f78}
+.sb-step-now{font-weight:700}
+.sb-step-n{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;flex-shrink:0;border-radius:999px;
+  font-size:8.5px;border:1px solid #818cf8;color:#a5b4fc}
+.sb-step-next .sb-step-n{border-color:#2a2a3d;color:#5f5f78}
+.sb-step-done .sb-step-n{background:#6366f1;border-color:#6366f1;color:#fff}
+.sb-prog-c{margin-top:8px;font-size:10.5px;color:#6f6f85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sb-fail{display:flex;flex-wrap:wrap;align-items:flex-start;gap:12px;margin-bottom:14px;padding:13px 14px;border-radius:12px;
+  background:#101018;border:1px solid rgba(248,113,113,.5)}
+.sb-fail-b{flex:1;min-width:200px}
+.sb-fail-t{font-size:12.5px;color:#f87171}
+.sb-fail-p{margin-top:5px;font-size:11.5px;color:#c3c3d4;line-height:1.6}
+.sb-fail-c{margin-top:8px;padding:8px;border-radius:8px;background:rgba(0,0,0,.35);border:1px solid #1e1e2b;color:#8a8aa3;
+  font-size:10.5px;white-space:pre-wrap;word-break:break-word;overflow-x:auto}
+.sb-fail-h{margin-top:8px;font-size:11.5px;color:#e6e6f0;line-height:1.6}
+.sb-fail-m{margin-top:7px;font-size:10.5px;color:#6f6f85}
 .sb-spin{animation:sbSpin 1s linear infinite}
 @keyframes sbSpin{to{transform:rotate(360deg)}}
 `;
