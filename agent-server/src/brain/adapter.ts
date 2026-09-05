@@ -143,6 +143,38 @@ export function translate(agentId: string, action: string, input: Record<string,
         },
       };
 
+    case "image.make_images":
+      // Named `article` because that is also the NEED — see manifests.ts's own note on this.
+      // agents/image.ts unwraps it (contentItemId / id / articleId / itemId), same as
+      // seo.check_seo and social.draft_social already do above.
+      return {
+        queue: "image",
+        data: { article: input.article ?? null, bump: input.bump ?? null, taskLabel: "Making the article's pictures" },
+      };
+
+    case "image.make_image":
+      // The standalone picture (§19.4.7 / 2026-09-05): no article anywhere near this one, so
+      // there is nothing here to unwrap — `subject` is the user's own words, passed as given.
+      return {
+        queue: "image",
+        data: {
+          subject: t(input.subject),
+          style: input.style ?? null,
+          shape: input.shape ?? null,
+          taskLabel: `Making a picture: "${t(input.subject)}"`,
+        },
+      };
+
+    case "story.make_story":
+      // Same naming rule as image.make_images — `article` is both the input name and the need.
+      // `images` (the OTHER need) never appears in the job data: story.ts does not read it, it
+      // re-reads the article's own pictures from the `media` table once they exist. The need
+      // exists purely so the planner runs Mr. Image before Mr. Story, never to hand over data.
+      return {
+        queue: "story",
+        data: { article: input.article ?? null, bump: input.bump ?? null, taskLabel: "Turning the article into a Web Story" },
+      };
+
     default:
       throw new Error(`No route for ${agentId}.${action}. Add it to brain/adapter.ts — do not guess a job shape.`);
   }

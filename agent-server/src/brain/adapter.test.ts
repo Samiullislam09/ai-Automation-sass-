@@ -42,3 +42,27 @@ test("a topic that resolves to null (the provider step never ran) is undefined, 
   const { data } = translate("keyword", "find_keywords", { topic: null });
   assert.equal(data.topic, undefined);
 });
+
+test("every enabled manifest action has a route — Mr. Image/Mr. Story shipped with none", async () => {
+  // Found live 2026-09-06: image.make_images, image.make_image and story.make_story were all
+  // in the manifest, offered to chat as real tools, and orderable end to end — right up until
+  // makeStepRunner() tried to actually dispatch the step, at which point translate() threw "No
+  // route for image.make_image. Add it to brain/adapter.ts". Nothing in this file's own test
+  // ever called translate() with every action the manifest declares, so an agent could be
+  // fully wired for planning and completely unreachable at the one moment that matters. This
+  // iterates the manifest itself rather than a hand-kept list, so a new agent's action fails
+  // this test the same day it is added, not the day someone finally orders it in chat.
+  const { MANIFESTS } = await import("./manifests.js");
+  const missing: string[] = [];
+  for (const agent of MANIFESTS) {
+    for (const action of agent.actions) {
+      try {
+        translate(agent.id, action.id, {});
+      } catch (e: any) {
+        if (/^No route for /.test(e?.message ?? "")) missing.push(`${agent.id}.${action.id}`);
+        else throw e; // a route exists but choked on the empty input — a real bug, not this test's job to hide
+      }
+    }
+  }
+  assert.deepEqual(missing, []);
+});
