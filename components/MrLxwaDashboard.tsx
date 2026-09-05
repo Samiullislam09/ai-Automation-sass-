@@ -161,12 +161,11 @@ type Agent = { id: string; name: string; role: string; status: AgentStatus; icon
  *  component), except `fixedStatus` agents which are always "Planned" regardless. */
 type AgentMeta = Omit<Agent, "status"> & { fixedStatus?: "Planned" };
 
-/** The full roster per MASTER_PLAN.html: the 9 real agents (`id` matches agent-server's
- *  AGENT_TYPES/task_steps.agent_id — boss IS the brain node in the middle, not a 10th
- *  orbiting icon) PLUS the 2 named-but-not-yet-built agents from §19 ("19 · Mr. Image aur
- *  Mr. Story — naye agents"), always "Planned" — shown on the network (the plan names them)
- *  but never counted as active/staffed anywhere (header pill, stats strip), since they don't
- *  run yet. Left-to-right order tells the real pipeline story: gather (Crawler → Analyst) →
+/** The full roster per MASTER_PLAN.html: all 11 real agents (`id` matches agent-server's
+ *  AGENT_TYPES/task_steps.agent_id — boss IS the brain node in the middle, not a 12th orbiting
+ *  icon). Mr. Image and Mr. Story (§19) shipped 2026-09-05/06 and are staffed/counted like every
+ *  other card now — no more "Planned" carve-out for them. Left-to-right order tells the real
+ *  pipeline story: gather (Crawler → Analyst) →
  *  plan (Keyword → Writer → Image) → [[brain]] → check/ship (SEO → Story → Audit) →
  *  distribute (Social → Leads). Each agent has its own icon + accent color (per the reference
  *  "AI Agent Network" mockup), not one shared Bot icon.
@@ -178,11 +177,11 @@ const AGENT_META_LEFT: AgentMeta[] = [
   { id: "analyst", name: "Mr. Analyst", role: "Site Brain", icon: BarChart3, color: "#3b82f6" },
   { id: "keyword", name: "Mr. Keyword", role: "Keyword Research", icon: KeyRound, color: "#f59e0b" },
   { id: "writer", name: "Mr. Writer", role: "Content Writer", icon: PenLine, color: "#8b5cf6" },
-  { id: "image", name: "Mr. Image", role: "Image Generation", icon: ImageIcon, color: "#facc15", fixedStatus: "Planned" },
+  { id: "image", name: "Mr. Image", role: "Image Generation", icon: ImageIcon, color: "#facc15" },
 ];
 const AGENT_META_RIGHT: AgentMeta[] = [
   { id: "seo", name: "Mr. SEO", role: "SEO Checks", icon: Search, color: "#22c55e" },
-  { id: "story", name: "Mr. Story", role: "Web Stories", icon: BookOpen, color: "#6366f1", fixedStatus: "Planned" },
+  { id: "story", name: "Mr. Story", role: "Web Stories", icon: BookOpen, color: "#6366f1" },
   { id: "audit", name: "Mr. Audit", role: "Site Audit", icon: ShieldCheck, color: "#a855f7" },
   { id: "social", name: "Miss Social", role: "Social Drafts", icon: Megaphone, color: "#ec4899" },
   { id: "leads", name: "Mr. Leads", role: "Lead Discovery", icon: UserRound, color: "#f97316" },
@@ -797,11 +796,11 @@ const AgentNetwork = ({
         </div>
       </div>
 
-      {/* stats strip — real, built agents only (the 2 Planned ones above are shown on the
-          network because the plan names them, but never counted here as staffed/active).
-          "Success Rate 98.6%" and "Time Saved 32.4h" were removed 2026-08-31: both were fixed
-          strings with no source anywhere in the product, and the file's own comment admitted
-          it. Add either back the day something actually measures it. */}
+      {/* stats strip — every agent on the roster is real and staffed now (Mr. Image and Mr.
+          Story lost their "Planned" carve-out 2026-09-06). "Success Rate 98.6%" and "Time
+          Saved 32.4h" were removed 2026-08-31: both were fixed strings with no source anywhere
+          in the product, and the file's own comment admitted it. Add either back the day
+          something actually measures it. */}
       <div className="lx-card2 mt-4 flex flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3">
         <StatTile icon={Users} color="#3b82f6" label="Total Agents" value={String(totalActive)} sub="Active" />
         <StatTile icon={Loader2} color="#3b82f6" label="Tasks Running" value={String(running)} sub="In Progress" spin />
@@ -1560,8 +1559,8 @@ export default function MrLxwaDashboard({
   // agents that are idle or already finished. It used to open only for an agent whose status
   // was exactly "Working", so nine of the ten cards were inert clicks and the user could never
   // ask "what did Mr. Keyword actually do?" after it finished (owner's ask, 2026-08-31).
-  // A "Planned" agent (Mr. Image / Mr. Story) still does nothing: it has no code behind it, so
-  // there is genuinely nothing to show.
+  // Nothing on the roster is fixed to "Planned" any more (Mr. Image and Mr. Story both shipped
+  // 2026-09-05/06) — this guard is kept for the day a genuinely unbuilt agent joins the roster.
   const openAgentPanel = (a: Agent) => {
     if (a.status === "Planned") return;
     setSelectedAgentId(a.id);
