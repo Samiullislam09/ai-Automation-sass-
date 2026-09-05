@@ -43,6 +43,7 @@ import { LxGlobalStyle } from "@/components/lx-theme";
 import { useLiveEvents, isTerminalTask, isFlowing, useNow, elapsedMs, clock, type TaskState } from "@/lib/live";
 import { useStore, PLANS } from "@/lib/store";
 import { startPolling } from "@/lib/poll";
+import LiveRunPanel from "@/components/dashboard/LiveRunPanel";
 import {
   LayoutDashboard,
   Users,
@@ -924,6 +925,14 @@ export default function MrLxwaDashboard({
   // dropped rather than faked; the rest come straight off `live`.
   const activeTasksList = live.tasks.filter((t) => !isTerminalTask(t.status));
   const queuedTasksList = activeTasksList.filter((t) => t.status === "queued" || t.status === "scheduled");
+  // The run the LiveRunPanel narrates. Deliberately NOT `task` above: that one is scoped to the
+  // chat conversation you happen to have open, and the dashboard has to show a run whoever
+  // started it — the schedule, another tab, a button on the Site Brain page. Newest open task
+  // first, and if the brain has not filed one yet the panel falls back to jobs_log.
+  const runTask: TaskState | null = activeTasksList[0] ?? null;
+  // Its own clock: `now` above only ticks while THIS conversation's task is open, so a run
+  // started anywhere else would have shown a frozen timer.
+  const runNow = useNow(!!runTask || !!account.crawl);
   const statusForAgent = (m: AgentMeta): AgentStatus => {
     if (m.fixedStatus) return m.fixedStatus;
     // Scoped to THIS order's steps only (see `task` above). Scanning every loaded task instead
@@ -1046,6 +1055,10 @@ export default function MrLxwaDashboard({
   // done, instead of the bubble sitting on "On it" forever while the real answer only ever shows
   // up in Workspace/Approvals.
   const orderedTaskId = useRef<string | null>(null);
+  // The same order, in state rather than a ref, purely so LiveRunPanel can say "Queued" the
+  // instant the chat accepts it. Cleared as soon as a real task or a working agent shows up —
+  // it is a placeholder for the first second or two, never a claim of its own.
+  const [pendingOrder, setPendingOrder] = useState<string | null>(null);
   const reportedTaskIds = useRef<Set<string>>(new Set());
   const startedLiveBubble = useRef<Set<string>>(new Set());
 
@@ -1058,6 +1071,11 @@ export default function MrLxwaDashboard({
   // not sit closed until Mr. Keyword picks up afterward.
   const workingAgent = bossAgent.status === "Working" ? bossAgent : allAgents.find((a) => a.status === "Working") ?? null;
   const [showPanel, setShowPanel] = useState(!!workingAgent);
+  useEffect(() => {
+    // The moment there is something real to show — a task row, or an agent whose jobs_log row
+    // says it is working — the placeholder gets out of the way.
+    if (pendingOrder && (runTask || workingAgent)) setPendingOrder(null);
+  }, [pendingOrder, runTask, workingAgent]);
   // Which agent the user asked to look at, by clicking its card. Null = "just follow the work"
   // (whoever is running, else whoever ran last). Set by openAgentPanel below; cleared when the
   // panel is closed, so the next auto-open follows the work again rather than being stuck on
@@ -1176,7 +1194,10 @@ export default function MrLxwaDashboard({
       const returned = res.headers.get("X-Conversation-Id");
       if (returned) convId.current = returned;
       const runJob = res.headers.get("X-Run-Job");
-      if (runJob) orderedTaskId.current = runJob;
+      if (runJob) {
+        orderedTaskId.current = runJob;
+        setPendingOrder(q.trim().slice(0, 120));
+      }
       // No task id back = this turn was a plain answer, not an order. Stop waiting.
       else setAwaitingOrder(false);
       const reader = res.body.getReader();
@@ -1578,6 +1599,22 @@ export default function MrLxwaDashboard({
       </Collapse>
       {/* ---- full: "AI Agent Network" — the resting state. CSS grid-area layout (see
           .lx-net), collapsing to a 2-column auto-flow (brain first) in a narrow column. ---- */}
+      {/* The run in progress, always. Owner 2026-09-05: "har hal main ye primary ha ki ham
+          user ko live progress dikhaye". Renders nothing when nothing is running. */}
+      <LiveRunPanel
+        task={runTask}
+        workingAgentId={workingAgent?.id ?? null}
+        workingAgentTask={(() => {
+          const t = workingAgent ? account.agents?.[workingAgent.id]?.task : null;
+          return t && t !== "Idle" && t !== "—" ? t : null;
+        })()}
+        crawl={account.crawl}
+        pendingOrder={pendingOrder}
+        now={runNow}
+        connected={live.connected}
+        onOpen={() => setShowPanel(true)}
+      />
+
       <Collapse open={!panelOpen}>
         <AgentNetwork
           top={netTop}
