@@ -76,7 +76,12 @@ export async function getAgentRoomStates(supabase: SupabaseClient, tenantId: str
     // `action` is the real human task label the enqueuer passed (e.g. Writing "how to ..."),
     // see agent-server/src/workers.ts. Older rows only carry the queue name, so TASKS below
     // is still the fallback rather than showing the word "writer" as a task.
-    .select("agent, action, status, detail, created_at")
+    // `progress:detail->progress`, not `detail`. This query runs on EVERY live poll — every
+    // four seconds, every 1.2s while a job runs — and the only thing the room states read out
+    // of the receipt is "12 of 40". Asking for the whole jsonb pulled the agent's entire
+    // result back forty rows at a time (see trimJobDetail in agent-server/src/jobsLog.ts for
+    // what used to be in there and what it cost).
+    .select("agent, action, status, progress:detail->progress, created_at")
     .eq("tenant_id", tenantId)
     .in("agent", Object.keys(JOB_AGENT_TO_ROOM))
     .order("created_at", { ascending: false })
@@ -91,7 +96,7 @@ export async function getAgentRoomStates(supabase: SupabaseClient, tenantId: str
     const label = j.action && j.action !== j.agent ? j.action : (TASKS[room] ?? "Working…");
     if (j.status === "running" || j.status === "queued") {
       // "Researching X · 12/40" reads as progress; the label on its own reads as a spinner.
-      const p = (j as any).detail?.progress;
+      const p = (j as any).progress;
       const suffix = p?.total ? ` · ${p.done ?? 0}/${p.total}` : "";
       rooms[room] = { state: "working", task: label + suffix };
     }
@@ -124,7 +129,7 @@ export async function getAgentRoomStates(supabase: SupabaseClient, tenantId: str
 export async function getRunningCrawl(supabase: SupabaseClient, tenantId: string) {
   const { data } = await supabase
     .from("jobs_log")
-    .select("detail, created_at")
+    .select("progress:detail->progress, created_at")
     .eq("tenant_id", tenantId)
     .eq("agent", "crawler")
     .eq("status", "running")
@@ -135,7 +140,7 @@ export async function getRunningCrawl(supabase: SupabaseClient, tenantId: string
   if (!data) return null;
   if (Date.now() - new Date(data.created_at).getTime() > 30 * 60 * 1000) return null;
 
-  const p = ((data.detail as any) ?? {}).progress ?? {};
+  const p = ((data as any).progress ?? {}) as any;
   return {
     startedAt: data.created_at,
     phase: p.phase ?? "starting",
@@ -525,12 +530,16 @@ export async function getCostSummary(supabase: SupabaseClient, tenantId: string,
 
   const { data, error } = await supabase
     .from("jobs_log")
-    .select("agent, detail")
+    // `cost:detail->cost` — five thousand whole receipts were being pulled across the wire to
+    // add up one number each.
+    .select("agent, cost:detail->cost")
     .eq("tenant_id", tenantId)
     .in("status", ["success", "error"])
     .gte("created_at", since.toISOString())
     .limit(5000);
 
-  const summary = summarizeCostRows(!error && data ? (data as { agent: string; detail: unknown }[]) : []);
+  const summary = summarizeCostRows(
+    !error && data ? (data as any[]).map((r) => ({ agent: r.agent, detail: { cost: r.cost } })) : []
+  );
   return { ...summary, sinceIso: since.toISOString() };
 }

@@ -62,7 +62,10 @@ export async function GET() {
       .limit(80),
     supabase
       .from("jobs_log")
-      .select("id, agent, action, status, detail, created_at")
+      // `message:detail->>message`, not `detail`. These 150 rows are the keyword and writer
+      // jobs — the two fattest receipts in the table — and the only thing read out of them
+      // below is the failure sentence. (2026-09-05 egress audit, finding #2.)
+      .select("id, agent, action, status, message:detail->>message, created_at")
       .eq("tenant_id", tenantId)
       .in("agent", ["keyword", "writer"])
       .gte("created_at", since)
@@ -106,7 +109,7 @@ export async function GET() {
       .map((j: any) => ({
         agent: j.agent,
         task: j.action && j.action !== j.agent ? j.action : j.agent,
-        message: String(j.detail?.message ?? "Failed."),
+        message: String(j.message ?? "Failed."),
         at: j.created_at,
       }));
     const stillWorking = windowJobs.some((j: any) => j.status === "running");

@@ -845,6 +845,9 @@ export interface WorkspaceSource {
 
 /** The default. Reads the same three tables the brain routes read, through the browser client,
  *  under the RLS policies of migration 017 (`is_tenant_member`). No token in the bundle. */
+/** How much of one task's recording is ever fetched at once. See getEvents below. */
+const EVENTS_LIMIT = 400;
+
 export function supabaseSource(): WorkspaceSource {
   const db = createClient();
   return {
@@ -876,14 +879,22 @@ export function supabaseSource(): WorkspaceSource {
       return { task: task as TaskRow, steps: (steps ?? []) as StepRow[] };
     },
     async getEvents(taskId, tenantId) {
+      // Newest EVENTS_LIMIT, then flipped back into the order the reducer folds them in.
+      //
+      // This had no limit, and the fallback poll below re-runs it every four seconds for every
+      // task that has not finished — so a long task meant re-downloading its entire recording,
+      // payloads and all, fifteen times a minute. The rail shows a window of recent activity;
+      // it has never shown four hundred events at once, so fetching more than that was paying
+      // for rows nobody could see. (2026-09-05 egress audit, finding #3.)
       const { data, error } = await db
         .from("task_events")
         .select("id, at, kind, agent_id, step_id, message_user, message_dev, payload")
         .eq("task_id", taskId)
         .eq("tenant_id", tenantId)
-        .order("id", { ascending: true });
+        .order("id", { ascending: false })
+        .limit(EVENTS_LIMIT);
       if (error) throw new Error(error.message);
-      return (data ?? []) as RecordedRow[];
+      return ((data ?? []) as RecordedRow[]).reverse();
     },
   };
 }

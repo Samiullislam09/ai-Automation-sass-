@@ -30,9 +30,76 @@ export async function logJobProgress(id: string | undefined, progress: Record<st
   if (error) console.error("[jobsLog] progress update failed:", error.message);
 }
 
+/** Keys an agent returns that must never be copied into jobs_log.
+ *
+ *  `detail` is the receipt: what happened, in the words the dashboard shows. It was being
+ *  handed the agent's ENTIRE return value (workers.ts: `logJobFinish(logId, result)`), which
+ *  meant Mr. Writer filed a second copy of the whole article in it (~15 KB) and Mr. Audit filed
+ *  the whole report — every issue plus a per-page row, with LCP/CLS/TBT, for up to 200 pages
+ *  (100 KB+). Every one of those bytes is already stored properly somewhere else:
+ *  content_items.body holds the article (detail keeps `contentItemId`), site_audits holds the
+ *  report.
+ *
+ *  Nothing reads them from here. lib/dashboard-data.ts's describeJob() — the only thing that
+ *  turns a detail into a sentence — never touches `body`, `blueprint`, `issues`, `meta` or
+ *  `run.pages`; it reads counts, titles, reasons and the quality gate.
+ *
+ *  What they DID do was cost money. The live poll re-read 61 of these rows every four seconds
+ *  (getAgentRoomStates 40 + getRecentJobs 20 + getRunningCrawl 1), and the schedule history
+ *  reads 150 keyword/writer rows at a time. That is how a 36 MB database with one user burned
+ *  through Supabase's 5 GB monthly egress in four days (2026-09-05) and got the whole
+ *  organisation restricted. */
+const HEAVY_KEYS = ["body", "blueprint", "issues", "meta", "pages", "pageSummary", "html", "markdown"];
+
+/** Belt to the blacklist's braces: a `detail` bigger than this is something new and unforeseen
+ *  that would be re-read sixty times every four seconds, so it is cut down to the keys the
+ *  dashboard is known to read rather than filed whole. */
+const MAX_DETAIL_BYTES = 8_000;
+const SAFE_KEYS = [
+  "attempt", "message", "reason", "topic", "topics", "title", "planned", "written", "published",
+  "publishedUrl", "attempted", "error", "hint", "chosenBy", "wordCount", "qualityGate", "source",
+  "chained", "awaitingChoice", "researchOnly", "recommended", "contentItemId", "scheduleRunId",
+  "autoPublish", "blockedByGate", "pagesCrawled", "urlsFound", "skipped", "built", "version", "cost",
+  // A failure's own fields. They are the whole point of the row when something breaks, so they
+  // survive the cut — the Audit and Site Brain pages read them straight back out.
+  "cause", "stack", "attempts", "durationMs", "agent", "at", "progress",
+];
+
+/** A `cause` is whatever the failing library said, which can be an entire API error body. Two
+ *  thousand characters is more than anyone reads and enough to identify any of them. */
+const MAX_CAUSE_CHARS = 2_000;
+
+/** Drops the heavy keys from a job result before it becomes the row's receipt. Shallow by
+ *  design, plus the one nested case that matters (`run.pages`, the audit's per-page table) —
+ *  a deep walk over every agent result would be a lot of machinery for one known shape. */
+export function trimJobDetail(detail: unknown): unknown {
+  if (!detail || typeof detail !== "object" || Array.isArray(detail)) return detail;
+  const out: Record<string, unknown> = { ...(detail as Record<string, unknown>) };
+  for (const k of HEAVY_KEYS) delete out[k];
+
+  if (typeof out.cause === "string" && out.cause.length > MAX_CAUSE_CHARS) {
+    out.cause = out.cause.slice(0, MAX_CAUSE_CHARS) + " …[truncated]";
+  }
+
+  const run = out.run;
+  if (run && typeof run === "object" && !Array.isArray(run)) {
+    const { pages, ...restOfRun } = run as Record<string, unknown>;
+    out.run = restOfRun;
+  }
+
+  if (JSON.stringify(out).length <= MAX_DETAIL_BYTES) return out;
+
+  const small: Record<string, unknown> = { detail_trimmed: true };
+  for (const k of SAFE_KEYS) if (k in out) small[k] = out[k];
+  return small;
+}
+
 export async function logJobFinish(id: string | undefined, detail: unknown) {
   if (!id) return;
-  const { error } = await supabase.from("jobs_log").update({ status: "success", detail }).eq("id", id);
+  const { error } = await supabase
+    .from("jobs_log")
+    .update({ status: "success", detail: trimJobDetail(detail) })
+    .eq("id", id);
   if (error) console.error("[jobsLog] update (success) failed:", error.message);
 }
 
@@ -57,7 +124,7 @@ export type JobErrorDetail = {
 
 export async function logJobError(id: string | undefined, detail: JobErrorDetail) {
   if (!id) return;
-  const { error } = await supabase.from("jobs_log").update({ status: "error", detail }).eq("id", id);
+  const { error } = await supabase.from("jobs_log").update({ status: "error", detail: trimJobDetail(detail) }).eq("id", id);
   if (error) console.error("[jobsLog] update (error) failed:", error.message);
 }
 

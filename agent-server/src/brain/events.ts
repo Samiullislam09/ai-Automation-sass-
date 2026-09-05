@@ -233,14 +233,20 @@ export async function stopEvents(): Promise<void> {
   channels.clear();
 }
 
-/** Replay: every event of one task, oldest first. The ▶ button in Approvals reads this. */
+/** Replay: one task's recording, oldest first. The ▶ button in Approvals reads this.
+ *
+ *  Capped at the newest REPLAY_LIMIT for the same reason lib/live.ts caps its own read: this
+ *  is unbounded per task and nothing downstream renders more than a window of it. */
+const REPLAY_LIMIT = 400;
+
 export async function replay(taskId: string, tenantId: string) {
   const { data, error } = await db
     .from("task_events")
     .select("id, at, kind, agent_id, step_id, message_user, message_dev, payload")
     .eq("task_id", taskId)
     .eq("tenant_id", tenantId)
-    .order("id", { ascending: true });
+    .order("id", { ascending: false })
+    .limit(REPLAY_LIMIT);
   if (error) throw new Error(`Could not read the recording: ${error.message}`);
-  return data ?? [];
+  return (data ?? []).reverse();
 }

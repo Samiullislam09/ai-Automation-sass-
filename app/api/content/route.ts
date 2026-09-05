@@ -19,7 +19,13 @@ export async function GET(req: NextRequest) {
     // an image_set and a web_story carry `blueprint.parent_article_id`, which is how Approvals
     // groups them under their article and how the "another image" button knows which article
     // to ask about.
-    .select("id, type, status, title, cluster, meta, blueprint, created_at, updated_at")
+    // `parent_article_id:blueprint->>parent_article_id`, not `blueprint`. The blueprint is the
+    // article's full outline; the ONE thing this list needs from it is which article an
+    // image_set or web_story belongs under (ApprovalsSection reads `c.blueprint
+    // ?.parent_article_id`), and the response below is rebuilt into that exact shape so no
+    // caller changes. Up to 100 outlines per call, on a list the dashboard shell re-reads
+    // every 60 seconds. (2026-09-05 egress audit, finding #5.)
+    .select("id, type, status, title, cluster, meta, parent_article_id:blueprint->>parent_article_id, created_at, updated_at")
     .eq("tenant_id", tenantId)
     .order("created_at", { ascending: false })
     .limit(100);
@@ -28,5 +34,10 @@ export async function GET(req: NextRequest) {
   const { data, error } = await query;
 
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true, items: data });
+
+  const items = (data ?? []).map(({ parent_article_id, ...row }: any) => ({
+    ...row,
+    blueprint: parent_article_id ? { parent_article_id } : null,
+  }));
+  return NextResponse.json({ ok: true, items });
 }
