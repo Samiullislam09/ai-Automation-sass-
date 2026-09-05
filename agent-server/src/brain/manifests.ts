@@ -217,9 +217,28 @@ export const MANIFESTS: Manifest[] = [
         estimated_seconds: 40,
         cost_units: 4,
       },
+
+      {
+        // ONE picture, on its own, with no article anywhere near it. Without this, "ek image
+        // banao" hit `make_images`, whose `needs: ["article"]` made the planner walk backwards
+        // and write a whole article first — expensive, slow, and not remotely what was asked
+        // (owner, 2026-09-05: "sirf image banane bole to image hi bana ke de").
+        //
+        // `subject` is required and is the user's own words: the picture is theirs to describe,
+        // so nothing here invents a subject for them.
+        id: "make_image",
+        phrases: ["ek image banao", "image generate karo", "picture banao", "generate an image", "make me an image", "ek picture do"],
+        input: { subject: "string", style: "string?", shape: "string?" },
+        output: { url: "string", imageSetId: "string" },
+        provides: "standalone_image",
+        needs: [],
+        irreversible: false,
+        estimated_seconds: 15, // measured: Cloudflare answered in 3.7s, plus sharp and the upload
+        cost_units: 2,
+      },
     ],
     // NOTE — `render_images` is deliberately NOT a manifest action. Mr. Image also accepts a
-    // job carrying `briefs` (agents/image.ts's renderGiven), which is how Mr. Story gets its
+    // job carrying `briefs` (agents/image.ts's renderBriefs), which is how Mr. Story gets its
     // cover and hook pages and how Miss Social will get a post image: the caller writes the
     // brief and Mr. Image renders it word for word (§19.4.3). That is agent-to-agent work, the
     // same way the crawler enqueues the analyst — nobody orders it in chat, it has no phrases

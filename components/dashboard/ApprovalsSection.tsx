@@ -574,15 +574,19 @@ function ImageSetPreview({ c }: { c: ContentItem }) {
   const [redoing, setRedoing] = useState<string | null>(null);
   const images = c.meta?.images ?? [];
   const articleId = c.blueprint?.parent_article_id ?? null;
+  // A picture asked for on its own ("ek image banao") belongs to no article — redoing it means
+  // asking for the same subject again, not re-running an article's plan.
+  const standalone = (c.meta as any)?.standalone === true;
+  const subject = String((c.meta as any)?.subject ?? "");
 
   const redo = async (slot: string) => {
-    if (!articleId) return;
+    if (!articleId && !standalone) return;
     setRedoing(slot);
     try {
       const res = await fetch("/api/agents/trigger", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "image", articleId, slot, bump: 1, source: "manual" }),
+        body: JSON.stringify(standalone ? { type: "image", subject, bump: 1, source: "manual" } : { type: "image", articleId, slot, bump: 1, source: "manual" }),
       });
       const d = await res.json();
       // The job is queued, not finished — the new picture appears when the run does, the same
@@ -624,7 +628,7 @@ function ImageSetPreview({ c }: { c: ContentItem }) {
               {img.anchor && <p className="lx-10 lx-mut mt-1.5">for: <span style={{ color: "#d6d6e4" }}>{img.anchor}</span></p>}
               <p className="lx-10 lx-mut mt-1" style={{ lineHeight: 1.5 }}>{img.alt}</p>
               {img.note && <p className="lx-10 lx-mut mt-1" style={{ opacity: 0.75 }}>{img.note}</p>}
-              {articleId && (
+              {(articleId || standalone) && (
                 <button className="lx-ghost lx-10 mt-2" disabled={redoing === img.slot} onClick={() => redo(img.slot)}>
                   <RefreshCw size={12} className={redoing === img.slot ? "ap-spin" : ""} /> {redoing === img.slot ? "Starting…" : "Another image"}
                 </button>

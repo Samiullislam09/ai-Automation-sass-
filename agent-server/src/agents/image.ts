@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Job } from "pg-boss";
 import { Agent, type AgentContext, type AgentJobData } from "./base.js";
 import { loadActiveProfile } from "../lib/siteProfile.js";
@@ -49,6 +50,12 @@ export class ImageAgent extends Agent {
 
     // render_images: a caller's own briefs, rendered as given (§19.4.3).
     if (Array.isArray(d.briefs) && d.briefs.length) return this.renderBriefs(tenantId, d, ctx);
+
+    // make_image: one picture, on its own. "Sirf image banane bole to image hi bana ke de"
+    // (owner, 2026-09-05) — no article is written, none is looked for, and the subject is the
+    // user's own words rather than anything this agent invented for them.
+    const subject = String(d.subject ?? "").trim();
+    if (subject && !d.article && !d.articleId && !d.itemId) return this.oneOffImage(tenantId, subject, d, ctx);
 
     // The brain threads Mr. Writer's whole output in under the need's name (`article`), while a
     // direct enqueue passes an id. Both are accepted; neither is guessed.
@@ -119,6 +126,70 @@ export class ImageAgent extends Agent {
       generated,
       fallbacks,
       budgetLeft: Number.isFinite(budget) ? budget : null,
+    };
+  }
+
+  /** One picture, asked for directly. The whole ladder still applies (Cloudflare → NVIDIA →
+   *  stock → a branded card), so this never comes back empty-handed, and it is filed the same
+   *  way an article's images are — a card in Approvals — so there is one place to look. */
+  private async oneOffImage(tenantId: string, subject: string, d: Record<string, any>, ctx: AgentContext) {
+    const profileRow = await loadActiveProfile(tenantId).catch(() => null);
+    const profile = (profileRow?.profile as any) ?? null;
+    const brand = { color: (profile?.voice as any)?.brand_color || undefined, name: (profile?.what_they_do ?? "").split(/[.,]/)[0]?.trim() || undefined };
+    const style: "photo" | "illustration" = d.style === "illustration" ? "illustration" : "photo";
+    const shape: Shape = (["thumb", "og", "hero", "inline", "story"] as const).includes(d.shape) ? (d.shape as Shape) : "hero";
+
+    // Budgeted like any other picture: a one-off must not be a way around the day's allowance.
+    const plan_ = await tenantPlan(tenantId);
+    const cap = capFor("image", plan_.plan, plan_.overrides);
+    const usedToday = await generatedToday(tenantId);
+    if (cap !== null && usedToday >= cap) {
+      return {
+        made: false,
+        question: `Aaj ka image budget khatam ho gaya (${usedToday}/${cap}). Kal UTC midnight pe reset hota hai — ya Cloudflare ka doosra account CLOUDFLARE_ACCOUNTS me jod dijiye.`,
+        images: [],
+      };
+    }
+
+    // A one-off gets its own id, so asking for the same thing twice gives two pictures rather
+    // than silently overwriting the first — the seed is what makes an ARTICLE's images stable,
+    // and that reasoning does not apply to a picture somebody just asked for.
+    const setId = randomUUID();
+    ctx.onProgress({ phase: "rendering", label: "Making the picture…", done: 0, total: 1, at: new Date().toISOString() });
+
+    const drawn = await this.renderBriefs(
+      tenantId,
+      { briefs: [{ slot: `oneoff_${setId.slice(0, 8)}`, shape, style, subject, depicts: subject, alt: subject.slice(0, 120), headline: subject.slice(0, 80) }], bump: Number(d.bump) || 0 },
+      ctx,
+    );
+    const image = drawn.images?.[0];
+    if (!image) return { made: false, question: "The picture could not be made this time. Try again in a moment.", images: [] };
+
+    // Filed as an image_set with no parent article — it belongs to nothing but itself, and the
+    // Approvals card renders it the same way.
+    const { data, error } = await supabase
+      .from("content_items")
+      .insert({
+        tenant_id: tenantId,
+        type: "image_set",
+        status: "awaiting_approval",
+        title: `Image — ${subject.slice(0, 80)}`,
+        body: subject,
+        blueprint: { standalone: true },
+        meta: { standalone: true, subject, images: [{ slot: image.slot, url: image.url, alt: image.alt, anchor: null, provider: image.provider, kind: style }] },
+      })
+      .select("id")
+      .single();
+    if (error) console.error("[image] the picture was made but the review card could not be filed:", error.message);
+
+    ctx.progress(1, "Picture ready");
+    return {
+      made: true,
+      url: image.url,
+      imageSetId: data ? String(data.id) : null,
+      subject,
+      provider: image.provider,
+      images: [image],
     };
   }
 
