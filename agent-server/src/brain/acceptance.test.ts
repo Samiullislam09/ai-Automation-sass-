@@ -41,9 +41,10 @@ function world(opts: { stubs?: Set<string>; notRouted?: Set<string> } = {}) {
   return { registry, db, events, calls };
 }
 
+/** write_article's `with_story` slot (2026-09-05, §19.4.6) is answered "no" by default here:
+ *  these tests are about the §14 acceptance rows, not about that question. */
 const intent = (over: Partial<Intent>): Intent => ({
   action: "write_article",
-  params: {},
   when: null,
   delivery: "approvals",
   confidence: 0.95,
@@ -52,6 +53,10 @@ const intent = (over: Partial<Intent>): Intent => ({
   echo: "",
   source: "chat",
   ...over,
+  params:
+    (over.action ?? "write_article") === "write_article" && (over.params ?? {}).with_story === undefined
+      ? { ...(over.params ?? {}), with_story: false }
+      : (over.params ?? {}),
 });
 
 /** The brain's own front-door rule, mirrored from `readIntent` in server.ts: irreversibility

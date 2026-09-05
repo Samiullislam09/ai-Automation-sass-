@@ -48,7 +48,7 @@ export class ImageAgent extends Agent {
     const d = job.data as Record<string, any>;
 
     // render_images: a caller's own briefs, rendered as given (§19.4.3).
-    if (Array.isArray(d.briefs) && d.briefs.length) return this.renderGiven(tenantId, d, ctx);
+    if (Array.isArray(d.briefs) && d.briefs.length) return this.renderBriefs(tenantId, d, ctx);
 
     // The brain threads Mr. Writer's whole output in under the need's name (`article`), while a
     // direct enqueue passes an id. Both are accepted; neither is guessed.
@@ -199,9 +199,15 @@ export class ImageAgent extends Agent {
     }
   }
 
-  /** render_images — the caller wrote the briefs, this only draws them (§19.4.3). Used by Mr.
-   *  Story for its cover and hook pages, and by Miss Social for a post's own image. */
-  private async renderGiven(tenantId: string, d: Record<string, any>, ctx: AgentContext) {
+  /** The caller wrote the briefs, this only draws them (§19.4.3). Used by Mr. Story for its
+   *  cover and hook pages, and by Miss Social for a post's own image.
+   *
+   *  PUBLIC and called in-process, not through the queue: Mr. Story needs the pictures BEFORE
+   *  it can render its AMP page, and a fire-and-forget job would hand it nothing to render.
+   *  The agents already run in one process (brain/adapter.ts), so this is a direct call the
+   *  same way the crawler reaches the analyst — and it is still "the caller writes the brief,
+   *  Mr. Image only draws it", which is the whole point of the split. */
+  async renderBriefs(tenantId: string, d: Record<string, any>, ctx: AgentContext) {
     const profileRow = await loadActiveProfile(tenantId).catch(() => null);
     const profile = (profileRow?.profile as any) ?? null;
     const brand = { color: (profile?.voice as any)?.brand_color || undefined, name: (profile?.what_they_do ?? "").split(/[.,]/)[0]?.trim() || undefined };

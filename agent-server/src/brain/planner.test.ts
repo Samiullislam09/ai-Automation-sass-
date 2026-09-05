@@ -47,7 +47,11 @@ const LIVE_WORLD = buildRegistry(MANIFESTS, { stubs: new Set(), notRouted: new S
 function intent(action: string, params: Record<string, unknown> = {}, delivery: Intent["delivery"] = "approvals"): Intent {
   return {
     action,
-    params,
+    // write_article gained a required `with_story` slot on 2026-09-05 (MASTER_PLAN §19.4.6) —
+    // the one question an article order asks. Every row below is about PLANNING, not about
+    // that question, so the helper answers it "no" unless a test says otherwise; the question
+    // itself has its own test further down.
+    params: action === "write_article" && params.with_story === undefined ? { ...params, with_story: false } : params,
     when: null,
     delivery,
     confidence: 0.95,
@@ -268,6 +272,30 @@ test("row 7b · without the article in hand, the same action does plan the artic
   assert.deepEqual(shape(p.steps), ["1:keyword.find_keywords", "2:writer.write_article", "3:image.make_images"]);
 });
 
+// ══ the one question an article order asks (§19.4.6) ════════════════════════════════════
+
+test("with_story · an article order asks once, in words, before anything is planned", () => {
+  const res = failed(plan({ ...intent("write_article", {}), params: { topic: "solar" } }, TODAY));
+  assert.deepEqual(res.failure, { kind: "missing_slots", slots: ["with_story"] });
+  // The user sees a question, never a field name.
+  assert.match(res.message, /Web Story bhi bana doon/);
+  assert.doesNotMatch(res.message, /with_story/);
+});
+
+test("with_story · saying yes plans the story too; saying no leaves it out", () => {
+  const no = okPlan(plan(intent("write_article", { topic: "solar", with_story: false }), PLAN_WORLD));
+  assert.equal(no.steps.some((s) => s.action === "make_story"), false);
+
+  const yes = okPlan(plan(intent("write_article", { topic: "solar", with_story: true }), PLAN_WORLD));
+  const story = yes.steps.find((s) => s.action === "make_story");
+  assert.ok(story, `expected a story step, got ${shape(yes.steps).join(", ")}`);
+  // It runs after the images it reuses, and it is optional — a story that cannot be built must
+  // not take the article down with it (§19.4.5).
+  assert.deepEqual([...story!.needs].sort(), ["article", "images"]);
+  assert.equal(story!.optional, true);
+  assert.ok(story!.no > yes.steps.find((s) => s.action === "make_images")!.no, "the story reuses the article's images, so it goes after them");
+});
+
 // ══ ROWS 8 & 9 · "mera schedule kya hai" / "TikTok video banao" → no tool, 0 steps ═══════
 
 test("rows 8-9 · anything the registry does not know is refused, never guessed", () => {
@@ -417,7 +445,7 @@ test("__from names the producing step as step:<no>:<agent_id>, the task_steps un
   const [kw, writer, image, seo, publish] = p.steps;
 
   assert.deepEqual(kw.input, { topic: "solar" });
-  assert.deepEqual(writer.input, { topic: "solar", tone: "plain", __from: { keywords: "step:1:keyword" } });
+  assert.deepEqual(writer.input, { topic: "solar", with_story: false, tone: "plain", __from: { keywords: "step:1:keyword" } });
   assert.deepEqual((image.input as { __from: Record<string, string> }).__from, { article: "step:2:writer" });
   assert.deepEqual((seo.input as { __from: Record<string, string> }).__from, { article: "step:2:writer" });
   assert.deepEqual((publish.input as { __from: Record<string, string> }).__from, {

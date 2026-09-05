@@ -153,7 +153,12 @@ export const MANIFESTS: Manifest[] = [
         // guarantees a keyword step ran first, so declaring it optional was a lie that only
         // survived because nothing checked. (The planner exempts fields that are also needs
         // from the missing-slot question, so this costs the user no extra question.)
-        input: { topic: "string", keywords: "string[]", tone: "string?", words: "number?" },
+        // `with_story` is REQUIRED on purpose, and it is the one question this action asks.
+        // Owner, 2026-09-05: "article likhne se pehle user se poochna kya wo web story bhi
+        // chahta hai — pehle hi puchlena". A model that hears "article + story banao" fills it
+        // and nobody is asked anything; silence means the planner asks once, before any work
+        // starts, rather than the customer discovering afterwards that they could have had one.
+        input: { topic: "string", keywords: "string[]", with_story: "boolean", tone: "string?", words: "number?" },
         output: { title: "string", body: "string", wordCount: "number", qualityGate: "object" },
         provides: "article",
         // "topic" here for the same reason as find_keywords above: given → satisfied literally,
@@ -221,6 +226,33 @@ export const MANIFESTS: Manifest[] = [
     // a person would say, and putting it in the manifest would offer the intent engine a tool
     // whose only required input is something a user cannot type.
     office: { room: "image", ico: "🖼️", color: "#f472b6" },
+  },
+
+  {
+    id: "story",
+    name: "Mr. Story",
+    version: "1.0.0",
+    description: "Turns an article into a Google Web Story — a phone-sized picture story that gets its own carousel in Discover.",
+    actions: [
+      {
+        id: "make_story",
+        phrases: ["web story banao", "make a web story", "isse story banao", "story banao", "amp story"],
+        // Same naming rule as make_images: the input is called after the need, so the brain can
+        // thread Mr. Writer's whole output straight into it.
+        input: { article: "object", bump: "number?" },
+        output: { pages: "number", storyId: "string", valid: "boolean" },
+        provides: "web_story",
+        // Images too: a story reuses the article's own pictures rather than generating eight of
+        // its own (MASTER_PLAN §19.4.5), so it has to run after Mr. Image.
+        needs: ["article", "images"],
+        // Filed for approval like everything else — it does not touch the live site itself.
+        irreversible: false,
+        // Two Cloudflare images at ~4s, one outline call, plus re-cropping the article's own.
+        estimated_seconds: 50,
+        cost_units: 5,
+      },
+    ],
+    office: { room: "story", ico: "📖", color: "#38bdf8" },
   },
 
   {

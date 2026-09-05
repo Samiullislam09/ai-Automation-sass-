@@ -276,6 +276,22 @@ export function plan(intent: Intent, registry: Registry): PlanResult {
     if (isFail(res) && res.failure.kind === "cycle") return { ok: false, failure: res.failure, message: res.message };
   }
 
+  // ── 3b. the extras the user asked for by name ──────────────────────────────────────────
+  //
+  // A Web Story is not part of DELIVERING an article — nothing consumes `web_story`, so the
+  // graph walk above will never reach it, and that is correct: a story is a second deliverable,
+  // not a step on the way to the first. It is planned only when the user said yes, which they
+  // are asked once while the order is being taken (MASTER_PLAN §19.4.6, `with_story`).
+  //
+  // Added as OPTIONAL: a story that cannot be built must not take the article down with it.
+  for (const [param, actionId] of Object.entries(EXTRAS)) {
+    if (intent.params[param] !== true) continue;
+    const extra = registry.actions.get(actionId);
+    if (!extra) continue; // the agent is not in this deployment — nothing to plan, nothing to claim
+    const res = add(actionId, false, null);
+    if (isFail(res) && res.failure.kind === "cycle") return { ok: false, failure: res.failure, message: res.message };
+  }
+
   // ── 4. numbering: independent steps share a `no` so the orchestrator runs them together ──
   const numbers = new Map<string, number>();
   const numberOf = (actionId: string): number => {
@@ -354,11 +370,16 @@ export function findDeliveryAction(registry: Registry, target: RegisteredAction)
  *  See rule 3 in the header for why this is the definition. */
 export function findFinishers(registry: Registry, target: RegisteredAction, delivery: RegisteredAction): RegisteredAction[] {
   if (delivery.spec.id === target.spec.id) return [];
+  const extras = new Set(Object.values(EXTRAS));
   const out: RegisteredAction[] = [];
   for (const candidate of registry.actions.values()) {
     if (candidate.spec.id === target.spec.id || candidate.spec.id === delivery.spec.id) continue;
     if (!candidate.spec.needs.includes(target.spec.provides)) continue;
-    const customers = consumersOf(registry, candidate.spec.provides);
+    // An EXTRA does not count as a customer. Mr. Story needs `images`, but it is a second
+    // deliverable the user opted into — not part of delivering the article — and letting it
+    // count made Mr. Image stop being a finisher the moment Mr. Story was registered, so
+    // "article likho" quietly lost its pictures (caught by planner.test.ts, 2026-09-05).
+    const customers = consumersOf(registry, candidate.spec.provides).filter((c) => !extras.has(c.spec.id));
     if (customers.length === 0) continue; // nobody wants it → not part of delivering the target
     if (customers.every((c) => c.spec.id === delivery.spec.id)) out.push(candidate);
   }
@@ -411,8 +432,28 @@ function unknownActionMessage(action: string, registry: Registry): string {
   return `${base} Shayad aap ${list} chahte the?`;
 }
 
+/** A slot the user can be asked about in words rather than by its field name. A field with no
+ *  entry here is still asked for — by name — which is ugly but honest; adding a sentence here
+ *  is how a new question stops looking like a form. */
+const SLOT_QUESTION: Record<string, string> = {
+  // MASTER_PLAN §19.4.6. Asked once, while the order is being taken, so the answer costs
+  // nothing later: a story reuses the article's own pictures and only makes two of its own.
+  with_story:
+    "Iska Web Story bhi bana doon? (Google Discover me alag carousel milta hai — article ki apni images reuse hoti hain, sirf 2 nayi banti hain.) Haan ya nahi.",
+};
+
+/** "Say yes and you also get X." A boolean param on the ORDER, mapped to an action that is
+ *  planned alongside it. Deliberately tiny and explicit: these are the only things that get
+ *  into a plan without the needs-graph asking for them, and each one is a question the user
+ *  was asked out loud first (see SLOT_QUESTION). */
+const EXTRAS: Record<string, string> = { with_story: "make_story" };
+
 function missingSlotsMessage(slots: string[]): string {
-  const list = slots.join(", ");
+  const asked = slots.map((s) => SLOT_QUESTION[s]).filter(Boolean);
+  // When every gap has a real question, ask THOSE — the field names never reach the user.
+  if (asked.length === slots.length) return asked.join(" ");
+
+  const list = slots.map((s) => SLOT_QUESTION[s] ?? s).join(", ");
   return slots.length === 1
     ? `Ek cheez batani baaki hai: ${list}. Bina uske main guess nahi karunga — bata dijiye, main turant shuru kar deta hoon.`
     : `Ye cheezein batani baaki hain: ${list}. Bina inke main guess nahi karunga — bata dijiye, main turant shuru kar deta hoon.`;

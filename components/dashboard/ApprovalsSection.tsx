@@ -637,6 +637,57 @@ function ImageSetPreview({ c }: { c: ContentItem }) {
   );
 }
 
+/** The story as the reader will swipe through it: the pages in order, cover first, at the
+ *  shape a phone gives them (MASTER_PLAN §19.4.5). The AMP verdict is shown plainly, because
+ *  an invalid Web Story gets no place in Discover's carousel and the carousel is the whole
+ *  reason to make one — "we made it" and "Google will show it" are different claims. */
+function WebStoryPreview({ c }: { c: ContentItem }) {
+  const pages = c.meta?.pages ?? [];
+  const valid = (c.meta as any)?.ampValid === true;
+  const checkedBy = String((c.meta as any)?.ampCheckedBy ?? "");
+  const errors: string[] = Array.isArray((c.meta as any)?.ampErrors) ? (c.meta as any).ampErrors : [];
+
+  return (
+    <div className="ap-card p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="lx-10 rounded-full px-2 py-0.5 font-semibold" style={{ border: `1px solid ${valid ? "rgba(74,222,128,.5)" : "rgba(248,113,113,.5)"}`, color: valid ? "#4ade80" : "#f87171" }}>
+          {valid ? "Valid AMP" : "Not valid AMP yet"}
+        </span>
+        <span className="lx-10 lx-mut">
+          {checkedBy === "amphtml-validator"
+            ? "checked with Google's own validator"
+            : "structural checks only — the validator's ruleset could not be fetched"}
+        </span>
+        <span className="lx-10 lx-mut ml-auto">{pages.length} pages</span>
+      </div>
+
+      {!valid && errors.length > 0 && (
+        <ul className="mt-2 space-y-1 pl-4" style={{ listStyle: "disc" }}>
+          {errors.map((e, i) => <li key={i} className="lx-10" style={{ color: "#f87171" }}>{e}</li>)}
+        </ul>
+      )}
+
+      <div className="lx-scroll mt-3 flex gap-3 overflow-x-auto pb-2">
+        {pages.map((p, i) => (
+          <figure key={i} className="m-0 shrink-0 rounded-lg" style={{ width: 150, border: "1px solid var(--lx-border)", overflow: "hidden", background: "#0b0b12" }}>
+            {p.image ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={p.image} alt={p.headline} loading="lazy" style={{ display: "block", width: "100%", aspectRatio: "9 / 16", objectFit: "cover" }} />
+            ) : (
+              <div style={{ width: "100%", aspectRatio: "9 / 16", background: "#12121c" }} />
+            )}
+            <figcaption className="p-2">
+              <span className="lx-10 lx-mut">{i === 0 ? "Cover" : `Page ${i + 1}`}</span>
+              <p className="lx-10 mt-0.5" style={{ color: "#e8e8f2", lineHeight: 1.4 }}>{p.headline}</p>
+            </figcaption>
+          </figure>
+        ))}
+      </div>
+      <p className="lx-10 lx-mut mt-2">The cover is the only page Google Discover shows in its carousel.</p>
+    </div>
+  );
+}
+
 function Drawer({ c, loading, busy, tab, setTab, onClose, onApprove, onReject, onCopy }: {
   c: ContentItem; loading: boolean; busy: boolean; tab: "details" | "preview" | "history";
   setTab: (t: "details" | "preview" | "history") => void; onClose: () => void; onApprove: () => void; onReject: () => void; onCopy: () => void;
@@ -706,7 +757,11 @@ function Drawer({ c, loading, busy, tab, setTab, onClose, onApprove, onReject, o
           <ImageSetPreview c={c} />
         )}
 
-        {tab === "preview" && c.type !== "image_set" && (
+        {tab === "preview" && c.type === "web_story" && (
+          <WebStoryPreview c={c} />
+        )}
+
+        {tab === "preview" && c.type !== "image_set" && c.type !== "web_story" && (
           <div className="ap-card p-4">
             {loading && typeof c.body !== "string" ? (
               <div className="flex items-center gap-2 lx-11 lx-mut"><Loader2 size={14} className="ap-spin" /> Loading content…</div>

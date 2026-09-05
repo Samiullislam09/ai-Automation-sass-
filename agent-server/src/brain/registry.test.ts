@@ -161,7 +161,7 @@ test("stub and not-yet-routed agents are registered but disabled", () => {
 test("enabledActions offers every action once its agent stops being a stub", () => {
   // Miss Social was the last stub; the day it un-stubbed, this list grew by one rather than
   // needing a hidden-tools branch — the whole point of driving this off STUB_AGENTS. It grew
-  // again when Mr. Image shipped (make_images, 2026-09-05).
+  // again when Mr. Image and Mr. Story shipped (make_images, make_story, 2026-09-05).
   const reg = buildRegistry(MANIFESTS, REAL_OPTS);
   const offered = enabledActions(reg).map((a) => a.spec.id);
 
@@ -174,6 +174,7 @@ test("enabledActions offers every action once its agent stops being a stub", () 
     "find_keywords",
     "find_leads",
     "make_images",
+    "make_story",
     "pick_topic",
     "plan_topics",
     "publish_article",

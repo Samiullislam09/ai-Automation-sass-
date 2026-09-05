@@ -9,6 +9,7 @@ import { SeoAgent } from "./agents/seo.js";
 import { LeadsAgent } from "./agents/leads.js";
 import { AuditAgent } from "./agents/audit.js";
 import { ImageAgent } from "./agents/image.js";
+import { StoryAgent } from "./agents/story.js";
 import { CrawlerAgent } from "./agents/crawler.js";
 import { AnalystAgent } from "./agents/analyst.js";
 import { PublishAgent } from "./agents/publish.js";
@@ -63,6 +64,7 @@ const AGENTS: Record<AgentType, Agent> = {
   publish: new PublishAgent(),
   audit: new AuditAgent(),
   image: new ImageAgent(),
+  story: new StoryAgent(),
 };
 
 // Named processJob, not process — a module-scope function called `process` shadows Node's
