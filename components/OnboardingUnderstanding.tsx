@@ -1,6 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
+import { ArrowLeft, ArrowRight, BadgeCheck, Briefcase, Package, ShoppingBag, TrendingUp, UserPlus, Users } from "lucide-react";
 import { normalizeProfile, type Goals, type Offering, type SiteProfile } from "@/components/SiteBrainModel";
+import { OptRow, PALETTE } from "@/components/OnboardingUI";
 
 /** The two screens MASTER_PLAN §25.7 adds to onboarding, between "paste your website" and
  *  "connect where we publish":
@@ -136,61 +138,93 @@ export function UnderstandingStep({
     onContinue();
   };
 
+  // The mockup's "Review & Confirm" screen: each fact is a row with a "Change" link, and only
+  // the row being changed opens into its editor — nothing else about the edit logic moved.
+  const [editing, setEditing] = useState<"what" | "aud" | "sell" | null>(null);
+  const toggle = (k: "what" | "aud" | "sell") => setEditing((e) => (e === k ? null : k));
+  const c = [PALETTE[0], PALETTE[1], PALETTE[3], PALETTE[2]];
+
   return (
     <>
-      <h2 className="ob-h1">We read your site — here&apos;s what we understood</h2>
+      <h2 className="ob-h1">Review &amp; Confirm</h2>
       <p className="ob-sub">
-        {pages ? `From ${pages} of your own pages. ` : ""}Correct anything that&apos;s wrong — your version is what the team uses from here on.
+        Here&apos;s what we understood{pages ? ` from ${pages} of your own pages` : ""}. Change anything that&apos;s wrong — your version is what the team uses from here on.
       </p>
 
-      <div className="ob-field">
-        <label className="ob-label" htmlFor="ob-what">What you do</label>
-        <textarea className="ob-input ob-textarea" id="ob-what" rows={3} value={what} placeholder="We couldn't work this out — tell us in a line" onChange={(e) => setWhat(e.target.value)} />
-      </div>
-
-      <div className="ob-field">
-        <label className="ob-label" htmlFor="ob-aud">Who you serve</label>
-        <input className="ob-input" id="ob-aud" value={audience} placeholder="We couldn't work this out — who buys from you?" onChange={(e) => setAudience(e.target.value)} />
-      </div>
-
-      <div className="ob-field">
-        <label className="ob-label">What you sell</label>
-        {offerings.length ? (
-          <div className="ob-rowlist">
-            {offerings.map((o, i) => (
-              <div key={i} className="ob-row">
-                <input
-                  className="ob-input"
-                  value={o.name}
-                  onChange={(e) => setOfferings((prev) => prev.map((p, j) => (j === i ? { ...p, name: e.target.value } : p)))}
-                />
-                <button type="button" className="ob-btn" onClick={() => setOfferings((prev) => prev.filter((_, j) => j !== i))}>
-                  Remove
-                </button>
-              </div>
-            ))}
+      <div className="ob-review">
+        <div className="ob-rrow">
+          <span className="ob-opticon" style={{ background: c[0].bg, color: c[0].fg }}><Briefcase size={17} /></span>
+          <div className="ob-rrow-b">
+            <small>What you do</small>
+            <b className={what.trim() ? "" : "empty"}>{what.trim() || "We couldn't work this out — add it"}</b>
           </div>
-        ) : (
-          <p className="ob-hint">We couldn&apos;t find a product or service list on your site. You can add these later.</p>
+          <button type="button" className="ob-change" onClick={() => toggle("what")}>{editing === "what" ? "Done" : "Change"}</button>
+        </div>
+        {editing === "what" && (
+          <div className="ob-redit">
+            <textarea className="ob-input ob-textarea" rows={3} value={what} placeholder="Tell us in a line" onChange={(e) => setWhat(e.target.value)} autoFocus />
+          </div>
+        )}
+
+        <div className="ob-rrow">
+          <span className="ob-opticon" style={{ background: c[1].bg, color: c[1].fg }}><Users size={17} /></span>
+          <div className="ob-rrow-b">
+            <small>Who you serve</small>
+            <b className={audience.trim() ? "" : "empty"}>{audience.trim() || "We couldn't work this out — who buys from you?"}</b>
+          </div>
+          <button type="button" className="ob-change" onClick={() => toggle("aud")}>{editing === "aud" ? "Done" : "Change"}</button>
+        </div>
+        {editing === "aud" && (
+          <div className="ob-redit">
+            <input className="ob-input" value={audience} placeholder="e.g. SME owners and quality managers" onChange={(e) => setAudience(e.target.value)} autoFocus />
+          </div>
+        )}
+
+        <div className="ob-rrow">
+          <span className="ob-opticon" style={{ background: c[2].bg, color: c[2].fg }}><Package size={17} /></span>
+          <div className="ob-rrow-b">
+            <small>What you sell</small>
+            <b className={offerings.length ? "" : "empty"}>
+              {offerings.length ? `${offerings.length} — ${offerings.slice(0, 3).map((o) => o.name).join(" · ")}${offerings.length > 3 ? " …" : ""}` : "No product or service list found — add these later"}
+            </b>
+          </div>
+          {offerings.length > 0 && <button type="button" className="ob-change" onClick={() => toggle("sell")}>{editing === "sell" ? "Done" : "Change"}</button>}
+        </div>
+        {editing === "sell" && (
+          <div className="ob-redit">
+            <div className="ob-rowlist">
+              {offerings.map((o, i) => (
+                <div key={i} className="ob-row">
+                  <input
+                    className="ob-input"
+                    value={o.name}
+                    onChange={(e) => setOfferings((prev) => prev.map((p, j) => (j === i ? { ...p, name: e.target.value } : p)))}
+                  />
+                  <button type="button" className="ob-btn" onClick={() => setOfferings((prev) => prev.filter((_, j) => j !== i))}>
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {proof.length > 0 && (
+          <div className="ob-rrow">
+            <span className="ob-opticon" style={{ background: c[3].bg, color: c[3].fg }}><BadgeCheck size={17} /></span>
+            <div className="ob-rrow-b">
+              <small>What we can prove about you</small>
+              <b title={proof.slice(0, 4).map((p) => p.claim).join(" · ")}>{proof.slice(0, 3).map((p) => p.claim).join(" · ")}{proof.length > 3 ? " …" : ""}</b>
+            </div>
+          </div>
         )}
       </div>
-
-      {proof.length > 0 && (
-        <div className="ob-field">
-          <label className="ob-label">What we can prove about you</label>
-          <ul className="ob-list">
-            {proof.slice(0, 4).map((p, i) => (
-              <li key={i}>{p.claim}</li>
-            ))}
-          </ul>
-          <p className="ob-hint">Only things written on your own site — nothing here is invented.</p>
-        </div>
-      )}
+      <p className="ob-hint">Only things written on your own site — nothing here is invented.</p>
 
       <div className="ob-actions">
-        <button className="ob-btn" onClick={onBack} disabled={saving}>Back</button>
-        <button className="ob-btn-primary" style={{ flex: 1 }} onClick={confirm} disabled={saving}>
-          {saving ? "Saving…" : "Yes, that's us"}
+        <button className="ob-btn" onClick={onBack} disabled={saving}><ArrowLeft size={14} /> Back</button>
+        <button className="ob-btn-primary" onClick={confirm} disabled={saving}>
+          {saving ? "Saving…" : "Confirm & Continue"} <ArrowRight size={15} />
         </button>
       </div>
     </>
@@ -199,10 +233,10 @@ export function UnderstandingStep({
 
 /* ── screen 2 · goals ───────────────────────────────────────────────────────────────────── */
 
-const GOAL_OPTS: { key: NonNullable<Goals["primary"]>; label: string; sub: string }[] = [
-  { key: "leads", label: "More enquiries", sub: "People contacting you" },
-  { key: "traffic", label: "More search traffic", sub: "Being found on Google" },
-  { key: "sales", label: "More sales", sub: "Orders and revenue" },
+const GOAL_OPTS: { key: NonNullable<Goals["primary"]>; label: string; sub: string; icon: typeof UserPlus }[] = [
+  { key: "leads", label: "More enquiries", sub: "People contacting you", icon: UserPlus },
+  { key: "traffic", label: "More search traffic", sub: "Being found on Google", icon: TrendingUp },
+  { key: "sales", label: "More sales", sub: "Orders and revenue", icon: ShoppingBag },
 ];
 
 export function GoalsStep({
@@ -235,26 +269,23 @@ export function GoalsStep({
 
   return (
     <>
-      <h2 className="ob-h1">What are we aiming for?</h2>
-      <p className="ob-sub">Everything the team plans will be pointed at this. You can change it any time.</p>
+      <h2 className="ob-h1">What are your main goals?</h2>
+      <p className="ob-sub">Choose what matters most to your business. You can always change this later.</p>
 
-      <div className="ob-goallist">
-        {GOAL_OPTS.map((g) => (
-          <button key={g.key} type="button" className={`ob-goal${primary === g.key ? " active" : ""}`} onClick={() => setPrimary(g.key)}>
-            <b>{g.label}</b>
-            <div className="ob-goal-sub">{g.sub}</div>
-          </button>
+      <div className="ob-optlist2">
+        {GOAL_OPTS.map((g, i) => (
+          <OptRow key={g.key} icon={g.icon} title={g.label} subtitle={g.sub} active={primary === g.key} colorIndex={i} onClick={() => setPrimary(g.key)} />
         ))}
       </div>
 
       <div className="ob-field" style={{ marginTop: 18 }}>
         <label className="ob-label">{names.length ? "Which should grow first? (pick up to 3)" : "What should grow first? (up to 3, one per line)"}</label>
         {names.length ? (
-          <div className="ob-pills">
+          <div className="ob-tags">
             {names.map((n) => {
               const on = focus.includes(n);
               return (
-                <span key={n} className={`ob-pill${on ? " active" : ""}`} style={!on && focus.length >= 3 ? { opacity: 0.45 } : undefined} onClick={() => toggle(n)}>
+                <span key={n} className={`ob-tag${on ? " active" : ""}`} style={!on && focus.length >= 3 ? { opacity: 0.45 } : undefined} onClick={() => toggle(n)}>
                   {n}
                 </span>
               );
@@ -266,9 +297,9 @@ export function GoalsStep({
       </div>
 
       <div className="ob-actions">
-        <button className="ob-btn" onClick={onBack} disabled={saving}>Back</button>
-        <button className="ob-btn-primary" style={{ flex: 1 }} onClick={save} disabled={!primary || saving}>
-          {saving ? "Saving…" : "Continue"}
+        <button className="ob-btn" onClick={onBack} disabled={saving}><ArrowLeft size={14} /> Back</button>
+        <button className="ob-btn-primary" onClick={save} disabled={!primary || saving}>
+          {saving ? "Saving…" : "Next"} <ArrowRight size={15} />
         </button>
       </div>
     </>
