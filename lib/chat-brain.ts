@@ -120,7 +120,29 @@ export type BrainTurnDeps = {
   runLegacy(job: LegacyJob): Promise<OrderResult>;
   /** Which of those four, if any, this message is. The route passes today's matcher. */
   legacyKind(message: string): LegacyJob | null;
+  /** When a reusable action last actually succeeded for this tenant, or null if never / the
+   *  read failed. Backs the "already fresh, don't redo it" gate below — see lib/reuse.ts. A
+   *  test stub that never resolves a date is exactly "always run it", which is today's
+   *  behaviour, so existing tests do not need to know this dependency exists. */
+  lastSuccessfulRun?(tenantId: string, agent: string): Promise<Date | null>;
 };
+
+/** Actions that read or rebuild something which stays valid for days — redoing one because a
+ *  vague message got classified as it (see this file's own incident note below) spends real
+ *  money for no new information. Not every action belongs here: writing an article or finding
+ *  keywords produces a NEW, distinct thing each time: there is nothing to "reuse" instead. */
+// Keyed by the bare action id — `routed.action` never carries the agent prefix (see
+// lib/chat-tools.ts's enabledActions(), which maps by `spec.id` alone).
+const REUSABLE_ACTIONS: Record<string, { agent: string; windowMs: number; noun: string }> = {
+  crawl_site: { agent: "crawler", windowMs: 7 * 24 * 60 * 60 * 1000, noun: "site padhna" },
+  audit_site: { agent: "audit", windowMs: 7 * 24 * 60 * 60 * 1000, noun: "site audit" },
+  build_site_profile: { agent: "analyst", windowMs: 7 * 24 * 60 * 60 * 1000, noun: "site samajhna" },
+};
+
+// A customer who explicitly asks again gets a real fresh run no matter how recent the last
+// one was — this gate exists to stop an ACCIDENTAL redo (the model's own judgement call on a
+// vague message), never to refuse a deliberate one.
+const FORCE_REUSABLE = /\b(phir\s*se|dobara|re-?crawl|re-?audit|force|abhi\s*turant|fresh\s*se|naya\s*kar)\b/i;
 
 export type BrainTurnInput = {
   message: string;
@@ -361,6 +383,33 @@ export async function brainTurn(input: BrainTurnInput, deps: BrainTurnDeps): Pro
       order: nothingStarted(saved.ok ? ask : `${ask} (Ye sawaal yaad nahi rahega — order poora dobara likh dena.)`),
       action: routed.action,
     };
+  }
+
+  /* 6.5 ─ Already fresh enough? Reuse it instead of paying to redo it. -------------------
+   *
+   *  Found live 2026-09-07: "let me about my webiste" (a vague, badly-typed question) got
+   *  classified as audit_site — a genuine, isolated model misjudgement, not a phrase-match
+   *  bug — and started a fresh 156-page Lighthouse run for a question that already had a
+   *  perfectly good answer sitting in site_profiles. Rather than chase every way a model can
+   *  misjudge intent, this gate sits after the decision: any of the three reusable actions
+   *  above only actually dispatches if it hasn't already succeeded within its own freshness
+   *  window, unless the customer's own words ask for it again explicitly. */
+  const reusable = REUSABLE_ACTIONS[routed.action];
+  if (reusable && deps.lastSuccessfulRun && !FORCE_REUSABLE.test(message)) {
+    const last = await deps.lastSuccessfulRun(input.tenantId, reusable.agent);
+    if (last && now.getTime() - last.getTime() < reusable.windowMs) {
+      const days = Math.max(0, Math.round((now.getTime() - last.getTime()) / 86_400_000));
+      const when = days === 0 ? "aaj hi" : days === 1 ? "kal" : `${days} din pehle`;
+      return {
+        handled: true,
+        order: nothingStarted(
+          `${reusable.noun} ${when} ho chuka hai — wahi latest data use ho raha hai, paisa aur time bacha ke dobara nahi kar raha. ` +
+            `Agar zaroor abhi dobara karna hai to "phir se karo" bol dena.`,
+          { kind: "info", title: "Already up to date", detail: routed.echo || undefined }
+        ),
+        action: routed.action,
+      };
+    }
   }
 
   /* 7 ─ Order it ----------------------------------------------------------------------- */

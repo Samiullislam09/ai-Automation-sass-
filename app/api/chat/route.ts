@@ -21,6 +21,7 @@ import * as brain from "@/lib/brain";
 import { brainTurn, legacyJobOf, type BrainTurn, type BrainTurnDeps, type OrderResult } from "@/lib/chat-brain";
 import { extractIntent } from "@/lib/chat-brain-intent";
 import { clearState, loadState, savePending } from "@/lib/chat-conversation";
+import { lastSuccessfulRun } from "@/lib/reuse";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -881,6 +882,7 @@ async function runBrainTurn(
       return startWork(legacy, tenantId, userId, job.message, supabase);
     },
     legacyKind: (message) => legacyJobOf(message, tz),
+    lastSuccessfulRun: (forTenantId, agent) => lastSuccessfulRun(supabase, forTenantId, agent),
   };
 
   return brainTurn({ message: q, tenantId, userId, conversationId: convId, tz, history }, deps);

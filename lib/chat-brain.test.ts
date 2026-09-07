@@ -134,6 +134,26 @@ const REGISTRY: BrainRegistry = {
       ],
     },
     {
+      id: "audit",
+      name: "Mr. Audit",
+      version: "1.0.0",
+      description: "Checks the whole site for what is broken, invisible to Google, or costing traffic.",
+      enabled: true,
+      healthy: true,
+      office: { room: "audit", ico: "🔎", color: "#34d399" },
+      actions: [
+        {
+          id: "audit_site",
+          phrases: ["site audit karo", "audit my site", "meri site check karo", "site audit", "what is wrong with my site", "site ki problem batao"],
+          input: { pages: "number?" },
+          irreversible: false,
+          estimated_seconds: 180,
+          needs: [],
+          provides: "site_audit",
+        },
+      ],
+    },
+    {
       id: "social",
       name: "Mr. Social",
       version: "0.1.0",
@@ -197,6 +217,10 @@ type StubOpts = {
   /** Force a failure out of the brain's createTask. */
   createError?: string;
   saveFails?: boolean;
+  /** When set, stands in for lib/reuse.ts's lastSuccessfulRun — omitted entirely (undefined)
+   *  by default, exactly like a caller that never wired the dependency, so every existing
+   *  test above is unaffected by the reuse gate's existence. */
+  lastRun?: (tenantId: string, agent: string) => Promise<Date | null>;
 };
 
 function stub(opts: StubOpts = {}) {
@@ -273,6 +297,7 @@ function stub(opts: StubOpts = {}) {
     },
 
     legacyKind: (message) => legacyJobOf(message, TZ),
+    lastSuccessfulRun: opts.lastRun,
   };
 
   return { deps, rec, get state() { return state; } };
@@ -331,6 +356,61 @@ test('"solar panels pe article likho" — a task, and no confirmation asked', as
   assert.notEqual(o.event?.kind, "needs_confirm");
   assert.equal(o.jobId, "task-1");
   assert.equal(o.agentId, "writer", "the office lights the room the manifest named");
+});
+
+/* ── the reuse gate (2026-09-07 incident: a vague question started a fresh audit) ────── */
+
+test('"site audit karo" is reused, not redone, when one already succeeded within the window', async () => {
+  const recentlyAudited = new Date(NOW.getTime() - 2 * 24 * 60 * 60 * 1000); // 2 days ago
+  const s = stub({
+    tool: { name: "audit_site", args: {} },
+    lastRun: async (_tenantId, agent) => (agent === "audit" ? recentlyAudited : null),
+  });
+  const t = await turn("site audit karo", s.deps);
+
+  assert.equal(s.rec.created.length, 0, "a fresh audit must not be dispatched when a recent one already succeeded");
+  const o = order(t);
+  assert.match(o.text, /already|2 din pehle/i);
+  assert.equal(o.event?.kind, "info");
+});
+
+test('an explicit "phir se" gets a real fresh run even though the last one was recent', async () => {
+  const recentlyAudited = new Date(NOW.getTime() - 2 * 24 * 60 * 60 * 1000);
+  const s = stub({
+    tool: { name: "audit_site", args: {} },
+    lastRun: async () => recentlyAudited,
+  });
+  const t = await turn("site audit phir se karo", s.deps);
+
+  assert.equal(s.rec.created.length, 1, "the customer asked again explicitly — the gate must not refuse it");
+});
+
+test("an audit older than the freshness window runs normally", async () => {
+  const staleAudit = new Date(NOW.getTime() - 10 * 24 * 60 * 60 * 1000); // 10 days ago
+  const s = stub({
+    tool: { name: "audit_site", args: {} },
+    lastRun: async () => staleAudit,
+  });
+  const t = await turn("site audit karo", s.deps);
+
+  assert.equal(s.rec.created.length, 1, "a week-old result is stale enough to redo");
+});
+
+test("with no lastSuccessfulRun dependency wired at all, every existing caller behaves exactly as before", async () => {
+  const s = stub({ tool: { name: "audit_site", args: {} } }); // lastRun omitted — deps.lastSuccessfulRun is undefined
+  const t = await turn("site audit karo", s.deps);
+
+  assert.equal(s.rec.created.length, 1, "the gate must be inert unless a caller opts in");
+});
+
+test("a task the gate does not cover (write_article) is never touched by it", async () => {
+  const s = stub({
+    tool: { name: "write_article", args: { topic: "solar panels" } },
+    lastRun: async () => NOW, // "just ran", if this leaked onto the wrong action it would block everything
+  });
+  const t = await turn("solar panels pe article likho", s.deps);
+
+  assert.equal(s.rec.created.length, 1, "only the three reusable actions are gated — writing an article never is");
 });
 
 test('"30 min baad" — the time is resolved by when.ts and the card says Booked', async () => {
@@ -531,7 +611,7 @@ test("one tool per ENABLED action, plus the question tool — and nothing else",
   const tools = toolsFromRegistry(REGISTRY);
   const names = tools.map((t) => t.function.name);
 
-  assert.deepEqual(names, ["find_keywords", "write_article", "research_brief", "plan_topics", ANSWER_QUESTION]);
+  assert.deepEqual(names, ["find_keywords", "write_article", "research_brief", "plan_topics", "audit_site", ANSWER_QUESTION]);
   assert.equal(names.includes("publish_article"), false, "no worker behind it → no tool");
   assert.equal(names.includes("draft_social"), false, "a stub → no tool");
 });
