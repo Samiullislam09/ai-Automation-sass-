@@ -37,30 +37,52 @@ export type OnboardingProfile = {
   builtFromPages: number | null;
 };
 
+const PROFILE_POLL_MS = 3000;
+
 /** Reads what the analyst made of the site. Returns `null` while it is still loading, so the
- *  parent can hold the step rather than flashing an empty screen and then filling it. */
+ *  parent can hold the step rather than flashing an empty screen and then filling it.
+ *
+ *  Polls every few seconds while the answer is still "thinking" — a single one-shot read (the
+ *  original behaviour) meant a tenant whose crawl was still running the moment step 4 was
+ *  reached stayed on "thinking" for the rest of the wizard even if the analyst finished ten
+ *  seconds later, so screens 5/6 and the real completion check on step 8 both need this to
+ *  keep looking rather than trust one snapshot. Stops on its own once the answer is final
+ *  (ready/no-pages/off) — never polls a tenant that is already done. */
 export function useOnboardingProfile(enabled: boolean): OnboardingProfile | null {
   const [state, setState] = useState<OnboardingProfile | null>(null);
 
   useEffect(() => {
     if (!enabled) return;
     let alive = true;
-    fetch("/api/onboarding/profile")
-      .then((r) => r.json())
-      .then((d) => {
-        if (!alive) return;
-        setState({
-          status: (d?.status as ProfileStatus) ?? "thinking",
-          profile: d?.profile ? normalizeProfile(d.profile) : null,
-          pagesCrawled: Number(d?.pagesCrawled) || 0,
-          builtFromPages: Number(d?.builtFromPages) || null,
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const tick = () => {
+      fetch("/api/onboarding/profile")
+        .then((r) => r.json())
+        .then((d) => {
+          if (!alive) return;
+          const next: OnboardingProfile = {
+            status: (d?.status as ProfileStatus) ?? "thinking",
+            profile: d?.profile ? normalizeProfile(d.profile) : null,
+            pagesCrawled: Number(d?.pagesCrawled) || 0,
+            builtFromPages: Number(d?.builtFromPages) || null,
+          };
+          setState(next);
+          if (next.status === "thinking") timer = setTimeout(tick, PROFILE_POLL_MS);
+        })
+        // A failed read is treated as "still thinking" for the same reason the API treats a
+        // database error that way: it is not a reason to stop somebody signing up.
+        .catch(() => {
+          if (!alive) return;
+          setState({ status: "thinking", profile: null, pagesCrawled: 0, builtFromPages: null });
+          timer = setTimeout(tick, PROFILE_POLL_MS);
         });
-      })
-      // A failed read is treated as "still thinking" for the same reason the API treats a
-      // database error that way: it is not a reason to stop somebody signing up.
-      .catch(() => alive && setState({ status: "thinking", profile: null, pagesCrawled: 0, builtFromPages: null }));
+    };
+    tick();
+
     return () => {
       alive = false;
+      if (timer) clearTimeout(timer);
     };
   }, [enabled]);
 
@@ -116,64 +138,59 @@ export function UnderstandingStep({
 
   return (
     <>
-      <h2 style={{ fontSize: 20 }}>We read your site — here&apos;s what we understood</h2>
-      <p className="sm mut" style={{ margin: "8px 0 16px" }}>
-        {pages ? `From ${pages} of your own pages. ` : ""}Fix anything that&apos;s wrong — your version is the one the team will use from now on.
+      <h2 className="ob-h1">We read your site — here&apos;s what we understood</h2>
+      <p className="ob-sub">
+        {pages ? `From ${pages} of your own pages. ` : ""}Correct anything that&apos;s wrong — your version is what the team uses from here on.
       </p>
 
-      <div className="field">
-        <label htmlFor="ob-what">What you do</label>
-        <textarea id="ob-what" rows={3} value={what} placeholder="We didn't work this out — tell us in a line" onChange={(e) => setWhat(e.target.value)} />
+      <div className="ob-field">
+        <label className="ob-label" htmlFor="ob-what">What you do</label>
+        <textarea className="ob-input ob-textarea" id="ob-what" rows={3} value={what} placeholder="We couldn't work this out — tell us in a line" onChange={(e) => setWhat(e.target.value)} />
       </div>
 
-      <div className="field">
-        <label htmlFor="ob-aud">Who you serve</label>
-        <input id="ob-aud" value={audience} placeholder="We didn't work this out — who buys from you?" onChange={(e) => setAudience(e.target.value)} />
+      <div className="ob-field">
+        <label className="ob-label" htmlFor="ob-aud">Who you serve</label>
+        <input className="ob-input" id="ob-aud" value={audience} placeholder="We couldn't work this out — who buys from you?" onChange={(e) => setAudience(e.target.value)} />
       </div>
 
-      <div className="field">
-        <label>What you sell</label>
+      <div className="ob-field">
+        <label className="ob-label">What you sell</label>
         {offerings.length ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+          <div className="ob-rowlist">
             {offerings.map((o, i) => (
-              <div key={i} style={{ display: "flex", gap: 7 }}>
+              <div key={i} className="ob-row">
                 <input
+                  className="ob-input"
                   value={o.name}
                   onChange={(e) => setOfferings((prev) => prev.map((p, j) => (j === i ? { ...p, name: e.target.value } : p)))}
-                  style={{ flex: 1, minWidth: 0 }}
                 />
-                <button
-                  type="button"
-                  className="btn btn-g"
-                  style={{ padding: "6px 10px", fontSize: 11.5, flexShrink: 0 }}
-                  onClick={() => setOfferings((prev) => prev.filter((_, j) => j !== i))}
-                >
+                <button type="button" className="ob-btn" onClick={() => setOfferings((prev) => prev.filter((_, j) => j !== i))}>
                   Remove
                 </button>
               </div>
             ))}
           </div>
         ) : (
-          <p className="xs mut" style={{ margin: 0 }}>We couldn&apos;t find a product or service list on your site. You can add these later.</p>
+          <p className="ob-hint">We couldn&apos;t find a product or service list on your site. You can add these later.</p>
         )}
       </div>
 
       {proof.length > 0 && (
-        <div className="field">
-          <label>What we can prove about you</label>
-          <ul style={{ margin: 0, paddingLeft: 18 }}>
+        <div className="ob-field">
+          <label className="ob-label">What we can prove about you</label>
+          <ul className="ob-list">
             {proof.slice(0, 4).map((p, i) => (
-              <li key={i} className="sm mut" style={{ marginBottom: 3 }}>{p.claim}</li>
+              <li key={i}>{p.claim}</li>
             ))}
           </ul>
-          <p className="xs mut" style={{ marginTop: 6 }}>Only things written on your own site — we never invent a claim.</p>
+          <p className="ob-hint">Only things written on your own site — nothing here is invented.</p>
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-        <button className="btn btn-g" onClick={onBack} disabled={saving}>← Back</button>
-        <button className="btn btn-p" style={{ flex: 1 }} onClick={confirm} disabled={saving}>
-          {saving ? "Saving…" : "Yes, that's us →"}
+      <div className="ob-actions">
+        <button className="ob-btn" onClick={onBack} disabled={saving}>Back</button>
+        <button className="ob-btn-primary" style={{ flex: 1 }} onClick={confirm} disabled={saving}>
+          {saving ? "Saving…" : "Yes, that's us"}
         </button>
       </div>
     </>
@@ -218,67 +235,40 @@ export function GoalsStep({
 
   return (
     <>
-      <h2 style={{ fontSize: 20 }}>What are we aiming for?</h2>
-      <p className="sm mut" style={{ margin: "8px 0 16px" }}>Everything the team plans will be pointed at this. You can change it any time.</p>
+      <h2 className="ob-h1">What are we aiming for?</h2>
+      <p className="ob-sub">Everything the team plans will be pointed at this. You can change it any time.</p>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div className="ob-goallist">
         {GOAL_OPTS.map((g) => (
-          <button
-            key={g.key}
-            type="button"
-            onClick={() => setPrimary(g.key)}
-            style={{
-              textAlign: "left",
-              padding: "11px 14px",
-              borderRadius: 12,
-              cursor: "pointer",
-              border: "1px solid " + (primary === g.key ? "var(--ac)" : "var(--line2)"),
-              background: primary === g.key ? "linear-gradient(135deg,#173c33,#12352c)" : "var(--panel2)",
-              color: "var(--ink)",
-            }}
-          >
-            <b style={{ fontSize: 14 }}>{g.label}</b>
-            <div className="xs mut">{g.sub}</div>
+          <button key={g.key} type="button" className={`ob-goal${primary === g.key ? " active" : ""}`} onClick={() => setPrimary(g.key)}>
+            <b>{g.label}</b>
+            <div className="ob-goal-sub">{g.sub}</div>
           </button>
         ))}
       </div>
 
-      <div className="field" style={{ marginTop: 18 }}>
-        <label>{names.length ? "Which should grow first? (pick up to 3)" : "What should grow first? (up to 3, one per line)"}</label>
+      <div className="ob-field" style={{ marginTop: 18 }}>
+        <label className="ob-label">{names.length ? "Which should grow first? (pick up to 3)" : "What should grow first? (up to 3, one per line)"}</label>
         {names.length ? (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          <div className="ob-pills">
             {names.map((n) => {
               const on = focus.includes(n);
               return (
-                <span
-                  key={n}
-                  onClick={() => toggle(n)}
-                  style={{
-                    padding: "8px 14px",
-                    borderRadius: 999,
-                    cursor: "pointer",
-                    userSelect: "none",
-                    fontSize: 13,
-                    border: "1px solid " + (on ? "var(--ac)" : "var(--line2)"),
-                    background: on ? "linear-gradient(135deg,#173c33,#12352c)" : "var(--panel2)",
-                    color: on ? "var(--ac)" : "var(--ink)",
-                    opacity: !on && focus.length >= 3 ? 0.45 : 1,
-                  }}
-                >
+                <span key={n} className={`ob-pill${on ? " active" : ""}`} style={!on && focus.length >= 3 ? { opacity: 0.45 } : undefined} onClick={() => toggle(n)}>
                   {n}
                 </span>
               );
             })}
           </div>
         ) : (
-          <textarea rows={3} value={typed} placeholder={"Roof repairs\nGutter cleaning"} onChange={(e) => setTyped(e.target.value)} />
+          <textarea className="ob-input ob-textarea" rows={3} value={typed} placeholder={"Roof repairs\nGutter cleaning"} onChange={(e) => setTyped(e.target.value)} />
         )}
       </div>
 
-      <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-        <button className="btn btn-g" onClick={onBack} disabled={saving}>← Back</button>
-        <button className="btn btn-p" style={{ flex: 1 }} onClick={save} disabled={!primary || saving}>
-          {saving ? "Saving…" : "Continue →"}
+      <div className="ob-actions">
+        <button className="ob-btn" onClick={onBack} disabled={saving}>Back</button>
+        <button className="ob-btn-primary" style={{ flex: 1 }} onClick={save} disabled={!primary || saving}>
+          {saving ? "Saving…" : "Continue"}
         </button>
       </div>
     </>
