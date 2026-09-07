@@ -288,6 +288,43 @@ export const LX_CSS = `
 .lx-live-anim{animation:lxLiveFade .4s ease-out both}
 @keyframes lxLiveFade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 
+/* Mr. Keyword's live search — a Google-results LOOK dressed over real rows (keyword, volume,
+   competition, source), never a fabricated URL or snippet: every row here is something
+   agents/keyword.ts actually returned. The chrome (search bar, caret, scanning bar) is what
+   sells "searching, right now" — the words inside it are honest. */
+.lx-serp-top{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--lx-mut);text-transform:uppercase;letter-spacing:.02em}
+.lx-serp-bar{display:flex;align-items:center;gap:8px;margin-top:8px;background:#0b0b16;border:1px solid rgba(255,255,255,.08);
+  border-radius:999px;padding:8px 14px}
+.lx-serp-caret{display:inline-block;width:1px;height:12px;margin-left:2px;vertical-align:-2px;background:#8b8ba0;animation:lxCaret 1s step-end infinite}
+@keyframes lxCaret{0%,49%{opacity:1}50%,100%{opacity:0}}
+.lx-serp-meta{font-size:11px;color:var(--lx-dim);margin:10px 2px 2px}
+.lx-serp-row{display:flex;gap:10px;padding:8px 2px;border-bottom:1px solid rgba(255,255,255,.05)}
+.lx-serp-row:last-child{border-bottom:none}
+.lx-serp-fav{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:6px}
+.lx-serp-crumb{font-size:10.5px;color:var(--lx-dim);display:flex;align-items:center;gap:3px}
+.lx-serp-title{font-size:13px;font-weight:600;color:#8ab4f8;margin-top:1px}
+.lx-serp-desc{font-size:11px;color:var(--lx-mut);margin-top:2px;line-height:1.4}
+.lx-serp-foot{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:10.5px;color:var(--lx-dim)}
+.lx-serp-scan{height:100%;width:32%;border-radius:999px;background:linear-gradient(90deg,#16a34a,#4ade80 55%,#86efac);
+  animation:lxScan .9s ease-in-out infinite}
+@keyframes lxScan{0%{margin-left:0%}50%{margin-left:68%}100%{margin-left:0%}}
+
+/* "Reading Web Pages" browser-chrome visual — components/MrLxwaDashboard.tsx's ResearchScreen.
+   Host + breadcrumb are real (parsed from the real source URL); the body is a deliberately
+   abstract shimmer-and-scroll stand-in for page text nobody actually has, never invented words. */
+.lx-read-frame{position:relative;background:#0b0b16;border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:10px 12px;overflow:hidden}
+.lx-read-bar{display:flex;align-items:center;gap:7px}
+.lx-read-fav{width:7px;height:7px;border-radius:2px;background:#4ade80;flex-shrink:0}
+.lx-read-host{font-size:11px;font-weight:700;letter-spacing:.02em;color:#d9d9e6;text-transform:uppercase}
+.lx-read-crumb{font-size:10px;color:var(--lx-dim);margin-top:6px}
+.lx-read-body{position:relative;height:150px;overflow:hidden;margin-top:10px}
+.lx-read-body-inner{animation:lxReadScroll 6s ease-in-out infinite alternate}
+.lx-read-skel{height:9px;border-radius:4px;background:linear-gradient(90deg,rgba(255,255,255,.06),rgba(255,255,255,.16),rgba(255,255,255,.06));
+  background-size:200% 100%;animation:lxShimmer 1.6s ease-in-out infinite}
+@keyframes lxShimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+@keyframes lxReadScroll{0%{transform:translateY(0)}100%{transform:translateY(-72px)}}
+.lx-read-scrim{position:absolute;left:0;right:0;bottom:0;height:36px;background:linear-gradient(180deg,transparent,#0b0b16);pointer-events:none}
+
 /* waveform */
 .lx-wv{display:flex;align-items:center;height:18px}
 .lx-wv i{display:inline-block;width:2px;margin-right:2px;border-radius:2px;background:var(--wc)}

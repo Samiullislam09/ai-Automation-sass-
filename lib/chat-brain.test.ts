@@ -637,9 +637,13 @@ test("the input spec becomes a JSON Schema, and `?` decides what is required", (
   assert.deepEqual(schema.required, ["topic", "keywords"]);
   assert.deepEqual(schema.properties.topic, { type: "string" });
   assert.deepEqual(schema.properties.keywords, { type: "array", items: { type: "string" } });
-  assert.deepEqual(schema.properties.words, { type: "number" });
+  // Optional fields accept `null` too — some tool-calling models fill an unset optional slot
+  // with a literal null rather than omitting the key, and a bare `type: "number"` schema makes
+  // the provider itself reject that call before this code ever sees it (found live 2026-09-07).
+  assert.deepEqual(schema.properties.words, { type: ["number", "null"] });
 
   assert.deepEqual(fieldSchema("object[]"), { schema: { type: "array", items: { type: "object" } }, required: true });
+  assert.deepEqual(fieldSchema("string?"), { schema: { type: ["string", "null"] }, required: false });
   assert.equal(fieldSchema("nonsense"), null, "a type we do not understand is left out, never guessed");
 });
 

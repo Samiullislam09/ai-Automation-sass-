@@ -83,7 +83,7 @@ export type BrainIntent = {
   action: string;
   params: Record<string, unknown>;
   /** Already resolved by lib/when.ts. The brain rejects a phrase. null = now. */
-  when: { at: string; kind: "absolute" | "relative" | "recurring"; matched: string } | null;
+  when: { at: string; kind: "absolute" | "relative" | "recurring"; matched: string; label?: string } | null;
   delivery: "approvals" | "publish" | "chat";
   confidence: number;
   missing: string[];
@@ -141,11 +141,27 @@ function headers(): Record<string, string> {
   };
 }
 
+// Same test lib/agent-jobs.ts's enqueueAgentJob already uses, for the same reason: Railway
+// restarts agent-server on every push to main, and can cold-start an idle instance too, so the
+// FIRST request after either can time out with the brain doing nothing wrong. Only a genuine
+// network-level failure counts — an HTTP error response (the brain actively refusing the order)
+// is never retried here, it is answered as-is below.
+const transient = (e: any) =>
+  /timeout|abort|ECONNREFUSED|ECONNRESET|fetch failed|ENOTFOUND|EAI_AGAIN/i.test(String(e?.name ?? "") + " " + String(e?.message ?? ""));
+
 /** One request, one result, never a throw.
  *
  *  A non-2xx carries the brain's own sentence when it sent one — those are already written for
  *  a customer ("\"foo\" naam ka koi kaam registered nahi hai."), and rewriting them here would
- *  put the same message in two places and let them drift. */
+ *  put the same message in two places and let them drift.
+ *
+ *  Retries once on a transient network failure (found live 2026-09-07: a cold Railway instance
+ *  made `POST /brain/tasks` — a real order — time out on its very first request of the day, with
+ *  no second attempt, so "find keywords for X" answered BRAIN_UNREACHABLE even though the brain
+ *  itself was healthy a few seconds later). Safe to resend as-is: every task-creating call
+ *  carries its own idempotency_key (idempotencyKey() below), and agent-server/src/brain/
+ *  orchestrator.ts's createTask() returns the EXISTING task on a duplicate key instead of making
+ *  a second one — a retry here can answer late, never order the work twice. */
 async function call<T>(
   path: string,
   init: { method: "GET" | "POST"; body?: unknown; timeoutMs: number }
@@ -158,18 +174,30 @@ async function call<T>(
     return { ok: false, error: BRAIN_UNREACHABLE, status: 503, reachable: false };
   }
 
-  let res: Response;
-  try {
-    res = await fetch(`${base}${path}`, {
+  const attempt = () =>
+    fetch(`${base}${path}`, {
       method: init.method,
       headers: headers(),
       ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
       signal: AbortSignal.timeout(init.timeoutMs),
       cache: "no-store",
     });
-  } catch (e: any) {
-    console.error(`[brain] ${init.method} ${path} unreachable:`, e?.message);
-    return { ok: false, error: BRAIN_UNREACHABLE, status: 502, reachable: false };
+
+  let res: Response;
+  try {
+    res = await attempt();
+  } catch (first: any) {
+    if (!transient(first)) {
+      console.error(`[brain] ${init.method} ${path} unreachable:`, first?.message);
+      return { ok: false, error: BRAIN_UNREACHABLE, status: 502, reachable: false };
+    }
+    console.warn(`[brain] ${init.method} ${path}: ${first?.message} — retrying once`);
+    try {
+      res = await attempt();
+    } catch (second: any) {
+      console.error(`[brain] ${init.method} ${path} unreachable after retry:`, second?.message);
+      return { ok: false, error: BRAIN_UNREACHABLE, status: 502, reachable: false };
+    }
   }
 
   const data: any = await res.json().catch(() => null);

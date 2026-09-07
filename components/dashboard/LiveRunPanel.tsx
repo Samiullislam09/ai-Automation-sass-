@@ -36,6 +36,32 @@ const FALLBACK_PIPELINE: { id: string; label: string }[] = [
   { id: "publish", label: "Publishing" },
 ];
 
+/** A step only gets its own nice `label` once a real progress event has touched it (the
+ *  orchestrator writes that on `step_started`) — a step still sitting `pending` on a task that
+ *  has not started yet (e.g. `status === "scheduled"`, booked for days out) has nothing but its
+ *  raw action id, and rendering that literally ("pick_topic", "find_keywords"...) was the
+ *  unreadable checklist the owner flagged 2026-09-07. Same small, known action set as
+ *  lib/chat-brain-intent.ts's ACTION_LABEL and MrLxwaDashboard.tsx's TASK_TITLES — kept local
+ *  and step-phrased (verb-first, no subject) rather than shared, since all three read differently
+ *  on purpose. */
+const STEP_LABEL: Record<string, string> = {
+  crawl_site: "Reading your site",
+  build_site_profile: "Analyzing your site",
+  plan_topics: "Planning topics",
+  pick_topic: "Choosing a topic",
+  find_keywords: "Keyword research",
+  write_article: "Writing the article",
+  research_brief: "Research",
+  make_images: "Creating images",
+  make_image: "Creating an image",
+  make_story: "Creating a Web Story",
+  check_seo: "SEO check",
+  publish_article: "Publishing",
+  audit_site: "Site audit",
+  draft_social: "Drafting social posts",
+  find_leads: "Finding leads",
+};
+
 const STATUS_TONE: Record<string, string> = {
   running: "#818cf8", queued: "#818cf8", scheduled: "#818cf8",
   done: "#34d399", succeeded: "#34d399",
@@ -93,12 +119,15 @@ export default function LiveRunPanel({
         <b className="lx-12 min-w-0 flex-1 truncate">{heading}</b>
 
         {total != null && <span className="lx-10 lx-mut">{doneCount} of {total} steps</span>}
-        {task && startedAt && (
+        {/* No elapsed clock for a `scheduled` task — nothing has started yet, so there is no
+            work-time to show, and a ticking "00:02:27" next to "0 of 5 steps" reads as live
+            processing for a booking that is days away (owner report 2026-09-07). */}
+        {task && startedAt && status !== "scheduled" && (
           <span className="lx-10 lx-mut lr-num"><Clock size={10} /> {clock(elapsedMs(task, now))}</span>
         )}
         <span className="lr-pill" style={{ color: tone, borderColor: `${tone}55`, background: `${tone}18` }}>
-          {status === "running" ? <Loader2 size={10} className="lr-spin" /> : status === "failed" ? <X size={10} /> : <Radio size={10} />}
-          {status === "queued" || status === "scheduled" ? "Queued" : status === "running" ? "Running" : status}
+          {status === "running" ? <Loader2 size={10} className="lr-spin" /> : status === "failed" ? <X size={10} /> : status === "scheduled" ? <Clock size={10} /> : <Radio size={10} />}
+          {status === "scheduled" ? "Scheduled" : status === "queued" ? "Queued" : status === "running" ? "Running" : status}
         </span>
         {onOpen && <button className="lr-open" onClick={onOpen}>Open</button>}
       </div>
@@ -123,7 +152,7 @@ export default function LiveRunPanel({
           ? steps.map((s) => (
               <StepRow
                 key={s.key}
-                label={s.label ?? s.action ?? s.agent_id}
+                label={s.label || STEP_LABEL[s.action ?? ""] || s.action || s.agent_id}
                 state={s.status === "running" ? "now" : s.status === "failed" ? "failed" : isTerminalStep(s.status) ? "done" : "next"}
                 ms={s.ms}
                 note={s.status === "failed" ? s.reason : null}

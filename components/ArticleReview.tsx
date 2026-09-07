@@ -129,7 +129,7 @@ export default function ArticleReview({ item, editable, id }: { item: Item; edit
   };
 
   const approve = async () => {
-    if (dirty) { toast("Pehle changes save karo, phir publish.", "info"); return; }
+    if (dirty) { toast("Save your changes before publishing.", "info"); return; }
     setBusy("approve");
     try {
       const res = await fetch(`/api/content/${id}/approve`, { method: "POST" });
@@ -229,7 +229,7 @@ export default function ArticleReview({ item, editable, id }: { item: Item; edit
 
               <textarea
                 className="rv-ask"
-                placeholder={"e.g. intro chhota karo\nadd a section about pricing\nremove the last paragraph"}
+                placeholder={"e.g. shorten the intro\nadd a section about pricing\nremove the last paragraph"}
                 value={instruction}
                 onChange={(e) => setInstruction(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) revise(); }}

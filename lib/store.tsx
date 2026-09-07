@@ -8,6 +8,7 @@
  *  - Payments: replace applyPlan() with Paddle/LemonSqueezy checkout + webhooks.
  */
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
+import { CheckCircle2, Info, X, XCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { AGENTS } from "@/lib/agents-data";
 
@@ -331,7 +332,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     } catch (e: any) {
       console.error("[store] memory not saved:", e?.message);
       setS(prev => ({ ...prev, memory: previous }));
-      toast("Memory save nahi hua — dobara try karo.", "error");
+      toast("Couldn't save memory — please try again.", "error");
     }
   };
 
@@ -373,12 +374,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       <div className="toastwrap">
         {toasts.map(t => (
           <div key={t.id} className={"toast toast-" + t.tone} role={t.tone === "error" ? "alert" : "status"}>
-            {t.tone === "ok" ? "✓ " : t.tone === "error" ? "✕ " : ""}{t.msg}
+            <span className="toast-icon">
+              {t.tone === "ok" ? <CheckCircle2 size={16} /> : t.tone === "error" ? <XCircle size={16} /> : <Info size={16} />}
+            </span>
+            <span className="toast-msg">{t.msg}</span>
             {t.action && (
               <button className="toast-act" onClick={() => { t.action!.onClick(); setToasts(x => x.filter(y => y.id !== t.id)); }}>
                 {t.action.label}
               </button>
             )}
+            <button className="toast-close" aria-label="Dismiss" onClick={() => setToasts(x => x.filter(y => y.id !== t.id))}>
+              <X size={13} />
+            </button>
           </div>
         ))}
       </div>

@@ -91,7 +91,16 @@ const BASE_TYPES: Record<string, Record<string, unknown>> = {
 
 /** `"number?"` → `{ type: "number" }`, not required. The `?` is the contract's optional mark
  *  and it is the ONLY thing that decides `required` — which is also what decides whether a
- *  missing value becomes a question instead of a guess. */
+ *  missing value becomes a question instead of a guess.
+ *
+ *  An optional field's `type` also accepts `"null"` (found live 2026-09-07: Groq's model filled
+ *  every optional slot it left blank with a literal `null` instead of omitting the key — normal
+ *  behaviour for several open tool-calling models — and Groq's own schema validator then
+ *  rejected the whole call with a 400 before this code ever saw it, since `null` does not match
+ *  a bare `type: "number"`. Every fallback provider after Groq was tried and failed for its own
+ *  unrelated reason, so the chat reported "team not reachable" for what was really one provider's
+ *  strict validation of a schema this file wrote too narrowly. coerceParams() above already
+ *  treats a `null` value as "not provided", so widening the type here costs nothing.) */
 export function fieldSchema(spec: string): { schema: Record<string, unknown>; required: boolean } | null {
   const raw = String(spec ?? "").trim();
   if (!raw) return null;
@@ -99,7 +108,9 @@ export function fieldSchema(spec: string): { schema: Record<string, unknown>; re
   const base = optional ? raw.slice(0, -1) : raw;
   const schema = BASE_TYPES[base];
   if (!schema) return null;
-  return { schema: { ...schema }, required: !optional };
+  const out = { ...schema };
+  if (optional && typeof out.type === "string") out.type = [out.type, "null"];
+  return { schema: out, required: !optional };
 }
 
 export function schemaFromInput(input: Record<string, string>, extras: string[] = [], needs: string[] = []): JsonSchema {
@@ -266,7 +277,10 @@ export function coerceParams(spec: BrainAction, args: Record<string, unknown>): 
     if (value === null || value === undefined) continue;
     const field = fieldSchema(decl);
     if (!field) continue;
-    const kind = String(field.schema.type);
+    // An optional field's `type` is `[base, "null"]` (see fieldSchema's own comment) — the real
+    // kind is always the first, non-"null" entry, whether `type` came back as that array or as
+    // the bare string a required field still gets.
+    const kind = Array.isArray(field.schema.type) ? String(field.schema.type[0]) : String(field.schema.type);
 
     if (kind === "array") {
       const items = Array.isArray(value) ? value : [value];

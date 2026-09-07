@@ -150,16 +150,26 @@ code{overflow-wrap:anywhere;word-break:break-word}
 .help::after{content:"";position:absolute;inset:-10px}
 .help:hover{background:var(--ac);color:#ffffff;border-color:var(--ac)}
 .tipbox{position:fixed;z-index:200;max-width:260px;background:var(--panel);color:var(--ink);border:1px solid var(--line2);border-radius:11px;padding:10px 12px;font-size:12px;line-height:1.5;box-shadow:0 12px 34px #1c254033}
-.toastwrap{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);z-index:300;display:flex;flex-direction:column;gap:8px;align-items:center}
+/* Top-right, one under another — the previous bottom-center placement sat directly on top of
+   whatever card was last on screen (e.g. the auto-publish toggle right after you flip it),
+   hiding the very thing you clicked. Every mainstream dashboard (Vercel, Linear, Stripe) parks
+   toasts in this same corner for the same reason: nothing you're reading lives there. */
+.toastwrap{position:fixed;top:18px;right:18px;z-index:300;display:flex;flex-direction:column;gap:8px;align-items:flex-end;max-width:calc(100vw - 32px)}
 /* The background was a hardcoded near-black while the text colour is inherited var(--ink) —
    in the light theme that was dark ink on a dark toast, i.e. invisible. Both come from the
    token set now. */
-.toast{background:var(--panel);color:var(--ink);border:1px solid var(--line2);border-left:3px solid var(--ac);border-radius:11px;padding:10px 16px;font-size:13px;max-width:calc(100vw - 32px);box-shadow:0 10px 30px #0000005c;animation:tin .3s ease}
+.toast{display:flex;align-items:flex-start;gap:9px;background:var(--panel);color:var(--ink);border:1px solid var(--line2);border-left:3px solid var(--ac);border-radius:11px;padding:11px 12px 11px 14px;font-size:13px;line-height:1.45;width:min(360px,100%);box-shadow:0 14px 34px #0000004a,0 2px 8px #00000026;animation:tin .28s cubic-bezier(.2,.8,.3,1)}
+.toast-icon{flex-shrink:0;display:flex;margin-top:1px;color:var(--ac)}
+.toast-error .toast-icon{color:var(--red)}
+.toast-info .toast-icon{color:var(--mut2)}
+.toast-msg{flex:1;min-width:0}
 .toast-error{border-left-color:var(--red)}
 .toast-info{border-left-color:var(--mut2);color:var(--mut)}
-.toast-act{margin-left:12px;background:none;border:1px solid var(--line2);border-radius:7px;color:var(--ac);font:inherit;font-weight:700;font-size:12px;padding:3px 9px;cursor:pointer}
+.toast-act{flex-shrink:0;background:none;border:1px solid var(--line2);border-radius:7px;color:var(--ac);font:inherit;font-weight:700;font-size:12px;padding:3px 9px;cursor:pointer}
 .toast-act:hover{border-color:var(--ac)}
-@keyframes tin{from{opacity:0;transform:translateY(10px)}to{opacity:1}}
+.toast-close{flex-shrink:0;display:flex;align-items:center;justify-content:center;width:20px;height:20px;margin:-2px -4px -2px 0;border:none;background:none;color:var(--mut2);border-radius:6px;cursor:pointer;transition:all var(--tr)}
+.toast-close:hover{background:var(--panel2);color:var(--ink)}
+@keyframes tin{from{opacity:0;transform:translate(12px,-6px) scale(.97)}to{opacity:1;transform:translate(0,0) scale(1)}}
 .modalwrap{position:fixed;inset:0;z-index:250;background:#060a14cc;backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;padding:18px}
 .modal{background:var(--panel);border:1px solid var(--line2);border-radius:18px;padding:clamp(18px,4.5vw,26px);max-width:440px;width:100%;animation:min .28s cubic-bezier(.3,1.3,.5,1);max-height:88vh;overflow-y:auto}
 @keyframes min{from{opacity:0;transform:scale(.92) translateY(10px)}to{opacity:1;transform:none}}

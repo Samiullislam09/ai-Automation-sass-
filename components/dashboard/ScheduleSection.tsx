@@ -112,7 +112,7 @@ export default function ScheduleSection() {
       const d = await fetch("/api/schedule", { cache: "no-store" }).then((r) => r.json());
       if (d.serverNow) skewRef.current = Date.parse(d.serverNow) - Date.now();
       if (!d.ok) {
-        setError(d.error ?? "Schedule load nahi ho paya.");
+        setError(d.error ?? "Couldn't load the schedule.");
         setMigration(!!d.needsMigration);
         setSched({ ...DEFAULTS, timezone: tz });
         setSaved({ ...DEFAULTS, timezone: tz });
@@ -147,7 +147,7 @@ export default function ScheduleSection() {
   const loadHistory = useCallback(async () => {
     try {
       const d = await fetch("/api/schedule/history", { cache: "no-store" }).then((r) => r.json());
-      if (!d.ok) { setHistoryError(d.error ?? "Run history load nahi ho payi."); return; }
+      if (!d.ok) { setHistoryError(d.error ?? "Couldn't load run history."); return; }
       setHistoryError("");
       setRuns(d.runs ?? []);
     } catch (e: any) {
@@ -176,7 +176,7 @@ export default function ScheduleSection() {
     try {
       const d = await fetch(`/api/scheduled-orders?id=${encodeURIComponent(id)}`, { method: "DELETE" }).then((r) => r.json());
       await loadOrders();
-      toast(d.ok ? "Cancel ho gaya — ab ye nahi chalega." : d.error ?? "Cancel nahi ho paya.", d.ok ? "ok" : "error");
+      toast(d.ok ? "Cancelled — this will no longer run." : d.error ?? "Couldn't cancel.", d.ok ? "ok" : "error");
     } catch (e: any) {
       toast(e?.message ?? "Network error.", "error");
     } finally {
@@ -232,11 +232,11 @@ export default function ScheduleSection() {
         body: JSON.stringify(body),
       });
       const data = await res.json();
-      if (!data.ok) { setError(data.error ?? "Save nahi hua."); return; }
+      if (!data.ok) { setError(data.error ?? "Couldn't save."); return; }
       if (override) set(override);
       if (data.autoPublishAvailable === false) setAutoPublishAvailable(false);
       await loadSchedule();
-      toast(body.enabled ? "Schedule chalu — team apne aap kaam karegi." : "Schedule band kar diya.");
+      toast(body.enabled ? "Schedule is on — the team will now work automatically." : "Schedule turned off.");
     } catch (e: any) {
       setError(e?.message ?? "Network error.");
     } finally {
@@ -301,9 +301,9 @@ export default function ScheduleSection() {
             <div className="sc-alert mt-3">
               <TriangleAlert size={15} style={{ color: "#f87171", flexShrink: 0 }} />
               <div>
-                <b className="lx-12">Database migration baaki hai</b>
+                <b className="lx-12">Database migration required</b>
                 <p className="lx-11 lx-mut mt-1">
-                  Supabase SQL editor me <code className="lx-mono">supabase/migrations/006_schedules.sql</code> chalao — tab tak yahan kuch save nahi hoga.
+                  Run <code className="lx-mono">supabase/migrations/006_schedules.sql</code> in the Supabase SQL editor — nothing here will save until you do.
                 </p>
               </div>
             </div>
@@ -469,8 +469,8 @@ export default function ScheduleSection() {
                 </p>
                 {!autoPublishAvailable && (
                   <p className="lx-11 mt-1.5" style={{ color: "#f87171" }}>
-                    Ye column abhi database me nahi hai — Supabase SQL editor me{" "}
-                    <code className="lx-mono">supabase/migrations/014_schedule_auto_publish.sql</code> chalao.
+                    This column isn't in the database yet — run{" "}
+                    <code className="lx-mono">supabase/migrations/014_schedule_auto_publish.sql</code> in the Supabase SQL editor.
                   </p>
                 )}
                 {autoPublishAvailable && canPublish === false && (
@@ -536,8 +536,13 @@ export default function ScheduleSection() {
                 const at = new Date(o.run_at).getTime();
                 const left = now != null ? at - now : null;
                 const isPending = o.status === "pending";
+                // `kind === "brain"` rows (app/api/scheduled-orders/route.ts's listBrainScheduled)
+                // already carry their own finished sentence — a manifest action id like
+                // "find_keywords" has no place in this switch, which only knows the four
+                // scheduled_orders kinds.
                 const what =
-                  o.kind === "publish" ? "Publish an article that is already written"
+                  o.kind === "brain" ? o.label
+                  : o.kind === "publish" ? "Publish an article that is already written"
                   : o.kind === "research" ? `Research keywords${o.topic ? ` for "${o.topic}"` : ""}`
                   : o.kind === "plan" ? "Pick this week's topics and write them"
                   : `Write an article${o.topic ? ` about "${o.topic}"` : ""}`;

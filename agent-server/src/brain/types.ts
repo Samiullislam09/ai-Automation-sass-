@@ -44,7 +44,11 @@ export type Intent = {
   agent?: string;
   params: Record<string, unknown>;
   /** Already resolved to an instant by the web app's when.ts. null = now. */
-  when: { at: string; kind: "absolute" | "relative" | "recurring"; matched: string } | null;
+  /** `label` is the web app's own describeWhen() rendering — always English, always the same
+   *  format the chat reply itself used — for anything shown outside the reply that quotes the
+   *  customer back (`matched` stays raw for that one case). Optional only because older/other
+   *  callers may not send it; falls back to `matched` where it's missing. */
+  when: { at: string; kind: "absolute" | "relative" | "recurring"; matched: string; label?: string } | null;
   delivery: "approvals" | "publish" | "chat";
   confidence: number;
   /** Slots the model could not fill. Non-empty = ask one question, do not guess. */

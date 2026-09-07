@@ -954,7 +954,13 @@ export type UseLive = {
 };
 
 export function useLiveEvents(tenantId: string | null, opts?: { source?: WorkspaceSource; limit?: number }): UseLive {
-  const limit = opts?.limit ?? 12;
+  // Was 12 — a session with a handful of back-to-back chat asks (keyword lookups, a scheduled
+  // order, an audit) pushed an older task's report card out of this window entirely, so a page
+  // refresh had nothing to rehydrate it from even though the row was still right there in the
+  // table (owner report 2026-09-07). listTasks' own select is narrow-column and getEvents caps
+  // at EVENTS_LIMIT per task, so widening this only means a few more cheap rows on first load,
+  // not a heavier one.
+  const limit = opts?.limit ?? 30;
   const sourceRef = useRef<WorkspaceSource | null>(opts?.source ?? null);
   if (!sourceRef.current) sourceRef.current = opts?.source ?? defaultSource();
   const source = sourceRef.current;
@@ -1285,9 +1291,16 @@ export function isFlowing(t: TaskState | null, now: number): boolean {
   return now - t.lastEventAt < STALL_MS;
 }
 
-/** mm:ss, frozen at `finishedAt` once the task is over. */
+/** mm:ss, frozen at `finishedAt` once the task is over.
+ *
+ *  Zero while `status === "scheduled"`: nothing has run yet, so `startedAt` falls back to
+ *  `createdAt` and a booking three days out ticked up from the moment it was booked, looking
+ *  exactly like a job mid-run (owner report 2026-09-07: "0 of 5 steps" next to a live-looking
+ *  timer for a task not due for days). A scheduled task earns a real clock the moment the
+ *  scheduler starts it and `startedAt` is finally set. */
 export function elapsedMs(t: TaskState | null, now: number): number {
   if (!t) return 0;
+  if (t.status === "scheduled" && !t.startedAt) return 0;
   const from = t.startedAt ?? t.createdAt;
   if (!from) return 0;
   const to = t.finishedAt ?? (isTerminalTask(t.status) ? t.lastEventAt || from : now);

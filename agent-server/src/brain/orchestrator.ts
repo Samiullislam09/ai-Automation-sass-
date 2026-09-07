@@ -166,7 +166,7 @@ export async function createTask(
       tenant_id: tenantId,
       at: iso(now()),
       run_at: runAt,
-      human: intent.when?.matched ?? runAt,
+      human: intent.when?.label ?? intent.when?.matched ?? runAt,
     });
   } else if (status === "queued") {
     await start(taskId, tenantId);

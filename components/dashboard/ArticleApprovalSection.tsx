@@ -329,7 +329,7 @@ export default function ArticleApprovalSection({
   };
 
   const approve = async () => {
-    if (dirty) { toast("Pehle changes save karo, phir publish.", "info"); return; }
+    if (dirty) { toast("Save your changes before publishing.", "info"); return; }
     setBusy("approve");
     try {
       const res = await fetch(`/api/content/${id}/approve`, { method: "POST" });
@@ -369,7 +369,7 @@ export default function ArticleApprovalSection({
   const runStatusChange = () => {
     if (statusChoice === "approve") return approve();
     if (statusChoice === "reject") return reject();
-    if (!comment.trim()) { toast("Pehle comment likho — wahi instruction ban ke draft rewrite hoga.", "info"); return; }
+    if (!comment.trim()) { toast("Write a comment first — it becomes the instruction for the rewrite.", "info"); return; }
     return revise(comment);
   };
 

@@ -62,7 +62,7 @@ import {
 export type IntentPlan = {
   action: string;
   params: Record<string, unknown>;
-  when: { at: string; kind: "absolute" | "relative" | "recurring"; matched: string } | null;
+  when: { at: string; kind: "absolute" | "relative" | "recurring"; matched: string; label: string } | null;
   delivery: "approvals" | "publish" | "chat";
   confidence: number;
   missing: string[];
@@ -122,11 +122,34 @@ export function resolveDelivery(message: string, fromModel: unknown): "approvals
   return !modelSaysNo && wantsAutoPublish(message) ? "publish" : "approvals";
 }
 
+/** Clean, English display label per action — used ONLY for the echo below (and, through it,
+ *  the Live Visual header and timeline). `spec.phrases[0]` must not be reused for this: those
+ *  are Hinglish routing triggers ("keywords do", "seedha publish kar do") meant for the intent
+ *  engine to match against, not something the customer should read back at themselves. An
+ *  action with no entry here still gets a readable label — its id with underscores turned to
+ *  spaces — so a new agent needs no update here to avoid an unreadable echo. */
+const ACTION_LABEL: Record<string, string> = {
+  crawl_site: "Reading your site",
+  build_site_profile: "Analyzing your site",
+  plan_topics: "Planning topics",
+  pick_topic: "Choosing a topic",
+  find_keywords: "Keyword research",
+  write_article: "Writing the article",
+  research_brief: "Research",
+  make_images: "Creating images",
+  make_image: "Creating an image",
+  make_story: "Creating a Web Story",
+  check_seo: "SEO check",
+  publish_article: "Publishing",
+  audit_site: "Site audit",
+  draft_social: "Drafting social posts",
+  find_leads: "Finding leads",
+};
+
 /** The one line the user sees when they are asked to confirm, and the receipt after.
  *
- *  Built from the action's own words — its first `phrase` is how the customer says it — plus
- *  the subject they named, the time in their zone, and where the result lands. No action name
- *  is spelled out here, so a new agent gets a readable echo the day it registers. */
+ *  Built from the action's own English label, plus the subject they named, the time in their
+ *  zone, and where the result lands. */
 export function echoLine(
   found: EnabledAction,
   params: Record<string, unknown>,
@@ -136,12 +159,12 @@ export function echoLine(
   now: Date = new Date()
 ): string {
   const spec = found.spec;
-  const what = (spec.phrases ?? [])[0] ?? spec.id.replace(/_/g, " ");
+  const what = ACTION_LABEL[spec.id] ?? spec.id.replace(/_/g, " ");
   const subject = Object.entries(params)
     .filter(([, v]) => typeof v === "string" && v.trim().length > 2)
     .map(([, v]) => String(v).trim())[0];
-  const at = when ? `${describeWhen(when.at, tz, now)} (${tz})` : "abhi";
-  const lands = delivery === "publish" ? "seedha site pe live" : "Approvals me";
+  const at = when ? `${describeWhen(when.at, tz, now)} (${tz})` : "now";
+  const lands = delivery === "publish" ? "published directly to your site" : "your Approvals queue";
   return [what, subject ? `"${subject}"` : null, at, lands].filter(Boolean).join(" · ");
 }
 
@@ -171,7 +194,14 @@ export function planFromToolCall(
   return {
     action: found.spec.id,
     params,
-    when: when ? { at: when.at.toISOString(), kind: when.kind, matched: when.matched } : null,
+    // `matched` stays the raw phrase the customer typed (kept for the reply that quotes them
+    // back to themselves); `label` is always the clean, English, describeWhen() rendering —
+    // the one every downstream "Booked — ..." card should show, so a Hinglish "3 din bad" never
+    // leaks into an otherwise-English confirmation (owner report 2026-09-07: dashboard card read
+    // "Booked — 3 din bad" next to English chrome everywhere else).
+    when: when
+      ? { at: when.at.toISOString(), kind: when.kind, matched: when.matched, label: describeWhen(when.at, ctx.tz, now) }
+      : null,
     delivery,
     confidence,
     missing: missingSlots(found.spec, params),

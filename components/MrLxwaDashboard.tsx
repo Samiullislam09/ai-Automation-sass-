@@ -469,27 +469,74 @@ const KeywordScreen = ({
 }) => {
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
+  // Where each row's own number came from — real metadata agents/keyword.ts already tags
+  // every item with (`source`), turned into words instead of a wire value nobody typed.
+  const SOURCE_LABEL: Record<string, string> = {
+    dataforseo: "DataForSEO",
+    gsc: "your Search Console",
+    autocomplete: "Google Autocomplete",
+    ai: "AI estimate",
+  };
+  const dotColor = (level: unknown) =>
+    level === "low" ? "#4ade80" : level === "medium" ? "#fbbf24" : level === "high" ? "#f87171" : "#5b5b72";
+
   if (running) {
     return (
-      <div>
-        {/* the search box — real topic, never a placeholder */}
-        <div className="lx-in flex items-center gap-2 px-3 py-2" style={{ borderRadius: 999 }}>
-          <Search size={14} className="lx-mut shrink-0" />
-          <span className="lx-12 min-w-0 flex-1 truncate">{topic || "…"}</span>
-          <span className="lx-pulse h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: "#22c55e" }} />
+      <div className="lx-serp">
+        <div className="lx-serp-top">
+          <Globe size={12} /> Google Search
+          <span className="lx-pill red ml-auto" style={{ padding: "1px 8px" }}>
+            <span className="lx-pulse h-1.5 w-1.5 rounded-full" style={{ background: "#ef4444" }} /> LIVE
+          </span>
         </div>
-        <ul className="mt-2">
-          {items.map((it) => (
-            <li key={it.key} className="lx-live-anim flex items-center gap-2.5 rounded-lg px-3 py-2 lx-11" style={{ color: "#cfcfdd" }}>
-              <Search size={12} className="lx-dim shrink-0" />
-              <span className="min-w-0 flex-1 truncate">{it.payload?.keyword ?? "?"}</span>
-              {num(it.payload?.searchVolume) != null && (
-                <span className="lx-10 lx-mut shrink-0">{num(it.payload?.searchVolume)}/mo</span>
-              )}
-            </li>
-          ))}
-        </ul>
-        {items.length === 0 && <div className="lx-10 lx-mut mt-3 px-1">Searching…</div>}
+        {/* the search box — real topic, never a placeholder, with a typing caret so an idle
+            moment (before the first keyword lands) still reads as "searching" rather than
+            frozen. */}
+        <div className="lx-serp-bar">
+          <Search size={14} className="lx-mut shrink-0" />
+          <span className="lx-12 min-w-0 flex-1 truncate">
+            {topic || "…"}
+            <span className="lx-serp-caret" />
+          </span>
+          <Search size={13} className="lx-dim shrink-0" />
+        </div>
+        <div className="lx-serp-meta">
+          {items.length === 0 ? "Searching…" : `Found ${items.length} keyword idea${items.length === 1 ? "" : "s"} so far…`}
+        </div>
+        <div>
+          {items.map((it) => {
+            const p = it.payload ?? {};
+            const vol = num(p.searchVolume);
+            const bits = [
+              p.gsc ? "already ranking on your site" : null,
+              vol != null ? `${vol}/mo` : "volume not measured",
+              p.competitionLevel ? `${p.competitionLevel} competition` : null,
+            ].filter(Boolean);
+            return (
+              <div key={it.key} className="lx-live-anim lx-serp-row">
+                <span className="lx-serp-fav" style={{ background: dotColor(p.competitionLevel) }} />
+                <div className="min-w-0 flex-1">
+                  {/* Same visual slot a real SERP's URL breadcrumb sits in — but since there is no
+                      real URL for a keyword idea, honest content goes there instead: where the
+                      number itself came from (agents/keyword.ts's own `source` tag). */}
+                  <div className="lx-serp-crumb truncate">
+                    Keyword Research{p.source && SOURCE_LABEL[p.source] ? ` › ${SOURCE_LABEL[p.source]}` : ""}
+                  </div>
+                  <div className="lx-serp-title truncate">{p.keyword ?? "?"}</div>
+                  <div className="lx-serp-desc truncate">{bits.join(" · ")}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {items.length > 0 && (
+          <div className="lx-serp-foot">
+            <div className="lx-track" style={{ flex: 1 }}>
+              <div className="lx-serp-scan" />
+            </div>
+            Scanning search data…
+          </div>
+        )}
       </div>
     );
   }
@@ -563,24 +610,91 @@ const ResearchScreen = ({ items, running }: { items: { key: string; payload: any
     if (!Array.isArray(meta)) return [];
     return meta.filter((m): m is string => typeof m === "string" && /^https?:\/\//.test(m));
   };
+  // Real, derivable from the URL itself — never a guess at the page's actual title or body
+  // text, which gpt-researcher does not hand back (see this component's header comment).
+  const hostOf = (u: string) => {
+    try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return u; }
+  };
+  const crumbsOf = (u: string) => {
+    try {
+      return new URL(u).pathname.split("/").filter(Boolean).slice(0, 3).map((s) => decodeURIComponent(s).replace(/[-_]/g, " "));
+    } catch { return []; }
+  };
+
+  const latest = items[items.length - 1];
+  const latestUrls = latest ? urlsFor(latest.payload) : [];
+  const readingHost = latestUrls[0] ? hostOf(latestUrls[0]) : null;
 
   return (
     <div>
-      <div className="flex items-center gap-2 lx-11 font-semibold">
-        <Globe size={13} className="lx-mut" />
-        Researching the open web…
-        <span className="lx-pulse h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: "#22c55e" }} />
-      </div>
-      <ul className="mt-2 space-y-2">
-        {items.map((it) => {
+      {readingHost ? (
+        // The browser-chrome "reading" screen (owner's reference mockup, 2026-09-07). The host
+        // and breadcrumb are real (parsed straight from the real source URL gpt-researcher
+        // reported); the shimmering bars are a deliberately abstract stand-in for the page's
+        // body — there is no real title/paragraph text to show without inventing one, so this
+        // never puts words in the page's mouth, only conveys "reading, scrolling, in progress".
+        <div className="lx-read">
+          <div className="lx-serp-top">
+            <Globe size={12} /> Reading Web Pages
+            <span className="lx-pill red ml-auto" style={{ padding: "1px 8px" }}>
+              <span className="lx-pulse h-1.5 w-1.5 rounded-full" style={{ background: "#ef4444" }} /> LIVE
+            </span>
+          </div>
+          <div className="lx-read-frame mt-2">
+            <div className="lx-read-bar">
+              <Menu size={12} className="lx-dim" />
+              <span className="lx-read-fav" />
+              <span className="lx-read-host truncate">{readingHost}</span>
+              <MoreVertical size={12} className="lx-dim ml-auto" />
+            </div>
+            {crumbsOf(latestUrls[0]).length > 0 && (
+              <div className="lx-read-crumb truncate">
+                Home{crumbsOf(latestUrls[0]).map((c, i) => (
+                  <span key={i}> › {c}</span>
+                ))}
+              </div>
+            )}
+            <div className="lx-read-body">
+              <div className="lx-read-body-inner">
+                <div className="lx-read-skel" style={{ width: "70%" }} />
+                <div className="lx-read-skel" style={{ width: "100%", marginTop: 10 }} />
+                <div className="lx-read-skel" style={{ width: "94%" }} />
+                <div className="lx-read-skel" style={{ width: "55%" }} />
+                <div className="lx-read-skel" style={{ width: "40%", marginTop: 16 }} />
+                <div className="lx-read-skel" style={{ width: "100%", marginTop: 10 }} />
+                <div className="lx-read-skel" style={{ width: "88%" }} />
+                <div className="lx-read-skel" style={{ width: "97%" }} />
+              </div>
+              <div className="lx-read-scrim" />
+            </div>
+          </div>
+          <div className="lx-serp-meta truncate">
+            {lineFor(latest.payload)}
+            {latestUrls.length > 1 ? ` · +${latestUrls.length - 1} more source${latestUrls.length - 1 === 1 ? "" : "s"}` : ""}
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 lx-11 font-semibold">
+          <Globe size={13} className="lx-mut" />
+          Researching the open web…
+          <span className="lx-pulse h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: "#22c55e" }} />
+        </div>
+      )}
+
+      {/* The plain history list — every progress line gpt-researcher actually sent, oldest
+          first. Kept in full when there is no "reading" screen above it to carry that job;
+          shown as a compact trailing log underneath it otherwise, so the panel reads as ONE
+          live viewport plus its log, not a stack of repeated cards. */}
+      <ul className={readingHost ? "mt-2 space-y-1" : "mt-2 space-y-2"}>
+        {(readingHost ? items.slice(0, -1).slice(-5) : items).map((it) => {
           const urls = urlsFor(it.payload);
           return (
             <li key={it.key} className="lx-live-anim">
-              <div className="flex items-center gap-2 lx-11" style={{ color: "#cfcfdd" }}>
-                <Search size={12} className="lx-dim shrink-0" />
+              <div className={`flex items-center gap-2 ${readingHost ? "lx-10 lx-dim" : "lx-11"}`} style={readingHost ? undefined : { color: "#cfcfdd" }}>
+                <Search size={readingHost ? 10 : 12} className="lx-dim shrink-0" />
                 <span className="min-w-0 flex-1 truncate">{lineFor(it.payload)}</span>
               </div>
-              {urls.length > 0 && (
+              {!readingHost && urls.length > 0 && (
                 <ul className="mt-1 ml-5 space-y-0.5">
                   {urls.slice(0, 5).map((u) => (
                     <li key={u} className="lx-10 lx-mut truncate">{u}</li>
@@ -910,7 +1024,16 @@ export default function MrLxwaDashboard({
       live.tasks.find((t) => t.conversation_id === convId.current) ??
       null)
     : null;
-  const taskActive = !!task && !isTerminalTask(task.status);
+  // NOT just `!isTerminalTask(task.status)` — found live 2026-09-07: a task's top-level
+  // `status` and its own `steps` can desync (the chat's live strip read "Done" while its own
+  // per-agent list, two lines below in the SAME widget, still showed "Mr. Keyword: working" and
+  // pending/not-started rows for the rest — a real order mid-flight, reported finished). Once
+  // `hydrateTask`'s monotonic TASK_RANK guard (lib/live.ts) locks a status as terminal it can
+  // never move back, so a single bad/early read there is stuck for the rest of the task's life;
+  // `steps` keeps getting folded correctly the whole time (that is what the Live Visual was
+  // showing streaming in), so it is the more trustworthy signal. A task the steps still call
+  // pending/running is never presented as finished, whatever the status field says.
+  const taskActive = !!task && (!isTerminalTask(task.status) || task.steps.some((s) => s.status === "pending" || s.status === "running"));
   // Ticks only while the newest task is actually open — a finished task's BottomBar timer is a
   // still image, same rule lib/live.ts's own useNow() doc comment states.
   const now = useNow(taskActive);
@@ -1196,6 +1319,13 @@ export default function MrLxwaDashboard({
       if (runJob) {
         orderedTaskId.current = runJob;
         setPendingOrder(q.trim().slice(0, 120));
+        // Fetch this task's real row the instant its id is known, instead of waiting on
+        // Realtime's first broadcast (or, if the channel is not yet SUBSCRIBED, the up-to-6s
+        // "connecting" grace period before the poll fallback even starts — see lib/live.ts's
+        // useLiveEvents). Without this the Live Visual sat on the `pendingOrder` placeholder
+        // for a couple of real seconds even though the row already existed the moment
+        // /api/chat answered; loadTask()'s own pull() reads it directly, no broadcast needed.
+        live.loadTask(runJob);
       }
       // No task id back = this turn was a plain answer, not an order. Stop waiting.
       else setAwaitingOrder(false);
@@ -1828,12 +1958,25 @@ export default function MrLxwaDashboard({
                   </div>
                 ) : (
                   <ul className="space-y-2">
-                    {producedItems.map((it) => (
-                      <li key={it.key} className="lx-in flex items-start gap-2 rounded-lg px-2.5 py-2 lx-11" style={{ color: "#cfcfdd" }}>
-                        <CheckCircle2 size={14} style={{ color: "#22c55e", marginTop: 1, flexShrink: 0 }} />
-                        {itemLabel(it)}
-                      </li>
-                    ))}
+                    {producedItems.map((it) =>
+                      // Mr Lxwa's own pick gets a proper card — a bold headline plus the reason
+                      // underneath — instead of the one run-on sentence itemLabel() gives every
+                      // other kind ("Chose "X" — Y" was unreadable at a glance).
+                      it.kind === "topic_picked" ? (
+                        <li key={it.key} className="lx-in rounded-lg px-3 py-2.5">
+                          <div className="flex items-center gap-1.5 lx-10 lx-mut">
+                            <CheckCircle2 size={12} style={{ color: "#22c55e" }} /> Topic chosen
+                          </div>
+                          <div className="lx-13 font-bold leading-snug mt-1">{it.payload?.topic ?? "a topic"}</div>
+                          {it.payload?.why && <div className="lx-11 lx-mut mt-1">{it.payload.why}</div>}
+                        </li>
+                      ) : (
+                        <li key={it.key} className="lx-in flex items-start gap-2 rounded-lg px-2.5 py-2 lx-11" style={{ color: "#cfcfdd" }}>
+                          <CheckCircle2 size={14} style={{ color: "#22c55e", marginTop: 1, flexShrink: 0 }} />
+                          {itemLabel(it)}
+                        </li>
+                      )
+                    )}
                   </ul>
                 )}
               </div>
