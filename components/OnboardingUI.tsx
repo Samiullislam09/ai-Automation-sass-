@@ -22,6 +22,19 @@ export const PALETTE = [
   { bg: "#fff1f2", fg: "#e11d48" }, // rose
 ];
 
+/** Brand-colour glow behind the page — the mockup's soft indigo/violet/blue blobs, so the
+ *  background reads as ours instead of a bare white sheet. Absolutely positioned; the page
+ *  wrapper must be position:relative with its columns above (z-index:1). */
+export function Glow() {
+  return (
+    <>
+      <i className="ob-glow ob-g1" aria-hidden />
+      <i className="ob-glow ob-g2" aria-hidden />
+      <i className="ob-glow ob-g3" aria-hidden />
+    </>
+  );
+}
+
 /** The brand mark used in both columns — the mockup's three rising bars. */
 export function BrandMark({ size = 30 }: { size?: number }) {
   return (
@@ -149,45 +162,56 @@ export function OptTile({
   );
 }
 
-/* Light theme, two columns. Injected with dangerouslySetInnerHTML — React escapes ">" inside a
-   <style> text child, which turns every child selector into a hydration mismatch. */
-export const ONBOARDING_CSS = `
-.ob-page{min-height:100vh;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);
-  background:radial-gradient(900px 500px at 8% 0%,#eef1ff 0%,rgba(238,241,255,0) 60%),
-             radial-gradient(900px 600px at 100% 30%,#f3ecff 0%,rgba(243,236,255,0) 55%),#f7f8fc;
-  font-family:Inter,"Segoe UI",system-ui,sans-serif;color:#0f172a}
-.ob-left{display:flex;flex-direction:column;padding:44px 40px 36px 56px;max-width:600px}
-.ob-right{display:flex;align-items:center;justify-content:center;padding:32px 40px}
-.ob-brand{display:flex;align-items:center;gap:10px}
+/* The pieces both the onboarding and the auth pages need (Glow, BrandMark) — every page that
+   renders either must include this in its stylesheet, or the glow <i> elements fall into the
+   grid as ordinary inline boxes and push the columns around. */
+export const SHARED_CSS = `
+.ob-glow{position:absolute;border-radius:999px;filter:blur(70px);pointer-events:none;z-index:0}
+.ob-g1{width:520px;height:520px;left:-160px;top:-180px;background:rgba(99,102,241,.30)}
+.ob-g2{width:640px;height:640px;right:-220px;top:6%;background:rgba(168,85,247,.22)}
+.ob-g3{width:440px;height:440px;left:34%;bottom:-220px;background:rgba(59,130,246,.20)}
 .ob-logo{display:inline-flex;align-items:center;justify-content:center;border-radius:10px;
   background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;flex-shrink:0}
+`;
+
+/* Light theme, two columns. Injected with dangerouslySetInnerHTML — React escapes ">" inside a
+   <style> text child, which turns every child selector into a hydration mismatch. */
+export const ONBOARDING_CSS = SHARED_CSS + `
+.ob-page{position:relative;height:100vh;overflow:hidden;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+  background:#f7f8fc;font-family:Inter,"Segoe UI",system-ui,sans-serif;color:#0f172a}
+.ob-page::before{content:"";position:absolute;right:0;top:0;width:52%;height:100%;pointer-events:none;
+  background:linear-gradient(160deg,rgba(219,234,254,.6),rgba(237,233,254,.4));clip-path:ellipse(72% 82% at 100% 42%)}
+.ob-left,.ob-right{position:relative;z-index:1;min-height:0}
+.ob-left{display:flex;flex-direction:column;padding:28px 32px 24px 48px;max-width:600px;overflow:hidden}
+.ob-right{display:flex;align-items:center;justify-content:center;padding:20px 36px;overflow:auto}
+.ob-brand{display:flex;align-items:center;gap:10px}
 .ob-brand-t{display:block;font-size:22px;font-weight:800;line-height:1.1;letter-spacing:-.01em}
 .ob-brand-s{display:block;font-size:13px;color:#64748b;line-height:1.3}
 .ob-card .ob-brand-t{font-size:14px}
 .ob-card .ob-brand-s{font-size:10.5px}
-.ob-pillbadge{align-self:flex-start;margin-top:56px;padding:6px 13px;border-radius:999px;background:#eef2ff;color:#4f46e5;
+.ob-pillbadge{align-self:flex-start;margin-top:28px;padding:6px 13px;border-radius:999px;background:#eef2ff;color:#4f46e5;
   font-size:12.5px;font-weight:600}
-.ob-hero{margin:16px 0 0;font-size:40px;line-height:1.12;font-weight:800;letter-spacing:-.02em}
+.ob-hero{margin:14px 0 0;font-size:34px;line-height:1.12;font-weight:800;letter-spacing:-.02em}
 .ob-grad{background:linear-gradient(90deg,#4f46e5,#a855f7);-webkit-background-clip:text;background-clip:text;color:transparent}
-.ob-herosub{margin:18px 0 0;font-size:15.5px;line-height:1.65;color:#475569;max-width:440px}
-.ob-features{list-style:none;margin:30px 0 0;padding:0;display:flex;flex-direction:column;gap:20px}
-.ob-features li{display:flex;gap:16px;align-items:flex-start}
-.ob-fico{display:flex;align-items:center;justify-content:center;width:52px;height:52px;border-radius:14px;flex-shrink:0}
-.ob-features b{display:block;font-size:15px;font-weight:700}
-.ob-features p{margin:3px 0 0;font-size:13px;line-height:1.55;color:#64748b;max-width:380px}
-.ob-foot{margin:auto 0 0;padding-top:34px;font-size:12.5px;color:#64748b}
-.ob-leftdots{display:flex;align-items:center;gap:8px;margin-top:22px}
+.ob-herosub{margin:14px 0 0;font-size:14.5px;line-height:1.6;color:#475569;max-width:440px}
+.ob-features{list-style:none;margin:22px 0 0;padding:0;display:flex;flex-direction:column;gap:13px}
+.ob-features li{display:flex;gap:14px;align-items:flex-start}
+.ob-fico{display:flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:12px;flex-shrink:0}
+.ob-features b{display:block;font-size:14px;font-weight:700}
+.ob-features p{margin:2px 0 0;font-size:12.5px;line-height:1.5;color:#64748b;max-width:380px}
+.ob-foot{margin:auto 0 0;padding-top:18px;font-size:12.5px;color:#64748b}
+.ob-leftdots{display:flex;align-items:center;gap:8px;margin-top:14px}
 .ob-leftdots i{display:block;width:8px;height:8px;border-radius:999px;background:#cfd4e6}
 .ob-leftdots i.on{background:#4f46e5;width:14px}
 .ob-leftdots i.done{background:#c7d2fe}
 .ob-leftdots span{margin-left:16px;font-size:13px;color:#64748b;font-variant-numeric:tabular-nums}
-.ob-card{width:100%;max-width:520px;padding:24px 28px 22px;border-radius:22px;background:#fff;
-  border:1px solid #eceef6;box-shadow:0 30px 70px -20px rgba(30,41,63,.18),0 8px 24px -8px rgba(30,41,63,.08)}
-.ob-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:22px}
+.ob-card{width:100%;max-width:520px;max-height:calc(100vh - 40px);overflow:auto;padding:20px 26px 18px;border-radius:22px;background:#fff;
+  border:1px solid #eceef6;box-shadow:0 30px 70px -20px rgba(30,41,63,.18),0 8px 24px -8px rgba(30,41,63,.08);box-sizing:border-box}
+.ob-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:16px}
 .ob-topskip{display:inline-flex;align-items:center;gap:5px;background:none;border:none;color:#64748b;
   font-size:13px;font-weight:600;cursor:pointer;padding:4px;font-family:inherit}
 .ob-topskip:hover{color:#0f172a}
-.ob-track{display:flex;align-items:center;margin-bottom:22px}
+.ob-track{display:flex;align-items:center;margin-bottom:16px}
 .ob-track-item{display:flex;align-items:center;flex:1;min-width:0}
 .ob-track-item:last-child{flex:0 0 auto}
 .ob-stepnum{display:flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:999px;flex-shrink:0;
@@ -196,8 +220,8 @@ export const ONBOARDING_CSS = `
 .ob-tdot.done{background:#4f46e5}
 .ob-seg{display:block;flex:1;height:2px;background:#e6e8f2;margin:0 4px}
 .ob-seg.done{background:#4f46e5}
-.ob-h1{font-size:22px;font-weight:800;letter-spacing:-.015em;color:#0f172a;line-height:1.25;margin:0}
-.ob-sub{margin:8px 0 18px;font-size:13px;color:#64748b;line-height:1.6}
+.ob-h1{font-size:21px;font-weight:800;letter-spacing:-.015em;color:#0f172a;line-height:1.25;margin:0}
+.ob-sub{margin:6px 0 14px;font-size:12.5px;color:#64748b;line-height:1.55}
 .ob-field{margin-bottom:14px}
 .ob-label{display:block;margin-bottom:6px;font-size:12px;font-weight:600;color:#475569}
 .ob-browser{padding:10px 12px 12px;border-radius:14px;background:#f3f4fa;border:1px solid #e6e8f2;margin-bottom:12px}
@@ -213,7 +237,7 @@ export const ONBOARDING_CSS = `
 .ob-input::placeholder{color:#a3a9c2}
 .ob-textarea{height:auto;padding:9px 12px;line-height:1.6;resize:vertical}
 .ob-plats{display:flex;gap:10px;margin-top:12px}
-.ob-plat{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 8px;border-radius:12px;background:#fff;border:1px solid #e6e8f2;
+.ob-plat{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;padding:8px 8px;border-radius:12px;background:#fff;border:1px solid #e6e8f2;
   font-size:11px;font-weight:600;color:#475569}
 .ob-plat span{display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:8px;background:#eef2ff;color:#4f46e5}
 .ob-error{margin-top:8px;font-size:12px;color:#dc2626}
@@ -234,7 +258,7 @@ export const ONBOARDING_CSS = `
 .ob-optrow.active .ob-radio{border-color:#4f46e5;background:#4f46e5}
 .ob-optrow.active .ob-radio::after{content:"";position:absolute;inset:4px;border-radius:999px;background:#fff}
 .ob-tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
-.ob-tile{display:flex;flex-direction:column;align-items:center;gap:8px;padding:14px 8px 12px;border-radius:14px;border:1.5px solid #e9ebf4;
+.ob-tile{display:flex;flex-direction:column;align-items:center;gap:7px;padding:12px 8px 10px;border-radius:14px;border:1.5px solid #e9ebf4;
   background:#fff;cursor:pointer;transition:.15s;font-family:inherit}
 .ob-tile:hover{border-color:#c7d2fe}
 .ob-tile.active{border-color:#4f46e5;background:#eef2ff}
@@ -254,7 +278,7 @@ export const ONBOARDING_CSS = `
 .ob-change{background:none;border:none;color:#4f46e5;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;padding:4px}
 .ob-change:hover{text-decoration:underline}
 .ob-redit{padding:0 14px 14px 64px;border-top:0}
-.ob-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:20px}
+.ob-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:16px}
 .ob-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:40px;padding:0 16px;border-radius:999px;white-space:nowrap;
   background:#fff;border:1.5px solid #e2e5f2;color:#475569;font-size:13px;font-weight:600;cursor:pointer;transition:.15s;font-family:inherit}
 .ob-btn:hover:not(:disabled){border-color:#c7cbe0;color:#0f172a}
@@ -264,7 +288,7 @@ export const ONBOARDING_CSS = `
   box-shadow:0 8px 20px -6px rgba(79,70,229,.5);font-family:inherit}
 .ob-btn-primary:hover:not(:disabled){background:#4338ca}
 .ob-btn-primary:disabled{opacity:.55;cursor:not-allowed;box-shadow:none}
-.ob-dots{display:flex;justify-content:center;gap:6px;margin-top:18px}
+.ob-dots{display:flex;justify-content:center;gap:6px;margin-top:14px}
 .ob-dots i{display:block;width:6px;height:6px;border-radius:999px;background:#e2e5f2}
 .ob-dots i.on{background:#4f46e5;width:16px}
 .ob-dots i.done{background:#c7d2fe}
@@ -273,8 +297,8 @@ export const ONBOARDING_CSS = `
 .ob-row .ob-input{flex:1;min-width:0}
 .ob-row .ob-btn{flex-shrink:0;height:42px;padding:0 12px}
 .ob-list{margin:0;padding-left:18px;font-size:12.5px;color:#334155;line-height:1.7}
-.ob-note{display:flex;flex-direction:column;gap:8px;padding:13px 15px;border-radius:13px;background:#f6f8fd;
-  border:1px solid #e6ebfd;margin-bottom:16px}
+.ob-note{display:flex;flex-direction:column;gap:7px;padding:11px 14px;border-radius:13px;background:#f6f8fd;
+  border:1px solid #e6ebfd;margin-bottom:12px}
 .ob-check{display:flex;align-items:center;gap:9px;font-size:12.5px;color:#475569;line-height:1.5}
 .ob-check::before{content:"✓";display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:999px;
   background:#dcfce7;color:#16a34a;font-size:10px;font-weight:800;flex-shrink:0}
@@ -314,9 +338,11 @@ export const ONBOARDING_CSS = `
 .ob-donerow{display:flex;align-items:center;gap:10px;font-size:13px;font-weight:600;color:#166534}
 .ob-donerow span{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:999px;background:#22c55e;color:#fff;flex-shrink:0}
 @media (max-width:980px){
-  .ob-page{grid-template-columns:1fr}
+  .ob-page{grid-template-columns:1fr;height:auto;min-height:100vh;overflow:visible}
+  .ob-page::before{display:none}
   .ob-left{display:none}
-  .ob-right{padding:18px 14px;align-items:flex-start}
+  .ob-right{padding:18px 14px;align-items:flex-start;overflow:visible}
+  .ob-card{max-height:none;overflow:visible}
 }
 @media (max-width:480px){
   .ob-card{padding:18px 16px 16px;border-radius:16px}

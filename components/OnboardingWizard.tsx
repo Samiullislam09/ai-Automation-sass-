@@ -9,7 +9,7 @@ import {
 import { SiWordpress } from "react-icons/si";
 import { useStore } from "@/lib/store";
 import { GoalsStep, UnderstandingStep, useOnboardingProfile, type OnboardingProfile } from "@/components/OnboardingUnderstanding";
-import { BrandMark, LeftPanel, OptRow, OptTile, StepTrack, ONBOARDING_CSS } from "@/components/OnboardingUI";
+import { BrandMark, Glow, LeftPanel, OptRow, OptTile, StepTrack, ONBOARDING_CSS } from "@/components/OnboardingUI";
 import { BRAIN_PHASES, phaseIndex, liveStage, pctFor, type BrainJobs } from "@/lib/brainPhases";
 
 /** The nine-screen "meet your business" flow (MASTER_PLAN §25.7).
@@ -355,6 +355,7 @@ export default function OnboardingWizard() {
   return (
     <div className="ob-page">
       <style dangerouslySetInnerHTML={{ __html: ONBOARDING_CSS }} />
+      <Glow />
       <LeftPanel step={step} total={TOTAL_STEPS} />
 
       <main className="ob-right">
