@@ -12,11 +12,14 @@ import { enqueue } from "../queues.js";
 // pages so onboarding itself doesn't time out on Vercel's serverless request limit.
 const PAGE_LIMIT = Number(process.env.CRAWL_PAGE_LIMIT) || 300;
 
-/** Full-site crawl agent — the deep follow-up to onboarding's quick 15-page sample.
- *  Triggered after onboarding completes (see app/api/onboarding/complete/route.ts) so the
- *  tenant's knowledge base (site_pages) — and every downstream agent/chat reply that reads
- *  it — reflects the WHOLE site, not a sample. Also what a future site chatbot widget
- *  (RAG over site_pages) would read from. */
+/** Full-site crawl agent — the deep counterpart to onboarding's quick 15-page sample
+ *  (/api/onboarding/crawl). Triggered the moment a website address is saved
+ *  (app/api/onboarding/site/route.ts, step 0 of the wizard) so the tenant's knowledge base
+ *  (site_pages) — and every downstream agent/chat reply that reads it — reflects the WHOLE
+ *  site, not a sample, as early as possible. Also what a future site chatbot widget (RAG over
+ *  site_pages) would read from. app/api/onboarding/complete/route.ts (end of the wizard) only
+ *  fires this a second time as a fallback for when step 0 never reached the server at all — it
+ *  checks first, on purpose: this used to run twice, unconditionally, for every signup. */
 export class CrawlerAgent extends Agent {
   type = "crawler";
   async run(job: Job<AgentJobData>, ctx: AgentContext) {

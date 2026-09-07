@@ -33,6 +33,16 @@ export async function POST(request: Request) {
     );
   }
 
+  // Read what's on file BEFORE this write. If /api/onboarding/site (step 0) already saved this
+  // exact address, it already enqueued this same crawl — up to 300 live page fetches, up to 300
+  // paid NVIDIA embedding calls, and a full Mr. Analyst run that chains off it automatically
+  // (agent-server/src/agents/crawler.ts). This route used to fire the identical job again below,
+  // unconditionally, which meant every signup with a website paid for all three things twice.
+  // The trigger below is step 0's fallback for when it never reached the server at all (offline,
+  // a bad gateway — see that route's own comment), not a second, unconditional run.
+  const { data: before } = await supabase.from("tenants").select("website_url").eq("id", tenantId).maybeSingle();
+  const crawlAlreadyStarted = !!normalizedUrl && before?.website_url === normalizedUrl;
+
   const { error: tenantErr } = await supabase
     .from("tenants")
     .update({
@@ -89,14 +99,16 @@ export async function POST(request: Request) {
     if (whErr) webhookSecret = null;
   }
 
-  // Kick off the FULL site crawl as a background job (agent-server, Railway) — not
-  // awaited, this request shouldn't wait on it. Onboarding's own /api/onboarding/crawl
-  // already did a quick ~15-page sample synchronously for immediate niche/topic feedback
-  // in the wizard; this follow-up goes deep (up to ~300 pages, no request-timeout
-  // constraint) so the tenant's real knowledge base — and every agent/chat reply that
-  // reads site_pages — reflects the whole site, not a sample.
+  // Only a fallback: fire the full site crawl here if step 0 never managed to (see the
+  // comment above `crawlAlreadyStarted`). A website that was already saved for this tenant
+  // already has its crawl running or done — nothing to start twice.
   const agentServerUrl = process.env.AGENT_SERVER_URL;
-  if (agentServerUrl) {
+  if (!normalizedUrl) {
+    // Nothing to crawl — "no website yet" is a real, final answer, not a reason to enqueue a
+    // job the crawler would just reject for lack of an address.
+  } else if (crawlAlreadyStarted) {
+    console.log("[onboarding/complete] skipping crawl — step 0 already started it for this address");
+  } else if (agentServerUrl) {
     fetch(`${agentServerUrl}/jobs/crawler`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
