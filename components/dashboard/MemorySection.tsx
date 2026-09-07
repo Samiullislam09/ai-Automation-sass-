@@ -222,7 +222,7 @@ export default function MemorySection() {
             </div>
           )}
 
-          <Link href="/whoami" className="mm-note">
+          <Link href="/dashboard/site-brain" className="mm-note">
             <Brain size={15} className="mm-line-i" />
             <span>Read Mr Lxwa&apos;s full understanding of your business</span>
           </Link>

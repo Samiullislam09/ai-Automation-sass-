@@ -286,7 +286,7 @@ export default function Memory() {
       </div>
 
       <div className="card" style={{ marginTop: 16, display: "flex", gap: 12, alignItems: "center" }}>
-        <div className="corb" /><div className="sm" style={{ minWidth: 0 }}><b>Who am I?</b> — <Link href="/whoami">Read Mr Lxwa&apos;s current understanding of your business →</Link></div>
+        <div className="corb" /><div className="sm" style={{ minWidth: 0 }}><b>Site Brain</b> — <Link href="/app/site-brain">Read Mr Lxwa&apos;s current understanding of your business →</Link></div>
       </div>
       {adding && (
         <div className="modalwrap" onClick={() => setAdding(false)}>

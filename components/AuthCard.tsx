@@ -4,7 +4,7 @@ import { useState } from "react";
 import { ArrowRight, Check, Eye, EyeOff, Lock, Mail, PenLine, Search, Send, ShieldCheck, User } from "lucide-react";
 import { SiWordpress } from "react-icons/si";
 import { createClient } from "@/lib/supabase/client";
-import { BrandMark, Glow, SHARED_CSS } from "@/components/OnboardingUI";
+import { BrandMark, SHARED_CSS } from "@/components/OnboardingUI";
 
 /** /login and /signup — rebuilt 2026-09-08 to the owner's reference mockup: a two-column light
  *  page (brand, headline, feature list and a small dashboard illustration on the left; the
@@ -101,7 +101,6 @@ export function AuthCard({ mode }: { mode: "login" | "signup" }) {
   return (
     <div className="au-page">
       <style dangerouslySetInnerHTML={{ __html: SHARED_CSS + CSS }} />
-      <Glow />
 
       <aside className="au-left">
         <div className="au-brand">
@@ -266,13 +265,13 @@ export function AuthCard({ mode }: { mode: "login" | "signup" }) {
 }
 
 const CSS = `
-.au-page{position:relative;height:100vh;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);overflow:hidden;
+.au-page{position:relative;min-height:100vh;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);
   background:#f7f8fc;font-family:Inter,"Segoe UI",system-ui,sans-serif;color:#0f172a}
 .au-page::before{content:"";position:absolute;right:0;top:0;width:52%;height:100%;pointer-events:none;
-  background:linear-gradient(160deg,rgba(219,234,254,.6),rgba(237,233,254,.4));clip-path:ellipse(72% 82% at 100% 42%)}
+  background:linear-gradient(160deg,rgba(219,234,254,.45),rgba(237,233,254,.25));clip-path:ellipse(72% 82% at 100% 42%)}
 .au-left,.au-right{position:relative;z-index:1;min-height:0}
-.au-left{display:flex;flex-direction:column;padding:30px 36px 26px 52px;max-width:600px;overflow:hidden}
-.au-right{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px 40px;gap:12px;overflow:auto}
+.au-left{display:flex;flex-direction:column;padding:28px 36px 24px 52px;max-width:600px}
+.au-right{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px 40px;gap:12px}
 .au-brand{display:flex;align-items:center;gap:10px}
 .au-brand b{display:block;font-size:22px;font-weight:800;line-height:1.1;letter-spacing:-.01em}
 .au-brand small{display:block;font-size:13px;color:#64748b;line-height:1.3}
@@ -315,22 +314,22 @@ const CSS = `
 .au-toplink a{display:inline-flex;align-items:center;gap:5px;padding:8px 14px;border-radius:999px;background:#fff;border:1px solid #e6e8f2;
   font-size:12.5px;color:#475569;text-decoration:none;box-shadow:0 6px 16px -10px rgba(30,41,63,.25)}
 .au-toplink b{color:#4f46e5;font-weight:600}
-.au-card{width:100%;max-width:400px;max-height:calc(100vh - 90px);overflow:auto;box-sizing:border-box;padding:24px 26px 20px;border-radius:20px;background:#fff;border:1px solid #eceef6;
+.au-card{width:100%;max-width:400px;box-sizing:border-box;padding:22px 24px 18px;border-radius:20px;background:#fff;border:1px solid #eceef6;
   box-shadow:0 30px 70px -20px rgba(30,41,63,.18),0 8px 24px -8px rgba(30,41,63,.08)}
 .au-center{text-align:center;display:flex;flex-direction:column;align-items:center}
 .au-h1{margin:0;font-size:24px;font-weight:800;letter-spacing:-.015em;line-height:1.2}
 .au-sub{margin:6px 0 16px;font-size:13px;color:#64748b;line-height:1.55}
-.au-google{display:flex;align-items:center;justify-content:center;gap:12px;width:100%;height:46px;border-radius:12px;border:none;cursor:pointer;
+.au-google{display:flex;align-items:center;justify-content:center;gap:12px;width:100%;height:42px;border-radius:12px;border:none;cursor:pointer;
   background:#2563eb;color:#fff;font-size:14px;font-weight:650;font-family:inherit;box-shadow:0 10px 22px -8px rgba(37,99,235,.55);transition:.15s}
 .au-google:hover{background:#1d4ed8}
 .au-gcircle{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:999px;background:#fff}
-.au-or{display:flex;align-items:center;gap:12px;margin:16px 0 14px;font-size:11.5px;color:#94a3b8}
+.au-or{display:flex;align-items:center;gap:12px;margin:12px 0 10px;font-size:11.5px;color:#94a3b8}
 .au-or span{flex:1;height:1px;background:#e6e8f2}
-.au-field{margin-bottom:12px}
-.au-field label{display:block;margin-bottom:6px;font-size:12.5px;font-weight:600;color:#1e293b}
+.au-field{margin-bottom:10px}
+.au-field label{display:block;margin-bottom:5px;font-size:12.5px;font-weight:600;color:#1e293b}
 .au-inwrap{position:relative;display:flex;align-items:center}
 .au-ic{position:absolute;left:12px;color:#94a3b8;pointer-events:none}
-.au-inwrap input{width:100%;height:44px;padding:0 40px 0 38px;border-radius:11px;background:#fff;border:1.5px solid #e2e5f2;color:#0f172a;
+.au-inwrap input{width:100%;height:41px;padding:0 40px 0 38px;border-radius:11px;background:#fff;border:1.5px solid #e2e5f2;color:#0f172a;
   font-size:13.5px;outline:none;box-sizing:border-box;font-family:inherit;transition:.15s}
 .au-inwrap input:focus{border-color:#4f46e5;box-shadow:0 0 0 3px rgba(79,70,229,.12)}
 .au-inwrap input::placeholder{color:#a3a9c2}
@@ -347,15 +346,15 @@ const CSS = `
 .au-link:hover{text-decoration:underline}
 .au-error{margin:0 0 10px;font-size:12.5px;color:#dc2626}
 .au-notice{margin:0 0 10px;font-size:12.5px;color:#16a34a}
-.au-primary{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;height:46px;border-radius:12px;border:none;cursor:pointer;
+.au-primary{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;height:43px;border-radius:12px;border:none;cursor:pointer;
   background:linear-gradient(135deg,#4f46e5,#6d5bf5);color:#fff;font-size:14.5px;font-weight:650;font-family:inherit;text-decoration:none;
   box-shadow:0 10px 22px -8px rgba(79,70,229,.55);transition:.15s;box-sizing:border-box}
 .au-primary:hover:not(:disabled){filter:brightness(1.06)}
 .au-primary:disabled{opacity:.6;cursor:not-allowed}
-.au-legal{margin:14px 0 0;text-align:center;font-size:11.5px;line-height:1.6;color:#64748b}
-@media (max-height:720px){.au-illo{display:none}}
+.au-legal{margin:12px 0 0;text-align:center;font-size:11.5px;line-height:1.6;color:#64748b}
+@media (max-height:760px){.au-illo{display:none}}
 @media (max-width:980px){
-  .au-page{grid-template-columns:1fr;height:auto;min-height:100vh;overflow:visible}
+  .au-page{grid-template-columns:1fr}
   .au-page::before{display:none}
   .au-left{display:none}
   .au-right{padding:18px 14px 28px;justify-content:flex-start}

@@ -22,19 +22,6 @@ export const PALETTE = [
   { bg: "#fff1f2", fg: "#e11d48" }, // rose
 ];
 
-/** Brand-colour glow behind the page — the mockup's soft indigo/violet/blue blobs, so the
- *  background reads as ours instead of a bare white sheet. Absolutely positioned; the page
- *  wrapper must be position:relative with its columns above (z-index:1). */
-export function Glow() {
-  return (
-    <>
-      <i className="ob-glow ob-g1" aria-hidden />
-      <i className="ob-glow ob-g2" aria-hidden />
-      <i className="ob-glow ob-g3" aria-hidden />
-    </>
-  );
-}
-
 /** The brand mark used in both columns — the mockup's three rising bars. */
 export function BrandMark({ size = 30 }: { size?: number }) {
   return (
@@ -162,14 +149,10 @@ export function OptTile({
   );
 }
 
-/* The pieces both the onboarding and the auth pages need (Glow, BrandMark) — every page that
-   renders either must include this in its stylesheet, or the glow <i> elements fall into the
-   grid as ordinary inline boxes and push the columns around. */
+/* Shared between the onboarding and the auth pages (BrandMark). The blurred colour blobs that
+   used to live here were removed 2026-09-08 — the owner didn't like them; the background is
+   the mockup's quiet off-white with one soft blue sweep on the right, nothing more. */
 export const SHARED_CSS = `
-.ob-glow{position:absolute;border-radius:999px;filter:blur(70px);pointer-events:none;z-index:0}
-.ob-g1{width:520px;height:520px;left:-160px;top:-180px;background:rgba(99,102,241,.30)}
-.ob-g2{width:640px;height:640px;right:-220px;top:6%;background:rgba(168,85,247,.22)}
-.ob-g3{width:440px;height:440px;left:34%;bottom:-220px;background:rgba(59,130,246,.20)}
 .ob-logo{display:inline-flex;align-items:center;justify-content:center;border-radius:10px;
   background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;flex-shrink:0}
 `;
@@ -177,13 +160,13 @@ export const SHARED_CSS = `
 /* Light theme, two columns. Injected with dangerouslySetInnerHTML — React escapes ">" inside a
    <style> text child, which turns every child selector into a hydration mismatch. */
 export const ONBOARDING_CSS = SHARED_CSS + `
-.ob-page{position:relative;height:100vh;overflow:hidden;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+.ob-page{position:relative;min-height:100vh;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);
   background:#f7f8fc;font-family:Inter,"Segoe UI",system-ui,sans-serif;color:#0f172a}
 .ob-page::before{content:"";position:absolute;right:0;top:0;width:52%;height:100%;pointer-events:none;
-  background:linear-gradient(160deg,rgba(219,234,254,.6),rgba(237,233,254,.4));clip-path:ellipse(72% 82% at 100% 42%)}
+  background:linear-gradient(160deg,rgba(219,234,254,.45),rgba(237,233,254,.25));clip-path:ellipse(72% 82% at 100% 42%)}
 .ob-left,.ob-right{position:relative;z-index:1;min-height:0}
 .ob-left{display:flex;flex-direction:column;padding:28px 32px 24px 48px;max-width:600px;overflow:hidden}
-.ob-right{display:flex;align-items:center;justify-content:center;padding:20px 36px;overflow:auto}
+.ob-right{display:flex;align-items:center;justify-content:center;padding:20px 36px}
 .ob-brand{display:flex;align-items:center;gap:10px}
 .ob-brand-t{display:block;font-size:22px;font-weight:800;line-height:1.1;letter-spacing:-.01em}
 .ob-brand-s{display:block;font-size:13px;color:#64748b;line-height:1.3}
@@ -205,7 +188,7 @@ export const ONBOARDING_CSS = SHARED_CSS + `
 .ob-leftdots i.on{background:#4f46e5;width:14px}
 .ob-leftdots i.done{background:#c7d2fe}
 .ob-leftdots span{margin-left:16px;font-size:13px;color:#64748b;font-variant-numeric:tabular-nums}
-.ob-card{width:100%;max-width:520px;max-height:calc(100vh - 40px);overflow:auto;padding:20px 26px 18px;border-radius:22px;background:#fff;
+.ob-card{width:100%;max-width:520px;padding:20px 26px 18px;border-radius:22px;background:#fff;
   border:1px solid #eceef6;box-shadow:0 30px 70px -20px rgba(30,41,63,.18),0 8px 24px -8px rgba(30,41,63,.08);box-sizing:border-box}
 .ob-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:16px}
 .ob-topskip{display:inline-flex;align-items:center;gap:5px;background:none;border:none;color:#64748b;
@@ -338,11 +321,10 @@ export const ONBOARDING_CSS = SHARED_CSS + `
 .ob-donerow{display:flex;align-items:center;gap:10px;font-size:13px;font-weight:600;color:#166534}
 .ob-donerow span{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:999px;background:#22c55e;color:#fff;flex-shrink:0}
 @media (max-width:980px){
-  .ob-page{grid-template-columns:1fr;height:auto;min-height:100vh;overflow:visible}
+  .ob-page{grid-template-columns:1fr}
   .ob-page::before{display:none}
   .ob-left{display:none}
-  .ob-right{padding:18px 14px;align-items:flex-start;overflow:visible}
-  .ob-card{max-height:none;overflow:visible}
+  .ob-right{padding:18px 14px;align-items:flex-start}
 }
 @media (max-width:480px){
   .ob-card{padding:18px 16px 16px;border-radius:16px}

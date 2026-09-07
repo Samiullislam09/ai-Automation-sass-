@@ -2,92 +2,55 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
-  ArrowLeft, ArrowRight, BadgeCheck, Briefcase, Calendar, CalendarClock, CalendarDays, Check, Clock, Code2, Globe,
-  GraduationCap, Link2, MapPin, MoreHorizontal, PenLine, Rocket, ShoppingCart, SlidersHorizontal, Smile,
-  Sparkles, Users, Zap,
+  ArrowLeft, ArrowRight, Briefcase, Check, Clock, Code2, Link2, MapPin, MoreHorizontal, PenLine, Rocket,
+  ShoppingBag, ShoppingCart, TrendingUp, UserPlus,
 } from "lucide-react";
 import { SiWordpress } from "react-icons/si";
 import { useStore } from "@/lib/store";
-import { GoalsStep, UnderstandingStep, useOnboardingProfile, type OnboardingProfile } from "@/components/OnboardingUnderstanding";
-import { BrandMark, Glow, LeftPanel, OptRow, OptTile, StepTrack, ONBOARDING_CSS } from "@/components/OnboardingUI";
+import { useOnboardingProfile, type OnboardingProfile } from "@/components/OnboardingUnderstanding";
+import { BrandMark, LeftPanel, OptRow, OptTile, StepTrack, ONBOARDING_CSS } from "@/components/OnboardingUI";
 import { BRAIN_PHASES, phaseIndex, liveStage, pctFor, type BrainJobs } from "@/lib/brainPhases";
 
-/** The nine-screen "meet your business" flow (MASTER_PLAN §25.7).
+/** The "meet your business" flow, cut down 2026-09-08 to the five screens that actually matter
+ *  (owner: "simple karo, sirf jo zaroori ho, modern"):
  *
- *  Visual language 2026-09-08: a faithful copy of the owner's reference mockup — brand and
- *  feature list on the left, the step card on the right, a numbered badge on a dotted track,
- *  icon-badged rows/tiles with a radio dot, a green-check note box, pill Back/Next buttons.
- *  Only the chrome and layout are copied; the fields and the nine steps are ours, and so is the
- *  colour (indigo/violet — the dashboard's family).
+ *    0  Website            — the one thing we truly need; the crawl starts here, in the background
+ *    1  Business type      — one tap, six tiles (Mr. Analyst reads the rest off the site itself)
+ *    2  Main goal          — one tap: enquiries / traffic / sales (what the planner optimises for)
+ *    3  Publishing platform — WordPress or a webhook, ONE "Connect" button that tests and saves in
+ *                            one go, or skip
+ *    4  Learning → done    — real crawl/analyst progress, then "You're all set"
  *
- *  Step 8 ("learning your business") polls the same job data Site Brain's own progress bar
- *  reads (lib/brainPhases.ts) and waits for the real crawl → Mr. Analyst chain to actually
- *  finish (or give up after a ceiling) before showing a done screen and continuing — a
- *  percentage that means something, not a timed animation. */
+ *  Gone: the audience / tone / pace questions (guessing out loud — the analyst derives them and
+ *  they're editable on Site Brain), the review-what-we-read screen (it lives on Site Brain), the
+ *  "which offerings first" picker, and the /whoami stop after finishing. Tone defaults to
+ *  "Professional"; every reader of tone_profile already copes with a missing pace/audience.
+ *
+ *  Visual language: the owner's reference mockup — brand + feature list on the left, the step
+ *  card on the right, numbered badge on a dotted track, icon tiles/rows with a radio dot. */
 
-const STEPS = [
-  {
-    key: "type",
-    q: "Tell us about your business",
-    sub: "What best describes your business? This helps our AI find the right keywords and create relevant content.",
-    tiles: true,
-    opts: [
-      { v: "Local service", icon: MapPin },
-      { v: "Online store", icon: ShoppingCart },
-      { v: "Agency / freelancer", icon: Briefcase },
-      { v: "SaaS / startup", icon: Rocket },
-      { v: "Blog / creator", icon: PenLine },
-      { v: "Other", icon: MoreHorizontal },
-    ],
-  },
-  {
-    key: "aud",
-    q: "Who are your customers?",
-    sub: "Who should the writing be aimed at? You can always change this later.",
-    tiles: false,
-    opts: [
-      { v: "Local customers", icon: MapPin },
-      { v: "Small businesses", icon: Briefcase },
-      { v: "Consumers online", icon: Globe },
-      { v: "Professionals", icon: Users },
-      { v: "Everyone", icon: Sparkles },
-    ],
-  },
-  {
-    key: "tone",
-    q: "How should your content sound?",
-    sub: "Pick the voice every article should be written in.",
-    tiles: false,
-    opts: [
-      { v: "Friendly and simple", icon: Smile },
-      { v: "Professional", icon: BadgeCheck },
-      { v: "Expert and detailed", icon: GraduationCap },
-      { v: "Bold and energetic", icon: Zap },
-    ],
-  },
-  {
-    key: "pace",
-    q: "How often should we publish?",
-    sub: "Set the pace. Every article still waits for your approval before it goes live.",
-    tiles: false,
-    opts: [
-      { v: "1 article / week", icon: Calendar },
-      { v: "2–3 / week", icon: CalendarDays },
-      { v: "Daily", icon: CalendarClock },
-      { v: "I'll decide per article", icon: SlidersHorizontal },
-    ],
-  },
+const TYPES = [
+  { v: "Local service", icon: MapPin },
+  { v: "Online store", icon: ShoppingCart },
+  { v: "Agency / freelancer", icon: Briefcase },
+  { v: "SaaS / startup", icon: Rocket },
+  { v: "Blog / creator", icon: PenLine },
+  { v: "Other", icon: MoreHorizontal },
 ];
 
-// Steps 0-8, for the track and the dot rows. Steps 5/6 (Understanding/Goals) are often skipped
-// when the crawl isn't ready yet — they still count, so the track doesn't jump around.
-const TOTAL_STEPS = 9;
+const GOALS: { key: "leads" | "traffic" | "sales"; label: string; sub: string; icon: typeof UserPlus; memory: string }[] = [
+  { key: "leads", label: "More enquiries", sub: "People contacting you", icon: UserPlus, memory: "More enquiries and inbound leads" },
+  { key: "traffic", label: "More search traffic", sub: "Being found on Google", icon: TrendingUp, memory: "More organic search traffic" },
+  { key: "sales", label: "More sales", sub: "Orders and revenue", icon: ShoppingBag, memory: "More sales and revenue" },
+];
 
-type ConnectMethod = "wordpress" | "webhook" | "later" | null;
+const TOTAL_STEPS = 5;
+
+type ConnectMethod = "wordpress" | "webhook" | null;
 
 // A crawl of a normal site plus six LLM calls is two to six minutes. Onboarding isn't the place
-// to make someone wait that long for a sign-up — give up gracefully and finish with whatever
-// the wizard's own answers say; Site Brain will keep working on it in the background regardless.
+// to make someone wait that long — give up gracefully after this and finish with what we have;
+// Site Brain keeps working in the background regardless.
 const LEARNING_CEILING_MS = 90_000;
 
 export default function OnboardingWizard() {
@@ -95,143 +58,144 @@ export default function OnboardingWizard() {
   const router = useRouter();
   const [step, setStep] = useState(0);
   const [site, setSite] = useState("");
-  // "I don't have a website" is a real answer and has to be stored as one. It used to be
-  // stored by typing the sentence "(no website yet)" INTO the website field, which the API
-  // then prefixed with https:// — and that value later took the whole crawler down.
+  // "I don't have a website" is a real answer and has to be stored as one — never as a
+  // placeholder sentence typed into the website field (that once took the crawler down).
   const [noSite, setNoSite] = useState(false);
-  const [ans, setAns] = useState<Record<string, string>>({});
+  const [type, setType] = useState("");
+  const [goal, setGoal] = useState<"leads" | "traffic" | "sales" | null>(null);
 
   const [method, setMethod] = useState<ConnectMethod>(null);
   const [siteSaving, setSiteSaving] = useState(false);
   const [siteError, setSiteError] = useState<string | null>(null);
 
-  // Steps 5 and 6 are §25.7's two new screens. They can only show something real once Mr.
-  // Analyst has finished, so the read starts at step 4 — one screen early — and a "thinking"
-  // or "no-pages" answer means the screens are skipped rather than shown empty. The hook keeps
-  // polling on its own until the answer is final, which is also what step 8 waits on below.
-  const understanding = useOnboardingProfile(step >= 4);
+  // Polls /api/onboarding/profile from step 2 on; step 4 waits on it. Stops on its own once the
+  // answer is final.
+  const understanding = useOnboardingProfile(step >= 2);
   const brainReady = understanding?.status === "ready" && !!understanding.profile;
 
-  // WordPress connect
   const [wpUrl, setWpUrl] = useState("");
   const [wpUser, setWpUser] = useState("");
   const [wpPass, setWpPass] = useState("");
-  const [wpTesting, setWpTesting] = useState(false);
-  const [wpResult, setWpResult] = useState<{ ok: boolean; msg: string } | null>(null);
-
-  // Webhook connect (Next.js / custom site — no credentials, just a URL)
   const [webhookUrl, setWebhookUrl] = useState("");
-  const [webhookTesting, setWebhookTesting] = useState(false);
-  const [webhookResult, setWebhookResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [connecting, setConnecting] = useState(false);
+  const [connectError, setConnectError] = useState<string | null>(null);
   const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  // step 8's real progress bar — the same jobs_log rows Site Brain's own bar reads
   const [brainJobs, setBrainJobs] = useState<BrainJobs | null>(null);
   const [showDone, setShowDone] = useState(false);
   const learningStartedAt = useRef<number | null>(null);
   const finalized = useRef(false);
   const doneShown = useRef(false);
-  // finalizeLearning fires from a timer set once step 8 is entered; by the time it fires,
-  // `understanding` closed over at that moment can be stale, so the finish logic always reads
-  // the latest value through this ref instead of the render-time variable.
   const understandingRef = useRef<OnboardingProfile | null>(understanding);
   understandingRef.current = understanding;
 
-  const testWordPress = async () => {
-    if (!wpUrl.trim() || !wpUser.trim() || !wpPass.trim()) {
-      setWpResult({ ok: false, msg: "Site URL, username and application password are all required." });
-      return;
-    }
-    setWpTesting(true);
-    setWpResult(null);
-    try {
-      const res = await fetch("/api/wordpress/test-connection", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ siteUrl: wpUrl.trim(), username: wpUser.trim(), appPassword: wpPass.trim() }),
-      });
-      const data = await res.json();
-      setWpResult({ ok: !!data.ok, msg: data.ok ? `Connected as ${data.name}` : data.error });
-    } catch {
-      setWpResult({ ok: false, msg: "The connection test failed — try again in a moment." });
-    }
-    setWpTesting(false);
-  };
-
-  const testWebhook = async () => {
-    if (!webhookUrl.trim()) {
-      setWebhookResult({ ok: false, msg: "Give us an API route on your own site — this is where we'll post each article." });
-      return;
-    }
-    setWebhookTesting(true);
-    setWebhookResult(null);
-    try {
-      const res = await fetch("/api/webhook/test-connection", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: webhookUrl.trim() }),
-      });
-      const data = await res.json();
-      setWebhookResult({ ok: !!data.ok, msg: data.ok ? "Ping received — your endpoint is live." : data.error });
-    } catch {
-      setWebhookResult({ ok: false, msg: "The test failed — try again in a moment." });
-    }
-    setWebhookTesting(false);
-  };
-
-  const nicheSummary = () => ans.type === "Local service"
+  const nicheSummary = () => type === "Local service"
     ? "Local services for nearby customers — trust, reviews and local visibility matter most"
-    : `Content-led growth for ${(ans.aud || "").toLowerCase()} — clarity and consistency matter most`;
+    : `Content-led growth for a ${(type || "business").toLowerCase()} — clarity and consistency matter most`;
+
+  /** Saves the tenant profile (+ the connection, if one was verified) and moves to learning.
+   *  Same route as before: /api/onboarding/complete. */
+  const finish = async (connection?: { wordpress?: { siteUrl: string; username: string; appPassword: string }; webhook?: { url: string } }) => {
+    let secret: string | null = null;
+    try {
+      const res = await fetch("/api/onboarding/complete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          websiteUrl: site.trim() || null,
+          niche: nicheSummary(),
+          toneProfile: { tone: "Professional", goals: goal ? { primary: goal, kpis: [], focus: [] } : null },
+          icpProfile: { businessType: type || null },
+          wordpress: connection?.wordpress,
+          webhook: connection?.webhook,
+        }),
+      });
+      const data = await res.json();
+      secret = data.webhookSecret ?? null;
+    } catch {
+      // non-fatal — the user still gets through; DB write failures show up in Supabase logs
+    }
+    if (goal) {
+      // The planner reads goals off the Site Brain profile; same PATCH the Site Brain page uses.
+      fetch("/api/site-brain", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ field: "goals", value: { primary: goal, kpis: [], focus: [] } }),
+      }).catch(() => {});
+    }
+    if (secret) setRevealedSecret(secret); // shown once — wait for the user to copy it
+    else setStep(4);
+  };
+
+  /** ONE button: verify the connection and, if it works, save everything and move on. */
+  const connect = async () => {
+    setConnectError(null);
+    setConnecting(true);
+    try {
+      if (method === "wordpress") {
+        if (!wpUrl.trim() || !wpUser.trim() || !wpPass.trim()) { setConnectError("Site URL, username and application password are all required."); return; }
+        const res = await fetch("/api/wordpress/test-connection", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ siteUrl: wpUrl.trim(), username: wpUser.trim(), appPassword: wpPass.trim() }),
+        });
+        const data = await res.json();
+        if (!data.ok) { setConnectError(data.error || "WordPress refused the connection."); return; }
+        await finish({ wordpress: { siteUrl: wpUrl.trim(), username: wpUser.trim(), appPassword: wpPass.trim() } });
+      } else if (method === "webhook") {
+        if (!webhookUrl.trim()) { setConnectError("Enter the API route on your site where we should post each article."); return; }
+        const res = await fetch("/api/webhook/test-connection", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: webhookUrl.trim() }),
+        });
+        const data = await res.json();
+        if (!data.ok) { setConnectError(data.error || "Your endpoint didn't answer the test ping."); return; }
+        await finish({ webhook: { url: webhookUrl.trim() } });
+      }
+    } catch {
+      setConnectError("Couldn't reach the server — try again in a moment.");
+    } finally {
+      setConnecting(false);
+    }
+  };
 
   const finalizeLearning = async () => {
     if (finalized.current) return;
     finalized.current = true;
 
     const u = understandingRef.current;
-    // The background crawler has been running since step 0 (§25.7) and site_pages is unique on
-    // (tenant_id, url), so re-running the old synchronous 15-page crawl on top of it would be
-    // one rejected insert per page for no gain. It stays as the fallback for the case it was
-    // written for: nothing was read in the background at all.
+    // Fallback for the case nothing was read in the background at all (see /api/onboarding/crawl).
     const crawlResult = u?.pagesCrawled
       ? null
       : await fetch("/api/onboarding/crawl", { method: "POST" }).then((r) => r.json()).catch(() => null);
 
-    // The real analyst profile — up to 300 pages, six LLM passes — beats both fallbacks when
-    // it's there; the quick 15-page crawl's own summary is next; the wizard's own answers are
-    // the last resort, for a tenant with no usable website at all.
     const niche = u?.profile?.what_they_do || crawlResult?.niche || nicheSummary();
     const topics: string | undefined = crawlResult?.topics?.length ? crawlResult.topics.join(", ") : undefined;
 
     patch({ onboarded: true });
-    // Straight to the DB (migration 010). These used to be patched into local state only,
-    // so the very first thing the team "learned" was erased by the first sign-out.
     saveMemory([
-      ...(site.trim() ? [{ k: "Website", v: site.trim() }] : []), { k: "Business type", v: ans.type }, { k: "Audience", v: ans.aud },
-      { k: "Brand tone", v: ans.tone }, { k: "Publishing pace", v: ans.pace },
+      ...(site.trim() ? [{ k: "Website", v: site.trim() }] : []),
+      ...(type ? [{ k: "Business type", v: type }] : []),
       { k: "Niche summary", v: niche },
       ...(topics ? [{ k: "Content topics", v: topics }] : []),
-      { k: "Goals", v: "More organic traffic, consistent publishing, and inbound leads" },
+      { k: "Goals", v: GOALS.find((g) => g.key === goal)?.memory ?? "More organic traffic, consistent publishing, and inbound leads" },
     ]);
     act(noSite ? "built the team memory from your answers." : `finished studying <b>${site}</b> and built the team memory.`, "Mr Lxwa");
-    router.push("/whoami");
+    router.push("/dashboard");
   };
 
-  // Drives step 8's exit: waits for the real crawl → analyst chain to resolve (ready or
-  // definitively no-pages), or gives up after LEARNING_CEILING_MS. Either way it shows the
-  // done screen first — finalizeLearning (the actual save + redirect) fires from there, either
-  // on the button or a short automatic fallback, so the customer sees a real "you're set"
-  // moment instead of vanishing straight to the dashboard.
+  // Step 4's exit: wait for the real crawl → analyst chain (ready / no-pages / off), or give up
+  // after the ceiling — either way show the done screen first.
   useEffect(() => {
-    if (step !== 8) return;
+    if (step !== 4) return;
     if (learningStartedAt.current == null) learningStartedAt.current = Date.now();
-
     const arrive = () => {
       if (doneShown.current) return;
       doneShown.current = true;
       setShowDone(true);
     };
-
     if (noSite) {
       const t = setTimeout(arrive, 900);
       return () => clearTimeout(t);
@@ -246,8 +210,6 @@ export default function OnboardingWizard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, noSite, understanding?.status]);
 
-  // Once the done screen is showing, finish on its own after a moment — the button is there
-  // for someone who wants to leave right away, not the only way out.
   useEffect(() => {
     if (!showDone) return;
     const t = setTimeout(finalizeLearning, 2600);
@@ -255,62 +217,22 @@ export default function OnboardingWizard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showDone]);
 
-  // The visual half of step 8: the same jobs_log rows Site Brain's refresh bar polls, purely
-  // for the percentage and step list — the exit above is driven by `understanding`, not this.
+  // The progress bar's data: the same jobs_log rows Site Brain's own bar polls.
   useEffect(() => {
-    if (step !== 8 || noSite || showDone) return;
+    if (step !== 4 || noSite || showDone) return;
     let alive = true;
     const tick = async () => {
       try {
         const d = await fetch("/api/site-brain/status").then((r) => r.json());
         if (alive && d?.ok) setBrainJobs(d.jobs ?? null);
-      } catch {
-        /* the next poll tries again */
-      }
+      } catch { /* next poll */ }
     };
     tick();
     const id = setInterval(tick, 3000);
-    return () => {
-      alive = false;
-      clearInterval(id);
-    };
+    return () => { alive = false; clearInterval(id); };
   }, [step, noSite, showDone]);
 
-  const finish = async () => {
-    // Build Guide Step 4 — persist to Supabase (tenants + integrations)
-    let secret: string | null = null;
-    try {
-      const res = await fetch("/api/onboarding/complete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          // null, not a placeholder sentence — see the note on `noSite` above.
-          websiteUrl: site.trim() || null,
-          niche: nicheSummary(),
-          toneProfile: { tone: ans.tone, audience: ans.aud, pace: ans.pace },
-          icpProfile: { businessType: ans.type, audience: ans.aud },
-          wordpress: method === "wordpress" && wpResult?.ok ? { siteUrl: wpUrl.trim(), username: wpUser.trim(), appPassword: wpPass.trim() } : undefined,
-          webhook: method === "webhook" && webhookResult?.ok ? { url: webhookUrl.trim() } : undefined,
-        }),
-      });
-      const data = await res.json();
-      secret = data.webhookSecret ?? null;
-    } catch {
-      // non-fatal — demo state below still lets the user through; DB write failures show up in Supabase logs
-    }
-
-    if (secret) {
-      setRevealedSecret(secret); // show once — don't auto-advance, wait for the user to copy it
-    } else {
-      setStep(8);
-    }
-  };
-
-  /** §25.7's first line: "Site URL → crawl start (background)". Saving the address here and
-   *  starting the crawl now is what gives the confirm screen something true to show four
-   *  screens later; it used to start after the wizard ended, when it was too late to confirm
-   *  anything. A crawl that will not start is not fatal — /api/onboarding/complete saves the
-   *  address again at the end and the old end-of-wizard crawl still runs. */
+  /** Saves the address and starts the crawl in the background, right now. */
   const startReading = async () => {
     setSiteSaving(true);
     setSiteError(null);
@@ -326,7 +248,7 @@ export default function OnboardingWizard() {
         return;
       }
     } catch {
-      // Offline or a bad gateway: carry on. The address is asked for again at the end.
+      // Offline or a bad gateway: carry on. The address is saved again at the end.
     } finally {
       setSiteSaving(false);
     }
@@ -339,8 +261,6 @@ export default function OnboardingWizard() {
     setCopied(true);
   };
 
-  // step 8's progress bar numbers, straight from lib/brainPhases — identical logic to Site
-  // Brain's own bar (components/dashboard/SiteBrainSection.tsx), just re-themed here.
   const stage = liveStage(brainJobs, null, null);
   const learningPct = noSite ? 100 : brainReady ? 100 : stage ? pctFor(stage) : 2;
   const learningLabel = noSite
@@ -350,12 +270,9 @@ export default function OnboardingWizard() {
       : stage?.job.progress?.label ?? (understanding?.status === "no-pages" ? "Couldn't read the site — continuing with your answers" : "Starting…");
   const stageIdx = stage ? phaseIndex(stage.agent, stage.job.progress.phase ?? null) : -1;
 
-  const q = step >= 1 && step <= 4 ? STEPS[step - 1] : null;
-
   return (
     <div className="ob-page">
       <style dangerouslySetInnerHTML={{ __html: ONBOARDING_CSS }} />
-      <Glow />
       <LeftPanel step={step} total={TOTAL_STEPS} />
 
       <main className="ob-right">
@@ -368,24 +285,24 @@ export default function OnboardingWizard() {
                 <small className="ob-brand-s">GrowthTeam AI</small>
               </div>
             </div>
-            {step < 8 && (
-              <button type="button" className="ob-topskip" onClick={() => setStep(7)}>
+            {step < 3 && (
+              <button type="button" className="ob-topskip" onClick={() => setStep(3)}>
                 Skip <ArrowRight size={14} />
               </button>
             )}
           </div>
 
-          {step < 8 && <StepTrack step={step} total={TOTAL_STEPS} />}
+          {step < 4 && <StepTrack step={step} total={TOTAL_STEPS} />}
 
           {step === 0 && (
             <>
               <h2 className="ob-h1">Connect Your Website</h2>
-              <p className="ob-sub">Let us know your website so we can analyze your content, understand your business and start finding the best opportunities.</p>
+              <p className="ob-sub">We&apos;ll read your site to understand your business and find the best opportunities.</p>
               <div className="ob-browser">
                 <div className="ob-browser-bar"><i /><i /><i /></div>
                 <div className="ob-inputwrap">
                   <span className="ob-ic"><Link2 size={13} /></span>
-                  <input className="ob-input" placeholder="https://yourwebsite.com" value={site} onChange={(e) => setSite(e.target.value)} />
+                  <input className="ob-input" placeholder="https://yourwebsite.com" value={site} onChange={(e) => setSite(e.target.value)} onKeyDown={(e) => e.key === "Enter" && site.trim() && startReading()} />
                 </div>
                 <div className="ob-plats">
                   <div className="ob-plat"><span><SiWordpress size={16} /></span>WordPress</div>
@@ -393,15 +310,11 @@ export default function OnboardingWizard() {
                 </div>
               </div>
               <div className="ob-note">
-                {[
-                  "Secure & read-only access",
-                  "We analyze your existing content",
-                  "No changes to your site",
-                ].map((t) => <div key={t} className="ob-check">{t}</div>)}
+                {["Secure & read-only access", "No changes to your site"].map((t) => <div key={t} className="ob-check">{t}</div>)}
               </div>
               {siteError && <p className="ob-error">{siteError}</p>}
               <div className="ob-actions">
-                <span className="ob-skip" style={{ margin: 0, textAlign: "left" }}>No website yet? <a onClick={() => { setSite(""); setNoSite(true); setStep(1); }}>Describe it instead</a></span>
+                <span className="ob-skip" style={{ margin: 0, textAlign: "left" }}>No website yet? <a onClick={() => { setSite(""); setNoSite(true); setStep(1); }}>Continue without one</a></span>
                 <button className="ob-btn-primary" disabled={!site.trim() || siteSaving} onClick={startReading}>
                   {siteSaving ? "Starting…" : "Next"} <ArrowRight size={15} />
                 </button>
@@ -409,177 +322,103 @@ export default function OnboardingWizard() {
             </>
           )}
 
-          {q && (
+          {step === 1 && (
             <>
-              <h2 className="ob-h1">{q.q}</h2>
-              <p className="ob-sub">{q.sub}</p>
-              {q.tiles ? (
-                <div className="ob-tiles">
-                  {q.opts.map((o, i) => (
-                    <OptTile key={o.v} icon={o.icon} title={o.v} active={ans[q.key] === o.v} colorIndex={i} onClick={() => setAns((a) => ({ ...a, [q.key]: o.v }))} />
-                  ))}
-                </div>
-              ) : (
-                <div className="ob-optlist2">
-                  {q.opts.map((o, i) => (
-                    <OptRow key={o.v} icon={o.icon} title={o.v} active={ans[q.key] === o.v} colorIndex={i} onClick={() => setAns((a) => ({ ...a, [q.key]: o.v }))} />
-                  ))}
-                </div>
-              )}
+              <h2 className="ob-h1">What kind of business is this?</h2>
+              <p className="ob-sub">One tap — this helps the team pick the right topics and tone.</p>
+              <div className="ob-tiles">
+                {TYPES.map((o, i) => (
+                  <OptTile key={o.v} icon={o.icon} title={o.v} active={type === o.v} colorIndex={i} onClick={() => setType(o.v)} />
+                ))}
+              </div>
               <div className="ob-actions">
-                <button className="ob-btn" onClick={() => setStep(step - 1)}><ArrowLeft size={14} /> Back</button>
-                <button className="ob-btn-primary" disabled={!ans[q.key]} onClick={() => setStep(step === 4 && !brainReady ? 7 : step + 1)}>
-                  Next <ArrowRight size={15} />
-                </button>
+                <button className="ob-btn" onClick={() => setStep(0)}><ArrowLeft size={14} /> Back</button>
+                <button className="ob-btn-primary" disabled={!type} onClick={() => setStep(2)}>Next <ArrowRight size={15} /></button>
               </div>
             </>
           )}
 
-          {step === 5 && (
-            brainReady ? (
-              <UnderstandingStep
-                profile={understanding!.profile!}
-                pages={understanding!.builtFromPages ?? understanding!.pagesCrawled}
-                onBack={() => setStep(4)}
-                onContinue={() => setStep(6)}
-              />
-            ) : (
-              // Reached only by pressing Back from the goals screen after the profile went away;
-              // the forward path skips straight past both screens when there is nothing to show.
-              <>
-                <h2 className="ob-h1">Still reading your site…</h2>
-                <p className="ob-sub">We&apos;ll show you what we understood on the Site Brain page once it&apos;s done.</p>
-                <div className="ob-actions">
-                  <button className="ob-btn" onClick={() => setStep(4)}><ArrowLeft size={14} /> Back</button>
-                  <button className="ob-btn-primary" onClick={() => setStep(7)}>Next <ArrowRight size={15} /></button>
-                </div>
-              </>
-            )
+          {step === 2 && (
+            <>
+              <h2 className="ob-h1">What matters most?</h2>
+              <p className="ob-sub">Everything the team plans is pointed at this. You can change it later.</p>
+              <div className="ob-optlist2">
+                {GOALS.map((g, i) => (
+                  <OptRow key={g.key} icon={g.icon} title={g.label} subtitle={g.sub} active={goal === g.key} colorIndex={i} onClick={() => setGoal(g.key)} />
+                ))}
+              </div>
+              <div className="ob-actions">
+                <button className="ob-btn" onClick={() => setStep(1)}><ArrowLeft size={14} /> Back</button>
+                <button className="ob-btn-primary" disabled={!goal} onClick={() => setStep(3)}>Next <ArrowRight size={15} /></button>
+              </div>
+            </>
           )}
 
-          {step === 6 && (
-            <GoalsStep
-              profile={understanding?.profile ?? null}
-              onBack={() => setStep(5)}
-              onContinue={() => setStep(7)}
-            />
-          )}
-
-          {step === 7 && revealedSecret && (
+          {step === 3 && revealedSecret && (
             <>
               <h2 className="ob-h1">Your webhook secret</h2>
-              <p className="ob-sub">
-                This is shown once. Save it in your site&apos;s <code>.env</code> — it&apos;s how your endpoint verifies the signature on each article we send.
-              </p>
+              <p className="ob-sub">Shown once. Put it in your site&apos;s <code>.env</code> as <code>MRLXWA_WEBHOOK_SECRET</code> — it verifies our signature on each article. Setup guide: <a href="/connect/nextjs" target="_blank" rel="noopener" className="ob-link">/connect/nextjs</a></p>
               <div className="ob-secret">
                 <span>{revealedSecret}</span>
                 <button className="ob-btn" onClick={copySecret}>{copied ? "Copied" : "Copy"}</button>
               </div>
-              <p className="ob-hint" style={{ margin: "16px 0 6px" }}>Add a route on your Next.js site that verifies it:</p>
-              <pre className="ob-code">
-{`// app/api/mrlxwa-content/route.ts
-import crypto from "crypto";
-
-export async function POST(req: Request) {
-  const body = await req.text();
-  const sig = req.headers.get("x-mrlxwa-signature");
-  const expected = "sha256=" + crypto
-    .createHmac("sha256", process.env.MRLXWA_WEBHOOK_SECRET!)
-    .update(body).digest("hex");
-  if (sig !== expected) return new Response("bad signature", { status: 401 });
-
-  const article = JSON.parse(body); // { title, body, meta }
-  // save it however you like — your DB, MDX file, git commit, etc.
-  return new Response("ok");
-}`}
-              </pre>
-              <p className="ob-hint" style={{ marginTop: 10 }}>
-                Full setup guide (for your developer): <a href="/connect/nextjs" target="_blank" rel="noopener" className="ob-link">/connect/nextjs</a>
-              </p>
               <div className="ob-actions" style={{ justifyContent: "flex-end" }}>
-                <button className="ob-btn-primary" onClick={() => { setRevealedSecret(null); setStep(8); }}>
+                <button className="ob-btn-primary" onClick={() => { setRevealedSecret(null); setStep(4); }}>
                   Saved it — continue <ArrowRight size={15} />
                 </button>
               </div>
             </>
           )}
 
-          {step === 7 && !revealedSecret && method === null && (
+          {step === 3 && !revealedSecret && method === null && (
             <>
-              <h2 className="ob-h1">Connect Your Platforms</h2>
-              <p className="ob-sub">Link your publishing platform so we can publish your content automatically (after your approval).</p>
+              <h2 className="ob-h1">Where should we publish?</h2>
+              <p className="ob-sub">Every article waits for your approval first — this is just where it goes after.</p>
               <div className="ob-optlist2">
                 <OptRow icon={SiWordpress as any} title="WordPress" subtitle="Publish directly to your WordPress site" active={false} colorIndex={3} onClick={() => setMethod("wordpress")} />
-                <OptRow icon={Link2} title="Webhook" subtitle="Send to your custom endpoint (Next.js or any site)" active={false} colorIndex={0} onClick={() => setMethod("webhook")} />
-                <OptRow icon={Clock} title="I'll do this later" subtitle="Articles wait in Approvals; publishing stays manual until you connect one" active={false} colorIndex={4} onClick={finish} />
-              </div>
-              <div className="ob-note" style={{ marginTop: 14, marginBottom: 0 }}>
-                {["Secure connection", "You stay in control", "Human approval for all publishes"].map((t) => <div key={t} className="ob-check">{t}</div>)}
+                <OptRow icon={Link2} title="Webhook" subtitle="Send to your own endpoint (Next.js or any site)" active={false} colorIndex={0} onClick={() => setMethod("webhook")} />
+                <OptRow icon={Clock} title="I'll do this later" subtitle="Articles wait in Approvals until you connect one" active={false} colorIndex={4} onClick={() => finish()} />
               </div>
               <div className="ob-actions">
-                <button className="ob-btn" onClick={() => setStep(4)}><ArrowLeft size={14} /> Back</button>
+                <button className="ob-btn" onClick={() => setStep(2)}><ArrowLeft size={14} /> Back</button>
               </div>
             </>
           )}
 
-          {step === 7 && !revealedSecret && method === "wordpress" && (
+          {step === 3 && !revealedSecret && method === "wordpress" && (
             <>
               <h2 className="ob-h1">Connect WordPress</h2>
-              <p className="ob-sub">WP Admin → Users → your user → Application Passwords → generate one.</p>
-              <div className="ob-note">
-                {[
-                  "This is NOT your login password — it's a separate, WordPress-generated key",
-                  "Revoke it any time from WP Admin, without changing your real password",
-                ].map((t) => <div key={t} className="ob-check">{t}</div>)}
-              </div>
+              <p className="ob-sub">Use an <b>Application Password</b> (WP Admin → Users → Profile), not your login password.</p>
               <div className="ob-field"><label className="ob-label">Site URL</label><input className="ob-input" placeholder="https://yoursite.com" value={wpUrl} onChange={(e) => setWpUrl(e.target.value)} /></div>
-              <div className="ob-field"><label className="ob-label">Username</label><input className="ob-input" placeholder="admin" value={wpUser} onChange={(e) => setWpUser(e.target.value)} /></div>
-              <div className="ob-field"><label className="ob-label">Application password</label><input className="ob-input" type="password" placeholder="xxxx xxxx xxxx xxxx" value={wpPass} onChange={(e) => setWpPass(e.target.value)} /></div>
-              <button className="ob-btn" style={{ width: "100%" }} disabled={wpTesting} onClick={testWordPress}>
-                {wpTesting ? "Testing…" : "Test connection"}
-              </button>
-              {wpResult && <p className={`ob-result ${wpResult.ok ? "ok" : "err"}`}>{wpResult.msg}</p>}
+              <div className="ob-field"><label className="ob-label">Username</label><input className="ob-input" placeholder="admin" value={wpUser} onChange={(e) => setWpUser(e.target.value)} autoComplete="off" /></div>
+              <div className="ob-field"><label className="ob-label">Application password</label><input className="ob-input" type="password" placeholder="xxxx xxxx xxxx xxxx" value={wpPass} onChange={(e) => setWpPass(e.target.value)} onKeyDown={(e) => e.key === "Enter" && connect()} autoComplete="new-password" /></div>
+              {connectError && <p className="ob-error">{connectError}</p>}
               <div className="ob-actions">
-                <button className="ob-btn" onClick={() => setMethod(null)}><ArrowLeft size={14} /> Back</button>
-                <button className="ob-btn-primary" onClick={finish}>{wpResult?.ok ? "Finish setup" : "Skip for now"} <ArrowRight size={15} /></button>
+                <button className="ob-btn" onClick={() => { setMethod(null); setConnectError(null); }}><ArrowLeft size={14} /> Back</button>
+                <button className="ob-btn-primary" disabled={connecting} onClick={connect}>{connecting ? "Connecting…" : "Connect"} <ArrowRight size={15} /></button>
               </div>
+              <p className="ob-skip"><a onClick={() => finish()}>Skip for now</a></p>
             </>
           )}
 
-          {step === 7 && !revealedSecret && method === "webhook" && (
+          {step === 3 && !revealedSecret && method === "webhook" && (
             <>
-              <h2 className="ob-h1">Connect via webhook</h2>
-              <p className="ob-sub">
-                Give us an API route on your Next.js (or any) site — we&apos;ll post each approved article there. No username or password, just a secret we generate for you.
-              </p>
-              <div className="ob-note">
-                {[
-                  "An article never sits permanently in our database — it goes straight to your endpoint",
-                  "No credentials required — just a public URL",
-                ].map((t) => <div key={t} className="ob-check">{t}</div>)}
-              </div>
-              <p className="ob-hint" style={{ margin: "0 0 12px" }}>
-                Not sure how to build the route? <a href="/connect/nextjs" target="_blank" rel="noopener" className="ob-link">See the full setup guide</a> — you can forward it to your developer.
-              </p>
-              <div className="ob-field"><label className="ob-label">Your API route URL</label><input className="ob-input" placeholder="https://yoursite.com/api/mrlxwa-content" value={webhookUrl} onChange={(e) => setWebhookUrl(e.target.value)} /></div>
-              <button className="ob-btn" style={{ width: "100%" }} disabled={webhookTesting} onClick={testWebhook}>
-                {webhookTesting ? "Testing…" : "Send test ping"}
-              </button>
-              {webhookResult && <p className={`ob-result ${webhookResult.ok ? "ok" : "err"}`}>{webhookResult.msg}</p>}
-              <p className="ob-hint">Haven&apos;t built the route yet? No problem — skip it and connect later.</p>
+              <h2 className="ob-h1">Connect your webhook</h2>
+              <p className="ob-sub">An API route on your site — we post each approved article there and give you a secret to verify it. <a href="/connect/nextjs" target="_blank" rel="noopener" className="ob-link">Setup guide</a></p>
+              <div className="ob-field"><label className="ob-label">Your API route URL</label><input className="ob-input" placeholder="https://yoursite.com/api/mrlxwa-content" value={webhookUrl} onChange={(e) => setWebhookUrl(e.target.value)} onKeyDown={(e) => e.key === "Enter" && connect()} /></div>
+              {connectError && <p className="ob-error">{connectError}</p>}
               <div className="ob-actions">
-                <button className="ob-btn" onClick={() => setMethod(null)}><ArrowLeft size={14} /> Back</button>
-                <button className="ob-btn-primary" onClick={finish}>{webhookResult?.ok ? "Finish setup" : "Skip for now"} <ArrowRight size={15} /></button>
+                <button className="ob-btn" onClick={() => { setMethod(null); setConnectError(null); }}><ArrowLeft size={14} /> Back</button>
+                <button className="ob-btn-primary" disabled={connecting} onClick={connect}>{connecting ? "Connecting…" : "Connect"} <ArrowRight size={15} /></button>
               </div>
+              <p className="ob-skip"><a onClick={() => finish()}>Skip for now</a></p>
             </>
           )}
 
-          {step === 8 && !showDone && (
+          {step === 4 && !showDone && (
             <>
               <h2 className="ob-h1">MrLxwa is learning your business</h2>
-              <p className="ob-sub">
-                {noSite ? "Building the team's memory from what you told us." : "This finishes on its own — you don't need to keep this tab open."}
-              </p>
+              <p className="ob-sub">{noSite ? "Building the team's memory from your answers." : "This finishes on its own — you don't need to keep this tab open."}</p>
               <div className="ob-prog">
                 <div className="ob-prog-h">
                   <span className="ob-dot" />
@@ -604,16 +443,16 @@ export async function POST(req: Request) {
             </>
           )}
 
-          {step === 8 && showDone && (
+          {step === 4 && showDone && (
             <div className="ob-done">
               <div className="ob-done-ic">🚀</div>
               <span className="ob-done-ok"><Check size={22} strokeWidth={3} /></span>
               <h2 className="ob-h1">You&apos;re All Set!</h2>
               <p className="ob-sub">Your AI marketing team is ready to go.<br />Let&apos;s grow your business together!</p>
               <div className="ob-donelist">
-                <div className="ob-donerow"><span><Check size={12} strokeWidth={3} /></span>{noSite ? "Business answers saved" : "Website connected"}</div>
-                <div className="ob-donerow"><span><Check size={12} strokeWidth={3} /></span>Goals set</div>
-                <div className="ob-donerow"><span><Check size={12} strokeWidth={3} /></span>{method && method !== "later" ? "Platforms linked" : "Team memory built"}</div>
+                <div className="ob-donerow"><span><Check size={12} strokeWidth={3} /></span>{noSite ? "Business saved" : "Website connected"}</div>
+                <div className="ob-donerow"><span><Check size={12} strokeWidth={3} /></span>Goal set</div>
+                <div className="ob-donerow"><span><Check size={12} strokeWidth={3} /></span>{method ? "Publishing platform linked" : "Team memory built"}</div>
                 <div className="ob-donerow"><span><Check size={12} strokeWidth={3} /></span>Your account is ready</div>
               </div>
               <button className="ob-btn-primary" style={{ width: "100%" }} onClick={finalizeLearning}>
@@ -622,7 +461,7 @@ export async function POST(req: Request) {
             </div>
           )}
 
-          {step < 8 && (
+          {step < 4 && (
             <div className="ob-dots">
               {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
                 <i key={i} className={i === step ? "on" : i < step ? "done" : ""} />
