@@ -15,7 +15,7 @@ import { placeOrder, findPublishable, findLatestPublished, listPending, cancelOr
 import { approveAndPublish, unpublishContent } from "@/lib/publish";
 import { classifyIntent, mightBeAnOrder } from "@/lib/chat-classify";
 import { enqueueAgentJob } from "@/lib/agent-jobs";
-import { loadBusiness, loadCounts, loadRecentWork, loadSchedule, type Counts, type Turn } from "@/lib/chat-context";
+import { loadBusiness, loadCounts, loadGreetingFacts, loadRecentWork, loadSchedule, type Counts, type GreetingFacts, type Turn } from "@/lib/chat-context";
 import type { SystemEventPayload } from "@/lib/chat-events";
 import * as brain from "@/lib/brain";
 import { brainTurn, legacyJobOf, type BrainTurn, type BrainTurnDeps, type OrderResult } from "@/lib/chat-brain";
@@ -439,9 +439,23 @@ function once(text: string): ReadableStream<Uint8Array> {
 
 function fallback(q: string, ctx: any): string {
   if (q === "__hello__") {
-    return `Salam! 👋 Ask me about your **tokens**, **today's work**, your **schedule**, or say **"write an article"** and the team starts.`;
+    return `Hi! 👋 Ask me about your **tokens**, **today's work**, your **schedule**, or say **"write an article"** and the team starts.`;
   }
   return `I'm having trouble reaching my brain right now — try again in a moment. Meanwhile: **${ctx.awaiting ?? 0}** item(s) await your approval.`;
+}
+
+/** The very first bubble in a new chat. Signed out, or no tenant yet, or the lookup failed —
+ *  all fall back to the old one-size sentence (fallback() above). Otherwise it names the site
+ *  and, only when one is actually booked, the next thing the team will do — one short line
+ *  either way, not a stacked "no schedule, but here's a paragraph about it instead". */
+function helloMessage(facts: GreetingFacts | null): string {
+  if (!facts?.name) return fallback("__hello__", {});
+
+  const head = `Hi **${facts.name}**! 👋`;
+  if (!facts.next) return `${head} What would you like to work on today — an article, or something else?`;
+
+  const outcome = facts.next.lands === "publishes straight to the site" ? "will be published" : facts.next.lands === "nothing published" ? "will run" : "will land in your Approvals queue";
+  return `${head} Per your schedule, **${facts.next.what}** ${outcome} **${facts.next.when}**.`;
 }
 
 /* ── Orders ──────────────────────────────────────────────────────────────────────────── */
@@ -893,15 +907,22 @@ async function runBrainTurn(
 /** Fills the caches while nobody is waiting, so the first real question doesn't pay for them.
  *  Every failure here is silent by design: this is an optimisation, and a warm-up that breaks
  *  must never break the greeting it rides on. */
-async function warm() {
-  const supabase = await createClient();
+/** Cached "who is asking" — hashed session cookie → {userId, tenantId}. Shared by warm() and
+ *  the hello greeting below so both hit the same cache entry instead of two auth.getUser()
+ *  calls on the same request. */
+async function resolveWho(supabase: SupabaseClient): Promise<{ userId: string | null; tenantId: string | null } | null> {
   const sk = sessionKey((await cookies()).getAll());
-  if (!sk) return;
-  const who = await cached(sk, TTL.session, async () => {
+  if (!sk) return null;
+  return cached(sk, TTL.session, async () => {
     const { data: { user } } = await supabase.auth.getUser();
     return { userId: user?.id ?? null, tenantId: user ? await getCurrentTenantId(supabase) : null };
   });
-  if (!who.tenantId) return;
+}
+
+async function warm() {
+  const supabase = await createClient();
+  const who = await resolveWho(supabase);
+  if (!who?.tenantId) return;
   await Promise.all([
     cached(`biz:${who.tenantId}`, TTL.business, () => loadBusiness(supabase, who.tenantId)),
     cached(`sched:${who.tenantId}`, TTL.schedule, () => loadSchedule(supabase, who.tenantId)),
@@ -916,15 +937,25 @@ export async function POST(req: NextRequest) {
   const clientHistory = cleanHistory(rawHistory);
   const askedFor = typeof conversationId === "string" ? conversationId : null;
 
-  // "__hello__" is a silent UI trigger (the chat auto-opens with a greeting) — a fixed message
-  // never needed a model call, and now it doesn't need a database round trip either.
-  //
-  // It does, however, arrive several seconds before the first real question, which makes it
-  // the perfect moment to go and fetch everything that question will need. The greeting
-  // returns immediately; the warm-up runs behind it.
+  // "__hello__" is a silent UI trigger (the chat auto-opens with a greeting) — never needed a
+  // model call. It still needs the tenant's name and next scheduled run, though (that's the
+  // whole point of the greeting), so it pays for one cached auth lookup + one cached "what's
+  // next" query rather than the seven-hop round trip the rest of this file was rewritten to
+  // avoid. Everything else the *next* real question will need (business, recent work, counts)
+  // still loads in the background behind the response — see warm() below.
   if (q === "__hello__") {
+    let facts: GreetingFacts | null = null;
+    try {
+      const supabase = await createClient();
+      const who = await resolveWho(supabase);
+      if (who?.tenantId) {
+        facts = await cached(`greet:${who.tenantId}`, TTL.schedule, () => loadGreetingFacts(supabase, who.tenantId));
+      }
+    } catch (e: any) {
+      console.error("[chat] hello personalization failed (harmless):", e?.message);
+    }
     void warm().catch((e) => console.error("[chat] warm-up failed (harmless):", e?.message));
-    return new Response(once(fallback(q, ctx || {})), { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    return new Response(once(helloMessage(facts)), { headers: { "Content-Type": "text/plain; charset=utf-8" } });
   }
 
   // Phase stopwatch. Kept in shipped code on purpose: "the chat feels slow" is unanswerable

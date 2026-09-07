@@ -260,6 +260,94 @@ export async function loadPendingOrders(supabase: SupabaseClient, tenantId: stri
   return `One-off orders the user booked in this chat, not yet fired (${lines.length}):\n${lines.join("\n")}`;
 }
 
+const GREETING_KIND_LABEL: Record<string, string> = {
+  article: "article",
+  publish: "article",
+  write: "article",
+  plan: "content plan",
+  research: "keyword research",
+  social: "social media post",
+};
+
+export type GreetingFacts = {
+  name: string | null;
+  website: string | null;
+  next: { when: string; what: string; lands: string } | null;
+};
+
+/** "https://www.example.com/anything" → "Example". `tenants.name` can't be used for this: it
+ *  is set once, at signup, to the user's OWN email prefix (lib/supabase/tenant.ts) and nothing
+ *  in the app ever changes it afterwards — so every tenant's "business name" was really just
+ *  whoever happened to sign up. The site's own domain is the one name on file that is actually
+ *  about the site. */
+function siteLabelFromUrl(url: string): string | null {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "");
+    const base = host.split(".")[0];
+    return base ? base.charAt(0).toUpperCase() + base.slice(1) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** What the very first chat bubble greets you with: your own site's name and, if one is
+ *  coming, the next thing the team will do — instead of the same fixed sentence for every
+ *  tenant. Kept separate from loadBusiness/loadSchedule (which answer real questions with the
+ *  full reference block) because a greeting needs one short clause, not a page of facts. */
+export async function loadGreetingFacts(supabase: SupabaseClient, tenantId: string | null): Promise<GreetingFacts | null> {
+  if (!tenantId) return null;
+  try {
+    const [{ data: tenant }, { data: schedules }, { data: oneOffs }] = await Promise.all([
+      supabase.from("tenants").select("website_url").eq("id", tenantId).maybeSingle(),
+      supabase.from("schedules").select("*").eq("tenant_id", tenantId).eq("enabled", true),
+      supabase
+        .from("scheduled_orders")
+        .select("kind, run_at, auto_publish")
+        .eq("tenant_id", tenantId)
+        .eq("status", "pending")
+        .order("run_at", { ascending: true })
+        .limit(5),
+    ]);
+
+    type Candidate = { at: Date; kind: string; lands: string };
+    const candidates: Candidate[] = [];
+    for (const s of schedules ?? []) {
+      const at = nextRunAt(s);
+      if (at) candidates.push({ at, kind: s.kind, lands: s.auto_publish ? "publishes straight to the site" : "lands in Approvals for review" });
+    }
+    for (const o of oneOffs ?? []) {
+      candidates.push({
+        at: new Date(o.run_at),
+        kind: o.kind,
+        lands: o.kind === "research" ? "nothing published" : o.auto_publish ? "publishes straight to the site" : "lands in Approvals for review",
+      });
+    }
+    candidates.sort((a, b) => a.at.getTime() - b.at.getTime());
+    const soonest = candidates[0] ?? null;
+    // Two automations booked for the exact same slot (e.g. an article and a social post both
+    // at 9am) read as one line — "1 article and 1 social media post" — not two greetings.
+    const sameSlot = soonest ? candidates.filter((c) => c.at.getTime() === soonest.at.getTime()) : [];
+
+    const website = tenant?.website_url ?? null;
+    return {
+      name: website ? siteLabelFromUrl(website) : null,
+      website,
+      next: soonest
+        ? {
+            when: untilPhrase(soonest.at),
+            what: Array.from(new Set(sameSlot.map((c) => GREETING_KIND_LABEL[c.kind] ?? c.kind)))
+              .map((label) => `1 ${label}`)
+              .join(" and "),
+            lands: soonest.lands,
+          }
+        : null,
+    };
+  } catch (e: any) {
+    console.error("[chat] greeting facts failed:", e?.message);
+    return null;
+  }
+}
+
 export const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 /** "Wednesday 26 August, 09:00 Asia/Calcutta" — a time a person can repeat out loud. */
