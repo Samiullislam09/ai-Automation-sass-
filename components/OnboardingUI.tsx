@@ -155,13 +155,23 @@ export function OptTile({
 export const SHARED_CSS = `
 .ob-logo{display:inline-flex;align-items:center;justify-content:center;border-radius:10px;
   background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;flex-shrink:0}
+/* Chrome paints autofilled inputs a grey-blue of its own; keep ours white with our text colour. */
+input:-webkit-autofill,input:-webkit-autofill:hover,input:-webkit-autofill:focus{
+  -webkit-box-shadow:0 0 0 1000px #fff inset;-webkit-text-fill-color:#0f172a;caret-color:#0f172a;
+  transition:background-color 9999s ease-out 0s}
+/* The page ground: off-white with a faint dot grid and a soft indigo wash at the top — texture,
+   not colour blobs. */
+.ob-ground{background-color:#f7f8fc;
+  background-image:radial-gradient(circle at 1px 1px,rgba(99,102,241,.13) 1px,transparent 0),
+    linear-gradient(180deg,rgba(232,236,255,.95) 0%,rgba(247,248,252,0) 42%);
+  background-size:24px 24px,100% 100%}
 `;
 
 /* Light theme, two columns. Injected with dangerouslySetInnerHTML — React escapes ">" inside a
    <style> text child, which turns every child selector into a hydration mismatch. */
 export const ONBOARDING_CSS = SHARED_CSS + `
 .ob-page{position:relative;min-height:100vh;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);
-  background:#f7f8fc;font-family:Inter,"Segoe UI",system-ui,sans-serif;color:#0f172a}
+  font-family:Inter,"Segoe UI",system-ui,sans-serif;color:#0f172a}
 .ob-page::before{content:"";position:absolute;right:0;top:0;width:52%;height:100%;pointer-events:none;
   background:linear-gradient(160deg,rgba(219,234,254,.45),rgba(237,233,254,.25));clip-path:ellipse(72% 82% at 100% 42%)}
 .ob-left,.ob-right{position:relative;z-index:1;min-height:0}

@@ -271,7 +271,7 @@ export default function OnboardingWizard() {
   const stageIdx = stage ? phaseIndex(stage.agent, stage.job.progress.phase ?? null) : -1;
 
   return (
-    <div className="ob-page">
+    <div className="ob-page ob-ground">
       <style dangerouslySetInnerHTML={{ __html: ONBOARDING_CSS }} />
       <LeftPanel step={step} total={TOTAL_STEPS} />
 

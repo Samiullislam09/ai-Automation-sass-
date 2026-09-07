@@ -99,7 +99,7 @@ export function AuthCard({ mode }: { mode: "login" | "signup" }) {
   const login = mode === "login";
 
   return (
-    <div className="au-page">
+    <div className="au-page ob-ground">
       <style dangerouslySetInnerHTML={{ __html: SHARED_CSS + CSS }} />
 
       <aside className="au-left">
@@ -266,7 +266,7 @@ export function AuthCard({ mode }: { mode: "login" | "signup" }) {
 
 const CSS = `
 .au-page{position:relative;min-height:100vh;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);
-  background:#f7f8fc;font-family:Inter,"Segoe UI",system-ui,sans-serif;color:#0f172a}
+  font-family:Inter,"Segoe UI",system-ui,sans-serif;color:#0f172a}
 .au-page::before{content:"";position:absolute;right:0;top:0;width:52%;height:100%;pointer-events:none;
   background:linear-gradient(160deg,rgba(219,234,254,.45),rgba(237,233,254,.25));clip-path:ellipse(72% 82% at 100% 42%)}
 .au-left,.au-right{position:relative;z-index:1;min-height:0}
