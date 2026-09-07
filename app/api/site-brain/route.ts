@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
+import { resolveWebsiteUrl } from "@/lib/website-url";
 import {
   PROFILE_FIELDS,
   coerceField,
@@ -69,10 +70,17 @@ export async function GET() {
 
   const schemaReady = !(error as any)?.code || (error as any).code !== MISSING_TABLE;
 
+  // Self-healing, same as the /api/integrations connect fix: a tenant connected before that
+  // fix shipped (or via a path that predates it) can have a WordPress/webhook row marked
+  // "connected" with `tenants.website_url` still empty. Recover it here too, so simply
+  // opening this page — not just reconnecting — is enough to catch up.
+  const websiteUrl = !(pagesCrawled ?? 0) ? await resolveWebsiteUrl(supabase, tenantId) : null;
+
   return NextResponse.json({
     ok: true,
     schemaReady,
     pagesCrawled: pagesCrawled ?? 0,
+    hasWebsite: !!websiteUrl,
     profile: active ? normalizeProfile(active.profile) : null,
     version: active ? Number(active.version) || 1 : null,
     builtAt: active?.created_at ?? null,

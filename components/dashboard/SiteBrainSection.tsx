@@ -39,6 +39,7 @@ type Payload = {
   error?: string;
   schemaReady: boolean;
   pagesCrawled: number;
+  hasWebsite: boolean;
   profile: SiteProfile | null;
   version: number | null;
   builtAt: string | null;
@@ -162,6 +163,19 @@ export default function SiteBrainSection() {
           sinceVersion: d?.version ?? null,
           startedAt: Date.parse(live.job.createdAt) || Date.now(),
         });
+      } else if (d && d.pagesCrawled === 0 && d.hasWebsite) {
+        // Found live 2026-09-07: a tenant can have a connected website and zero pages —
+        // /api/site-brain's own GET just backfilled `tenants.website_url` for exactly this
+        // case, but backfilling the column doesn't start a crawl by itself. Catch up here
+        // instead of leaving the page stuck on an empty state with no button that fixes it.
+        const res = await fetch("/api/agents/trigger", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "crawler" }),
+        }).then((r) => r.json()).catch(() => ({ ok: false }));
+        if (res?.ok) {
+          setPolling({ sinceCrawler: j?.crawler?.id ?? null, sinceAnalyst: j?.analyst?.id ?? null, sinceVersion: d.version ?? null, startedAt: Date.now() });
+        }
       }
     });
   }, [load, fetchStatus]);
@@ -326,9 +340,13 @@ export default function SiteBrainSection() {
       <Shell banner={banner}>
         <Empty
           Icon={PlugZap}
-          title="We haven't read your site yet"
-          body="The Site Brain is built from your own pages. Connect your website and we'll read it — then this page fills itself in."
-          action={<Link href="/dashboard/connect" className="sb-primary">Connect your website</Link>}
+          title={s.hasWebsite ? "Reading your site now" : "We haven't read your site yet"}
+          body={
+            s.hasWebsite
+              ? "Your website is connected. We've already started reading it — this page fills itself in on its own, usually within a few minutes."
+              : "The Site Brain is built from your own pages. Connect your website and we'll read it — then this page fills itself in."
+          }
+          action={s.hasWebsite ? undefined : <Link href="/dashboard/connect" className="sb-primary">Connect your website</Link>}
         />
       </Shell>
     );

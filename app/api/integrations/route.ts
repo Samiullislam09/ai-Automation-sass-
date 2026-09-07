@@ -3,6 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
 import { encrypt } from "@/lib/crypto";
 import { generateWebhookSecret, signPayload } from "@/lib/webhook";
+import { enqueueAgentJob } from "@/lib/agent-jobs";
+import { resolveWebsiteUrl } from "@/lib/website-url";
 
 /** Everything the Connect page (/app/connect) talks to.
  *
@@ -150,7 +152,26 @@ export async function POST(request: NextRequest) {
   });
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
 
-  return NextResponse.json({ ok: true, type, status, secret: revealSecret });
+  // A CMS/website connection is a promise that the team now knows this business — Site Brain
+  // and Memory are both built from `site_pages`, and nothing writes that table except a crawl.
+  // Backfill `tenants.website_url` from what was just connected (self-healing, same as an
+  // already-broken tenant visiting /dashboard/site-brain — see resolveWebsiteUrl's own
+  // comment), then start the crawl if this tenant has never had one. Only once: a tenant that
+  // already has pages is being reconnected/re-tested, not onboarded, and must not pay for a
+  // fresh 300-page crawl every time they hit "Test & save".
+  let crawlStarted = false;
+  if (type === "wordpress" || type === "webhook") {
+    const site = await resolveWebsiteUrl(supabase, tenantId);
+    if (site) {
+      const { count } = await supabase.from("site_pages").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId);
+      if (!count) {
+        const started = await enqueueAgentJob("crawler", tenantId, { taskLabel: "Reading your site" });
+        crawlStarted = started.ok;
+      }
+    }
+  }
+
+  return NextResponse.json({ ok: true, type, status, secret: revealSecret, crawlStarted });
 }
 
 export async function DELETE(request: NextRequest) {
