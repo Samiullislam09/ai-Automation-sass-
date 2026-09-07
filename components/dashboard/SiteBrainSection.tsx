@@ -65,6 +65,7 @@ export default function SiteBrainSection() {
   const [refreshing, setRefreshing] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [openField, setOpenField] = useState<ProfileField | null>(null);
+  const [showPages, setShowPages] = useState(false);
   const [jobs, setJobs] = useState<BrainJobs | null>(null);
   // `since*`: the rows that already existed when we started watching (the previous run's), so
   // a finished older run is never mistaken for this one — and `sinceVersion` is the profile
@@ -383,9 +384,12 @@ export default function SiteBrainSection() {
           <div className="sb-card-k">Read from your site</div>
           <div className="sb-card-v">{s.builtFrom?.pages ?? s.pagesCrawled} pages</div>
           <div className="sb-card-s">&nbsp;</div>
-          <button className="sb-card-a" disabled={refreshing || !!polling} onClick={() => refresh("crawler")}>
-            {refreshing ? "Starting…" : polling ? "Working…" : "Read again"}
-          </button>
+          <div style={{ display: "flex", gap: 12 }}>
+            <button className="sb-card-a" onClick={() => setShowPages(true)}>View pages</button>
+            <button className="sb-card-a" disabled={refreshing || !!polling} onClick={() => refresh("crawler")}>
+              {refreshing ? "Starting…" : polling ? "Working…" : "Read again"}
+            </button>
+          </div>
         </div>
 
         <div className="sb-card">
@@ -452,6 +456,8 @@ export default function SiteBrainSection() {
           onGo={setOpenField}
         />
       )}
+
+      {showPages && <PagesModal onClose={() => setShowPages(false)} />}
 
       <SiteBrainFieldStyles />
     </Shell>
@@ -623,6 +629,57 @@ function FieldPopup({ field, profile, busy, onSave, onClose, onGo }: {
   );
 }
 
+/** The list behind the "N pages" count — lazily fetched only when opened (see
+ *  app/api/site-brain/pages/route.ts's own comment on why this isn't part of the main GET). */
+function PagesModal({ onClose }: { onClose: () => void }) {
+  const [pages, setPages] = useState<{ title: string; url: string }[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", esc);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    fetch("/api/site-brain/pages")
+      .then((r) => r.json())
+      .then((d) => (d.ok ? setPages(d.pages ?? []) : setError(d.error || "Couldn't load the page list.")))
+      .catch(() => setError("Couldn't load the page list — network error."));
+    return () => { window.removeEventListener("keydown", esc); document.body.style.overflow = prev; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div className="sb-modal" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="sb-sheet" onClick={(e) => e.stopPropagation()}>
+        <header className="sb-sheet-h">
+          <div className="min-w-0 flex-1">
+            <div className="sb-sheet-t">Pages we&rsquo;ve read</div>
+            <div className="sb-sheet-s">{pages ? `${pages.length} page${pages.length === 1 ? "" : "s"}` : "Loading…"}</div>
+          </div>
+          <button className="sb-x" onClick={onClose} aria-label="Close"><X size={16} /></button>
+        </header>
+        <div className="lx-scroll sb-sheet-b">
+          {error ? (
+            <p className="lx-11 lx-mut">{error}</p>
+          ) : !pages ? (
+            <div className="sb-loading"><Loader2 size={16} className="sb-spin lx-mut" /><span className="lx-11 lx-mut">Loading…</span></div>
+          ) : pages.length === 0 ? (
+            <p className="lx-11 lx-mut">Nothing read yet.</p>
+          ) : (
+            <ol className="sb-pagelist">
+              {pages.map((p) => (
+                <li key={p.url}>
+                  <a href={p.url} target="_blank" rel="noopener noreferrer" title={p.url}>{p.title}</a>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Empty({ Icon, title, body, action }: { Icon: React.ElementType; title: string; body: string; action?: React.ReactNode }) {
   return (
     <div className="sb-empty">
@@ -709,6 +766,10 @@ const CSS = `
 .sb-navbtn{display:inline-flex;align-items:center;gap:6px;max-width:48%;height:32px;padding:0 12px;border-radius:9px;
   background:#101018;border:1px solid #1e1e2b;color:#a8a8bd;font-size:11.5px;font-weight:600;cursor:pointer;transition:.15s}
 .sb-navbtn:hover{color:#fff;border-color:#3a3a52}
+.sb-pagelist{margin:0;padding:0;list-style:none}
+.sb-pagelist li+li{border-top:1px solid #1a1a26}
+.sb-pagelist a{display:block;padding:9px 2px;font-size:12.5px;color:#c8c8d8;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sb-pagelist a:hover{color:#a5b4fc}
 .sb-hist{margin-top:10px;border-radius:12px;background:#101018;border:1px solid #1e1e2b;overflow:hidden}
 .sb-hist-r{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;padding:9px 13px}
 .sb-hist-r+.sb-hist-r{border-top:1px solid #1a1a26}

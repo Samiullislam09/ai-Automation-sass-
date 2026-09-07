@@ -2,9 +2,17 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
-  Brain, Check, Globe, Link2, Loader2, Pencil, Plus, Search, Trash2, X,
+  Brain, Check, ChevronRight, Globe, Link2, Loader2, Pencil, Plus, Search, Trash2, X,
 } from "lucide-react";
 import { useStore } from "@/lib/store";
+import { isFieldEmpty, normalizeProfile, previewOf, FRIENDLY_LABEL, type ProfileField, type SiteProfile } from "@/components/SiteBrainModel";
+
+/** The read-only half of "where this comes from": once Mr. Analyst has actually read the site
+ *  (components/dashboard/SiteBrainSection.tsx builds the full twenty-field version), the most
+ *  useful of those fields are worth showing here too — without duplicating an editor. This list
+ *  is deliberately a curated subset, in the order a business owner would want to see them, not
+ *  every field Site Brain has. */
+const SITE_FACT_FIELDS: ProfileField[] = ["what_they_do", "audience", "offerings", "usp", "pricing", "geo", "credentials", "cta"];
 
 /** /dashboard/memory — third pass, 2026-09-05. The owner didn't like the stat strip + four
  *  tabs + insight dumps ("sirf wo data dena hai jo zaroori ho… user friendly layout… colour
@@ -45,6 +53,7 @@ export default function MemorySection() {
   const [status, setStatus] = useState<Status | null>(null);
   const [loading, setLoading] = useState(true);
   const [insights, setInsights] = useState<any>(null);
+  const [profile, setProfile] = useState<SiteProfile | null>(null);
 
   useEffect(() => {
     fetch("/api/dashboard/status")
@@ -56,7 +65,15 @@ export default function MemorySection() {
       .then((r) => (r.ok ? r.json() : null))
       .then(setInsights)
       .catch(() => {});
+    // Read-only: what Mr. Analyst has already worked out, straight from the same table Site
+    // Brain edits. Nothing here is stored a second time — this just renders the live profile.
+    fetch("/api/site-brain")
+      .then((r) => r.json())
+      .then((d) => { if (d?.ok && d.profile) setProfile(normalizeProfile(d.profile)); })
+      .catch(() => {});
   }, []);
+
+  const siteFacts = profile ? SITE_FACT_FIELDS.filter((f) => !isFieldEmpty(profile, f)) : [];
 
   const save = (i: number) => {
     saveMemory(s.memory.map((m: any, j: number) => (j === i ? { ...m, v: val } : m)));
@@ -148,6 +165,23 @@ export default function MemorySection() {
                 </div>
               ))}
             </div>
+          )}
+
+          {/* ---------------- what site brain already knows (read-only) ---------------- */}
+          {siteFacts.length > 0 && (
+            <>
+              <div className="mm-sec mt-6">From your Site Brain</div>
+              <p className="lx-11 lx-mut mt-1">Read off your site by Mr. Analyst. Correct these on the Site Brain page, not here.</p>
+              <div className="mm-grid mt-2">
+                {siteFacts.map((f) => (
+                  <Link key={f} href="/dashboard/site-brain" className="mm-fact mm-fact-link">
+                    <div className="mm-k">{FRIENDLY_LABEL[f]}</div>
+                    <div className="mm-v mm-v-link">{previewOf(profile!, f)}</div>
+                    <ChevronRight size={13} className="mm-fact-go" />
+                  </Link>
+                ))}
+              </div>
+            </>
           )}
 
           {/* ---------------- where it comes from ---------------- */}
@@ -244,6 +278,11 @@ const CSS = `
 .mm-fact{position:relative;padding:13px 14px;border-radius:12px;background:#101018;border:1px solid #1e1e2b;transition:.15s}
 .mm-fact:hover{border-color:#2c2c40;background:#12121c}
 .mm-fact.editing{border-color:rgba(99,102,241,.55)}
+.mm-fact-link{display:block;text-decoration:none;padding-right:34px}
+.mm-fact-link:hover{border-color:rgba(99,102,241,.5)}
+.mm-v-link{padding-right:0}
+.mm-fact-go{position:absolute;top:14px;right:12px;color:#5f5f78;transition:.15s}
+.mm-fact-link:hover .mm-fact-go{color:#8f95ff}
 .mm-k{font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:#7c7c95}
 .mm-v{margin-top:5px;padding-right:56px;font-size:13.5px;line-height:1.55;color:#e9e9f2;overflow-wrap:anywhere}
 .mm-acts{position:absolute;top:10px;right:10px;display:flex;gap:4px;opacity:0;transition:opacity .15s}
