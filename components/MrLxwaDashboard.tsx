@@ -1269,6 +1269,10 @@ export default function MrLxwaDashboard({
   // done, instead of the bubble sitting on "On it" forever while the real answer only ever shows
   // up in Workspace/Approvals.
   const orderedTaskId = useRef<string | null>(null);
+  // The in-flight turn's own controller, so the Stop button (owner, 2026-09-10: "jaisa ChatGPT
+  // Claude pe hota hai, ek esc/pause btn") can actually abort the fetch instead of just hiding
+  // it — a real ChatGPT/Claude-style stop, not a cosmetic one.
+  const streamAbortRef = useRef<AbortController | null>(null);
   // The same order, in state rather than a ref, purely so LiveRunPanel can say "Queued" the
   // instant the chat accepts it. Cleared as soon as a real task or a working agent shows up —
   // it is a placeholder for the first second or two, never a claim of its own.
@@ -1405,6 +1409,8 @@ export default function MrLxwaDashboard({
   const stream = async (q: string) => {
     setChatBusy(true);
     setThread((p) => [...p, { who: "ai", text: "", time: nowTime(), live: true }]);
+    const controller = new AbortController();
+    streamAbortRef.current = controller;
     let full = "";
     // Flips the still-empty bubble from "…" to a "still working" line after 6s. `send()`
     // blocks a second order while `chatBusy`, so exactly one live bubble exists at a time —
@@ -1429,6 +1435,7 @@ export default function MrLxwaDashboard({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ q, ctx: {}, history, conversationId: convId.current }),
+        signal: controller.signal,
       });
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
       const returned = res.headers.get("X-Conversation-Id");
@@ -1467,7 +1474,19 @@ export default function MrLxwaDashboard({
         next[next.length - 1] = { ...next[next.length - 1], text: full, live: false };
         return next;
       });
-    } catch {
+    } catch (e: any) {
+      if (e?.name === "AbortError") {
+        // The user hit Stop (below) — a real abort of this fetch, not a network failure. Drop
+        // both this turn's bubbles (the user's message and whatever partial reply arrived) and
+        // hand their own words back to the composer so they can change it and send again, same
+        // as the owner asked for ("dobara us chat pe changes karke send kare"). The task-cancel
+        // half (if this turn had already become a real order) happens in stopGenerating() below
+        // — this catch only ever runs after that has already been requested.
+        setThread((p) => p.slice(0, -2));
+        setMsg(q);
+        requestAnimationFrame(() => msgInputRef.current?.focus());
+        return; // `finally` below still clears the timer and chatBusy
+      }
       // Whatever streamed in stays on screen; an empty bubble forever (with no way to retry)
       // was worse than showing a plain, honest failure line.
       setThread((p) => {
@@ -2058,6 +2077,25 @@ export default function MrLxwaDashboard({
     setBotOpen(true);
     setDesktopAssistantOpen(true);
     void stream(text);
+  };
+
+  /** The composer's Stop button (owner, 2026-09-10: "jaisa ChatGPT Claude pe hota hai" — a real
+   *  stop, not cosmetic). Aborting the fetch only stops what WE show; if this turn had already
+   *  been accepted as a real order (X-Run-Job already seen — orderedTaskId.current is set the
+   *  instant that happens, well before the live feed hydrates a `task` object), the actual work
+   *  is still running on the server and needs the same real cancel door cancelCurrentTask() uses
+   *  — called directly by id here since `task` cannot be trusted to already point at it yet
+   *  ("100% accurate hoga, turant har task cancel ho jayega"). */
+  const stopGenerating = () => {
+    streamAbortRef.current?.abort();
+    const jobId = orderedTaskId.current;
+    if (jobId) {
+      orderedTaskId.current = null;
+      setPendingOrder(null);
+      fetch(`/api/tasks/${jobId}/cancel`, { method: "POST" })
+        .then(() => live.reload())
+        .catch(() => {});
+    }
   };
 
   // Real cancel — POSTs to app/api/tasks/[id]/cancel, which is the thin server-side door onto
@@ -2724,15 +2762,30 @@ export default function MrLxwaDashboard({
             className="lx-11 w-full resize-none bg-transparent py-1.5 disabled:opacity-60"
             style={{ border: "none", color: "var(--lx-text)", maxHeight: 88, overflowY: "auto" }}
           />
-          <button
-            onClick={send}
-            disabled={chatBusy || !msg.trim()}
-            aria-label="Send"
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-white disabled:opacity-50"
-            style={{ background: "linear-gradient(135deg,#4f46e5,#8b5cf6)", border: "none", cursor: chatBusy ? "default" : "pointer", boxShadow: "0 0 12px rgba(124,58,237,.5)" }}
-          >
-            <Send size={13} />
-          </button>
+          {/* Send/Stop share one slot, ChatGPT/Claude-style: mid-reply this is a real Stop (see
+              stopGenerating — aborts the fetch and, if an order was already accepted, cancels
+              the real task too), not just a disabled Send. */}
+          {chatBusy ? (
+            <button
+              onClick={stopGenerating}
+              aria-label="Stop generating"
+              title="Stop"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-white"
+              style={{ background: "#3f3f4a", border: "1px solid var(--lx-border)", cursor: "pointer" }}
+            >
+              <Square size={11} fill="#fff" stroke="#fff" />
+            </button>
+          ) : (
+            <button
+              onClick={send}
+              disabled={!msg.trim()}
+              aria-label="Send"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-white disabled:opacity-50"
+              style={{ background: "linear-gradient(135deg,#4f46e5,#8b5cf6)", border: "none", cursor: "pointer", boxShadow: "0 0 12px rgba(124,58,237,.5)" }}
+            >
+              <Send size={13} />
+            </button>
+          )}
         </div>
       </div>
     </aside>
