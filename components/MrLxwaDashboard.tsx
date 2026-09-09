@@ -420,7 +420,10 @@ function taskTitle(task: { kind?: string | null; echo?: string | null } | null |
   const subject = task.echo ? (task.echo.match(/"([^"]+)"/)?.[1] ?? null) : null;
   const known = task.kind ? TASK_TITLES[task.kind] : undefined;
   if (known) return known(subject);
-  const firstSegment = task.echo?.split(" · ")[0]?.trim();
+  // Fallback only, for a kind this map doesn't know yet — echoLine (lib/chat-brain-intent.ts)
+  // writes full sentences now ("Keyword research for "X". Starting now…"), so the first clause
+  // is everything up to the first ". ", not the old " · "-joined format.
+  const firstSegment = task.echo?.split(/\.\s/)[0]?.trim();
   return firstSegment ? firstSegment.charAt(0).toUpperCase() + firstSegment.slice(1) : "Task";
 }
 
