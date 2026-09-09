@@ -44,7 +44,7 @@ import "@/lib/dns-fix";
 import { NVIDIA_URL, chatModelsInOrder, modelParams } from "@/lib/chat-model";
 import { openFastCompletion } from "@/lib/ai/fastChat";
 import { parseWhen, describeWhen, type When } from "@/lib/when";
-import { wantsAutoPublish } from "@/lib/chat-intent";
+import { isRealTopic, wantsAutoPublish } from "@/lib/chat-intent";
 import type { BrainRegistry } from "@/lib/brain";
 import {
   ANSWER_QUESTION,
@@ -153,10 +153,61 @@ const ACTION_LABEL: Record<string, string> = {
   find_leads: "Finding leads",
 };
 
-/** The one line the user sees when they are asked to confirm, and the receipt after.
+/** Words that describe the REQUEST, not a subject. "find a good keyword for my article" hands
+ *  the model `topic: "article"` — a perfectly ordinary word that isRealTopic() (built for
+ *  "null" and sentence fragments) lets straight through — and the customer then watched the
+ *  timeline say `Keyword research · "article"` and the title read "Keyword Research: article"
+ *  (found live 2026-09-10 on Vercel). Same idea as lib/chat-classify.ts's FILLER: strip the
+ *  request words and see whether anything is left. */
+const REQUEST_WORDS =
+  /\b(?:best|good|top|new|next|some|any|my|our|the|an?|for|about|on|please|keywords?|key ?word|artic\w*|blogs?|posts?|content|topics?|research|write|writing|draft|likh\w*|nikal\w*|dhund\w*|dhoond\w*|banao|website|site)\b/gi;
+
+function isRealSubject(v: string): boolean {
+  if (!isRealTopic(v)) return false;
+  const residue = v.replace(REQUEST_WORDS, " ").replace(/[^\p{L}\p{N}\s-]/gu, " ").replace(/\s+/g, " ").trim();
+  return /[\p{L}]{3,}/u.test(residue);
+}
+
+/** The subject the customer actually named, or null. `topic` is the field every manifest uses
+ *  for the subject, so it is read first; any other string param is a fallback for an agent
+ *  that names its subject field differently. */
+function subjectOf(params: Record<string, unknown>): string | null {
+  const topic = params.topic;
+  if (typeof topic === "string" && topic.trim().length > 2) return topic.trim();
+  for (const [k, v] of Object.entries(params)) {
+    if (k === "topic") continue;
+    if (typeof v === "string" && v.trim().length > 2) return v.trim();
+  }
+  return null;
+}
+
+/** Roman-Hindi / Hinglish, as a cheap word test — enough to pick which of two written
+ *  sentences to send back, never used to decide anything about the order itself. */
+export function looksHinglish(message: string): boolean {
+  return /\b(?:karo|kar\s+do|karna|hai|hain|mujhe|mere|mera|liye|liya|dhundo|dhoondo|dhundho|likho|likhna|nikalo|batao|chahiye|kya|aap|tum|bhai|acha|achha|theek|thik|wala|wali|abhi|kal)\b/i.test(
+    String(message ?? "")
+  );
+}
+
+/** How an action's label joins onto its subject in a sentence. "Writing the article" already
+ *  carries its noun, so the subject follows directly; "Keyword research" needs "for";
+ *  "Research" reads best with "on". */
+const SUBJECT_JOIN: Record<string, string> = {
+  write_article: "",
+  research_brief: "on",
+};
+
+/** The one line the user sees when they are asked to confirm, the receipt after, and the
+ *  first line of the task's timeline — a plain English sentence, not a " · "-joined record
+ *  (owner 2026-09-10: `Keyword research · "article" · now · your Approvals queue` read as
+ *  "ajib sa"). Built from the action's own English label, the subject they named (kept in
+ *  double quotes on purpose — components/MrLxwaDashboard.tsx's taskTitle() reads it back out
+ *  with /"([^"]+)"/), the time in their zone, and where the result lands.
  *
- *  Built from the action's own English label, plus the subject they named, the time in their
- *  zone, and where the result lands. */
+ *  Shapes:
+ *    Keyword research for "ISO 9001 certification". Starting now. Results will land in your Approvals queue.
+ *    Writing the article "X". Scheduled: in 3 days — Thu 10 Sept at 03:37 pm (Asia/Calcutta). It will be published directly to your site.
+ *    Site audit. Starting now. Results will land in your Approvals queue. */
 export function echoLine(
   found: EnabledAction,
   params: Record<string, unknown>,
@@ -167,12 +218,12 @@ export function echoLine(
 ): string {
   const spec = found.spec;
   const what = ACTION_LABEL[spec.id] ?? spec.id.replace(/_/g, " ");
-  const subject = Object.entries(params)
-    .filter(([, v]) => typeof v === "string" && v.trim().length > 2)
-    .map(([, v]) => String(v).trim())[0];
-  const at = when ? `${describeWhen(when.at, tz, now)} (${tz})` : "now";
-  const lands = delivery === "publish" ? "published directly to your site" : "your Approvals queue";
-  return [what, subject ? `"${subject}"` : null, at, lands].filter(Boolean).join(" · ");
+  const subject = subjectOf(params);
+  const join = SUBJECT_JOIN[spec.id] ?? "for";
+  const headline = subject ? `${what} ${join ? `${join} ` : ""}"${subject}"` : what;
+  const timing = when ? `Scheduled: ${describeWhen(when.at, tz, now)} (${tz}).` : "Starting now.";
+  const lands = delivery === "publish" ? "It will be published directly to your site." : "Results will land in your Approvals queue.";
+  return `${headline}. ${timing} ${lands}`;
 }
 
 /** What Mr. Lxwa actually says, in the chat, the moment a reversible action starts running
@@ -181,39 +232,66 @@ export function echoLine(
  *  going stale (it sat in the transcript unchanged for the whole run). The fix was never "say
  *  nothing" — it was "say something real instead of a status that goes stale" (owner
  *  2026-09-09: "kaam shuru hone se pehle mujhe ek message aana chahiye ... jo bhi task ho").
+ *
+ *  This is the FALLBACK only — the model writes the real line itself (lib/chat-tools.ts's
+ *  REPLY_FIELD) and this runs when it left that field out. Two sentences per action, English
+ *  and Hinglish, and looksHinglish() on the customer's own message picks: an English question
+ *  answered in Hinglish read as the product not listening (found live 2026-09-10 on Vercel).
  *  One real sentence per action, same reason ACTION_LABEL is a table and not a formatter:
  *  "Working on X" repeated for every action reads like a template, not a teammate talking to
  *  you. An action with no entry here still gets a real sentence, built from the same
  *  id-to-words fallback ACTION_LABEL uses, so a new agent needs no update here either. */
-const ACK_LINE: Record<string, (subject: string | null) => string> = {
-  crawl_site: () => "Theek hai, main aapki poori website dobara padh raha hoon.",
-  build_site_profile: () => "Theek hai, main aapke business ko dobara samajh raha hoon.",
-  plan_topics: () => "Theek hai, main is hafte ke topics plan kar raha hoon.",
-  pick_topic: () => "Theek hai, main agla best topic choose kar raha hoon.",
-  find_keywords: (s) =>
-    `Theek hai, main aapke liye best keywords dhoond raha hoon${s ? ` "${s}" ke liye` : ""} jo aap agle article ke liye use kar sakte hain.`,
-  write_article: (s) => `Theek hai, main${s ? ` "${s}" par` : ""} article likhna shuru kar raha hoon.`,
-  research_brief: (s) => `Theek hai, main${s ? ` "${s}" par` : ""} research kar raha hoon.`,
-  make_images: () => "Theek hai, main images bana raha hoon.",
-  make_image: () => "Theek hai, main ek image bana raha hoon.",
-  make_story: () => "Theek hai, main ek Web Story bana raha hoon.",
-  check_seo: () => "Theek hai, main SEO check kar raha hoon.",
-  publish_article: () => "Theek hai, main ise publish kar raha hoon.",
-  audit_site: () => "Theek hai, main aapki site ka audit kar raha hoon.",
-  draft_social: () => "Theek hai, main social posts draft kar raha hoon.",
-  find_leads: () => "Theek hai, main aapke liye leads dhoond raha hoon.",
+type AckPair = { en: (subject: string | null) => string; hi: (subject: string | null) => string };
+const ACK_LINE: Record<string, AckPair> = {
+  crawl_site: {
+    en: () => "Got it — I'm reading through your whole website again now.",
+    hi: () => "Theek hai, main aapki poori website dobara padh raha hoon.",
+  },
+  build_site_profile: {
+    en: () => "Got it — I'm re-analyzing your business from your site now.",
+    hi: () => "Theek hai, main aapke business ko dobara samajh raha hoon.",
+  },
+  plan_topics: {
+    en: () => "Got it — I'm planning this week's topics for you now.",
+    hi: () => "Theek hai, main is hafte ke topics plan kar raha hoon.",
+  },
+  pick_topic: {
+    en: () => "Got it — I'm choosing the best next topic for you now.",
+    hi: () => "Theek hai, main agla best topic choose kar raha hoon.",
+  },
+  find_keywords: {
+    en: (s) => `Got it — I'm finding the best keywords for you${s ? ` around "${s}"` : ""} now, ready for your next article.`,
+    hi: (s) =>
+      `Theek hai, main aapke liye best keywords dhoond raha hoon${s ? ` "${s}" ke liye` : ""} jo aap agle article ke liye use kar sakte hain.`,
+  },
+  write_article: {
+    en: (s) => `Got it — I'm starting on your article${s ? ` about "${s}"` : ""} now.`,
+    hi: (s) => `Theek hai, main${s ? ` "${s}" par` : ""} article likhna shuru kar raha hoon.`,
+  },
+  research_brief: {
+    en: (s) => `Got it — I'm researching${s ? ` "${s}"` : " this"} for you now.`,
+    hi: (s) => `Theek hai, main${s ? ` "${s}" par` : ""} research kar raha hoon.`,
+  },
+  make_images: { en: () => "Got it — I'm creating the images now.", hi: () => "Theek hai, main images bana raha hoon." },
+  make_image: { en: () => "Got it — I'm creating the image now.", hi: () => "Theek hai, main ek image bana raha hoon." },
+  make_story: { en: () => "Got it — I'm creating the Web Story now.", hi: () => "Theek hai, main ek Web Story bana raha hoon." },
+  check_seo: { en: () => "Got it — I'm running the SEO check now.", hi: () => "Theek hai, main SEO check kar raha hoon." },
+  publish_article: { en: () => "Got it — I'm publishing it now.", hi: () => "Theek hai, main ise publish kar raha hoon." },
+  audit_site: { en: () => "Got it — I'm auditing your site now.", hi: () => "Theek hai, main aapki site ka audit kar raha hoon." },
+  draft_social: { en: () => "Got it — I'm drafting the social posts now.", hi: () => "Theek hai, main social posts draft kar raha hoon." },
+  find_leads: { en: () => "Got it — I'm finding leads for you now.", hi: () => "Theek hai, main aapke liye leads dhoond raha hoon." },
 };
 
-export function ackLine(found: EnabledAction, params: Record<string, unknown>): string {
-  const subject =
-    Object.entries(params)
-      .filter(([, v]) => typeof v === "string" && v.trim().length > 2)
-      .map(([, v]) => String(v).trim())[0] ?? null;
+export function ackLine(found: EnabledAction, params: Record<string, unknown>, message = ""): string {
+  const subject = subjectOf(params);
   const spec = found.spec;
-  const fn = ACK_LINE[spec.id];
-  if (fn) return fn(subject);
+  const hinglish = looksHinglish(message);
+  const pair = ACK_LINE[spec.id];
+  if (pair) return hinglish ? pair.hi(subject) : pair.en(subject);
   const what = (ACTION_LABEL[spec.id] ?? spec.id.replace(/_/g, " ")).toLowerCase();
-  return `Theek hai, main ${what}${subject ? ` "${subject}"` : ""} shuru kar raha hoon.`;
+  return hinglish
+    ? `Theek hai, main ${what}${subject ? ` "${subject}"` : ""} shuru kar raha hoon.`
+    : `Got it — I'm starting on ${what}${subject ? ` for "${subject}"` : ""} now.`;
 }
 
 /** One tool call → the plan. Pure, and the only place a tool call turns into an order — the
@@ -232,6 +310,13 @@ export function planFromToolCall(
   if (!found || name === ANSWER_QUESTION) return nothingOrdered();
 
   const params = coerceParams(found.spec, args ?? {});
+  // A `topic` that only names the request ("article", "keywords", "content") is no topic at
+  // all — see isRealSubject. Dropped rather than kept, so it never reaches the agent as a seed
+  // and never shows up in the echo/title. For the actions where `topic` is also a `need`
+  // (find_keywords, write_article in the real manifests), the planner then fills it from the
+  // customer's own site via pick_topic — missingSlots() already treats a graph-filled field as
+  // provided, so this does not turn into a question.
+  if (typeof params.topic === "string" && !isRealSubject(params.topic)) delete params.topic;
   const when = resolveWhen(ctx.message, (args ?? {})[WHEN_FIELD], ctx.tz, now);
   const delivery = resolveDelivery(ctx.message, (args ?? {})[DELIVERY_FIELD]);
 
@@ -277,6 +362,8 @@ function systemPrompt(): string {
     "- Fill only the arguments the user actually gave you. Never invent a topic, a name, or a number. Leaving a " +
       "required argument out is correct and safe — they will be asked.",
     "- Copy time words verbatim into " + WHEN_FIELD + ". Do not convert them, do not compute a date.",
+    "- " + REPLY_FIELD + " MUST be in the same language and script as the user's latest message: an English message gets " +
+      "professional English, a Hinglish / Roman Hindi message gets Hinglish. Never switch languages on them.",
     "- Do not write any prose. The tool call is the whole answer.",
   ].join("\n");
 }

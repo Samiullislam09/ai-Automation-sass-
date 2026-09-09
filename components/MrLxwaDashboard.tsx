@@ -84,6 +84,8 @@ import {
   XCircle,
   User,
   LogOut,
+  Star,
+  Square,
 } from "lucide-react";
 
 /* ========================================================================== */
@@ -541,45 +543,106 @@ const KeywordScreen = ({
     );
   }
 
+  return <KeywordOpportunities items={items} onWriteArticle={onWriteArticle} />;
+};
+
+/** The finished keyword table, laid out to the owner's reference mockup (2026-09-10): a titled
+ *  card of rows — keyword, then compact cells, then one "Use" action — with the best-fit row
+ *  highlighted and everything past five rows behind "View more". The mockup also drew Intent,
+ *  Trend and CPC columns; agents/keyword.ts sends none of those, and inventing them would break
+ *  the one rule this panel lives by (real fields only), so the columns here are exactly what the
+ *  agent measured: source, volume, competition, fit. Shown as a real card layout rather than a
+ *  bare <table> so it reads the same on the phone (narrow columns collapse via .hide-sm). */
+const KeywordOpportunities = ({
+  items,
+  onWriteArticle,
+}: {
+  items: { key: string; payload: any }[];
+  onWriteArticle: (keyword: string) => void;
+}) => {
+  const [showAll, setShowAll] = useState(false);
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const SOURCE_SHORT: Record<string, string> = {
+    dataforseo: "DataForSEO",
+    gsc: "Search Console",
+    autocomplete: "Autocomplete",
+    ai: "AI estimate",
+  };
+  const fmtVol = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1).replace(/\.0$/, "")}K` : String(v));
+  const compColor = (level: unknown) =>
+    level === "low" ? "#4ade80" : level === "medium" ? "#fbbf24" : level === "high" ? "#f87171" : undefined;
+  const compLabel = (level: unknown) =>
+    level === "low" ? "Low" : level === "medium" ? "Med" : level === "high" ? "High" : "—";
+  const fitColor = (pct: number) => (pct >= 50 ? "#4ade80" : pct >= 35 ? "#fbbf24" : "#8b8ba0");
+
+  if (items.length === 0) return <div className="lx-10 lx-mut px-1 py-2">No keywords were produced.</div>;
+
+  // Best-fit row first only for the highlight decision — the list itself keeps the agent's own
+  // order, which is already ranked (agents/keyword.ts sorts by measured volume, then fit).
+  let bestKey: string | null = null;
+  let bestFit = -1;
+  for (const it of items) {
+    const f = num(it.payload?.fitScore);
+    if (f != null && f > bestFit) { bestFit = f; bestKey = it.key; }
+  }
+  if (bestKey == null && items.length) bestKey = items[0].key;
+
+  const LIMIT = 5;
+  const visible = showAll ? items : items.slice(0, LIMIT);
+
   return (
-    <div className="lx-scroll" style={{ overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 420 }}>
-        <thead>
-          <tr className="lx-10 lx-mut" style={{ textAlign: "left" }}>
-            <th style={{ padding: "6px 8px", fontWeight: 600 }}>Keyword</th>
-            <th style={{ padding: "6px 8px", fontWeight: 600, whiteSpace: "nowrap" }}>Volume</th>
-            <th style={{ padding: "6px 8px", fontWeight: 600, whiteSpace: "nowrap" }}>Competition</th>
-            <th style={{ padding: "6px 8px", fontWeight: 600, whiteSpace: "nowrap" }}>Fit</th>
-            <th style={{ padding: "6px 8px" }} />
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((it) => {
-            const p = it.payload ?? {};
-            const vol = num(p.searchVolume);
-            const fit = num(p.fitScore);
-            return (
-              <tr key={it.key} style={{ borderTop: "1px solid var(--lx-border)" }}>
-                <td className="lx-11" style={{ padding: "8px", color: "#e6e6f2" }}>
-                  {p.keyword ?? "?"}
-                  {p.gsc ? <span className="lx-pill green ml-2">already ranking</span> : null}
-                </td>
-                {/* "not measured" is the honest word when the free source has no number —
-                    never a 0, which would read as "nobody searches this". */}
-                <td className="lx-11 lx-mut" style={{ padding: "8px", whiteSpace: "nowrap" }}>{vol != null ? `${vol}/mo` : "not measured"}</td>
-                <td className="lx-11 lx-mut" style={{ padding: "8px", whiteSpace: "nowrap" }}>{p.competitionLevel ?? "—"}</td>
-                <td className="lx-11 lx-mut" style={{ padding: "8px", whiteSpace: "nowrap" }}>{fit != null ? `${Math.round(fit * 100)}%` : "—"}</td>
-                <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>
-                  <button className="lx-ghost lx-10" style={{ padding: "4px 9px" }} onClick={() => onWriteArticle(String(p.keyword ?? ""))}>
-                    Write article
-                  </button>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      {items.length === 0 && <div className="lx-10 lx-mut px-1 py-2">No keywords were produced.</div>}
+    <div className="lx-kwo">
+      <div className="lx-kwo-head">
+        <span className="lx-kwo-title">Keyword opportunities</span>
+        <span className="lx-kwo-count">{items.length} found</span>
+      </div>
+      <div className="lx-kwo-grid lx-kwo-th">
+        <span>Keyword</span>
+        <span className="hide-sm">Source</span>
+        <span className="hide-sm">Volume</span>
+        <span className="hide-sm">Competition</span>
+        <span className="hide-sm">Fit</span>
+        <span>Action</span>
+      </div>
+      {visible.map((it) => {
+        const p = it.payload ?? {};
+        const vol = num(p.searchVolume);
+        const fit = num(p.fitScore);
+        const fitPct = fit != null ? Math.round(fit * 100) : null;
+        const best = it.key === bestKey;
+        return (
+          <div key={it.key} className={`lx-kwo-grid lx-kwo-row${best ? " best" : ""}`}>
+            <div className="lx-kwo-kw">
+              <span className="lx-kwo-mark">{best ? <Star size={12} /> : <span className="h-2 w-2 rounded-sm" style={{ background: "currentColor", opacity: 0.4 }} />}</span>
+              <span className="lx-kwo-text">
+                {p.keyword ?? "?"}
+                {p.gsc ? <span className="lx-pill green ml-2" style={{ padding: "1px 7px", fontSize: 10 }}>already ranking</span> : null}
+              </span>
+            </div>
+            <span className="lx-kwo-cell hide-sm">
+              {p.source && SOURCE_SHORT[p.source] ? <span className="lx-kwo-src">{SOURCE_SHORT[p.source]}</span> : <span className="lx-mut">—</span>}
+            </span>
+            {/* "—" when the free source has no number — never a 0, which would read as "nobody
+                searches this". */}
+            <span className={`lx-kwo-cell hide-sm${vol == null ? " mut" : ""}`}>{vol != null ? fmtVol(vol) : "—"}</span>
+            <span className="lx-kwo-cell hide-sm" style={{ color: compColor(p.competitionLevel), fontWeight: compColor(p.competitionLevel) ? 600 : undefined }}>
+              {compLabel(p.competitionLevel)}
+            </span>
+            <span className="lx-kwo-cell hide-sm" style={{ color: fitPct != null ? fitColor(fitPct) : undefined, fontWeight: 600 }}>
+              {fitPct != null ? `${fitPct}%` : "—"}
+            </span>
+            <button className="lx-kwo-use" onClick={() => onWriteArticle(String(p.keyword ?? ""))} title="Write an article for this keyword">
+              Use
+            </button>
+          </div>
+        );
+      })}
+      {items.length > LIMIT && (
+        <button className="lx-kwo-more" onClick={() => setShowAll((s) => !s)}>
+          {showAll ? "Show less" : `View more (${items.length - LIMIT})`}
+          <ChevronDown size={14} style={{ transform: showAll ? "rotate(180deg)" : undefined, transition: "transform .18s" }} />
+        </button>
+      )}
     </div>
   );
 };
@@ -1248,6 +1311,14 @@ export default function MrLxwaDashboard({
   // panel is closed, so the next auto-open follows the work again rather than being stuck on
   // an agent the user looked at ten minutes ago.
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  // Follow the work: the moment a DIFFERENT agent starts running, drop whatever tab the user
+  // had clicked so the panel opens on the one now working (owner, 2026-09-10: "jo working hai
+  // wohi tab apne aap open hoke rahe"). A click still sticks for as long as that same agent is
+  // the one running; only a real hand-off resets it. Keyed off the id, not the object.
+  useEffect(() => {
+    setSelectedAgentId(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workingAgent?.id]);
   // The panel used to require `workingAgent`, so it vanished the instant the last step finished
   // — the user watched it disappear exactly when the result became worth reading. It now stays
   // on whatever task it was opened for until the user closes it (X), which is also what makes
@@ -2176,23 +2247,44 @@ export default function MrLxwaDashboard({
           {/* Tabs = the agents that actually worked on THIS order (§24.4b). They used to be five
               fixed labels that all rendered the same thing; now each one switches the screen
               above to that agent's own output and its own timeline below. */}
+          {/* Each tab wears its own step's real state (owner, 2026-09-10): a green check once its
+              step is done, an animated "working" while it runs, and a disabled "Not started"
+              until the plan reaches it — all read off task.steps, never a fixed label. The
+              working agent's tab is also the one that auto-opens (see the follow-the-work
+              effect next to selectedAgentId). */}
           <div className="lx-scroll mt-3 flex gap-5 overflow-x-auto border-b" style={{ borderColor: "var(--lx-border)" }}>
-            {taskAgents.map((a) => (
-              <button
-                key={a.id}
-                className={`lx-tab ${panelAgent?.id === a.id ? "on" : ""}`}
-                onClick={() => setSelectedAgentId(a.id)}
-                title={`${a.name} — ${a.status}`}
-              >
-                <span className="flex items-center gap-1.5 whitespace-nowrap">
-                  <span
-                    className={`h-1.5 w-1.5 rounded-full ${a.status === "Working" ? "lx-pulse" : ""}`}
-                    style={{ background: STATUS_COLOR[a.status] }}
-                  />
-                  {a.name}
-                </span>
-              </button>
-            ))}
+            {taskAgents.map((a) => {
+              const mine = (task?.steps ?? []).filter((s) => s.agent_id === a.id);
+              const running = mine.some((s) => s.status === "running");
+              const failed = !running && mine.some((s) => s.status === "failed");
+              const done = !running && !failed && mine.length > 0 && mine.some((s) => s.status === "done") && mine.every((s) => isTerminalStep(s.status));
+              const notStarted = !running && !failed && !done && mine.length > 0 && mine.every((s) => s.status === "pending");
+              const state = running ? "working" : done ? "done" : failed ? "failed" : notStarted ? "idle" : "";
+              return (
+                <button
+                  key={a.id}
+                  className={`lx-tab ${state} ${panelAgent?.id === a.id ? "on" : ""}`}
+                  onClick={() => setSelectedAgentId(a.id)}
+                  disabled={notStarted}
+                  title={notStarted ? `${a.name} — not started yet` : `${a.name} — ${running ? "working" : done ? "done" : failed ? "failed" : a.status}`}
+                >
+                  <span className="flex items-center gap-1.5 whitespace-nowrap">
+                    {done ? (
+                      <CheckCircle2 size={13} style={{ color: "#22c55e", flexShrink: 0 }} />
+                    ) : failed ? (
+                      <XCircle size={13} style={{ color: "#ef4444", flexShrink: 0 }} />
+                    ) : running ? (
+                      <span className="lx-pulse h-1.5 w-1.5 rounded-full" style={{ background: "#3b82f6", boxShadow: "0 0 8px #3b82f6" }} />
+                    ) : (
+                      <span className="h-1.5 w-1.5 rounded-full" style={{ background: "#5c5c72" }} />
+                    )}
+                    {a.name}
+                    {running && <span className="lx-shimmer lx-10 ml-0.5" style={{ color: "#93c5fd" }}>working…</span>}
+                    {notStarted && <span className="lx-10 ml-0.5" style={{ color: "var(--lx-dim)" }}>Not started</span>}
+                  </span>
+                </button>
+              );
+            })}
             {taskAgents.length === 0 && <span className="lx-tab lx-mut">No agents on this order yet</span>}
           </div>
 
@@ -2540,7 +2632,9 @@ export default function MrLxwaDashboard({
                   void cancelCurrentTask();
                 }}
               >
-                <XCircle size={14} />
+                <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full border" style={{ borderColor: "#ef4444" }}>
+                  <Square size={7} fill="#ef4444" stroke="#ef4444" />
+                </span>
               </button>
             )}
             <ChevronDown
@@ -2681,8 +2775,10 @@ export default function MrLxwaDashboard({
             onClick={cancelCurrentTask}
             disabled={!!cancellingTaskId}
           >
-            <span className="relative flex h-3 w-3 items-center justify-center rounded-full border" style={{ borderColor: "#f87171" }}>
-              <span className="h-1 w-1 rounded-sm" style={{ background: "#f87171" }} />
+            {/* A filled square — the universal "stop" glyph. The old circle-with-a-dot read as a
+                record button, not stop (owner, 2026-09-10). */}
+            <span className="relative flex h-3.5 w-3.5 items-center justify-center rounded-full border" style={{ borderColor: "#f87171" }}>
+              <Square size={7} fill="#f87171" stroke="#f87171" />
             </span>
             {cancellingTaskId ? "Stopping…" : "Stop Task"}
           </button>

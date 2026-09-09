@@ -262,6 +262,13 @@ export function isTerminalStep(s: StepStatus): boolean {
   return TERMINAL_STEP.indexOf(s) >= 0;
 }
 
+/** The task ended because the work was done — as opposed to failed/cancelled/needs_attention.
+ *  Only these may finalize a step that never reported its own finish (see finalizeSteps). */
+const SUCCESS_TASK: TaskStatus[] = ["done", "published", "awaiting_approval"];
+function isSuccessTask(s: TaskStatus): boolean {
+  return SUCCESS_TASK.indexOf(s) >= 0;
+}
+
 /** Status is monotonic. This is what makes out-of-order delivery harmless: a `step_finished`
  *  that overtakes its `step_started` leaves the step done, and the late `step_started` only
  *  fills in the label it was carrying. */
@@ -439,6 +446,43 @@ function upsertStep(steps: StepState[], key: string, seed: Partial<StepState> & 
   return copy;
 }
 
+/** Which StepState an agent-level event belongs to.
+ *
+ *  An agent's own `step_started`/`step_finished`/`progress` carry the agent's INTERNAL sub-step
+ *  id (`ctx.step("search", …)` in agent-contract/context.ts — "search", "score", …), never the
+ *  `task_steps` row uuid that hydrateTask keys the PLANNED step by (and that `task_failed` /
+ *  `step_skipped` address by `no`). Keying by the event's step_id alone therefore created a
+ *  second, parallel step per sub-step while the planned row sat `pending` forever — found live
+ *  2026-09-10: a finished 1-step keyword task still read "Step 0 of 1 · 0%", its Stop button live,
+ *  because that one planned step had never been touched by anything but the initial hydrate.
+ *
+ *  Order: an exact key match first (a hydrated row whose id the agent really does use, and every
+ *  test that speaks in step ids); else the agent's own planned step that is still open (by `no`,
+ *  lowest first); else the event's step_id as its own key, exactly as before. */
+function resolveStepKey(steps: StepState[], agentId: string | null, stepId: string | null): { key: string; planned: boolean } | null {
+  if (stepId && steps.some((s) => s.key === stepId)) return { key: stepId, planned: false };
+  if (agentId) {
+    const open = steps
+      .filter((s) => s.agent_id === agentId && s.no != null && !isTerminalStep(s.status))
+      .sort((a, b) => a.no! - b.no!)[0];
+    if (open) return { key: open.key, planned: true };
+  }
+  return stepId ? { key: stepId, planned: false } : null;
+}
+
+/** The task is over because the work succeeded: any step still pending/running is finished by
+ *  definition (the orchestrator only emits a success `task_finished` once every required
+ *  task_steps row is terminal). Failed/skipped/cancelled steps keep their own word. */
+function finalizeSteps(steps: StepState[], at: number, only?: (s: StepState) => boolean): StepState[] {
+  let out = steps;
+  for (const s of steps) {
+    if (isTerminalStep(s.status)) continue;
+    if (only && !only(s)) continue;
+    out = upsertStep(out, s.key, { agent_id: s.agent_id }, { status: "done", finishedAt: at, fraction: 1 });
+  }
+  return out;
+}
+
 function upsertPane(panes: AgentPane[], agentId: string, patch: (p: AgentPane) => AgentPane): AgentPane[] {
   const i = panes.findIndex((p) => p.agent_id === agentId);
   if (i < 0) return panes.concat(patch({ agent_id: agentId, status: "idle", kinds: [], items: [], lastEventAt: 0 }));
@@ -523,10 +567,15 @@ export function foldEvents(state: LiveState, incoming: IncomingEvent): LiveState
       setTask("running");
       break;
 
-    case "task_finished":
+    case "task_finished": {
       t.finishedAt = t.finishedAt ?? at;
-      setTask((e.status as TaskStatus) ?? "done");
+      const status = (e.status as TaskStatus) ?? "done";
+      setTask(status);
+      // The work is over; a planned step that never reported its own finish (see resolveStepKey)
+      // is finished by definition. Not for failed/cancelled — those keep the truth of what broke.
+      if (isSuccessTask(status)) t.steps = finalizeSteps(t.steps, at);
       break;
+    }
 
     case "task_failed":
       t.finishedAt = t.finishedAt ?? at;
@@ -569,31 +618,47 @@ export function foldEvents(state: LiveState, incoming: IncomingEvent): LiveState
       }
       break;
 
-    case "step_started":
+    case "step_started": {
       setTask("running");
+      const target = resolveStepKey(t.steps, agentId, stepId);
+      // A sub-step landing on the planned step: its label becomes the step's live label and a
+      // later sub-step's startedAt must not move the step's own start back — hence `?? at` only
+      // when the planned step has none yet.
+      const cur = target ? t.steps.find((s) => s.key === target.key) : undefined;
       t.steps = upsertStep(
         t.steps,
-        stepId ?? `${agentId}#${t.steps.length + 1}`,
+        target?.key ?? `${agentId}#${t.steps.length + 1}`,
         { agent_id: agentId ?? "?", step_id: stepId },
-        { label: e.label, status: "running", startedAt: at },
+        { label: e.label, status: "running", startedAt: cur?.startedAt ?? at },
         runId,
       );
       if (agentId) t.agents = upsertPane(t.agents, agentId, (p) => ({ ...p, status: "running", lastEventAt: Math.max(p.lastEventAt, at) }));
       break;
+    }
 
-    case "step_finished":
+    case "step_finished": {
+      const target = resolveStepKey(t.steps, agentId, stepId);
+      if (target?.planned) {
+        // One of the agent's sub-steps ended — the planned step is still this agent's turn until
+        // its run finishes (`run_finished`) or the task does (`task_finished`). Only the clock.
+        if (agentId) t.agents = upsertPane(t.agents, agentId, (p) => ({ ...p, lastEventAt: Math.max(p.lastEventAt, at) }));
+        break;
+      }
       t.steps = upsertStep(
         t.steps,
-        stepId ?? `${agentId}#${t.steps.length + 1}`,
+        target?.key ?? `${agentId}#${t.steps.length + 1}`,
         { agent_id: agentId ?? "?", step_id: stepId },
         { status: "done", finishedAt: at, ms: e.ms, fraction: 1 },
         runId,
       );
       if (agentId) t.agents = upsertPane(t.agents, agentId, (p) => ({ ...p, lastEventAt: Math.max(p.lastEventAt, at) }));
       break;
+    }
 
     case "progress": {
-      const key = stepId ?? (agentId ? t.steps.find((s) => s.agent_id === agentId && s.status === "running")?.key : undefined);
+      const key =
+        resolveStepKey(t.steps, agentId, stepId)?.key ??
+        (agentId ? t.steps.find((s) => s.agent_id === agentId && s.status === "running")?.key : undefined);
       if (key) {
         const cur = t.steps.find((s) => s.key === key);
         // Only forward. A progress event that overtook a later one must not rewind the bar.
@@ -634,6 +699,10 @@ export function foldEvents(state: LiveState, incoming: IncomingEvent): LiveState
           status: p.status === "failed" ? p.status : "done",
           lastEventAt: Math.max(p.lastEventAt, at),
         }));
+        // The agent's whole run succeeded — the orchestrator marks its task_steps row done on
+        // exactly this event, so the planned step this run was (see resolveStepKey) is done too.
+        // Only the step it was actually running: a queued later step of the same agent stays put.
+        t.steps = finalizeSteps(t.steps, at, (s) => s.agent_id === agentId && s.status === "running");
       }
       break;
 
@@ -769,6 +838,10 @@ export function hydrateTask(state: LiveState, snap: { task: TaskRow; steps?: Ste
   }
   if (t.totalSteps == null && (snap.steps?.length ?? 0) > 0) t.totalSteps = snap.steps!.length;
   if (isTerminalTask(t.status) && t.finishedAt == null && task.updated_at) t.finishedAt = ms(task.updated_at);
+  // A refresh must show the same truth the live fold does: a task row that ended in success
+  // with a task_steps row still non-terminal (a race between the two writes, or an agent that
+  // never reported its own finish) is a finished step, not a live one.
+  if (isSuccessTask(t.status)) t.steps = finalizeSteps(t.steps, t.finishedAt ?? ms(task.updated_at) ?? t.lastEventAt);
 
   const order = state.byTask[task.id] ? state.order : state.order.concat(task.id);
   return { order, byTask: { ...state.byTask, [task.id]: t } };

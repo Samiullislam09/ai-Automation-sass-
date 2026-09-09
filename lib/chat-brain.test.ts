@@ -59,7 +59,9 @@ const REGISTRY: BrainRegistry = {
           input: { topic: "string", count: "number?" },
           irreversible: false,
           estimated_seconds: 20,
-          needs: [],
+          // Mirrors the real manifest (agent-server/src/brain/manifests.ts, 2026-08-31): a blank
+          // topic is fed by boss.pick_topic, so it is never a question for the customer.
+          needs: ["topic"],
           provides: "keywords",
         },
       ],
@@ -749,6 +751,54 @@ test("a model that leaves spoken_reply out still gets the deterministic ackLine 
   const t = await turn("mere liya ek keyword dhundo", s.deps);
 
   assert.ok(order(t).text.trim().length > 0, "still a real sentence, not empty");
+});
+
+test("the fallback acknowledgment answers in the customer's own language — English in, English out", async () => {
+  // Found live 2026-09-10 on Vercel: "ok can you find a good keyword for me? for artical" came
+  // back "Theek hai, main aapke liye…". The fallback must not switch languages on them.
+  const en = stub({ tool: { name: "find_keywords", args: { topic: "ISO 27701" } } });
+  const tEn = await turn("can you find good keywords for ISO 27701 for me?", en.deps);
+  assert.doesNotMatch(order(tEn).text, /theek hai|main aapke|raha hoon/i, "an English message never gets a Hinglish ack");
+  assert.match(order(tEn).text, /keywords/i);
+
+  const hi = stub({ tool: { name: "find_keywords", args: { topic: "ISO 27701" } } });
+  const tHi = await turn("mere liye ISO 27701 ke keyword dhundo", hi.deps);
+  assert.match(order(tHi).text, /theek hai/i, "a Hinglish message still gets the Hinglish ack");
+});
+
+test("the echo is a plain English sentence with the subject in quotes — never a ' · ' record", async () => {
+  const s = stub({ tool: { name: "find_keywords", args: { topic: "ISO 27701 certification cost" } } });
+  const t = await turn("find keywords for ISO 27701 certification cost", s.deps);
+  const echo = order(t).label ?? "";
+  assert.doesNotMatch(echo, / · /, "the old joined-record shape is gone");
+  assert.match(echo, /"ISO 27701 certification cost"/, "the subject stays double-quoted (taskTitle() reads it back out)");
+  assert.match(echo, /^Keyword research for "ISO 27701 certification cost"\. Starting now\. Results will land in your Approvals queue\.$/);
+
+  const bare = stub({ tool: { name: "plan_topics", args: {} } });
+  const tBare = await turn("plan my content", bare.deps);
+  const bareEcho = order(tBare).label ?? "";
+  assert.doesNotMatch(bareEcho, /"/, "no subject means no quotes at all");
+  assert.match(bareEcho, /^Planning topics\. Starting now\. Results will land in your Approvals queue\.$/);
+});
+
+test('a "topic" that only names the request ("article") is no subject: dropped, unquoted, and not a question', async () => {
+  // Found live 2026-09-10: `Keyword research · "article"` in the timeline and "Keyword Research:
+  // article" as the title, because the model echoed the request word back as the topic.
+  const s = stub({ tool: { name: "find_keywords", args: { topic: "article" } } });
+  const t = await turn("ok can you find a good keyword for me? for artical", s.deps);
+
+  assert.equal(s.rec.created.length, 1, "the order is still placed — the team picks the real topic itself");
+  assert.equal(s.rec.created[0].intent.params.topic, undefined, "the junk topic never reaches the agent");
+  assert.equal(s.rec.saved.length, 0, "no slot question either — topic is graph-filled for this action");
+  const echo = order(t).label ?? "";
+  assert.doesNotMatch(echo, /"/, "no quoted subject in the echo");
+  assert.match(echo, /^Keyword research\. Starting now\./);
+
+  // A genuine topic is untouched by the same filter.
+  const real = stub({ tool: { name: "find_keywords", args: { topic: "ISO 9001 certification cost" } } });
+  const tReal = await turn("keywords for ISO 9001 certification cost", real.deps);
+  assert.equal(real.rec.created[0].intent.params.topic, "ISO 9001 certification cost");
+  assert.match(order(tReal).label ?? "", /"ISO 9001 certification cost"/);
 });
 
 test("the answer to the one question completes the order", async () => {

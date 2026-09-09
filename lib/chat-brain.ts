@@ -566,7 +566,7 @@ async function placeOrder(
   // above the composer still owns "is it still running".
   const found = enabledActions(registry).get(intent.action);
   return {
-    text: intent.reply ?? (found ? ackLine(found, intent.params) : ""),
+    text: intent.reply ?? (found ? ackLine(found, intent.params, input.message) : ""),
     agentId: room,
     jobId: created.task_id,
     label: created.echo || intent.echo || null,

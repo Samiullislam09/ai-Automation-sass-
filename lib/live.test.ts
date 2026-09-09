@@ -391,6 +391,91 @@ test("cold start: hydrating the recording after the panel already has live event
   assert.equal(one(once).outline.length, 2);
 });
 
+/* ── 9 · The planned step vs the agent's own sub-steps ──────────────────────────────────
+ * Found live 2026-09-10: a finished 1-step keyword task read "Step 0 of 1 · 0%" with a live Stop
+ * button. Agents emit step events keyed by their OWN sub-step ids (ctx.step("search")), never by
+ * the task_steps row uuid the planned step is keyed by — so the planned step never moved. */
+
+const active = (t: ReturnType<typeof one>) =>
+  !["done", "published", "failed", "cancelled", "needs_attention", "awaiting_approval"].includes(t.status) ||
+  t.steps.some((s) => s.status === "pending" || s.status === "running");
+const doneCount = (t: ReturnType<typeof one>) => t.steps.filter((s) => s.status === "done").length;
+
+test("an agent's sub-step events land on its planned step instead of spawning parallel steps", () => {
+  let s = hydrateTask(emptyLive, {
+    task: { id: TASK, status: "running", kind: "find_keywords", created_at: iso(0) },
+    steps: [{ id: "8f1c-uuid", no: 1, agent_id: "keyword", action: "find_keywords", status: "pending" }],
+  });
+  s = foldEvents(s, ev({ type: "step_started", step_id: "search", label: "Looking up search data" }, 1000));
+  s = foldEvents(s, ev({ type: "progress", step_id: "search", fraction: 0.5, label: "3 found" }, 1500));
+  s = foldEvents(s, ev({ type: "step_finished", step_id: "search", ms: 900 }, 1900));
+  s = foldEvents(s, ev({ type: "step_started", step_id: "score", label: "Checking which fit your site" }, 2000));
+
+  let t = one(s);
+  assert.equal(t.steps.length, 1, "one planned step, not one per sub-step");
+  const step = t.steps[0];
+  assert.equal(step.key, "8f1c-uuid");
+  assert.equal(step.status, "running", "a finished sub-step does not finish the agent's turn");
+  assert.equal(step.label, "Checking which fit your site", "the live label follows the sub-steps");
+  assert.equal(step.progressLabel, "3 found", "progress keyed by a sub-step id still reaches the planned step");
+  assert.equal(step.startedAt, T0 + 1000, "a later sub-step does not move the step's own start");
+
+  s = foldEvents(s, ev({ type: "run_finished", output: {}, ms: 3000, cost_units: 1, llm_calls: 2, tokens_in: 5, tokens_out: 5 }, 3000));
+  t = one(s);
+  assert.equal(t.steps[0].status, "done", "the agent's run finishing is the planned step finishing");
+  assert.equal(t.steps[0].finishedAt, T0 + 3000);
+  assert.equal(doneCount(t), 1);
+});
+
+test("task_finished (success) finalizes a step that never reported its own finish", () => {
+  let s = foldEvents(emptyLive, tev({ type: "task_started", steps: 1 }, 0));
+  s = hydrateTask(s, {
+    task: { id: TASK, status: "running", created_at: iso(0) },
+    steps: [{ id: "row-1", no: 1, agent_id: "keyword", action: "find_keywords", status: "pending" }],
+  });
+  assert.equal(active(one(s)), true, "sanity: the task is live before the finish");
+
+  s = foldEvents(s, tev({ type: "task_finished", status: "done", ms: 20000 }, 20000));
+  const t = one(s);
+  assert.equal(t.status, "done");
+  assert.equal(t.steps[0].status, "done");
+  assert.equal(t.steps[0].finishedAt, T0 + 20000);
+  assert.equal(t.steps[0].fraction, 1);
+  assert.equal(doneCount(t), 1, "Step 1 of 1, not 0 of 1");
+  assert.equal(active(t), false, "no lingering pending step keeps the timer and Stop button alive");
+  assert.equal(isFlowing(t, T0 + 20001), false);
+  assert.equal(elapsedMs(t, T0 + 999999), 20000, "the clock froze at the finish");
+});
+
+test("task_failed and task_cancelled never finalize an open step as done", () => {
+  const seed = () =>
+    hydrateTask(foldEvents(emptyLive, tev({ type: "task_started", steps: 2 }, 0)), {
+      task: { id: TASK, status: "running", created_at: iso(0) },
+      steps: [
+        { id: "r1", no: 1, agent_id: "keyword", action: "find_keywords", status: "done", finished_at: iso(500) },
+        { id: "r2", no: 2, agent_id: "writer", action: "write_article", status: "running", started_at: iso(600) },
+      ],
+    });
+
+  const failed = one(foldEvents(seed(), tev({ type: "task_failed", message: "Writer ruk gaya.", step_no: 2 }, 5000)));
+  assert.equal(failed.steps[1].status, "failed");
+
+  const cancelled = one(foldEvents(seed(), tev({ type: "task_cancelled", by: "user" }, 5000)));
+  assert.equal(cancelled.steps[1].status, "running", "a cancel says nothing about the step's own outcome");
+  assert.equal(cancelled.status, "cancelled");
+});
+
+test("hydrateTask: a task row that ended in success finalizes a task_steps row still marked pending", () => {
+  const s = hydrateTask(emptyLive, {
+    task: { id: TASK, status: "awaiting_approval", created_at: iso(0), updated_at: iso(30000) },
+    steps: [{ id: "row-1", no: 1, agent_id: "keyword", action: "find_keywords", status: "pending" }],
+  });
+  const t = one(s);
+  assert.equal(t.steps[0].status, "done", "a page refresh shows the same truth the live fold does");
+  assert.equal(t.steps[0].finishedAt, T0 + 30000);
+  assert.equal(active(t), false);
+});
+
 test("events for another task never contaminate this one", () => {
   let s = foldEvents(emptyLive, ev({ type: "data", kind: "keyword", payload: { kw: "mine" } }, 1000));
   s = foldEvents(s, { ...(ev({ type: "data", kind: "keyword", payload: { kw: "theirs" } }, 1000) as any), task_id: "task-2" });

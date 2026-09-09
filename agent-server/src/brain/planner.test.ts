@@ -86,7 +86,7 @@ test("row 1 · sirf keywords do → find_keywords → 1 step, and the writer nev
   assert.deepEqual(p.steps[0].input, { topic: "solar panels" }, "no __from: nothing feeds step 1");
   assert.equal(p.estimated_seconds, 20);
   assert.equal(p.cost_units, 3);
-  assert.deepEqual(p.outline, ["1. Mr. Keyword keywords nikalega (~20s)"]);
+  assert.deepEqual(p.outline, ["1. Mr. Keyword finds the keywords (~20s)"]);
 });
 
 test("row 1b · asking to publish keywords still plans one step — nothing publishes a keyword", () => {
@@ -127,10 +127,10 @@ test("row 3 · article likho, in the registry §5.5 describes → 4 steps, image
   assert.ok(!p.steps.some((s) => s.action === "draft_social"), "social only runs when asked for");
 
   assert.deepEqual(p.outline, [
-    "1. Mr. Keyword pehle keywords nikalega (~20s)",
-    "2. Mr. Writer article likhega (~5 min)",
-    "3a. Mr. SEO SEO check karega (~40s) ‖ saath me",
-    "3b. Mr. Image images banayega (~40s) ‖ saath me",
+    "1. Mr. Keyword first finds the keywords (~20s)",
+    "2. Mr. Writer writes the article (~5 min)",
+    "3a. Mr. SEO runs the SEO check (~40s) ‖ in parallel",
+    "3b. Mr. Image creates the images (~40s) ‖ in parallel",
   ]);
 });
 

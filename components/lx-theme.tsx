@@ -176,6 +176,12 @@ export const LX_CSS = `
   background:none;border:none;cursor:pointer;white-space:nowrap}
 .lx-tab:hover{color:#d6d6e4}
 .lx-tab.on{color:#fff}
+/* Per-agent tab states (components/MrLxwaDashboard.tsx's agent tabs, 2026-09-10): done reads
+   as settled, working stays lit, and a step the plan has not reached yet is visibly inert. */
+.lx-tab.done{color:#b9f6ca}
+.lx-tab.working{color:#dbeafe}
+.lx-tab.idle,.lx-tab:disabled{color:var(--lx-dim);cursor:not-allowed;opacity:.6}
+.lx-tab.idle:hover,.lx-tab:disabled:hover{color:var(--lx-dim)}
 .lx-tab.on::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;border-radius:2px;
   background:linear-gradient(90deg,#3b82f6,#22d3ee);box-shadow:0 0 8px rgba(59,130,246,.85)}
 
@@ -336,6 +342,40 @@ export const LX_CSS = `
 .lx-serp-scan{height:100%;width:32%;border-radius:999px;background:linear-gradient(90deg,#16a34a,#4ade80 55%,#86efac);
   animation:lxScan .9s ease-in-out infinite}
 @keyframes lxScan{0%{margin-left:0%}50%{margin-left:68%}100%{margin-left:0%}}
+
+/* "Keyword opportunities" — components/MrLxwaDashboard.tsx's KeywordScreen, finished state
+   (owner's reference mockup, 2026-09-10). A card of rows, not a bare <table>: keyword left,
+   the real columns the agent actually sends (source, volume, competition, fit) as compact
+   cells, one "Use" action per row, best-fit row highlighted, "View more" past five rows. */
+.lx-kwo{display:flex;flex-direction:column;gap:6px}
+.lx-kwo-head{display:flex;align-items:center;gap:10px;padding:2px 2px 8px}
+.lx-kwo-title{font-size:15px;font-weight:700;color:var(--lx-text)}
+.lx-kwo-count{font-size:11px;font-weight:600;color:#b9a5ff;background:rgba(139,92,246,.14);
+  border:1px solid rgba(139,92,246,.35);border-radius:8px;padding:2px 8px}
+.lx-kwo-grid{display:grid;grid-template-columns:minmax(0,1fr) 118px 64px 84px 56px 62px;gap:10px;align-items:center}
+.lx-kwo-th{padding:0 12px 6px;font-size:11px;font-weight:600;color:var(--lx-mut)}
+.lx-kwo-th>span:not(:first-child){text-align:center}
+.lx-kwo-row{padding:10px 12px;border:1px solid var(--lx-border);border-radius:12px;background:rgba(255,255,255,.02);
+  transition:border-color .15s,background .15s}
+.lx-kwo-row:hover{border-color:rgba(139,92,246,.35);background:rgba(255,255,255,.035)}
+.lx-kwo-row.best{border-color:rgba(139,92,246,.6);box-shadow:0 0 0 1px rgba(139,92,246,.25),0 6px 20px rgba(124,58,237,.18)}
+.lx-kwo-kw{display:flex;align-items:center;gap:10px;min-width:0}
+.lx-kwo-mark{width:22px;height:22px;border-radius:7px;border:1px solid var(--lx-border);display:flex;align-items:center;
+  justify-content:center;flex-shrink:0;color:var(--lx-dim)}
+.lx-kwo-row.best .lx-kwo-mark{border-color:rgba(139,92,246,.6);color:#b9a5ff;background:rgba(139,92,246,.14)}
+.lx-kwo-text{font-size:12.5px;color:var(--lx-text);line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.lx-kwo-cell{font-size:12px;color:var(--lx-text);text-align:center;white-space:nowrap}
+.lx-kwo-cell.mut{color:var(--lx-mut)}
+.lx-kwo-src{display:inline-block;font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:6px;
+  color:#60a5fa;background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.35);white-space:nowrap}
+.lx-kwo-use{display:inline-flex;align-items:center;justify-content:center;width:100%;padding:5px 0;border-radius:8px;
+  font-size:12px;font-weight:700;color:#fff;cursor:pointer;border:1px solid rgba(139,92,246,.6);
+  background:linear-gradient(135deg,#4f46e5,#7c3aed 55%,#8b5cf6);box-shadow:0 4px 14px rgba(124,58,237,.3);transition:.15s}
+.lx-kwo-use:hover{filter:brightness(1.1)}
+.lx-kwo-more{display:inline-flex;align-items:center;gap:6px;margin:6px auto 0;padding:6px 12px;border:none;background:none;
+  color:var(--lx-mut);font-size:12.5px;cursor:pointer}
+.lx-kwo-more:hover{color:var(--lx-text)}
+@media (max-width:640px){.lx-kwo-grid{grid-template-columns:minmax(0,1fr) 62px}.lx-kwo-grid>.hide-sm{display:none}}
 
 /* "Reading Web Pages" browser-chrome visual — components/MrLxwaDashboard.tsx's ResearchScreen.
    Host + breadcrumb are real (parsed from the real source URL); the body is a deliberately

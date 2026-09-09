@@ -94,7 +94,7 @@ const NOUN: Record<string, string> = {
   images: "images",
   published_url: "publish",
   brief: "research brief",
-  site_pages: "site ka content",
+  site_pages: "site content",
   site_profile: "site profile",
   topics: "topics",
   topic: "topic",
@@ -102,24 +102,26 @@ const NOUN: Record<string, string> = {
   leads: "leads",
 };
 
-/** What a step is doing, in the outline. */
+/** What a step is doing, in the outline. English on purpose: the plan card is dashboard
+ *  chrome, not conversation — only Mr. Lxwa's replies follow the customer's language
+ *  (owner, 2026-09-10: "Mr Lxwa's Plan ... professional english karo"). */
 const VERB: Record<string, string> = {
-  keywords: "keywords nikalega",
-  article: "article likhega",
-  seo_passed: "SEO check karega",
-  images: "images banayega",
-  published_url: "site pe live karega",
-  brief: "research brief banayega",
-  site_pages: "site padhega",
-  site_profile: "site profile banayega",
-  topics: "topics chunega",
-  topic: "best topic chunega",
-  social_posts: "social posts banayega",
-  leads: "leads dhundega",
+  keywords: "finds the keywords",
+  article: "writes the article",
+  seo_passed: "runs the SEO check",
+  images: "creates the images",
+  published_url: "publishes it to your site",
+  brief: "builds the research brief",
+  site_pages: "reads your site",
+  site_profile: "builds your site profile",
+  topics: "picks the topics",
+  topic: "picks the best topic",
+  social_posts: "drafts the social posts",
+  leads: "finds leads",
 };
 
 const noun = (provides: string): string => NOUN[provides] ?? provides;
-const verb = (provides: string): string => VERB[provides] ?? `${provides} banayega`;
+const verb = (provides: string): string => VERB[provides] ?? `produces ${provides}`;
 
 export function humanSeconds(secs: number): string {
   if (secs < 90) return `~${secs}s`;
@@ -411,9 +413,9 @@ function buildOutline(registry: Registry, steps: PlanStep[], skipNotes: string[]
     const idx = seenInLevel.get(s.no) ?? 0;
     seenInLevel.set(s.no, idx + 1);
     const label = parallel ? `${s.no}${String.fromCharCode(97 + idx)}` : `${s.no}`;
-    const first = s.no === 1 && steps.length > 1 ? "pehle " : "";
+    const first = s.no === 1 && steps.length > 1 ? "first " : "";
     const time = humanSeconds(spec.estimated_seconds);
-    const tail = parallel ? " ‖ saath me" : "";
+    const tail = parallel ? " ‖ in parallel" : "";
     return `${label}. ${agentName(registry, s.agent_id)} ${first}${verb(spec.provides)} (${time})${tail}`;
   });
 
@@ -475,7 +477,9 @@ function unhealthyMessage(registry: Registry, entry: RegisteredAction, forAction
 
 function skipMessage(registry: Registry, entry: RegisteredAction): string {
   const who = agentName(registry, entry.agent_id);
-  return `${who} abhi available nahi hai, isliye ${noun(entry.spec.provides)} is baar skip — baaki kaam chalta rahega.`;
+  // Reaches the outline (the plan card, dashboard chrome) as a "— note" line — English, like
+  // the rest of the outline; the plan-failure sentences above are the brain's own replies.
+  return `${who} isn't available right now, so ${noun(entry.spec.provides)} will be skipped this time — the rest of the work continues.`;
 }
 
 function cycleMessage(involved: string[]): string {

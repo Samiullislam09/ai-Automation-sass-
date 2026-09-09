@@ -87,10 +87,17 @@ const META_FIELDS: Record<string, Record<string, unknown>> = {
   },
   [REPLY_FIELD]: {
     type: "string",
+    // Two paired examples, not one: a single Hinglish example anchored the model to Hinglish
+    // even for an English message (found live 2026-09-10 on Vercel — "ok can you find a good
+    // keyword for me?" came back "Theek hai, main aapke liye…"). The language rule has to be the
+    // loudest thing in this description, and the examples must show BOTH answers.
     description:
-      "One short, natural, first-person sentence telling the customer what you are about to do right now, " +
-      "in the same language and tone they just wrote to you in (match Hinglish with Hinglish, English with English). " +
-      'Example: "Theek hai, main aapke liye best keywords dhoond raha hoon jo aap agle article ke liye use kar sakte hain." ' +
+      "One short, natural, first-person sentence telling the customer what you are about to do right now. " +
+      "LANGUAGE RULE (mandatory): write it in the SAME language and script as the customer's latest message. " +
+      "If they wrote in English, reply in plain professional English. If they wrote in Hinglish / Roman Hindi / Roman Urdu, reply in Hinglish. " +
+      "Never switch languages on them. " +
+      'Example for an English message ("can you find a good keyword for my article?"): "Got it — I\'m finding the best keywords for your article right now." ' +
+      'Example for a Hinglish message ("mere liye keyword dhundo"): "Theek hai, main aapke liye best keywords dhoond raha hoon." ' +
       'Never a bare status word like "Done" or "On it" — a real, warm sentence, said once, before the work starts. ' +
       "Mention the actual subject they named if there is one.",
   },
