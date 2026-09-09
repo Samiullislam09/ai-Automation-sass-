@@ -343,6 +343,15 @@ const FABRICATED_ORDER = new RegExp(
     "^(?:main|maine|mainne)\\b[^.!?\\n]{0,40}?\\b(?:queue|schedule|shuru|start)\\w*\\s*(?:kar\\s*)?(?:diya|di|dia)",
     // "Queued for ...", "Scheduled for Thursday ..."
     "^(?:queued|scheduled)\\b[^.!?\\n]{0,10}\\bfor\\b",
+    // "Got it — our team will pick the best topic and start the article for you." A real order
+    // never reaches this function (see this const's own doc comment above) — but the FIRST FOUR
+    // patterns only catch the model naming an agent, or saying "I've"/"maine ... kar diya"; a
+    // plain, agent-less, third-person future claim like this slipped straight through every one
+    // of them (found live 2026-09-09: the reply read as a confirmed order, no task was ever
+    // created, and the owner watched the dashboard stay empty because none of the earlier
+    // patterns matched this phrasing at all).
+    "\\b(?:the\\s+)?team\\s+will\\s+\\w+",
+    "\\bwill\\s+(?:start|pick|choose|write|research|publish|draft|create)\\b[^.!?\\n]{0,40}?\\bfor you\\b",
   ].join("|"),
   "i"
 );

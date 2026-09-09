@@ -84,6 +84,27 @@ test("out of order: a stale progress event never rewinds the bar", () => {
   assert.equal(step.progressLabel, "8/10 pages");
 });
 
+test("a bare fraction:0 progress event updates the label but never pins the bar at 0%", () => {
+  // Found live 2026-09-09: keyword search sends exactly one progress checkpoint (fraction 0)
+  // and then narrates the rest of its real work purely through progressLabel/timeline text —
+  // no later fraction ever arrives. A human reading "Overall Progress: 0%" next to a step that
+  // is visibly producing results reads that as broken, not as "just started". Treating a bare
+  // 0 the same as "nothing reported yet" (fraction stays null, so the UI's percentage bar does
+  // not render at all) is honest; a genuine later fraction still applies normally.
+  let s = emptyLive;
+  s = foldEvents(s, ev({ type: "step_started", step_id: "s1", label: "Looking up search data" }, 0));
+  s = foldEvents(s, ev({ type: "progress", step_id: "s1", fraction: 0, label: "Looking up search data for X" }, 500));
+
+  let step = one(s).steps[0];
+  assert.equal(step.fraction, null);
+  assert.equal(step.progressLabel, "Looking up search data for X");
+
+  s = foldEvents(s, ev({ type: "progress", step_id: "s1", fraction: 0.5, label: "halfway" }, 1000));
+  step = one(s).steps[0];
+  assert.equal(step.fraction, 0.5, "a genuine later fraction still applies normally");
+  assert.equal(step.progressLabel, "halfway");
+});
+
 test("out of order: data items are placed by their own timestamp, not by arrival", () => {
   let s = emptyLive;
   s = foldEvents(s, ev({ type: "data", kind: "keyword", payload: { kw: "solar panel cost dubai", vol: 1200 } }, 3000));

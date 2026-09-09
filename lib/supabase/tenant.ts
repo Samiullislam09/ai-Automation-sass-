@@ -28,12 +28,25 @@ export async function getCurrentTenantId(supabase: SupabaseClient): Promise<stri
 
   const admin = createAdminClient();
 
-  const { data: membership } = await admin
+  const { data: membership, error: memSelectErr } = await admin
     .from("memberships")
     .select("tenant_id")
     .eq("user_id", userData.user.id)
     .limit(1)
     .maybeSingle();
+
+  // A failed READ is not "this user has no membership" — the two look identical once the error
+  // is thrown away (found live 2026-09-10: a transient admin-client hiccup here silently fell
+  // through to the bootstrap branch below, which INSERTS A BRAND NEW TENANT for a user who
+  // already has one — the account panel's own intermittent failures were one visible symptom;
+  // a real user quietly getting a second, empty workspace would have been the far worse one).
+  // Every real caller of this function already treats `null` as "try again in a moment" (see
+  // app/api/account/route.ts and its siblings), so returning null here is always safe; silently
+  // bootstrapping a duplicate tenant on a transient error never is.
+  if (memSelectErr) {
+    console.error("[getCurrentTenantId] membership lookup failed:", memSelectErr.message);
+    return null;
+  }
 
   if (membership?.tenant_id) return membership.tenant_id;
 

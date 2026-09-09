@@ -598,7 +598,15 @@ export function foldEvents(state: LiveState, incoming: IncomingEvent): LiveState
         const cur = t.steps.find((s) => s.key === key);
         // Only forward. A progress event that overtook a later one must not rewind the bar.
         if (cur && !isTerminalStep(cur.status) && (cur.fraction == null || e.fraction >= cur.fraction)) {
-          t.steps = upsertStep(t.steps, key, { agent_id: agentId ?? "?" }, { fraction: e.fraction, progressLabel: e.label ?? null }, runId);
+          const patch: Partial<StepState> = { progressLabel: e.label ?? null };
+          // A literal 0 is indistinguishable, to a human reading a percentage bar, from "nothing
+          // reported yet" — some agents (found live 2026-09-09: keyword search) only ever send
+          // ONE progress checkpoint, fraction 0, and then narrate the rest purely through
+          // `progressLabel`/timeline text with no further fraction event. Leaving `fraction`
+          // unset here (rather than pinning it at 0) keeps the step eligible for a genuine
+          // later fraction to still apply normally, and hides the bar instead of freezing it.
+          if (e.fraction > 0) patch.fraction = e.fraction;
+          t.steps = upsertStep(t.steps, key, { agent_id: agentId ?? "?" }, patch, runId);
         }
       }
       if (agentId) t.agents = upsertPane(t.agents, agentId, (p) => ({ ...p, lastEventAt: Math.max(p.lastEventAt, at) }));

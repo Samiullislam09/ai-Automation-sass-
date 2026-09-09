@@ -50,6 +50,7 @@ import {
   ANSWER_QUESTION,
   CONFIDENCE_FIELD,
   DELIVERY_FIELD,
+  REPLY_FIELD,
   WHEN_FIELD,
   coerceParams,
   enabledActions,
@@ -67,6 +68,11 @@ export type IntentPlan = {
   confidence: number;
   missing: string[];
   echo: string;
+  /** The model's own words for "I'm doing this now" — genuinely written by whichever call chose
+   *  this tool (lib/chat-tools.ts's REPLY_FIELD), not a hand-written line. Null only when a
+   *  model left the field out; ackLine() is the deterministic fallback for that case, kept
+   *  separate so callers can tell "the model wrote this" from "we had to guess" if it matters. */
+  reply: string | null;
 };
 
 /** Below this, ask instead of doing (plan §5.1). Not a dial to turn down: the cost of a wrong
@@ -94,6 +100,7 @@ export const nothingOrdered = (confidence = 1): IntentPlan => ({
   confidence,
   missing: [],
   echo: "",
+  reply: null,
 });
 
 /* ── The parts the model does not decide ─────────────────────────────────────────────── */
@@ -168,6 +175,47 @@ export function echoLine(
   return [what, subject ? `"${subject}"` : null, at, lands].filter(Boolean).join(" · ");
 }
 
+/** What Mr. Lxwa actually says, in the chat, the moment a reversible action starts running
+ *  with no confirmation needed — the first-person sentence the customer reads before the live
+ *  progress strip takes over. There used to be a bare "On it." here, removed 2026-08-31 for
+ *  going stale (it sat in the transcript unchanged for the whole run). The fix was never "say
+ *  nothing" — it was "say something real instead of a status that goes stale" (owner
+ *  2026-09-09: "kaam shuru hone se pehle mujhe ek message aana chahiye ... jo bhi task ho").
+ *  One real sentence per action, same reason ACTION_LABEL is a table and not a formatter:
+ *  "Working on X" repeated for every action reads like a template, not a teammate talking to
+ *  you. An action with no entry here still gets a real sentence, built from the same
+ *  id-to-words fallback ACTION_LABEL uses, so a new agent needs no update here either. */
+const ACK_LINE: Record<string, (subject: string | null) => string> = {
+  crawl_site: () => "Theek hai, main aapki poori website dobara padh raha hoon.",
+  build_site_profile: () => "Theek hai, main aapke business ko dobara samajh raha hoon.",
+  plan_topics: () => "Theek hai, main is hafte ke topics plan kar raha hoon.",
+  pick_topic: () => "Theek hai, main agla best topic choose kar raha hoon.",
+  find_keywords: (s) =>
+    `Theek hai, main aapke liye best keywords dhoond raha hoon${s ? ` "${s}" ke liye` : ""} jo aap agle article ke liye use kar sakte hain.`,
+  write_article: (s) => `Theek hai, main${s ? ` "${s}" par` : ""} article likhna shuru kar raha hoon.`,
+  research_brief: (s) => `Theek hai, main${s ? ` "${s}" par` : ""} research kar raha hoon.`,
+  make_images: () => "Theek hai, main images bana raha hoon.",
+  make_image: () => "Theek hai, main ek image bana raha hoon.",
+  make_story: () => "Theek hai, main ek Web Story bana raha hoon.",
+  check_seo: () => "Theek hai, main SEO check kar raha hoon.",
+  publish_article: () => "Theek hai, main ise publish kar raha hoon.",
+  audit_site: () => "Theek hai, main aapki site ka audit kar raha hoon.",
+  draft_social: () => "Theek hai, main social posts draft kar raha hoon.",
+  find_leads: () => "Theek hai, main aapke liye leads dhoond raha hoon.",
+};
+
+export function ackLine(found: EnabledAction, params: Record<string, unknown>): string {
+  const subject =
+    Object.entries(params)
+      .filter(([, v]) => typeof v === "string" && v.trim().length > 2)
+      .map(([, v]) => String(v).trim())[0] ?? null;
+  const spec = found.spec;
+  const fn = ACK_LINE[spec.id];
+  if (fn) return fn(subject);
+  const what = (ACTION_LABEL[spec.id] ?? spec.id.replace(/_/g, " ")).toLowerCase();
+  return `Theek hai, main ${what}${subject ? ` "${subject}"` : ""} shuru kar raha hoon.`;
+}
+
 /** One tool call → the plan. Pure, and the only place a tool call turns into an order — the
  *  network half below is a thin wrapper around this so every rule here is testable offline. */
 export function planFromToolCall(
@@ -191,9 +239,13 @@ export function planFromToolCall(
   const confidence =
     typeof raw === "number" && Number.isFinite(raw) ? Math.max(0, Math.min(1, raw)) : ASSUMED_CONFIDENCE;
 
+  const rawReply = (args ?? {})[REPLY_FIELD];
+  const reply = typeof rawReply === "string" && rawReply.trim().length > 0 ? rawReply.trim() : null;
+
   return {
     action: found.spec.id,
     params,
+    reply,
     // `matched` stays the raw phrase the customer typed (kept for the reply that quotes them
     // back to themselves); `label` is always the clean, English, describeWhen() rendering —
     // the one every downstream "Booked — ..." card should show, so a Hinglish "3 din bad" never

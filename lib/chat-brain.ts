@@ -21,7 +21,7 @@ import type { SystemEventPayload } from "@/lib/chat-events";
 import type { BrainRegistry, BrainResult, BrainTaskCreated, BrainIntent } from "@/lib/brain";
 import { BRAIN_UNREACHABLE } from "@/lib/brain";
 import { ANSWER_QUESTION, capabilitiesPrompt, coerceParams, enabledActions, matchActionPhrase } from "@/lib/chat-tools";
-import { CONFIDENCE_FLOOR, type IntentPlan } from "@/lib/chat-brain-intent";
+import { ackLine, CONFIDENCE_FLOOR, type IntentPlan } from "@/lib/chat-brain-intent";
 import { CONFIRM_SLOT, resolveFollowUp, type ConversationState, type PendingIntent, type StateResult } from "@/lib/chat-conversation";
 import { describeWhen, parseWhen } from "@/lib/when";
 import { mightBeAnOrder } from "@/lib/chat-classify";
@@ -143,6 +143,19 @@ const REUSABLE_ACTIONS: Record<string, { agent: string; windowMs: number; noun: 
 // one was — this gate exists to stop an ACCIDENTAL redo (the model's own judgement call on a
 // vague message), never to refuse a deliberate one.
 const FORCE_REUSABLE = /\b(phir\s*se|dobara|re-?crawl|re-?audit|force|abhi\s*turant|fresh\s*se|naya\s*kar)\b/i;
+
+// "kya tum Instagram pe post kar sakte ho?" mentions work ("post") but is a question about
+// ability, not an instruction — the conversation model already answers these honestly from the
+// registry's own capabilities list. Used below to keep the clarifying-question fallback from
+// swallowing a capability question it would otherwise answer better.
+const CAPABILITY_QUESTION = /\b(?:kya\s+(?:tum|aap)|can\s+you|could\s+you|are\s+you\s+able|sakte\s+ho|possible\s+hai)\b/i;
+
+// "publish mat karna", said on its own with nothing pending, mentions work ("publish") but is a
+// sentence about something NOT to do, not a request for something new — this exact phrase once
+// cancelled the customer's next booked article for the same reason (see the legacy-kind check
+// above). A negation anywhere in the message is reason enough to leave it to the conversation
+// model rather than ask a clarifying question about work nobody asked for.
+const NEGATION = /\b(?:nahi|nahin|mat|don'?t|do\s*not)\b/i;
 
 export type BrainTurnInput = {
   message: string;
@@ -338,6 +351,32 @@ export async function brainTurn(input: BrainTurnInput, deps: BrainTurnDeps): Pro
       const params = coerceParams(spec, intent.params ?? {});
       for (const need of Array.from(graphFills)) delete (params as Record<string, unknown>)[need];
       routed = { ...intent, action: byPhrase, params, missing: [] };
+    } else if (mightBeAnOrder(message) && !CAPABILITY_QUESTION.test(message) && !NEGATION.test(message)) {
+      // Neither the model nor the deterministic phrase-matcher pinned an action, but the
+      // message mentions the work at all (mightBeAnOrder — the same cheap, free, no-network
+      // check §3 already uses above) — routing this to the free-form conversational model risked
+      // exactly the failure app/api/chat/route.ts's FABRICATED_ORDER filter now has to catch
+      // (a confident-sounding "Got it" with nothing ever created), and silence is just as
+      // confusing (owner, 2026-09-10: "ek chota sa clarifying sawaal pucho"). One short, honest
+      // question instead — the same "a missed order costs one rephrase" trade-off §5.1 already
+      // accepts everywhere else in this file, just for the case where not even an action is
+      // known yet, so there is no slot to ask about by name.
+      //
+      // CAPABILITY_QUESTION is excluded on purpose: "kya tum Instagram pe post kar sakte ho?" has
+      // an instruction-shaped word ("post") but is not an instruction — it is a question about
+      // what the team CAN do, which the conversation model already answers honestly from the
+      // registry's own capabilities list. NEGATION is excluded for the same reason "publish mat
+      // karna" gets its own legacy-kind check above: said alone, it is a sentence about something
+      // NOT to do, not a request for new work. Asking either to rephrase an order that was never
+      // meant as one would be a worse answer than what the conversation model already gives.
+      return {
+        handled: true,
+        order: nothingStarted(
+          'I want to make sure I get this right — could you tell me a bit more about what you\'d like done? ' +
+            'For example, "write an article about X" or "find keywords for Y" — I\'ll get the team on it right away.'
+        ),
+        action: "clarify",
+      };
     } else {
       return conversation(capabilities, intent.action);
     }
@@ -517,14 +556,17 @@ async function placeOrder(
     );
   }
 
+  // `intent.reply` is the model's OWN sentence — genuinely written by the same call that chose
+  // this tool (lib/chat-tools.ts's REPLY_FIELD), not a hand-written line (owner 2026-09-09: "ye
+  // static nahi, AI answer de"). ackLine() only covers a model that left the field out. NOT the
+  // "On it." removed 2026-08-31 for going stale while the run was in progress — that complaint
+  // was about a STATUS that never updated, not about having a reply at all: an empty bubble here
+  // read as the product silently starting work with no acknowledgment (owner: "bina kuch bataye
+  // kaam suru ho gaya"). This sentence is said once and never claims to be live — the strip
+  // above the composer still owns "is it still running".
+  const found = enabledActions(registry).get(intent.action);
   return {
-    // Deliberately EMPTY. "On it." was a dead sentence that sat in the thread for the whole run
-    // and then went stale the moment work finished. The live progress strip above the composer
-    // now carries that state — it names the running step, counts the steps and moves — so a
-    // second, frozen copy of the same idea in the transcript is worse than nothing (owner,
-    // 2026-08-31: "on it ko remove kardo text ko"). The client drops an empty reply rather than
-    // rendering a blank bubble.
-    text: "",
+    text: intent.reply ?? (found ? ackLine(found, intent.params) : ""),
     agentId: room,
     jobId: created.task_id,
     label: created.echo || intent.echo || null,

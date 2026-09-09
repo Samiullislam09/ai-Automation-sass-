@@ -143,6 +143,34 @@ export const LX_CSS = `
   box-shadow:0 6px 22px rgba(124,58,237,.35);transition:.18s}
 .lx-grad:hover{filter:brightness(1.1)}
 
+/* Smooth inline expand/collapse — the sidebar account chip (components/MrLxwaDashboard.tsx)
+   used to open a floating popover on top of the page; the owner wanted it to open in place
+   instead, like the rest of the sidebar. The grid-rows trick animates to the content's real
+   height with no JS measurement (a plain max-height guesses wrong the moment content changes),
+   and the inner div's own overflow:hidden is what actually clips it mid-animation. */
+.lx-expand{display:grid;grid-template-rows:0fr;transition:grid-template-rows .22s ease}
+.lx-expand.open{grid-template-rows:1fr}
+.lx-expand > div{overflow:hidden}
+
+/* Clean menu rows — the sidebar account expand's "View full account"/"Sign out" actions used to
+   be a plain text link and a full-width ghost button stacked under raw text, which read as an
+   unfinished list, not a menu (owner 2026-09-09: "clean tarike se data, best UI UX"). */
+.lx-menurow{display:flex;align-items:center;gap:9px;padding:9px 12px;font-size:12.5px;
+  color:var(--lx-text);cursor:pointer;transition:background .15s;text-decoration:none;
+  border:none;background:none;width:100%;text-align:left}
+.lx-menurow:hover{background:rgba(255,255,255,.06)}
+.lx-menurow.danger{color:#f87171}
+
+/* The chat bubble's placeholder while the model has replied with a task but no text yet — was
+   a flat, static "…" (owner 2026-09-09: "chat... jaisa icon animate karo"). Three dots bouncing
+   in sequence reads as "thinking", not "frozen". */
+.lx-typing{display:inline-flex;align-items:center;gap:4px;height:14px;padding:2px 0}
+.lx-typing span{width:5px;height:5px;border-radius:50%;background:var(--lx-mut);
+  animation:lxTypingBounce 1.1s ease-in-out infinite}
+.lx-typing span:nth-child(2){animation-delay:.15s}
+.lx-typing span:nth-child(3){animation-delay:.3s}
+@keyframes lxTypingBounce{0%,60%,100%{transform:translateY(0);opacity:.4}30%{transform:translateY(-4px);opacity:1}}
+
 /* ---- tabs -------------------------------------------------------------- */
 .lx-tab{position:relative;padding:10px 2px;font-size:12.5px;font-weight:500;color:var(--lx-mut);
   background:none;border:none;cursor:pointer;white-space:nowrap}

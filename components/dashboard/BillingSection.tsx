@@ -3,12 +3,12 @@ import { useState } from "react";
 import { PLANS, useStore } from "@/lib/store";
 import { LxInput } from "./ui";
 
-/** /dashboard/settings — same real logic as the old app/app/billing/page.tsx. The checkout
+/** /dashboard/account — same real logic as the old app/app/billing/page.tsx. The checkout
  *  itself is still the demo flow noted there (TODO backend: Paddle / Lemon Squeezy replaces
  *  this) — `applyPlan` just updates local plan state, same as before; nothing here pretends a
  *  real charge happens. Restyled to the new dashboard theme per the owner's standing
- *  instruction (2026-08-29). Rendered inside <MrLxwaDashboard> as its `children` — see
- *  app/dashboard/settings/page.tsx. */
+ *  instruction (2026-08-29). Rendered inside <MrLxwaDashboard> as its `children`, below
+ *  AccountSection — see app/dashboard/account/page.tsx. */
 
 export default function BillingSection() {
   const { s, applyPlan } = useStore();
@@ -42,7 +42,7 @@ export default function BillingSection() {
         )}
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <div id="plans" className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {Object.entries(PLANS).map(([k, p]) => (
           <div
             key={k}

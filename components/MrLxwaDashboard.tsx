@@ -40,7 +40,7 @@ import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LxGlobalStyle } from "@/components/lx-theme";
-import { useLiveEvents, isTerminalTask, isFlowing, useNow, elapsedMs, clock, type TaskState } from "@/lib/live";
+import { useLiveEvents, isTerminalTask, isTerminalStep, isFlowing, useNow, elapsedMs, clock, type TaskState } from "@/lib/live";
 import { useStore, PLANS } from "@/lib/store";
 import { startPolling } from "@/lib/poll";
 import LiveRunPanel from "@/components/dashboard/LiveRunPanel";
@@ -82,6 +82,8 @@ import {
   BrainCircuit,
   ArrowRight,
   XCircle,
+  User,
+  LogOut,
 } from "lucide-react";
 
 /* ========================================================================== */
@@ -120,7 +122,7 @@ const NAV: NavItem[] = [
   { label: "Audit", icon: TrendingUp, href: "/dashboard/audit" },
   { label: "Reports", icon: ClipboardList, href: "/dashboard/reports" },
   { label: "Memory", icon: BrainCircuit, href: "/dashboard/memory" },
-  { label: "Settings", icon: Settings, href: "/dashboard/settings" },
+  { label: "Account", icon: Settings, href: "/dashboard/account" },
 ];
 
 /** A chat bubble. `live` = still streaming in (the loop below keeps appending to `text`);
@@ -274,6 +276,7 @@ const AgentNode = ({ a, compact = false, onClick }: { a: Agent; compact?: boolea
     return (
       <button
         type="button"
+        data-agent-id={a.id}
         onClick={onClick}
         disabled={!clickable}
         className="flex shrink-0 items-center gap-1.5 rounded-full px-2 py-1"
@@ -485,9 +488,6 @@ const KeywordScreen = ({
       <div className="lx-serp">
         <div className="lx-serp-top">
           <Globe size={12} /> Google Search
-          <span className="lx-pill red ml-auto" style={{ padding: "1px 8px" }}>
-            <span className="lx-pulse h-1.5 w-1.5 rounded-full" style={{ background: "#ef4444" }} /> LIVE
-          </span>
         </div>
         {/* the search box — real topic, never a placeholder, with a typing caret so an idle
             moment (before the first keyword lands) still reads as "searching" rather than
@@ -636,9 +636,6 @@ const ResearchScreen = ({ items, running }: { items: { key: string; payload: any
         <div className="lx-read">
           <div className="lx-serp-top">
             <Globe size={12} /> Reading Web Pages
-            <span className="lx-pill red ml-auto" style={{ padding: "1px 8px" }}>
-              <span className="lx-pulse h-1.5 w-1.5 rounded-full" style={{ background: "#ef4444" }} /> LIVE
-            </span>
           </div>
           <div className="lx-read-frame mt-2">
             <div className="lx-read-bar">
@@ -983,7 +980,7 @@ export default function MrLxwaDashboard({
   const pathname = usePathname();
   // Real account/plan/sign-out — the same lib/store.tsx StoreProvider AppShell reads from,
   // mounted globally in app/layout.tsx, so it's already live here without any extra fetch.
-  const { s: account, signOut } = useStore();
+  const { s: account, signOut, patch } = useStore();
 
   // Real per-agent status — was reading ONLY the single newest task's steps, so an agent that
   // did real work a moment ago (in the task just before the newest one) still showed "Waiting"
@@ -1107,6 +1104,40 @@ export default function MrLxwaDashboard({
   const userInitial = userName.charAt(0).toUpperCase() || "?";
   const planName = PLANS[account.plan]?.name ?? account.plan;
 
+  // The account panel's own copy of the truth — real database values (email, workspace name,
+  // website, plan, today's per-agent usage, connected integrations, awaiting approvals), never
+  // the cached lib/store.tsx `account` object above (which can sit on whatever plan/name it last
+  // synced, including a stale localStorage copy from a previous session). Same endpoint
+  // AppShell's older AccountMenu already used correctly (app/api/account/route.ts).
+  //
+  // Fetched ONCE on mount, not on every open — a real round trip to a hosted Supabase project
+  // is a few hundred ms per query, and this route makes several; re-running it and blanking the
+  // panel back to "Loading…" every single time the user reopened it (owner: "har bar 2-3 sec
+  // loading leta hai") made something that only needs to be right-ish, not live-to-the-second,
+  // feel slow on every click. Opening now shows whatever was last fetched instantly; a real
+  // plan/name change still reaches the user the next time this component mounts (a page
+  // navigation), and the full /dashboard/account page's own "Refresh" button is there for
+  // anyone who wants it re-checked on demand right now.
+  const [acctData, setAcctData] = useState<any>(null);
+  useEffect(() => {
+    fetch("/api/account", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => {
+        setAcctData(d);
+        // Also correct the cached copy so the collapsed chip (and every other reader of
+        // `account.plan`) stops showing a plan the database no longer agrees with.
+        if (d?.ok && d.plan && PLANS[d.plan]) patch({ plan: d.plan, tokensMax: PLANS[d.plan].tokens });
+      })
+      .catch(() => setAcctData({ ok: false }));
+    // `patch` deliberately excluded — lib/store.tsx hands out a new function identity on every
+    // one of its own re-renders (it isn't wrapped in useCallback), and StoreProvider re-renders
+    // often (toasts, chat, live polling all live in the same context). With `patch` in this
+    // array the effect re-armed on nearly every render, reset acctData to null each time, and
+    // the fetch never won the race — this panel was stuck on "Loading…" forever (owner report
+    // 2026-09-09). Mount-once is exactly what this needs — nothing to react to afterward.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Real pending-approvals count for the sidebar badge — same /api/content endpoint the
   // Approvals page itself reads. Polled, not fake: 0 means the badge doesn't render at all.
   const [approvalsCount, setApprovalsCount] = useState(0);
@@ -1157,11 +1188,6 @@ export default function MrLxwaDashboard({
   // The chat's progress strip: one line by default, opens on the chevron (owner, 2026-08-31 —
   // the expanded card was permanently eating the chat's own room).
   const [stripOpen, setStripOpen] = useState(false);
-  // True from the instant an order is sent until the live feed actually has the task. Without
-  // it there is a dead gap — the request is in flight, then the brain is creating rows — where
-  // the chat showed nothing at all and the product felt asleep. The strip fills that gap with a
-  // real "Working…" rather than a fabricated step count.
-  const [awaitingOrder, setAwaitingOrder] = useState(false);
   const [msg, setMsg] = useState("");
   const [thread, setThread] = useState<ThreadMsg[]>([]);
   const [chatBusy, setChatBusy] = useState(false);
@@ -1183,6 +1209,13 @@ export default function MrLxwaDashboard({
   const [pendingOrder, setPendingOrder] = useState<string | null>(null);
   const reportedTaskIds = useRef<Set<string>>(new Set());
   const startedLiveBubble = useRef<Set<string>>(new Set());
+  // Which steps have already gotten a narration bubble (below) — keyed by the step's own `key`,
+  // never re-fired for the same step even across re-renders/reconnects.
+  const narratedStepIds = useRef<Set<string>>(new Set());
+  // Which tasks have had their "steps already done before this view even opened" baselined —
+  // without this, opening/reloading the page mid-run (or on an already-finished task) would
+  // burst-narrate every historical step at once instead of only what finishes from here on.
+  const narrationBaseline = useRef<Set<string>>(new Set());
 
   // The agent panel (live activity, timeline, search results) exists to show ONE agent's
   // live work — it only makes sense while an agent is actually working. `workingAgent` is
@@ -1192,6 +1225,18 @@ export default function MrLxwaDashboard({
   // actually running before anyone else even has a step to run — the panel should open on him,
   // not sit closed until Mr. Keyword picks up afterward.
   const workingAgent = bossAgent.status === "Working" ? bossAgent : allAgents.find((a) => a.status === "Working") ?? null;
+  // The compact agent strip (below, only visible once a panel is open) auto-scrolls so whoever
+  // is actually working is always the one centered — a full-automation feel where the camera
+  // follows the work, not a manual "you scroll to find them" (owner 2026-09-09: "jo agent us
+  // waqt work kare wo scroll hoke center pe aaya"). Keyed off the id (a string, stable across
+  // re-renders) rather than the workingAgent object itself, which is a fresh reference every
+  // render.
+  const compactStripRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!workingAgent) return;
+    const el = compactStripRef.current?.querySelector<HTMLElement>(`[data-agent-id="${workingAgent.id}"]`);
+    el?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+  }, [workingAgent?.id]);
   const [showPanel, setShowPanel] = useState(!!workingAgent);
   useEffect(() => {
     // The moment there is something real to show — a task row, or an agent whose jobs_log row
@@ -1234,7 +1279,6 @@ export default function MrLxwaDashboard({
   const hadActiveTask = useRef(false);
   useEffect(() => {
     if (taskActive && !hadActiveTask.current) setShowPanel(true);
-    if (taskActive) setAwaitingOrder(false);
     hadActiveTask.current = taskActive;
   }, [taskActive]);
 
@@ -1327,8 +1371,6 @@ export default function MrLxwaDashboard({
         // /api/chat answered; loadTask()'s own pull() reads it directly, no broadcast needed.
         live.loadTask(runJob);
       }
-      // No task id back = this turn was a plain answer, not an order. Stop waiting.
-      else setAwaitingOrder(false);
       const reader = res.body.getReader();
       const dec = new TextDecoder();
       while (true) {
@@ -1342,8 +1384,10 @@ export default function MrLxwaDashboard({
         });
       }
       setThread((p) => {
-        // An accepted order now replies with NO text (see lib/chat-brain.ts) — the live strip
-        // is the status. Drop the placeholder instead of leaving an empty bubble behind.
+        // An accepted order replies with a real acknowledgment sentence now (lib/chat-brain.ts,
+        // lib/chat-brain-intent.ts's ackLine/REPLY_FIELD) — this only still fires for the rare
+        // case a model call genuinely returned nothing at all. Drop the placeholder instead of
+        // leaving an empty bubble behind.
         if (!full.trim()) return p.slice(0, -1);
         const next = [...p];
         next[next.length - 1] = { ...next[next.length - 1], text: full, live: false };
@@ -1363,7 +1407,6 @@ export default function MrLxwaDashboard({
     } finally {
       clearTimeout(slowTimer);
       setChatBusy(false);
-      if (!orderedTaskId.current) setAwaitingOrder(false);
     }
   };
 
@@ -1453,7 +1496,6 @@ export default function MrLxwaDashboard({
     if (!t || chatBusy) return;
     setThread((p) => [...p, { who: "user", text: t, time: nowTime() }]);
     setMsg("");
-    setAwaitingOrder(true);
     void stream(t);
   };
 
@@ -1481,10 +1523,30 @@ export default function MrLxwaDashboard({
     const t = live.byTask[id];
     if (!t) return;
 
-    if (!isTerminalTask(t.status)) {
+    // NOT just `!isTerminalTask(t.status)` — the same class of status/steps desync as
+    // `taskActive` above, only in the opposite direction: here `t.status` can stay non-terminal
+    // for a while AFTER every one of its steps already finished, so this "still working" bubble
+    // kept saying so well after the Live Visual panel (which reads step-level state) had already
+    // shown the finished result (owner report 2026-09-09). A task whose steps are all terminal
+    // is over, whatever the status field says yet.
+    const allStepsDone = t.steps.length > 0 && t.steps.every((s) => isTerminalStep(s.status));
+    if (!isTerminalTask(t.status) && !allStepsDone) {
       const runningNow = t.steps.find((s) => s.status === "running");
       const latestLine = t.lines[t.lines.length - 1];
-      const liveText = runningNow?.progressLabel || runningNow?.label || latestLine?.text || "On it…";
+      // A per-STEP completion line (a bare "Done", written when whichever step just finished)
+      // is not a description of what the TASK is doing now — it is the tail end of what it just
+      // did. Between one step finishing and the next one starting there is briefly no
+      // `runningNow`, and falling back to that line put the word "Done" on a task that was very
+      // much still running (found live 2026-09-07, reproduced: Mr. Keyword's own last line was
+      // literally "Done" while Mr. Writer/SEO/Image hadn't run yet). Only a genuinely
+      // descriptive latest line is used; a bare completion word gets the same honest "between
+      // steps" text as having no line at all.
+      const isStepDoneLine = (s?: string) => !!s && /^(done|finished)\.?$/i.test(s.trim());
+      const liveText =
+        runningNow?.progressLabel ||
+        runningNow?.label ||
+        (latestLine?.text && !isStepDoneLine(latestLine.text) ? latestLine.text : null) ||
+        "Starting the next step…";
       // The plan, checklist-style — same rows the collapsed strip above the composer reads
       // (task.steps, real task_steps rows), just also rendered inline here per the owner's
       // reference mockup. Empty until the planner has actually written steps for this task.
@@ -1540,6 +1602,43 @@ export default function MrLxwaDashboard({
       next[i] = { ...next[i], text, live: false, chip, cta };
       return next;
     });
+  }, [live.byTask]);
+
+  /** Live progress narration — a genuinely model-written sentence for every step as it finishes
+   *  ("Mr. Keyword ne apna kaam kar diya hai" style), as its own new chat bubble rather than
+   *  folded into the one running-status line above (that line still owns "what's happening
+   *  right now"; these are a stream of "X just finished" moments). The owner chose this over
+   *  the free, template-based option when asked directly about the extra cost/latency it adds —
+   *  one real call to app/api/chat/narrate per step (2026-09-09). */
+  useEffect(() => {
+    const id = orderedTaskId.current;
+    if (!id) return;
+    const t = live.byTask[id];
+    if (!t) return;
+
+    if (!narrationBaseline.current.has(id)) {
+      narrationBaseline.current.add(id);
+      for (const s of t.steps) if (s.status === "done") narratedStepIds.current.add(s.key);
+      return;
+    }
+
+    for (const s of t.steps) {
+      if (s.status !== "done" || narratedStepIds.current.has(s.key)) continue;
+      narratedStepIds.current.add(s.key);
+      const agentName = [...allAgents, bossAgent].find((a) => a.id === s.agent_id)?.name ?? s.agent_id;
+      const stepLabel = s.label || (s.action ? s.action.replace(/_/g, " ") : "a step");
+      fetch("/api/chat/narrate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agentName, stepLabel }),
+      })
+        .then((r) => r.json())
+        .then((d) => {
+          if (!d?.ok || !d.text) return; // provider unavailable/slow — say nothing this time
+          setThread((p) => [...p, { who: "ai", text: d.text, time: nowTime() }]);
+        })
+        .catch(() => {});
+    }
   }, [live.byTask]);
 
   /* ---------------------------------------------------------------------- */
@@ -1645,37 +1744,73 @@ export default function MrLxwaDashboard({
         </div>
       </nav>
 
-      {/* user — real name/plan from lib/store.tsx (the same source AppShell's account chip
-          reads), real sign-out. [ASSET] user photo → gradient initial, unchanged. */}
-      <div className={mini ? "p-2" : "p-3"}>
+      {/* user — clicking this expands the panel below IN PLACE (owner 2026-09-09: "popup
+          nahi, wahi tab extend ho smoothly") instead of a floating popover on top of the page.
+          acctData (fetched fresh above, real database values) corrects the plan/company line
+          the instant this opens, instead of trusting whatever lib/store.tsx had cached. Text
+          uses a neutral gray (#9a9ab2, the same tone lx-ghost's own label already uses) rather
+          than the theme's violet-tinted --lx-mut, which read as unprofessional here. */}
+      <div className={mini ? "p-1.5" : "p-2"}>
         <button
-          className={`lx-card2 flex w-full items-center gap-3 text-left ${mini ? "p-1.5 lg:justify-center" : "p-2.5"}`}
-          onClick={() => setAcctOpen((o) => !o)}
+          className={`lx-card2 flex w-full items-center gap-2 text-left ${mini ? "p-1 lg:justify-center" : "p-1.5"}`}
+          onClick={() => { setConfirmSignOut(false); setAcctOpen((o) => !o); }}
           title={mini ? `${userName} \u00b7 ${planName}` : undefined}
         >
           <span
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
             style={{ background: "linear-gradient(135deg,#f59e0b,#ef4444 60%,#7c3aed)" }}
           >
             {userInitial}
           </span>
           <span className={`min-w-0 flex-1 ${mini ? "lg:hidden" : ""}`}>
-            <span className="block truncate lx-13 font-semibold">{userName}</span>
-            <span className="block lx-10 lx-mut">{planName}</span>
+            <span className="block truncate lx-11 font-semibold">{userName}</span>
+            <span className="block truncate lx-10" style={{ color: "#9a9ab2" }}>
+              {acctData?.ok ? (PLANS[acctData.plan]?.name ?? acctData.plan ?? planName) : planName}
+              {acctData?.ok && acctData.website ? ` · ${String(acctData.website).replace(/^https?:\/\//, "")}` : ""}
+            </span>
           </span>
-          <ChevronDown size={15} className={`lx-mut ${mini ? "lg:hidden" : ""}`} />
+          <ChevronDown
+            size={13}
+            className={`lx-mut transition-transform ${mini ? "lg:hidden" : ""}`}
+            style={{ transform: acctOpen ? "rotate(180deg)" : undefined }}
+          />
         </button>
-        {acctOpen && (
-          <button
-            className="lx-ghost mt-1.5 w-full justify-center"
-            onClick={() => {
-              if (!confirmSignOut) { setConfirmSignOut(true); return; }
-              void signOut();
-            }}
-          >
-            {confirmSignOut ? "Click again to sign out" : "Sign out"}
-          </button>
-        )}
+
+        {/* Redesigned as a real menu (owner 2026-09-09: "view my account bilkul pasand nahi
+            aaya, clean tarike se, best UI UX") — icon-led menu rows with their own hover state
+            (.lx-menurow), instead of stacked plain text plus a lone link plus a full-width ghost
+            button. No profile row here anymore: the trigger button right above already shows
+            name, plan and website, so repeating avatar+email here was the same identity twice
+            in the same breath (owner: "heysamiul wala chiz badi dikh rahi hai, ek baar dikhao").
+            Collapsed (mini, desktop) rail is too narrow for "View full account" to read well, so
+            it keeps only Sign out there — same reasoning the chevron/name text already follow
+            (lg:hidden) in that state. */}
+        <div className={`lx-expand ${acctOpen ? "open" : ""}`}>
+          <div>
+            <div className="lx-card2 mt-1.5 overflow-hidden" style={{ padding: 4 }}>
+              {!mini && (
+                <>
+                  {!acctData && <div className="lx-10 px-3 py-2" style={{ color: "#9a9ab2" }}>Loading…</div>}
+                  {acctData && !acctData.ok && (
+                    <div className="lx-10 px-3 py-2" style={{ color: "#f87171" }}>Couldn't load your account.</div>
+                  )}
+                  <Link href="/dashboard/account" className="lx-menurow" onClick={() => setAcctOpen(false)}>
+                    <User size={13} className="lx-mut" /> View full account
+                  </Link>
+                </>
+              )}
+              <button
+                className="lx-menurow danger"
+                onClick={() => {
+                  if (!confirmSignOut) { setConfirmSignOut(true); return; }
+                  void signOut();
+                }}
+              >
+                <LogOut size={13} /> {confirmSignOut ? "Click again to confirm" : "Sign out"}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </aside>
   );
@@ -1714,7 +1849,7 @@ export default function MrLxwaDashboard({
           every-second timer re-render and stuttered (and once got stuck at opacity 0). */}
       {/* ---- compact: every agent sorted into one line, once a panel is open ---- */}
       <Collapse open={panelOpen}>
-        <div className="lx-scroll overflow-x-auto">
+        <div className="lx-scroll overflow-x-auto" ref={compactStripRef}>
           <div className="flex min-w-max items-center gap-2 px-4 py-3">
             {agentsLeft.map((a) => (
               <AgentNode key={a.id} a={a} compact onClick={() => openAgentPanel(a)} />
@@ -1728,21 +1863,27 @@ export default function MrLxwaDashboard({
       </Collapse>
       {/* ---- full: "AI Agent Network" — the resting state. CSS grid-area layout (see
           .lx-net), collapsing to a 2-column auto-flow (brain first) in a narrow column. ---- */}
-      {/* The run in progress, always. Owner 2026-09-05: "har hal main ye primary ha ki ham
-          user ko live progress dikhaye". Renders nothing when nothing is running. */}
-      <LiveRunPanel
-        task={runTask}
-        workingAgentId={workingAgent?.id ?? null}
-        workingAgentTask={(() => {
-          const t = workingAgent ? account.agents?.[workingAgent.id]?.task : null;
-          return t && t !== "Idle" && t !== "—" ? t : null;
-        })()}
-        crawl={account.crawl}
-        pendingOrder={pendingOrder}
-        now={runNow}
-        connected={live.connected}
-        onOpen={() => setShowPanel(true)}
-      />
+      {/* The run in progress, in the resting state only. Owner 2026-09-05: "har hal main ye
+          primary ha ki ham user ko live progress dikhaye" — but once the panel below is
+          already open, this became a second "Your team is working" summary sitting right on
+          top of the real Live Visual detail for the exact same task, its own "Open" button now
+          pointing at a panel already on screen (owner 2026-09-09: "is tab ko remove kardo").
+          Renders nothing when nothing is running, same as before. */}
+      {!panelOpen && (
+        <LiveRunPanel
+          task={runTask}
+          workingAgentId={workingAgent?.id ?? null}
+          workingAgentTask={(() => {
+            const t = workingAgent ? account.agents?.[workingAgent.id]?.task : null;
+            return t && t !== "Idle" && t !== "—" ? t : null;
+          })()}
+          crawl={account.crawl}
+          pendingOrder={pendingOrder}
+          now={runNow}
+          connected={live.connected}
+          onOpen={() => setShowPanel(true)}
+        />
+      )}
 
       <Collapse open={!panelOpen}>
         <AgentNetwork
@@ -1775,7 +1916,14 @@ export default function MrLxwaDashboard({
     (panelAgent ? [...(task?.steps ?? [])].filter((s) => s.agent_id === panelAgent.id).sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))[0] : null) ??
     null;
   const runningStep = panelStep?.status === "running" ? panelStep : null;
-  const stepNo = task && panelStep ? task.steps.findIndex((s) => s.key === panelStep.key) + 1 : null;
+  // The count of steps DONE across the whole task — NOT panelStep's own array position, which
+  // is what this used to be (`task.steps.findIndex(s => s.key === panelStep.key) + 1`). That
+  // read as "Step 1 of 4" for as long as the card you had open happened to sit first in the
+  // steps array, whether or not that step — or any other — had actually finished (found live
+  // 2026-09-07: stuck on "Step 1 of 4 · 0%" while Mr. Keyword had already finished and Mr. Image
+  // was mid-run). "Step N of M" now means the same thing everywhere it's shown, task-wide —
+  // matching barDoneSteps below, which is the same count for the same reason.
+  const stepNo = task ? task.steps.filter((s) => s.status === "done").length : null;
   const totalSteps = task?.totalSteps ?? task?.steps.length ?? null;
   // Real progress numbers off `task` — used by BOTH the chat's live strip and the bottom bar,
   // so they are declared here, before either is built (a `const` used above its declaration in
@@ -1835,7 +1983,6 @@ export default function MrLxwaDashboard({
     setThread((p) => [...p, { who: "user", text, time: nowTime() }]);
     setBotOpen(true);
     setDesktopAssistantOpen(true);
-    setAwaitingOrder(true);
     void stream(text);
   };
 
@@ -2264,7 +2411,15 @@ export default function MrLxwaDashboard({
                   ) : m.text ? (
                     boldText(m.text, `m${i}`)
                   ) : m.live ? (
-                    m.slow ? "Still working — taking a little longer than usual…" : "…"
+                    // Neutral on purpose — this same bubble covers a plain question ("what is
+                    // your name?") as much as an order, and "Still working" reads as task
+                    // language for the former (owner 2026-09-09, screenshot: a plain Q&A showed
+                    // task-style "working" copy).
+                    m.slow ? "Just a moment, still thinking…" : (
+                      <span className="lx-typing" aria-label="Mr. Lxwa is typing">
+                        <span /><span /><span />
+                      </span>
+                    )
                   ) : (
                     ""
                   )}
@@ -2318,9 +2473,16 @@ export default function MrLxwaDashboard({
           off `task` — the same value the network cards, the wires and the plan all use, which we
           can see updating — so there is no timing to get wrong. It is deliberately a strip, not
           a chat bubble: progress is a live state, not something that was "said". */}
-      {/* Shown the moment an order is sent (awaitingOrder), not only once the task row exists —
-          that gap is exactly where the product used to look asleep. */}
-      {(task || awaitingOrder) && (
+      {/* Shown once a real order genuinely exists (pendingOrder — set only when /api/chat hands
+          back an actual job id, see the effect above) or a task row does — NOT on `awaitingOrder`
+          alone, which flips true for every message the instant it's sent, plain questions
+          included. This strip's whole vocabulary ("Working…", "Sending it to the team…", a stop
+          button) is task language; showing it while waiting to find out if "what is your name?"
+          turned into an order read as the product presuming work it never started (owner
+          2026-09-09, screenshot: a plain Q&A showed "Working... Sending it to the team..."). The
+          chat bubble's own typing-dots (see the thread render below) already cover the ordinary
+          "waiting for a reply" feeling for every message, task or not. */}
+      {(task || pendingOrder) && (
         <div className="lx-card2 mx-3 mb-2 px-3 py-2">
           {/* COLLAPSED BY DEFAULT — one line. The full card (order text, the ticking plan, the
               bar, the review link) was several lines tall and permanently ate the chat's own
@@ -2340,18 +2502,18 @@ export default function MrLxwaDashboard({
               if (e.key === "Enter" || e.key === " ") setStripOpen((o) => !o);
             }}
           >
-            {/* `awaitingOrder` wins over `task`: right after sending, `task` is still the
-                PREVIOUS (finished) order, and showing its "Done" while the new one is being
+            {/* `pendingOrder` wins over `task`: right after a fresh order lands, `task` is still
+                the PREVIOUS (finished) order, and showing its "Done" while the new one is being
                 created is exactly the stale answer this strip exists to avoid. */}
             <span
-              className={`h-1.5 w-1.5 shrink-0 rounded-full ${awaitingOrder || taskActive ? "lx-pulse" : ""}`}
+              className={`h-1.5 w-1.5 shrink-0 rounded-full ${pendingOrder || taskActive ? "lx-pulse" : ""}`}
               style={{
-                background: awaitingOrder || taskActive ? "#22c55e" : "#8b8ba0",
-                boxShadow: awaitingOrder || taskActive ? "0 0 8px #22c55e" : "none",
+                background: pendingOrder || taskActive ? "#22c55e" : "#8b8ba0",
+                boxShadow: pendingOrder || taskActive ? "0 0 8px #22c55e" : "none",
               }}
             />
-            <span className={`lx-11 min-w-0 flex-1 truncate font-semibold ${awaitingOrder ? "lx-shimmer" : ""}`}>
-              {awaitingOrder || !task
+            <span className={`lx-11 min-w-0 flex-1 truncate font-semibold ${pendingOrder ? "lx-shimmer" : ""}`}>
+              {pendingOrder || !task
                 ? "Working…"
                 : taskActive
                   ? runningStep?.progressLabel || runningStep?.label || "Starting…"
@@ -2359,14 +2521,14 @@ export default function MrLxwaDashboard({
                     ? task.reason || "Stopped"
                     : "Done"}
             </span>
-            {!awaitingOrder && task && stepNo != null && totalSteps != null && (
+            {!pendingOrder && task && stepNo != null && totalSteps != null && (
               <span className="lx-10 lx-mut shrink-0">{stepNo}/{totalSteps}</span>
             )}
             {/* Real cancel, right here — same handler/state as Office's "Stop Task" (BottomBar),
                 so a click here disables both at once and neither goes stale. 2026-09-04, the
                 owner's own words: "current task ko rokne ka, stop karne ka, chat pe hi ek
                 option ho". Only while a task is genuinely running — nothing to stop otherwise. */}
-            {!awaitingOrder && taskActive && (
+            {!pendingOrder && taskActive && (
               <button
                 className="lx-icobtn shrink-0"
                 style={{ width: 20, height: 20, color: "#ef4444", opacity: cancellingTaskId ? 0.5 : 1 }}
@@ -2390,13 +2552,13 @@ export default function MrLxwaDashboard({
 
           <Collapse open={stripOpen}>
             <div className="pt-2">
-              <div className="lx-10 lx-mut truncate">{awaitingOrder || !task ? "Sending it to the team…" : taskTitle(task)}</div>
+              <div className="lx-10 lx-mut truncate">{pendingOrder || !task ? "Sending it to the team…" : taskTitle(task)}</div>
 
               {/* THE PLAN, TICKING. Mr Lxwa's real steps (task_steps, in plan order), each row
                   animating in as the plan lands and then flipping to done as its agent
                   finishes. Built from the real rows, so it can never show a step that is not in
                   the plan or tick one that has not finished. */}
-              {!awaitingOrder && task && task.steps.length > 0 && (
+              {!pendingOrder && task && task.steps.length > 0 && (
                 <ul className="mt-2 space-y-1">
                   {task!.steps.map((st, i) => {
                     const nm = [...allAgents, bossAgent].find((a) => a.id === st.agent_id)?.name ?? st.agent_id;
@@ -2431,7 +2593,7 @@ export default function MrLxwaDashboard({
 
               {/* Only once the order is genuinely over, and only when there is a real thing to
                   open — straight at the article, not the Approvals list. */}
-              {!awaitingOrder && task && isTerminalTask(task.status) && reviewHref && (
+              {!pendingOrder && task && isTerminalTask(task.status) && reviewHref && (
                 <Link href={reviewHref} className="lx-grad lx-10 mt-2 inline-flex px-2.5 py-1">
                   Review
                 </Link>

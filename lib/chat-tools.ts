@@ -55,6 +55,17 @@ export const WHEN_FIELD = "when_phrase";
 export const DELIVERY_FIELD = "delivery";
 /** How sure the model is. Below the floor in lib/chat-brain-intent.ts it becomes a question. */
 export const CONFIDENCE_FIELD = "confidence";
+/** The one sentence the customer actually reads back, the moment the order is placed — genuinely
+ *  written by the model that just chose this tool, not a hand-written line per action (owner
+ *  2026-09-09: "ye static nahi, AI answer de"). Filled in AS A TOOL ARGUMENT rather than as
+ *  ordinary chat `content` on purpose: several providers this app falls back through refuse to
+ *  return both `content` and `tool_calls` in strict tool-calling mode, but every one of them
+ *  reliably fills in whatever fields the schema asks for — so asking the model to write its own
+ *  reply INTO the call it is already making costs nothing extra (same one request, a few more
+ *  output tokens) and never depends on a provider's stance on mixing content with tool_calls.
+ *  lib/chat-brain-intent.ts's planFromToolCall falls back to its own ackLine() only if a model
+ *  leaves this out. */
+export const REPLY_FIELD = "spoken_reply";
 
 const META_FIELDS: Record<string, Record<string, unknown>> = {
   [WHEN_FIELD]: {
@@ -73,6 +84,15 @@ const META_FIELDS: Record<string, Record<string, unknown>> = {
   [CONFIDENCE_FIELD]: {
     type: "number",
     description: "0 to 1: how sure you are this is the right tool and the arguments are right. Be honest; 0.5 is fine.",
+  },
+  [REPLY_FIELD]: {
+    type: "string",
+    description:
+      "One short, natural, first-person sentence telling the customer what you are about to do right now, " +
+      "in the same language and tone they just wrote to you in (match Hinglish with Hinglish, English with English). " +
+      'Example: "Theek hai, main aapke liye best keywords dhoond raha hoon jo aap agle article ke liye use kar sakte hain." ' +
+      'Never a bare status word like "Done" or "On it" — a real, warm sentence, said once, before the work starts. ' +
+      "Mention the actual subject they named if there is one.",
   },
 };
 
@@ -224,7 +244,7 @@ function describe(agent: BrainAgent, spec: BrainAction): string {
  *  prompts and the same message classifies the same way twice. */
 export function toolsFromRegistry(registry: BrainRegistry | null | undefined): ChatTool[] {
   const tools: ChatTool[] = [];
-  const extras = [WHEN_FIELD, DELIVERY_FIELD, CONFIDENCE_FIELD];
+  const extras = [WHEN_FIELD, DELIVERY_FIELD, CONFIDENCE_FIELD, REPLY_FIELD];
 
   // Array.from rather than iterating the Map directly: this repo's tsconfig targets ES5-era
   // iteration and `--downlevelIteration` is off.

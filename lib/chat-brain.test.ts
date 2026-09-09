@@ -323,6 +323,23 @@ test('"hello" — a greeting starts nothing', async () => {
   assert.equal(s.rec.saved.length, 0);
 });
 
+test("a message that mentions the work but matches no action gets ONE clarifying question, not silence or the free-form model", async () => {
+  // Neither the model (tool: null) nor the phrase-matcher (this message matches no registered
+  // trigger phrase verbatim) pin an action — but it plainly mentions the work ("content"), so
+  // routing it to the conversation model risked the exact failure app/api/chat/route.ts's
+  // FABRICATED_ORDER filter exists to catch. Owner, 2026-09-10: "ek chota sa clarifying sawaal
+  // pucho" instead of silence or a hallucination risk.
+  const s = stub({ tool: null });
+  const t = await turn("mujhe kuch content chahiye", s.deps);
+
+  assert.equal(t.handled, true, "answered directly, not handed to the free-form conversation model");
+  assert.equal(s.rec.created.length, 0, "still no task — a question, not a guess");
+  const text = order(t).text;
+  assert.ok(text.trim().length > 0, "a real question, not an empty reply");
+  assert.doesNotMatch(text, /\bteam will\b|\bwill (?:start|pick|choose|write|research|publish|draft|create)\b.*for you/i,
+    "must never itself read like a confirmed order");
+});
+
 test('"article likho" — ONE question, and no task', async () => {
   const s = stub({ tool: { name: "write_article", args: {} } });
   const t = await turn("article likho", s.deps);
@@ -702,6 +719,36 @@ test("a low-confidence REVERSIBLE call just runs — §3 rule 2, 'draft likhna .
 
   assert.equal(s.rec.created.length, 1, "a reversible order is placed, not questioned");
   assert.doesNotMatch(order(t).text, /pakka nahi/i);
+  // Real acknowledgment, not the empty bubble removed 2026-08-31 along with the stale "On it.".
+  // The owner asked for a real sentence back for every task, not silence (2026-09-09).
+  assert.ok(order(t).text.trim().length > 0, "a reversible order gets a real spoken reply, not an empty bubble");
+  assert.doesNotMatch(order(t).text, /^on it\.?$/i, "not the old stale 'On it.' line either");
+});
+
+test("every reversible action gets its own real acknowledgment sentence, not just write_article", async () => {
+  const s = stub({ tool: { name: "find_keywords", args: { topic: "ISO 27701" } } });
+  const t = await turn("mere liya ek keyword dhundo", s.deps);
+
+  assert.equal(s.rec.created.length, 1);
+  const text = order(t).text;
+  assert.ok(text.trim().length > 0, "a real reply, not an empty bubble");
+  assert.match(text, /keyword/i, "the sentence is about keyword research specifically, not a generic template");
+});
+
+test("a model that writes its own spoken_reply is used verbatim, not the ackLine fallback", async () => {
+  const s = stub({
+    tool: { name: "find_keywords", args: { topic: "ISO 27701", spoken_reply: "Sure thing — hunting down keywords for ISO 27701 right now!" } },
+  });
+  const t = await turn("mere liya ek keyword dhundo", s.deps);
+
+  assert.equal(order(t).text, "Sure thing — hunting down keywords for ISO 27701 right now!");
+});
+
+test("a model that leaves spoken_reply out still gets the deterministic ackLine fallback", async () => {
+  const s = stub({ tool: { name: "find_keywords", args: { topic: "ISO 27701" } } });
+  const t = await turn("mere liya ek keyword dhundo", s.deps);
+
+  assert.ok(order(t).text.trim().length > 0, "still a real sentence, not empty");
 });
 
 test("the answer to the one question completes the order", async () => {
