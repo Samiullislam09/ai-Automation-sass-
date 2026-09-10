@@ -18,11 +18,16 @@ export const dynamic = "force-dynamic";
  *  it names no tenant data beyond what the caller already sends it. */
 
 const SYSTEM_PROMPT = [
-  "You are Mr. Lxwa, narrating your AI marketing team's live progress to a small business owner",
-  "in warm, natural Hinglish (a Hindi+English mix, the way an Indian/Pakistani small business",
-  "owner writes to a helpful assistant). One teammate just finished a step of a task in progress.",
-  "Write ONE short sentence — third person about the teammate (e.g. 'Mr. Keyword ne...'), never",
-  "a bare status word, never a bullet point, never quotes around it, never more than one sentence.",
+  "You are Mr. Lxwa, narrating your AI marketing team's live progress to a small business owner.",
+  "One teammate just finished a step of a task in progress.",
+  "LANGUAGE RULE (mandatory): reply in the SAME language and script as the customer's own message",
+  "given below. If they wrote in English, reply in plain professional English. If they wrote in",
+  "Hinglish / Roman Hindi / Roman Urdu, reply in Hinglish. Never switch languages on them.",
+  "HONESTY RULE (mandatory): if you are told the step produced NOTHING, say so plainly — do not",
+  "claim success, do not say a list was 'finalized' or 'ready', and do not celebrate. A step that",
+  "found zero results is disappointing, not good news, and the customer must hear that clearly.",
+  "Write ONE short sentence — third person about the teammate (e.g. 'Mr. Keyword...'), never a",
+  "bare status word, never a bullet point, never quotes around it, never more than one sentence.",
   "If a subject/topic is given, mention it naturally. Just the sentence, nothing else.",
 ].join(" ");
 
@@ -35,6 +40,14 @@ export async function POST(req: NextRequest) {
   const agentName = typeof body?.agentName === "string" ? body.agentName.trim().slice(0, 60) : "";
   const stepLabel = typeof body?.stepLabel === "string" ? body.stepLabel.trim().slice(0, 200) : "";
   const subject = typeof body?.subject === "string" ? body.subject.trim().slice(0, 200) : "";
+  const message = typeof body?.message === "string" ? body.message.trim().slice(0, 300) : "";
+  // Whether this step actually produced anything — without this the model had no way to know a
+  // "finished" step came back empty, and cheerfully announced a keyword list that did not exist
+  // (owner report 2026-09-10, live: "Mr. Keyword ne aaj keywords ki list finalize kar li hai" for
+  // a run that produced zero keywords). `null` (the field omitted) means "not applicable/unknown"
+  // — some steps (writing, publishing) don't have a meaningful item count, and the honesty rule
+  // only applies when the caller actually knows the count was zero.
+  const producedCount = typeof body?.producedCount === "number" ? body.producedCount : null;
   if (!agentName || !stepLabel) {
     return NextResponse.json({ ok: false, error: "agentName and stepLabel are required." }, { status: 400 });
   }
@@ -43,7 +56,12 @@ export async function POST(req: NextRequest) {
     { role: "system", content: SYSTEM_PROMPT },
     {
       role: "user",
-      content: `${agentName} just finished: ${stepLabel}.${subject ? ` Subject: "${subject}".` : ""}`,
+      content: [
+        `${agentName} just finished: ${stepLabel}.`,
+        subject ? `Subject: "${subject}".` : "",
+        producedCount === 0 ? "IMPORTANT: this step found/produced NOTHING — zero results. Say so honestly." : "",
+        message ? `\nThe customer's own latest message, to match language against:\n${message}` : "",
+      ].filter(Boolean).join(" "),
     },
   ];
 

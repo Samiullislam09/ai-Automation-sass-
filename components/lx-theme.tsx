@@ -176,12 +176,6 @@ export const LX_CSS = `
   background:none;border:none;cursor:pointer;white-space:nowrap}
 .lx-tab:hover{color:#d6d6e4}
 .lx-tab.on{color:#fff}
-/* Per-agent tab states (components/MrLxwaDashboard.tsx's agent tabs, 2026-09-10): done reads
-   as settled, working stays lit, and a step the plan has not reached yet is visibly inert. */
-.lx-tab.done{color:#b9f6ca}
-.lx-tab.working{color:#dbeafe}
-.lx-tab.idle,.lx-tab:disabled{color:var(--lx-dim);cursor:not-allowed;opacity:.6}
-.lx-tab.idle:hover,.lx-tab:disabled:hover{color:var(--lx-dim)}
 .lx-tab.on::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;border-radius:2px;
   background:linear-gradient(90deg,#3b82f6,#22d3ee);box-shadow:0 0 8px rgba(59,130,246,.85)}
 

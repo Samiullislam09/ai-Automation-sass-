@@ -1269,6 +1269,12 @@ export default function MrLxwaDashboard({
   // done, instead of the bubble sitting on "On it" forever while the real answer only ever shows
   // up in Workspace/Approvals.
   const orderedTaskId = useRef<string | null>(null);
+  // The exact words that placed the current order — so the live-narration effect further down
+  // can ask the model to answer in the SAME language the customer is actually using (English
+  // stays English, Hinglish stays Hinglish), same rule the ack line already follows. `pendingOrder`
+  // state gets cleared the moment a task/agent shows up, well before steps finish, so it cannot
+  // be reused here.
+  const lastOrderMessageRef = useRef<string>("");
   // The in-flight turn's own controller, so the Stop button (owner, 2026-09-10: "jaisa ChatGPT
   // Claude pe hota hai, ek esc/pause btn") can actually abort the fetch instead of just hiding
   // it — a real ChatGPT/Claude-style stop, not a cosmetic one.
@@ -1408,6 +1414,7 @@ export default function MrLxwaDashboard({
    *  REAL model turn, persisted server-side to chat_conversations/chat_messages. */
   const stream = async (q: string) => {
     setChatBusy(true);
+    lastOrderMessageRef.current = q;
     setThread((p) => [...p, { who: "ai", text: "", time: nowTime(), live: true }]);
     const controller = new AbortController();
     streamAbortRef.current = controller;
@@ -1444,6 +1451,19 @@ export default function MrLxwaDashboard({
       if (runJob) {
         orderedTaskId.current = runJob;
         setPendingOrder(q.trim().slice(0, 120));
+        // Tag THIS bubble — the one about to fill with the model's own real acknowledgment —
+        // with the task id right now, before the live-status effect below ever runs. Without
+        // this it had no way to find this bubble and pushed a SECOND one instead, so an order
+        // showed two assistant replies: the real ack (in the customer's own language) and a
+        // separate hardcoded "Got it! I've assigned the task..." card, always in English (owner
+        // report 2026-09-10, live on Vercel: "chat box pe kuch data duplicate ata hai").
+        setThread((p) => {
+          const i = p.length - 1;
+          if (p[i]?.who !== "ai") return p;
+          const next = [...p];
+          next[i] = { ...next[i], taskId: runJob };
+          return next;
+        });
         // Fetch this task's real row the instant its id is known, instead of waiting on
         // Realtime's first broadcast (or, if the channel is not yet SUBSCRIBED, the up-to-6s
         // "connecting" grace period before the poll fallback even starts — see lib/live.ts's
@@ -1649,17 +1669,26 @@ export default function MrLxwaDashboard({
       }));
       const cta = planSteps.length ? { label: "View Live Workflow", agentId: runningNow?.agent_id } : undefined;
       setThread((p) => {
+        // Attach the evolving checklist to the bubble stream() already tagged with this taskId
+        // the moment the order was accepted — that bubble's own `text` is the model's real
+        // acknowledgment (in the customer's own language) and is never overwritten here; only
+        // `planSteps`/`cta` change as the plan progresses. A second, separate bubble for the
+        // same order is exactly the duplicate the owner reported.
+        const i = p.findIndex((m) => m.taskId === id);
+        if (i >= 0) {
+          const prev = p[i];
+          if (prev.live === true && JSON.stringify(prev.planSteps) === JSON.stringify(planSteps)) return p;
+          const next = [...p];
+          next[i] = { ...next[i], live: true, planSteps, cta };
+          return next;
+        }
+        // Fallback: this effect fired before stream() had a chance to tag its own bubble (a
+        // narrow timing case, e.g. a task order placed by a path other than the chat composer).
         if (!startedLiveBubble.current.has(id)) {
           startedLiveBubble.current.add(id);
           return [...p, { who: "ai", text: liveText, time: nowTime(), live: true, taskId: id, planSteps, cta }];
         }
-        const i = p.findIndex((m) => m.taskId === id);
-        if (i < 0) return p;
-        const prev = p[i];
-        if (prev.text === liveText && JSON.stringify(prev.planSteps) === JSON.stringify(planSteps)) return p;
-        const next = [...p];
-        next[i] = { ...next[i], text: liveText, planSteps, cta };
-        return next;
+        return p;
       });
       return;
     }
@@ -1720,10 +1749,15 @@ export default function MrLxwaDashboard({
       narratedStepIds.current.add(s.key);
       const agentName = [...allAgents, bossAgent].find((a) => a.id === s.agent_id)?.name ?? s.agent_id;
       const stepLabel = s.label || (s.action ? s.action.replace(/_/g, " ") : "a step");
+      // Whether this step actually produced anything — without this the narrator had no way to
+      // know a "finished" step came back empty, and cheerfully announced a keyword list that
+      // did not exist (owner report 2026-09-10, live: "Mr. Keyword ne aaj keywords ki list
+      // finalize kar li hai" for a run that produced zero keywords).
+      const producedCount = t.agents.find((p) => p.agent_id === s.agent_id)?.items.length ?? 0;
       fetch("/api/chat/narrate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ agentName, stepLabel }),
+        body: JSON.stringify({ agentName, stepLabel, producedCount, message: lastOrderMessageRef.current }),
       })
         .then((r) => r.json())
         .then((d) => {
@@ -2043,6 +2077,14 @@ export default function MrLxwaDashboard({
     : [];
   // This agent's own sentences, plus the task-level ones (agent_id null) that frame them.
   const panelLines = (task?.lines ?? []).filter((ln) => !panelAgent || ln.agent_id == null || ln.agent_id === panelAgent.id);
+  // Clicking an agent the plan hasn't reached yet still opens its screen (nothing is disabled,
+  // owner 2026-09-10) — it just has no lines yet because there is genuinely nothing to show, not
+  // because something is broken. "No activity yet" read as dead; an animated "Waiting…" reads as
+  // "your turn is coming".
+  const panelAgentNotStarted =
+    !!panelAgent && !!task &&
+    task.steps.some((s) => s.agent_id === panelAgent.id) &&
+    task.steps.filter((s) => s.agent_id === panelAgent.id).every((s) => s.status === "pending");
 
   // THE TABS: only the agents that are genuinely part of THIS order, in plan order — replacing
   // the five fixed labels ("Live Activity / Research / Writing / …") that rendered identical
@@ -2288,40 +2330,37 @@ export default function MrLxwaDashboard({
           {/* Tabs = the agents that actually worked on THIS order (§24.4b). They used to be five
               fixed labels that all rendered the same thing; now each one switches the screen
               above to that agent's own output and its own timeline below. */}
-          {/* Each tab wears its own step's real state (owner, 2026-09-10): a green check once its
-              step is done, an animated "working" while it runs, and a disabled "Not started"
-              until the plan reaches it — all read off task.steps, never a fixed label. The
-              working agent's tab is also the one that auto-opens (see the follow-the-work
-              effect next to selectedAgentId). */}
+          {/* Simple tabs again (owner, 2026-09-10: "bahut bada hogaya hai, simple pehle jaisa") —
+              just a small status dot plus the name, same size as before. Done gets a check mark
+              INSTEAD of the dot (not green text, just the icon); nothing here disables — clicking
+              an agent that hasn't started yet still opens its (empty, "Waiting…") screen below,
+              same as clicking any other tab. The working agent's tab still auto-opens on its own
+              (see the follow-the-work effect next to selectedAgentId). */}
           <div className="lx-scroll mt-3 flex gap-5 overflow-x-auto border-b" style={{ borderColor: "var(--lx-border)" }}>
             {taskAgents.map((a) => {
               const mine = (task?.steps ?? []).filter((s) => s.agent_id === a.id);
               const running = mine.some((s) => s.status === "running");
               const failed = !running && mine.some((s) => s.status === "failed");
               const done = !running && !failed && mine.length > 0 && mine.some((s) => s.status === "done") && mine.every((s) => isTerminalStep(s.status));
-              const notStarted = !running && !failed && !done && mine.length > 0 && mine.every((s) => s.status === "pending");
-              const state = running ? "working" : done ? "done" : failed ? "failed" : notStarted ? "idle" : "";
               return (
                 <button
                   key={a.id}
-                  className={`lx-tab ${state} ${panelAgent?.id === a.id ? "on" : ""}`}
+                  className={`lx-tab ${panelAgent?.id === a.id ? "on" : ""}`}
                   onClick={() => setSelectedAgentId(a.id)}
-                  disabled={notStarted}
-                  title={notStarted ? `${a.name} — not started yet` : `${a.name} — ${running ? "working" : done ? "done" : failed ? "failed" : a.status}`}
+                  title={`${a.name} — ${running ? "working" : done ? "done" : failed ? "failed" : "waiting"}`}
                 >
                   <span className="flex items-center gap-1.5 whitespace-nowrap">
                     {done ? (
                       <CheckCircle2 size={13} style={{ color: "#22c55e", flexShrink: 0 }} />
                     ) : failed ? (
                       <XCircle size={13} style={{ color: "#ef4444", flexShrink: 0 }} />
-                    ) : running ? (
-                      <span className="lx-pulse h-1.5 w-1.5 rounded-full" style={{ background: "#3b82f6", boxShadow: "0 0 8px #3b82f6" }} />
                     ) : (
-                      <span className="h-1.5 w-1.5 rounded-full" style={{ background: "#5c5c72" }} />
+                      <span
+                        className={running ? "lx-pulse h-1.5 w-1.5 rounded-full" : "h-1.5 w-1.5 rounded-full"}
+                        style={{ background: running ? "#3b82f6" : "#5c5c72" }}
+                      />
                     )}
                     {a.name}
-                    {running && <span className="lx-shimmer lx-10 ml-0.5" style={{ color: "#93c5fd" }}>working…</span>}
-                    {notStarted && <span className="lx-10 ml-0.5" style={{ color: "var(--lx-dim)" }}>Not started</span>}
                   </span>
                 </button>
               );
@@ -2338,7 +2377,18 @@ export default function MrLxwaDashboard({
               level lines (agent_id null — "On it — 4 steps", "Done") always stay, since they are
               the frame every agent's work sits inside. */}
           <div className="lx-tl mt-1">
-            {panelLines.length === 0 && <div className="lx-11 lx-mut py-2">No activity yet.</div>}
+            {panelLines.length === 0 && (
+              <div className="lx-11 lx-mut py-2 flex items-center gap-2">
+                {panelAgentNotStarted ? (
+                  <>
+                    <span className="lx-pulse h-1.5 w-1.5 rounded-full" style={{ background: "#5c5c72" }} />
+                    <span className="lx-shimmer">Waiting…</span>
+                  </>
+                ) : (
+                  "No activity yet."
+                )}
+              </div>
+            )}
             {panelLines.slice(-8).map((ln) => {
               const color = ln.tone === "ok" ? "#22c55e" : ln.tone === "err" ? "#ef4444" : ln.tone === "warn" ? "#f59e0b" : "#3b82f6";
               return (
@@ -2496,9 +2546,9 @@ export default function MrLxwaDashboard({
                 <div className="flex items-center gap-2">
                   <Robo size={24} />
                   <span className="lx-11 font-semibold">Mr. Lxwa</span>
-                  {/* live task-status bubble only (see the effect that writes `taskId`) — the
-                      model's own streaming reply is `live` too but never carries a taskId, so
-                      this dot never shows for an ordinary in-progress reply. */}
+                  {/* Genuinely means the order this bubble belongs to is still running — stream()
+                      tags the bubble with the real taskId the instant the order is accepted, so
+                      this now stays lit for exactly as long as the task itself does. */}
                   {m.live && m.taskId && (
                     <span className="flex items-center gap-1 lx-10" style={{ color: "#4ade80" }}>
                       <span className="lx-pulse h-1.5 w-1.5 rounded-full" style={{ background: "#22c55e" }} /> working
@@ -2517,7 +2567,13 @@ export default function MrLxwaDashboard({
                 >
                   {m.planSteps?.length ? (
                     <>
-                      <div>Got it! I&apos;ve assigned the task to my team and we&apos;ve started working. Here&apos;s the plan:</div>
+                      {/* The model's own real acknowledgment (lib/chat-brain-intent.ts's
+                          ackLine/REPLY_FIELD, in the customer's own language) — never the
+                          hardcoded English line this used to show unconditionally, which is what
+                          made an order look like TWO different replies (owner report
+                          2026-09-10). The hardcoded line survives only as a fallback for the rare
+                          turn where a model call genuinely returned no text at all. */}
+                      <div>{m.text ? boldText(m.text, `m${i}`) : "Got it — I've assigned this to the team and we've started working. Here's the plan:"}</div>
                       <ul className="mt-2 space-y-1.5">
                         {m.planSteps.map((s, si) => {
                           const done = s.status === "done";
