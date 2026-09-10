@@ -200,9 +200,27 @@ export function enabledActions(registry: BrainRegistry | null | undefined): Map<
  *  The longest match wins, so a specific phrase beats a generic one that happens to be a
  *  substring of it. Both sides are padded with spaces so a phrase matches as whole words inside
  *  a longer sentence, without matching as a fragment inside an unrelated compound word.
+ *
+ *  A handful of near-universal Hinglish spelling/conjugation variants are folded toward the
+ *  shorter root form a manifest phrase is built from before matching — found live 2026-09-10:
+ *  with the model down (extractIntent's own outage), an everyday write-article request in a
+ *  slightly different conjugation and a very common vowel typo fell all the way through to the
+ *  clarifying-question fallback, because this fast path is an exact-substring match and neither
+ *  variant is literally what any manifest registers. This is not stemming — just the specific
+ *  handful of variants that showed up live — and it only ever touches the MESSAGE side, never
+ *  the phrases themselves, which stay exactly what each manifest declares (so this file still
+ *  hard-codes no action's own words — see this file's own test for that rule).
  */
+const PHRASE_NORMALIZE: [RegExp, string][] = [
+  [/\bartical\b/g, "article"],
+  [/\bartikle\b/g, "article"],
+  [/\blikh\s*ke\b/g, "likh"],
+  [/\blikhwa\b/g, "likh"],
+];
+
 export function matchActionPhrase(message: string, registry: BrainRegistry | null | undefined): string | null {
-  const hay = ` ${String(message ?? "").toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim()} `;
+  let hay = ` ${String(message ?? "").toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim()} `;
+  for (const [re, to] of PHRASE_NORMALIZE) hay = hay.replace(re, to);
   if (hay.trim().length < 3) return null;
 
   let bestId: string | null = null;
