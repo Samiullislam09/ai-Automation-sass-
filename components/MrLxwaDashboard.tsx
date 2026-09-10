@@ -2060,11 +2060,11 @@ export default function MrLxwaDashboard({
     </section>
   );
 
-  // The "AI Agent Network" full grid — moved out from the resting-state-only slot above
-  // (owner, 2026-09-10: "ye jo all 11 agents ka tab hai, isko yahan se remove karo aur Live
-  // Visual ke niche add karo"). It now always renders, right under the Live Visual panel,
-  // instead of hiding the moment that panel opens.
-  const Network = (
+  // The "AI Agent Network" full grid — resting-dashboard content only. Owner, 2026-09-10:
+  // showing it underneath the Live Visual panel too (an earlier pass here) was confusing, not
+  // helpful — once the panel is open you're already looking at one agent's own live screen,
+  // and the whole-roster grid right below it was clutter. Back to strictly !panelOpen.
+  const Network = !panelOpen && (
     <section className="lx-card relative overflow-hidden">
       <AgentNetwork
         top={netTop}
