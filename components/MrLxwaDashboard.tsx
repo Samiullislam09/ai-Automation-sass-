@@ -3001,8 +3001,8 @@ export default function MrLxwaDashboard({
             <>
               {Workflow}
               <Collapse open={panelOpen}>{AgentPanel}</Collapse>
-              {RunSummary}
               {Network}
+              {RunSummary}
               {BottomBar}
             </>
           )}
