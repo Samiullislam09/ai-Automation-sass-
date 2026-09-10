@@ -2038,13 +2038,11 @@ export default function MrLxwaDashboard({
     </section>
   );
 
-  // The run-in-progress summary card — title, checklist, timeline log. Used to sit at the top
-  // of the Workflow card, above the AI Agent Network grid. Owner, 2026-09-10: pulled it out of
-  // there entirely and moved it below the Live Visual detail panel instead — same content,
-  // just a different spot on the page. Still hidden while the Live Visual panel itself is open
-  // (its own checklist already covers the same ground for the agent you're looking at), and
-  // renders nothing when nothing is running, same as before.
-  const RunSummary = !panelOpen && (
+  // The run-in-progress summary card — title, checklist, timeline log. Used to sit on the
+  // resting dashboard, above the AI Agent Network grid. Owner, 2026-09-10 (final): take it off
+  // the resting dashboard entirely — it only shows now once the Live Visual panel itself is
+  // open, directly under it, instead of duplicating that same information on the home screen.
+  const RunSummary = panelOpen && (
     <section className="lx-card relative overflow-hidden">
       <LiveRunPanel
         task={runTask}
@@ -3001,8 +2999,8 @@ export default function MrLxwaDashboard({
             <>
               {Workflow}
               <Collapse open={panelOpen}>{AgentPanel}</Collapse>
-              {Network}
               {RunSummary}
+              {Network}
               {BottomBar}
             </>
           )}
