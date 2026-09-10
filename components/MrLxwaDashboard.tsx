@@ -1670,26 +1670,29 @@ export default function MrLxwaDashboard({
         label: [...allAgents, bossAgent].find((a) => a.id === st.agent_id)?.name ?? st.agent_id,
         status: st.status,
       }));
-      const cta = planSteps.length ? { label: "View Live Workflow", agentId: runningNow?.agent_id } : undefined;
+      // No CTA button yet — "View in Live Visual" only belongs on the finished summary (the
+      // terminal branch below sets its own), not on a task that has barely started (owner
+      // 2026-09-10: it was showing up mid-conversation, well before there was anything finished
+      // worth looking at).
       setThread((p) => {
         // Attach the evolving checklist to the bubble stream() already tagged with this taskId
         // the moment the order was accepted — that bubble's own `text` is the model's real
         // acknowledgment (in the customer's own language) and is never overwritten here; only
-        // `planSteps`/`cta` change as the plan progresses. A second, separate bubble for the
-        // same order is exactly the duplicate the owner reported.
+        // `planSteps` changes as the plan progresses. A second, separate bubble for the same
+        // order is exactly the duplicate the owner reported.
         const i = p.findIndex((m) => m.taskId === id);
         if (i >= 0) {
           const prev = p[i];
           if (prev.live === true && JSON.stringify(prev.planSteps) === JSON.stringify(planSteps)) return p;
           const next = [...p];
-          next[i] = { ...next[i], live: true, planSteps, cta };
+          next[i] = { ...next[i], live: true, planSteps };
           return next;
         }
         // Fallback: this effect fired before stream() had a chance to tag its own bubble (a
         // narrow timing case, e.g. a task order placed by a path other than the chat composer).
         if (!startedLiveBubble.current.has(id)) {
           startedLiveBubble.current.add(id);
-          return [...p, { who: "ai", text: liveText, time: nowTime(), live: true, taskId: id, planSteps, cta }];
+          return [...p, { who: "ai", text: liveText, time: nowTime(), live: true, taskId: id, planSteps }];
         }
         return p;
       });
@@ -1727,6 +1730,37 @@ export default function MrLxwaDashboard({
       next[i] = { ...next[i], text, live: false, chip, cta };
       return next;
     });
+
+    // Upgrade "8 keywords ready" into a real sentence naming what was actually produced/picked
+    // (owner, 2026-09-10: "real ai answer dega ki ye keyword select kiya gaya hai, normal chat
+    // jaisa") — the template above ships immediately so the bubble is never left stale while
+    // this resolves, and this quietly replaces it if the model answers in time.
+    if (produced) {
+      const agentName = [...allAgents, bossAgent].find((a) => a.id === produced.agentId)?.name ?? "The team";
+      fetch("/api/chat/narrate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agentName,
+          stepLabel: `the whole order — found ${produced.count} ${plural(produced.kind, produced.count)}`,
+          subject: produced.headline ?? undefined,
+          producedCount: produced.count,
+          message: lastOrderMessageRef.current,
+        }),
+      })
+        .then((r) => r.json())
+        .then((d) => {
+          if (!d?.ok || !d.text) return;
+          setThread((p) => {
+            const i = p.findIndex((m) => m.taskId === id);
+            if (i < 0) return p;
+            const next = [...p];
+            next[i] = { ...next[i], text: d.text };
+            return next;
+          });
+        })
+        .catch(() => {});
+    }
   }, [live.byTask]);
 
   /** Live progress narration — a genuinely model-written sentence for every step as it finishes
