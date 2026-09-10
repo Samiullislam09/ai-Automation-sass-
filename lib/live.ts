@@ -614,6 +614,20 @@ export function foldEvents(state: LiveState, incoming: IncomingEvent): LiveState
         // A new run over a failed step is a retry; let the step re-open.
         const failed = t.steps.filter((s) => s.agent_id === agentId && s.status === "failed");
         for (const s of failed) t.steps = upsertStep(t.steps, s.key, { agent_id: agentId }, { status: "running", reason: null, runId }, runId);
+        // The agent's planned step itself, still `pending` — an agent whose whole run is
+        // narrated through `ctx.onProgress()` alone (no `ctx.step()` sub-steps, e.g.
+        // agents/keyword.ts) never sends a `step_started` to flip this, so the card sat on
+        // "Waiting" for its ENTIRE run and the Live Visual panel never auto-opened for it
+        // (found live 2026-09-10: Mr. Keyword ran a minute of real progress lines while its
+        // own network card, and every other agent's, stayed "Waiting"). A run starting at all
+        // is itself proof the agent's turn began, whether or not it ever names a sub-step.
+        const open = resolveStepKey(t.steps, agentId, null);
+        if (open && !failed.some((s) => s.key === open.key)) {
+          const cur = t.steps.find((s) => s.key === open.key);
+          if (cur && cur.status === "pending") {
+            t.steps = upsertStep(t.steps, open.key, { agent_id: agentId }, { status: "running", startedAt: cur.startedAt ?? at }, runId);
+          }
+        }
         t.agents = upsertPane(t.agents, agentId, (p) => ({ ...p, status: "running", lastEventAt: Math.max(p.lastEventAt, at) }));
       }
       break;
