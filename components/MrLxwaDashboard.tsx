@@ -1612,10 +1612,21 @@ export default function MrLxwaDashboard({
           // conversations/route.ts) — use them directly instead of a second round trip
           // through openConversation, which is what used to leave "Connecting to Mr. Lxwa…"
           // on screen for two serial network hops on every single page load.
-          if (r.latestMessages?.id === id) {
+          const thread = r.latestMessages?.id === id ? messagesToThread(r.latestMessages.messages) : null;
+          if (thread) {
+            // A most-recent conversation row with zero messages is a real, if rare, case — a
+            // `newChat()`/POST created it but nothing was ever sent into it before the tab was
+            // closed. Found live 2026-09-10: the dashboard then resumed that same empty row on
+            // every reload forever, set an empty thread, and sat on "Connecting to Mr. Lxwa…"
+            // with nothing left to do about it — no message ever arrives for an empty thread to
+            // wait for. Same rule as "no history at all": greet fresh.
+            if (thread.length === 0) {
+              void stream("__hello__");
+              return;
+            }
             convId.current = id;
             orderedTaskId.current = null;
-            setThread(messagesToThread(r.latestMessages.messages));
+            setThread(thread);
             setShowHistory(false);
           } else {
             await openConversation(id);
