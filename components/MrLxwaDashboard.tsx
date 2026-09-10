@@ -2035,29 +2035,30 @@ export default function MrLxwaDashboard({
           </div>
         </div>
       </Collapse>
-      {/* ---- full: "AI Agent Network" — the resting state. CSS grid-area layout (see
-          .lx-net), collapsing to a 2-column auto-flow (brain first) in a narrow column. ---- */}
-      {/* The run in progress, in the resting state only. Owner 2026-09-05: "har hal main ye
-          primary ha ki ham user ko live progress dikhaye" — but once the panel below is
-          already open, this became a second "Your team is working" summary sitting right on
-          top of the real Live Visual detail for the exact same task, its own "Open" button now
-          pointing at a panel already on screen (owner 2026-09-09: "is tab ko remove kardo").
-          Renders nothing when nothing is running, same as before. */}
-      {!panelOpen && (
-        <LiveRunPanel
-          task={runTask}
-          workingAgentId={workingAgent?.id ?? null}
-          workingAgentTask={(() => {
-            const t = workingAgent ? account.agents?.[workingAgent.id]?.task : null;
-            return t && t !== "Idle" && t !== "—" ? t : null;
-          })()}
-          crawl={account.crawl}
-          pendingOrder={pendingOrder}
-          now={runNow}
-          connected={live.connected}
-          onOpen={() => setShowPanel(true)}
-        />
-      )}
+    </section>
+  );
+
+  // The run-in-progress summary card — title, checklist, timeline log. Used to sit at the top
+  // of the Workflow card, above the AI Agent Network grid. Owner, 2026-09-10: pulled it out of
+  // there entirely and moved it below the Live Visual detail panel instead — same content,
+  // just a different spot on the page. Still hidden while the Live Visual panel itself is open
+  // (its own checklist already covers the same ground for the agent you're looking at), and
+  // renders nothing when nothing is running, same as before.
+  const RunSummary = !panelOpen && (
+    <section className="lx-card relative overflow-hidden">
+      <LiveRunPanel
+        task={runTask}
+        workingAgentId={workingAgent?.id ?? null}
+        workingAgentTask={(() => {
+          const t = workingAgent ? account.agents?.[workingAgent.id]?.task : null;
+          return t && t !== "Idle" && t !== "—" ? t : null;
+        })()}
+        crawl={account.crawl}
+        pendingOrder={pendingOrder}
+        now={runNow}
+        connected={live.connected}
+        onOpen={() => setShowPanel(true)}
+      />
     </section>
   );
 
@@ -3000,6 +3001,7 @@ export default function MrLxwaDashboard({
             <>
               {Workflow}
               <Collapse open={panelOpen}>{AgentPanel}</Collapse>
+              {RunSummary}
               {Network}
               {BottomBar}
             </>
