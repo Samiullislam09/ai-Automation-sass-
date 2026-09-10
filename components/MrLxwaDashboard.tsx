@@ -43,7 +43,6 @@ import { LxGlobalStyle } from "@/components/lx-theme";
 import { useLiveEvents, isTerminalTask, isTerminalStep, isFlowing, useNow, elapsedMs, clock, type TaskState } from "@/lib/live";
 import { useStore, PLANS } from "@/lib/store";
 import { startPolling } from "@/lib/poll";
-import LiveRunPanel from "@/components/dashboard/LiveRunPanel";
 import {
   LayoutDashboard,
   Users,
@@ -1127,9 +1126,6 @@ export default function MrLxwaDashboard({
   // started it — the schedule, another tab, a button on the Site Brain page. Newest open task
   // first, and if the brain has not filed one yet the panel falls back to jobs_log.
   const runTask: TaskState | null = activeTasksList[0] ?? null;
-  // Its own clock: `now` above only ticks while THIS conversation's task is open, so a run
-  // started anywhere else would have shown a frozen timer.
-  const runNow = useNow(!!runTask || !!account.crawl);
   const statusForAgent = (m: AgentMeta): AgentStatus => {
     if (m.fixedStatus) return m.fixedStatus;
     // Scoped to THIS order's steps only (see `task` above). Scanning every loaded task instead
@@ -2050,28 +2046,6 @@ export default function MrLxwaDashboard({
           </div>
         </div>
       </Collapse>
-    </section>
-  );
-
-  // The run-in-progress summary card — title, checklist, timeline log. Used to sit on the
-  // resting dashboard, above the AI Agent Network grid. Owner, 2026-09-10 (final): take it off
-  // the resting dashboard entirely — it only shows now once the Live Visual panel itself is
-  // open, directly under it, instead of duplicating that same information on the home screen.
-  const RunSummary = panelOpen && (
-    <section className="lx-card relative overflow-hidden">
-      <LiveRunPanel
-        task={runTask}
-        workingAgentId={workingAgent?.id ?? null}
-        workingAgentTask={(() => {
-          const t = workingAgent ? account.agents?.[workingAgent.id]?.task : null;
-          return t && t !== "Idle" && t !== "—" ? t : null;
-        })()}
-        crawl={account.crawl}
-        pendingOrder={pendingOrder}
-        now={runNow}
-        connected={live.connected}
-        onOpen={() => setShowPanel(true)}
-      />
     </section>
   );
 
@@ -3014,7 +2988,6 @@ export default function MrLxwaDashboard({
             <>
               {Workflow}
               <Collapse open={panelOpen}>{AgentPanel}</Collapse>
-              {RunSummary}
               {Network}
               {BottomBar}
             </>
