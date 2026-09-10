@@ -20,7 +20,7 @@
 import type { SystemEventPayload } from "@/lib/chat-events";
 import type { BrainRegistry, BrainResult, BrainTaskCreated, BrainIntent } from "@/lib/brain";
 import { BRAIN_UNREACHABLE } from "@/lib/brain";
-import { ANSWER_QUESTION, capabilitiesPrompt, coerceParams, enabledActions, matchActionPhrase } from "@/lib/chat-tools";
+import { ANSWER_QUESTION, capabilitiesPrompt, enabledActions } from "@/lib/chat-tools";
 import { ackLine, CONFIDENCE_FLOOR, type IntentPlan } from "@/lib/chat-brain-intent";
 import { CONFIRM_SLOT, resolveFollowUp, type ConversationState, type PendingIntent, type StateResult } from "@/lib/chat-conversation";
 import { describeWhen, parseWhen } from "@/lib/when";
@@ -143,19 +143,6 @@ const REUSABLE_ACTIONS: Record<string, { agent: string; windowMs: number; noun: 
 // one was — this gate exists to stop an ACCIDENTAL redo (the model's own judgement call on a
 // vague message), never to refuse a deliberate one.
 const FORCE_REUSABLE = /\b(phir\s*se|dobara|re-?crawl|re-?audit|force|abhi\s*turant|fresh\s*se|naya\s*kar)\b/i;
-
-// "kya tum Instagram pe post kar sakte ho?" mentions work ("post") but is a question about
-// ability, not an instruction — the conversation model already answers these honestly from the
-// registry's own capabilities list. Used below to keep the clarifying-question fallback from
-// swallowing a capability question it would otherwise answer better.
-const CAPABILITY_QUESTION = /\b(?:kya\s+(?:tum|aap)|can\s+you|could\s+you|are\s+you\s+able|sakte\s+ho|possible\s+hai)\b/i;
-
-// "publish mat karna", said on its own with nothing pending, mentions work ("publish") but is a
-// sentence about something NOT to do, not a request for something new — this exact phrase once
-// cancelled the customer's next booked article for the same reason (see the legacy-kind check
-// above). A negation anywhere in the message is reason enough to leave it to the conversation
-// model rather than ask a clarifying question about work nobody asked for.
-const NEGATION = /\b(?:nahi|nahin|mat|don'?t|do\s*not)\b/i;
 
 export type BrainTurnInput = {
   message: string;
@@ -327,59 +314,23 @@ export async function brainTurn(input: BrainTurnInput, deps: BrainTurnDeps): Pro
   /* 5 ─ What did they ask for? --------------------------------------------------------- */
   const intent = await deps.extractIntent(message, registry, { tz: input.tz, history: input.history, now });
 
-  // THE MANIFEST'S OWN PHRASES OVERRULE A "this is just a question" READING.
-  //
-  // The model kept classifying a bare "ek article likho" as a question and answering it
-  // conversationally — no task, no work, and to the customer it looks like the product is
-  // interviewing them instead of doing the job (owner, 2026-08-31: "user se kuch nahi
-  // puchega"). When someone types an action's own registered trigger phrase, that is not a
-  // question, whatever the model decided; §5.1's deterministic fast path exists precisely so
-  // routing does not rest on the model's mood.
-  //
-  // Deliberately one-directional: a phrase match can turn a QUESTION into work, never the
-  // reverse, and it cannot redirect one action to another. Params are re-coerced against the
-  // action being routed to, so the question tool's own loose `topic` ("article") cannot leak in
-  // as a real subject — anything the action lists in `needs` is dropped and the planner fills it
-  // from the customer's own site instead.
-  let routed = intent;
+  // The model's own classification is the ONLY source of truth for what a message means — no
+  // deterministic phrase list, keyword regex or fixed English fallback sentence second-guesses
+  // it. There used to be a "does the message literally contain one of an action's registered
+  // trigger phrases" override here, plus a hand-written clarifying question for when neither
+  // that nor the model pinned an action. Both were removed (owner, 2026-09-10: "sab ke sab AI
+  // jawab dega, koi hardcoded nahi, isse user confuse ho raha hai") — a fixed phrase list only
+  // ever matches exactly the wording it happens to list, so the exact same kind of request
+  // routed correctly for one phrasing and fell through to a canned clarifying question for
+  // another. That inconsistency read as broken, not as a safety net. If the model doesn't map
+  // the message to a real action, it falls through to the free-form conversational reply below
+  // — which is the SAME model, so it can explain, ask its own follow-up question, or just
+  // answer, in its own words and the customer's own language, rather than one fixed sentence
+  // standing in for all three.
+  const routed = intent;
   const known = enabledActions(registry);
-  if (intent.action === ANSWER_QUESTION || !known.has(intent.action)) {
-    const byPhrase = matchActionPhrase(message, registry);
-    const spec = byPhrase ? known.get(byPhrase)?.spec : undefined;
-    if (byPhrase && spec) {
-      const graphFills = new Set((spec.needs ?? []).map(String));
-      const params = coerceParams(spec, intent.params ?? {});
-      for (const need of Array.from(graphFills)) delete (params as Record<string, unknown>)[need];
-      routed = { ...intent, action: byPhrase, params, missing: [] };
-    } else if (mightBeAnOrder(message) && !CAPABILITY_QUESTION.test(message) && !NEGATION.test(message)) {
-      // Neither the model nor the deterministic phrase-matcher pinned an action, but the
-      // message mentions the work at all (mightBeAnOrder — the same cheap, free, no-network
-      // check §3 already uses above) — routing this to the free-form conversational model risked
-      // exactly the failure app/api/chat/route.ts's FABRICATED_ORDER filter now has to catch
-      // (a confident-sounding "Got it" with nothing ever created), and silence is just as
-      // confusing (owner, 2026-09-10: "ek chota sa clarifying sawaal pucho"). One short, honest
-      // question instead — the same "a missed order costs one rephrase" trade-off §5.1 already
-      // accepts everywhere else in this file, just for the case where not even an action is
-      // known yet, so there is no slot to ask about by name.
-      //
-      // CAPABILITY_QUESTION is excluded on purpose: "kya tum Instagram pe post kar sakte ho?" has
-      // an instruction-shaped word ("post") but is not an instruction — it is a question about
-      // what the team CAN do, which the conversation model already answers honestly from the
-      // registry's own capabilities list. NEGATION is excluded for the same reason "publish mat
-      // karna" gets its own legacy-kind check above: said alone, it is a sentence about something
-      // NOT to do, not a request for new work. Asking either to rephrase an order that was never
-      // meant as one would be a worse answer than what the conversation model already gives.
-      return {
-        handled: true,
-        order: nothingStarted(
-          'I want to make sure I get this right — could you tell me a bit more about what you\'d like done? ' +
-            'For example, "write an article about X" or "find keywords for Y" — I\'ll get the team on it right away.'
-        ),
-        action: "clarify",
-      };
-    } else {
-      return conversation(capabilities, intent.action);
-    }
+  if (routed.action === ANSWER_QUESTION || !known.has(routed.action)) {
+    return conversation(capabilities, routed.action);
   }
 
   /* 6 ─ Sure enough to spend money? ---------------------------------------------------- */

@@ -325,21 +325,20 @@ test('"hello" — a greeting starts nothing', async () => {
   assert.equal(s.rec.saved.length, 0);
 });
 
-test("a message that mentions the work but matches no action gets ONE clarifying question, not silence or the free-form model", async () => {
-  // Neither the model (tool: null) nor the phrase-matcher (this message matches no registered
-  // trigger phrase verbatim) pin an action — but it plainly mentions the work ("content"), so
-  // routing it to the conversation model risked the exact failure app/api/chat/route.ts's
-  // FABRICATED_ORDER filter exists to catch. Owner, 2026-09-10: "ek chota sa clarifying sawaal
-  // pucho" instead of silence or a hallucination risk.
+test("a message that mentions the work but matches no action goes to the free-form model — no hardcoded clarifying question", async () => {
+  // There used to be a deterministic phrase-matcher here, and a fixed English clarifying
+  // question for when neither it nor the model pinned an action. Both were removed (owner,
+  // 2026-09-10: "sab ke sab AI jawab dega, koi hardcoded nahi, isse user confuse ho raha hai") —
+  // a fixed phrase list only ever matched exactly the wording it happened to list, so identical
+  // kinds of requests got inconsistent treatment depending on exact phrasing. The model's own
+  // classification (tool: null here — it did not pin an action) is now the only thing that
+  // decides this, and an unpinned message always falls through to the conversational reply,
+  // which is itself the model and can ask its own follow-up question if it needs to.
   const s = stub({ tool: null });
   const t = await turn("mujhe kuch content chahiye", s.deps);
 
-  assert.equal(t.handled, true, "answered directly, not handed to the free-form conversation model");
-  assert.equal(s.rec.created.length, 0, "still no task — a question, not a guess");
-  const text = order(t).text;
-  assert.ok(text.trim().length > 0, "a real question, not an empty reply");
-  assert.doesNotMatch(text, /\bteam will\b|\bwill (?:start|pick|choose|write|research|publish|draft|create)\b.*for you/i,
-    "must never itself read like a confirmed order");
+  assert.equal(t.handled, false, "handed to the free-form conversation model, not answered by a fixed sentence");
+  assert.equal(s.rec.created.length, 0, "still no task — nothing was ordered");
 });
 
 test('"article likho" — ONE question, and no task', async () => {
