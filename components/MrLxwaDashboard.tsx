@@ -363,7 +363,11 @@ const NetCard = ({ a, area, onClick }: { a: Agent; area: string; onClick?: () =>
         <div className="lx-10 lx-mut">{a.role}</div>
         {!planned && (
           <div className="mt-1.5 flex items-center gap-1.5 lx-10 font-semibold" style={{ color: statusColor }}>
-            <span className={`h-1.5 w-1.5 rounded-full ${working ? "lx-pulse" : ""}`} style={{ background: statusColor }} />
+            {a.status === "Completed" ? (
+              <CheckCircle2 size={12} style={{ flexShrink: 0 }} />
+            ) : (
+              <span className={`h-1.5 w-1.5 rounded-full ${working ? "lx-pulse" : ""}`} style={{ background: statusColor }} />
+            )}
             {a.status}
           </div>
         )}
@@ -905,6 +909,14 @@ const AgentNetwork = ({
 }) => {
   const hostRef = useRef<HTMLDivElement>(null);
   const workingAgents = [...top, ...left, ...right, ...bottom].filter((a) => a.status === "Working");
+  // The full grid gets the same "camera follows the work" treatment the compact tab strip
+  // already has (owner, 2026-09-10): the moment an agent starts, the page scrolls so its card
+  // sits centered in view instead of making the owner go hunting for it.
+  useEffect(() => {
+    if (!workingAgent) return;
+    const el = hostRef.current?.querySelector<HTMLElement>(`[data-agent-id="${workingAgent.id}"]`);
+    el?.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+  }, [workingAgent?.id]);
   return (
     <div className="p-4 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1351,20 +1363,11 @@ export default function MrLxwaDashboard({
     workingAgent ??
     (lastStep ? [...allAgents, bossAgent].find((a) => a.id === lastStep.agent_id) ?? null : null) ??
     (producerAgent ? [...allAgents, bossAgent].find((a) => a.id === producerAgent) ?? null : null);
-  // Auto-open on the rising edge of AN ACTIVE ORDER — not of "somebody is Working".
-  //
-  // Keyed off `workingAgent` before, this missed the case the owner actually hits: for the first
-  // seconds after an order is placed the task exists but every step is still `pending`, so no
-  // agent is "Working", so nothing opened — and by the time a step did start, the effect's
-  // dependency was a fresh object on every render rather than a value that changed, which is not
-  // something to rely on. `taskActive` is a boolean, so this fires exactly once per new order,
-  // immediately, and the panel is already open to show the plan landing and then each agent
-  // taking its turn. Closing it still sticks: the flag only re-arms when the next order starts.
-  const hadActiveTask = useRef(false);
-  useEffect(() => {
-    if (taskActive && !hadActiveTask.current) setShowPanel(true);
-    hadActiveTask.current = taskActive;
-  }, [taskActive]);
+  // NOT auto-opened on a new order any more (owner, 2026-09-10: the detailed per-agent view
+  // "accurate live nahi hai" — remove it from the home dashboard's default view; the compact
+  // LiveRunPanel strip + the full AI Agent Network grid are the home dashboard now). The panel
+  // still opens the moment the user actually asks for it — its own "Open" button, or clicking an
+  // agent's card directly (openAgentPanel below) — never on its own.
 
   useEffect(() => {
     const el = chatRef.current;
