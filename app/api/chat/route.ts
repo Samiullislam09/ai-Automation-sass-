@@ -358,7 +358,9 @@ const FABRICATED_ORDER = new RegExp(
 
 function relay(
   upstream: ReadableStream<Uint8Array>,
-  onDone: (full: string) => void,
+  // May return a Promise now — see the `finally` block below for why it is AWAITED before the
+  // stream closes, not fired-and-forgotten alongside it.
+  onDone: (full: string) => void | Promise<void>,
   onFirstWord: () => void = () => {}
 ): ReadableStream<Uint8Array> {
   const enc = new TextEncoder();
@@ -433,8 +435,16 @@ function relay(
         console.error("[chat] stream broke mid-answer:", e?.message);
         if (!full) controller.enqueue(enc.encode("I lost my connection mid-sentence — ask me again."));
       } finally {
+        // onDone (the caller's saveTurn) is awaited BEFORE the stream closes, not alongside it.
+        // A Vercel Node function can freeze the instance as soon as the stream this `start()`
+        // drives is done producing output — closing first and saving after was racing that
+        // freeze exactly like the non-streamed reply() path was (see its own comment): every
+        // token had already reached the browser by this point, so the reader sees no
+        // difference, but the save is now guaranteed to actually run instead of sometimes losing
+        // the race. Found live 2026-09-10 via a chat turn that streamed a real answer and then
+        // never appeared in chat_messages.
+        await onDone(full.trim());
         controller.close();
-        onDone(full.trim());
       }
     },
   });
@@ -1033,8 +1043,15 @@ export async function POST(req: NextRequest) {
   const convId = await convP;
   lap("conversation");
 
-  const reply = (text: string, order?: OrderResult) => {
-    if (tenantId && convId) void saveTurn(tenantId, convId, q, text);
+  const reply = async (text: string, order?: OrderResult) => {
+    // Awaited, not fire-and-forget: a Vercel Node function is free to freeze the instance the
+    // moment the Response it returns is fully sent, and a `void saveTurn(...)` here was racing
+    // that freeze — found live 2026-09-10, a "find keywords" order that visibly worked (the
+    // team really ran it) left no trace in chat_messages, sometimes turning up minutes later
+    // once some other request happened to keep the same instance warm long enough to flush it,
+    // sometimes not at all. saveTurn already self-catches, so awaiting it costs one real DB
+    // round trip (tens of ms) and never turns a save failure into a failed reply.
+    if (tenantId && convId) await saveTurn(tenantId, convId, q, text);
     return new Response(once(text), {
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
@@ -1092,8 +1109,8 @@ export async function POST(req: NextRequest) {
       const sections = lastSections;
       const body = relay(
         upstream,
-        (full) => {
-          if (tenantId && convId && full) void saveTurn(tenantId, convId, q, full);
+        async (full) => {
+          if (tenantId && convId && full) await saveTurn(tenantId, convId, q, full);
           lap("lastWord");
           console.log(`[chat] timing ${JSON.stringify(mark)} sections=${sections}`);
         },
