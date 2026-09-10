@@ -2116,8 +2116,15 @@ export default function MrLxwaDashboard({
         .flatMap((p) => p.items)
         .sort((a, b) => a.at - b.at)
     : [];
-  // This agent's own sentences, plus the task-level ones (agent_id null) that frame them.
-  const panelLines = (task?.lines ?? []).filter((ln) => !panelAgent || ln.agent_id == null || ln.agent_id === panelAgent.id);
+  // This agent's OWN sentences only. Used to also let through the task-level, agent-less lines
+  // ("On it — 5 steps", "Writing the article. Starting now…") on every agent's tab as "the frame
+  // every agent's work sits inside" — but that meant Mr. Keyword's own screen opened with the
+  // WRITER's order-level sentence sitting right above its real "Looking up search data…" lines,
+  // reading as if the two agents' reports had been mixed together (owner, 2026-09-10: "keyword
+  // wale pe article ka analytic aa raha hai"). Those framing lines now only show in the
+  // no-agent-selected "What the team is doing" view; a specific agent's tab shows exactly, only,
+  // that agent's own lines.
+  const panelLines = (task?.lines ?? []).filter((ln) => (panelAgent ? ln.agent_id === panelAgent.id : true));
   // Clicking an agent the plan hasn't reached yet still opens its screen (nothing is disabled,
   // owner 2026-09-10) — it just has no lines yet because there is genuinely nothing to show, not
   // because something is broken. "No activity yet" read as dead; an animated "Waiting…" reads as
@@ -2414,10 +2421,13 @@ export default function MrLxwaDashboard({
           </div>
 
           {/* timeline — task.lines: real, human-readable events (lib/live.ts's userMessage()),
-              never a raw prompt/error string. Scoped to the agent whose card was clicked; task-
-              level lines (agent_id null — "On it — 4 steps", "Done") always stay, since they are
-              the frame every agent's work sits inside. */}
-          <div className="lx-tl mt-1">
+              never a raw prompt/error string. Scoped to the agent whose card was clicked (see
+              panelLines above) — no other agent's lines mixed in. Full history, not just the
+              last few: it used to hard-cut to the last 8 lines, silently dropping everything
+              earlier (owner, 2026-09-10: "analytic ka part cut jaye aisa nahi... full show
+              karna, agar zyada ho to scroll pe dalo") — now it all renders, and the panel itself
+              scrolls once it runs long instead of the page growing without bound. */}
+          <div className="lx-tl mt-1" style={{ maxHeight: 360, overflowY: "auto" }}>
             {panelLines.length === 0 && (
               <div className="lx-11 lx-mut py-2 flex items-center gap-2">
                 {panelAgentNotStarted ? (
@@ -2430,7 +2440,7 @@ export default function MrLxwaDashboard({
                 )}
               </div>
             )}
-            {panelLines.slice(-8).map((ln) => {
+            {panelLines.map((ln) => {
               const color = ln.tone === "ok" ? "#22c55e" : ln.tone === "err" ? "#ef4444" : ln.tone === "warn" ? "#f59e0b" : "#3b82f6";
               return (
                 <div className="lx-row" key={ln.key}>
@@ -2438,7 +2448,11 @@ export default function MrLxwaDashboard({
                     {new Date(ln.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                   </span>
                   <span className="lx-dot" style={{ background: color, boxShadow: `0 0 8px ${color}` }} />
-                  <span className="lx-12 truncate" style={{ color: "#d9d9e6" }}>{ln.text}</span>
+                  {/* No `truncate` — a long sentence used to end in an ellipsis with no way to
+                      read the rest of it. It wraps instead now; the row's own align-items:start
+                      (below) keeps the timestamp/dot pinned to the first line, not centered
+                      against the whole wrapped block. */}
+                  <span className="lx-12" style={{ color: "#d9d9e6", alignSelf: "start", paddingTop: 1 }}>{ln.text}</span>
                   <span style={{ width: 14 }} />
                   <span style={{ width: 14 }} />
                 </div>
