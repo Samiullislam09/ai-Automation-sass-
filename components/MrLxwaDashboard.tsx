@@ -1552,25 +1552,28 @@ export default function MrLxwaDashboard({
     }
   }
 
+  // Shared with the mount effect below, which already has its messages in hand (folded into
+  // the conversations-list response) and must not re-fetch them just to reuse this mapping.
+  const messagesToThread = (messages: any[]): ThreadMsg[] =>
+    (messages ?? [])
+      .filter((m: any) => m.role === "user" || m.role === "assistant")
+      .map(
+        (m: any): ThreadMsg => ({
+          who: m.role === "user" ? "user" : "ai",
+          text: String(m.content ?? ""),
+          time: m.created_at
+            ? new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }).toUpperCase()
+            : "",
+        })
+      );
+
   async function openConversation(id: string) {
     try {
       const r = await fetch(`/api/chat/conversations/${id}`).then((res) => res.json());
       if (!r?.ok) return;
       convId.current = id;
       orderedTaskId.current = null;
-      setThread(
-        (r.messages ?? [])
-          .filter((m: any) => m.role === "user" || m.role === "assistant")
-          .map(
-            (m: any): ThreadMsg => ({
-              who: m.role === "user" ? "user" : "ai",
-              text: String(m.content ?? ""),
-              time: m.created_at
-                ? new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }).toUpperCase()
-                : "",
-            })
-          )
-      );
+      setThread(messagesToThread(r.messages));
       setShowHistory(false);
     } catch {}
   }
@@ -1608,7 +1611,19 @@ export default function MrLxwaDashboard({
         const r = await fetch("/api/chat/conversations").then((res) => res.json());
         if (r?.ok && r.conversations?.length) {
           setConvs(r.conversations);
-          await openConversation(r.conversations[0].id);
+          const id = r.conversations[0].id;
+          // The list response already carries this one's messages (app/api/chat/
+          // conversations/route.ts) — use them directly instead of a second round trip
+          // through openConversation, which is what used to leave "Connecting to Mr. Lxwa…"
+          // on screen for two serial network hops on every single page load.
+          if (r.latestMessages?.id === id) {
+            convId.current = id;
+            orderedTaskId.current = null;
+            setThread(messagesToThread(r.latestMessages.messages));
+            setShowHistory(false);
+          } else {
+            await openConversation(id);
+          }
           return;
         }
       } catch {}
