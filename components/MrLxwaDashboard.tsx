@@ -1344,6 +1344,16 @@ export default function MrLxwaDashboard({
     setSelectedAgentId(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workingAgent?.id]);
+  // Auto-open the Live Visual the moment an agent actually starts working (owner, 2026-09-10:
+  // "jo agent kaam kare uska live visual open nahi ho raha" — restores this after an earlier
+  // pass removed auto-open entirely; that removal is kept for "opening on every new order" in
+  // general, but the owner now wants the working agent's own screen to open itself, not require
+  // a manual click). The user's own close (X) still wins until the NEXT hand-off — this only
+  // fires again when `workingAgent.id` actually changes.
+  useEffect(() => {
+    if (workingAgent) setShowPanel(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workingAgent?.id]);
   // The panel used to require `workingAgent`, so it vanished the instant the last step finished
   // — the user watched it disappear exactly when the result became worth reading. It now stays
   // on whatever task it was opened for until the user closes it (X), which is also what makes
@@ -2048,21 +2058,27 @@ export default function MrLxwaDashboard({
           onOpen={() => setShowPanel(true)}
         />
       )}
+    </section>
+  );
 
-      <Collapse open={!panelOpen}>
-        <AgentNetwork
-          top={netTop}
-          left={netLeft}
-          right={netRight}
-          bottom={netBottom}
-          bossAgent={bossAgent}
-          totalActive={realAgents.length + 1}
-          running={realAgents.filter((a) => a.status === "Working").length}
-          completed={realAgents.filter((a) => a.status === "Completed").length}
-          workingAgent={workingAgent}
-          onOpen={openAgentPanel}
-        />
-      </Collapse>
+  // The "AI Agent Network" full grid — moved out from the resting-state-only slot above
+  // (owner, 2026-09-10: "ye jo all 11 agents ka tab hai, isko yahan se remove karo aur Live
+  // Visual ke niche add karo"). It now always renders, right under the Live Visual panel,
+  // instead of hiding the moment that panel opens.
+  const Network = (
+    <section className="lx-card relative overflow-hidden">
+      <AgentNetwork
+        top={netTop}
+        left={netLeft}
+        right={netRight}
+        bottom={netBottom}
+        bossAgent={bossAgent}
+        totalActive={realAgents.length + 1}
+        running={realAgents.filter((a) => a.status === "Working").length}
+        completed={realAgents.filter((a) => a.status === "Completed").length}
+        workingAgent={workingAgent}
+        onOpen={openAgentPanel}
+      />
     </section>
   );
 
@@ -2984,6 +3000,7 @@ export default function MrLxwaDashboard({
             <>
               {Workflow}
               <Collapse open={panelOpen}>{AgentPanel}</Collapse>
+              {Network}
               {BottomBar}
             </>
           )}
