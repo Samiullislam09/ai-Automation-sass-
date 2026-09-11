@@ -778,6 +778,235 @@ const ResearchScreen = ({ items, running }: { items: { key: string; payload: any
   );
 };
 
+/** LIVE_CANVAS_SPEC.md (owner, 2026-09-11) asked for a purpose-built live screen per remaining
+ *  agent — SEO, Image, Audit, Leads, Publish, Social — the same "typed component, real events
+ *  only" rule KeywordScreen/ResearchScreen above already follow. Until now these six fell into
+ *  the generic item list (or, in Workspace.tsx's own dispatcher, `GenericCards`) — a plain
+ *  key/value dump of whatever `ctx.data()` sent, with no shape of its own.
+ *
+ *  Every field name below is the REAL one, read straight off the agent's own `ctx.data()` calls
+ *  (agent-server/src/agents/{seo,image,audit,leads,publish,social}.ts) — not the shape an
+ *  earlier reference design assumed. Nothing here invents a value: an agent that hasn't sent a
+ *  field yet leaves that part of the screen simply absent, never a placeholder guess. */
+
+/** SEO and Audit both emit an `"issue"` kind with the identical `{id, severity, what, fix}`
+ *  shape (lib/seoChecks.ts's `SeoIssue`, agent-server/src/lib/audit/checks.ts's `AuditIssue`) —
+ *  one row renderer, reused by both screens below, rather than two copies that would silently
+ *  drift apart. */
+const IssueRow = ({ payload }: { payload: any }) => {
+  const sev = payload?.severity === "block" ? "red" : payload?.severity === "warn" ? "amber" : "mut";
+  return (
+    <div className="lx-live-anim lx-in rounded-lg px-3 py-2.5">
+      <div className="flex items-center gap-2">
+        <span className={`lx-pill ${sev}`} style={{ fontSize: 10, padding: "1px 8px" }}>
+          {payload?.severity ?? "info"}
+        </span>
+        <span className="lx-11 font-medium" style={{ color: "#d9d9e6" }}>{payload?.what ?? "Issue"}</span>
+      </div>
+      {payload?.fix && <div className="lx-10 lx-mut mt-1.5">{payload.fix}</div>}
+    </div>
+  );
+};
+
+type CanvasItem = { key: string; kind: string; payload: any };
+
+/** Mr. SEO's live screen — `ctx.data("score", …)` once (seo.ts:72), then one `ctx.data("issue",
+ *  …)` per finding (seo.ts:87), as they're found — not a fake gauge sweeping to a precomputed
+ *  number. */
+const SeoScreen = ({ items, running }: { items: CanvasItem[]; running: boolean }) => {
+  const scoreItem = items.filter((it) => it.kind === "score").slice(-1)[0];
+  const issues = items.filter((it) => it.kind === "issue");
+  if (!scoreItem && issues.length === 0) {
+    return <div className="lx-10 lx-mut px-1 py-2">{running ? "Running the on-page checks…" : "No SEO check has run for this order."}</div>;
+  }
+  const s = scoreItem?.payload ?? {};
+  const score = typeof s.score === "number" ? s.score : null;
+  return (
+    <div>
+      {score != null && (
+        <div className="lx-live-anim mb-3 flex items-baseline gap-2">
+          <span className="text-3xl font-bold" style={{ color: s.passed ? "#4ade80" : "#fbbf24" }}>{score}</span>
+          <span className="lx-11 lx-mut">/ {typeof s.max === "number" ? s.max : 100}</span>
+          <span className={`lx-pill ${s.passed ? "green" : "amber"} ml-2`}>
+            {s.passed ? "Passed" : `${s.blockers ?? 0} blocker${s.blockers === 1 ? "" : "s"}`}
+          </span>
+          {s.serpCompared === false && <span className="lx-10 lx-mut">— not compared against the live SERP</span>}
+        </div>
+      )}
+      <div className="space-y-2">
+        {issues.map((it) => <IssueRow key={it.key} payload={it.payload} />)}
+      </div>
+    </div>
+  );
+};
+
+/** Mr. Image's live screen — real generated URLs, `ctx.data("image", …)` once per image
+ *  (image.ts:112/340). `slot` is a free string off the media plan (`ImageSlot`), never an
+ *  invented enum — bucketed by substring match so a slot naming scheme change never breaks
+ *  this into an unstyled fallback. */
+const ImageScreen = ({ items, running }: { items: CanvasItem[]; running: boolean }) => {
+  const images = items.filter((it) => it.kind === "image" && it.payload?.url);
+  if (images.length === 0) {
+    return <div className="lx-10 lx-mut px-1 py-2">{running ? "Generating images…" : "No images were produced for this order."}</div>;
+  }
+  const isHero = (slot: unknown) => /hero/i.test(String(slot ?? ""));
+  const hero = images.find((it) => isHero(it.payload?.slot)) ?? null;
+  const rest = images.filter((it) => it !== hero);
+  const Tile = ({ it }: { it: CanvasItem }) => (
+    <div key={it.key} className="lx-live-anim overflow-hidden rounded-lg" style={{ border: "1px solid var(--lx-border)" }}>
+      {/* eslint-disable-next-line @next/next/no-img-element -- a real generated URL from an
+          arbitrary provider (Cloudflare/NIM), not a static asset next/image can optimize. */}
+      <img src={it.payload.url} alt={it.payload?.alt ?? ""} className="aspect-video w-full object-cover" />
+      <div className="lx-10 lx-mut truncate px-2 py-1.5">{it.payload?.slot ?? "image"}</div>
+    </div>
+  );
+  return (
+    <div>
+      {hero && <div className="mb-3"><Tile it={hero} /></div>}
+      {rest.length > 0 && <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">{rest.map((it) => <Tile key={it.key} it={it} />)}</div>}
+    </div>
+  );
+};
+
+/** Mr. Site Audit's live screen — crawl progress from `ctx.data("page", {url,done,total})`
+ *  (audit.ts:82, and again with `phase:"perf"` at audit.ts:150), the running score
+ *  (`ctx.data("score", {score,blocks,warns,pages})`, audit.ts:116/173), and every issue found
+ *  along the way — same `IssueRow` as SEO, since audit.ts's own `AuditIssue` is the identical
+ *  `{id,severity,what,fix}` shape. */
+const AuditScreen = ({ items, running }: { items: CanvasItem[]; running: boolean }) => {
+  const pages = items.filter((it) => it.kind === "page");
+  const issues = items.filter((it) => it.kind === "issue");
+  const scoreItem = items.filter((it) => it.kind === "score").slice(-1)[0];
+  const latest = pages[pages.length - 1]?.payload;
+  const total = typeof latest?.total === "number" ? latest.total : null;
+  const done = typeof latest?.done === "number" ? latest.done : pages.length;
+  if (!pages.length && !issues.length && !scoreItem) {
+    return <div className="lx-10 lx-mut px-1 py-2">{running ? "Crawling the site…" : "No audit has run for this order."}</div>;
+  }
+  return (
+    <div>
+      {total != null && total > 0 && (
+        <div className="mb-3">
+          <div className="lx-10 lx-mut mb-1.5 flex items-center justify-between">
+            <span>{latest?.phase === "perf" ? "Measuring performance" : "Crawling pages"}</span>
+            <span>{done} / {total}</span>
+          </div>
+          <div className="h-1.5 overflow-hidden rounded-full" style={{ background: "var(--lx-in)" }}>
+            <div
+              className="h-full rounded-full"
+              style={{ width: `${Math.min(100, Math.round((done / total) * 100))}%`, background: "var(--lx-cyan)", transition: "width .5s ease" }}
+            />
+          </div>
+        </div>
+      )}
+      {scoreItem && (
+        <div className="lx-live-anim mb-3 flex items-baseline gap-2">
+          <span className="text-2xl font-bold">{scoreItem.payload?.score ?? "?"}</span>
+          <span className="lx-11 lx-mut">/ 100 site score</span>
+        </div>
+      )}
+      <div className="space-y-2">
+        {issues.map((it) => <IssueRow key={it.key} payload={it.payload} />)}
+      </div>
+    </div>
+  );
+};
+
+/** Mr. Leads' live screen — one `ctx.data("lead", …)` per qualified lead (leads.ts:131), as
+ *  discovery/scoring finds them. `band` is a free string off the agent's own scoring, matched
+ *  by substring the same defensive way ImageScreen matches `slot`, rather than a hardcoded
+ *  enum this screen would silently stop coloring the day the agent's own wording changes. */
+const LeadsScreen = ({ items, running }: { items: CanvasItem[]; running: boolean }) => {
+  const leads = items.filter((it) => it.kind === "lead");
+  if (!leads.length) {
+    return <div className="lx-10 lx-mut px-1 py-2">{running ? "Finding leads…" : "No leads were found for this order."}</div>;
+  }
+  return (
+    <div className="space-y-2">
+      {leads.map((it) => {
+        const p = it.payload ?? {};
+        const band = String(p.band ?? "").toLowerCase();
+        const tier = /hi|high/.test(band) ? "green" : /lo|low/.test(band) ? "mut" : "amber";
+        return (
+          <div key={it.key} className="lx-live-anim lx-in rounded-lg px-3 py-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="lx-12 truncate font-semibold">{p.name ?? "?"}</span>
+              {typeof p.score === "number" && (
+                <span className={`lx-pill ${tier}`} style={{ fontSize: 10, padding: "1px 8px" }}>{p.score}</span>
+              )}
+            </div>
+            {p.website && <div className="lx-10 lx-mut truncate">{p.website}</div>}
+            {p.why && <div className="lx-11 mt-1" style={{ color: "#cfcfdd" }}>{p.why}</div>}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+/** Mr. Publish's live screen — a browser-chrome frame around the ONE thing publish.ts actually
+ *  sends: `ctx.data("published", {url, verified, title})` (publish.ts:128), fired once at the
+ *  end. There is no incremental "typing the title" moment to show honestly — publish.ts's own
+ *  `ctx.onProgress` calls before that are plain `{label}` strings, already carried by the
+ *  shared running-step label above this screen, so this component itself only ever draws the
+ *  one real, verified outcome. `verified` is a real `fetch(url).status===200` check
+ *  (publish.ts), never assumed true because the call succeeded. */
+const PublishScreen = ({ items, running }: { items: CanvasItem[]; running: boolean }) => {
+  const pub = items.filter((it) => it.kind === "published").slice(-1)[0];
+  if (!pub) {
+    return <div className="lx-10 lx-mut px-1 py-2">{running ? "Publishing…" : "Nothing has been published for this order yet."}</div>;
+  }
+  const p = pub.payload ?? {};
+  return (
+    <div className="lx-live-anim overflow-hidden rounded-lg" style={{ border: "1px solid var(--lx-border)" }}>
+      <div className="flex items-center gap-2 px-3 py-2" style={{ background: "var(--lx-in)", borderBottom: "1px solid var(--lx-border)" }}>
+        <Globe size={12} className="lx-mut shrink-0" />
+        <span className="lx-10 lx-mono lx-mut truncate">{p.url ?? "publishing…"}</span>
+      </div>
+      <div className="p-3">
+        <div className="lx-12 mb-2 font-semibold">{p.title ?? "Untitled"}</div>
+        <span className={`lx-pill ${p.verified ? "green" : "amber"}`}>
+          {p.verified ? <CheckCircle2 size={12} /> : null} {p.verified ? "Verified live" : "Published — not yet verified"}
+        </span>
+      </div>
+    </div>
+  );
+};
+
+/** Miss Social's live screen — one `ctx.data("post", …)` per network drafted (social.ts:89):
+ *  the real caption, real hashtags, and `overLimit` (a real length check against that
+ *  network's own limit, social.ts's `LIMIT` table) — never a fabricated schedule time, since
+ *  scheduling happens later in Approvals, not inside this agent's own run. */
+const SocialScreen = ({ items, running }: { items: CanvasItem[]; running: boolean }) => {
+  const posts = items.filter((it) => it.kind === "post");
+  if (!posts.length) {
+    return <div className="lx-10 lx-mut px-1 py-2">{running ? "Drafting posts…" : "No posts were drafted for this order."}</div>;
+  }
+  return (
+    <div className="space-y-3">
+      {posts.map((it) => {
+        const p = it.payload ?? {};
+        return (
+          <div key={it.key} className="lx-live-anim lx-card2 p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="lx-11 font-semibold">{p.label ?? p.network ?? "Post"}</span>
+              {p.overLimit && <span className="lx-pill amber" style={{ fontSize: 10, padding: "1px 8px" }}>over limit</span>}
+            </div>
+            <div className="lx-12" style={{ whiteSpace: "pre-wrap", color: "#d9d9e6" }}>{p.text ?? ""}</div>
+            {Array.isArray(p.hashtags) && p.hashtags.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {p.hashtags.map((h: string, i: number) => (
+                  <span key={i} className="lx-10" style={{ color: "#60a5fa" }}>#{String(h).replace(/^#/, "")}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 /** One tile in the network's bottom stats strip. */
 const StatTile = ({
   icon: Icon,
@@ -1154,6 +1383,16 @@ export default function MrLxwaDashboard({
   // showing it, and the Live Visual panel would never auto-open for it (found live 2026-08-31).
   const bossMeta: AgentMeta = { id: "boss", name: "Mr. Lxwa", role: "Command Center", icon: BrainCircuit, color: "#a78bfa" };
   const bossAgent: Agent = { ...bossMeta, status: statusForAgent(bossMeta) };
+  // Mr. Publish — same treatment as the boss card above, and for the same reason: this file's
+  // own comment already said Mr. Publish is "hidden from this diagram only, not because it
+  // doesn't exist" (§176), but the diagram (AGENT_META_LEFT/RIGHT) was ALSO the only source
+  // `allAgents`/tabs/`panelAgent` read from — so hiding it from the grid silently hid it from
+  // everywhere else too. A real `publish_article` step ran with no tab of its own, no Live
+  // Visual, and `workingAgent` never true for it (found live 2026-09-11, building PublishScreen
+  // and discovering it could never actually be reached). Kept out of AGENT_META_RIGHT/the net
+  // grid on purpose — it still isn't a NetCard peer — but fed into every OTHER lookup below.
+  const publishMeta: AgentMeta = { id: "publish", name: "Mr. Publish", role: "Publishing", icon: Send, color: "#c98a2b" };
+  const publishAgent: Agent = { ...publishMeta, status: statusForAgent(publishMeta) };
   const allAgents: Agent[] = [...agentsLeft, ...agentsRight];
   const realAgents = allAgents.filter((a) => a.status !== "Planned");
   const workingAgentsCount = realAgents.filter((a) => a.status === "Working").length;
@@ -1308,7 +1547,8 @@ export default function MrLxwaDashboard({
   // Mr Lxwa checked first: when a plan starts with his own pick_topic step, he is the one
   // actually running before anyone else even has a step to run — the panel should open on him,
   // not sit closed until Mr. Keyword picks up afterward.
-  const workingAgent = bossAgent.status === "Working" ? bossAgent : allAgents.find((a) => a.status === "Working") ?? null;
+  const workingAgent =
+    bossAgent.status === "Working" ? bossAgent : allAgents.find((a) => a.status === "Working") ?? (publishAgent.status === "Working" ? publishAgent : null);
   // The compact agent strip (below, only visible once a panel is open) auto-scrolls so whoever
   // is actually working is always the one centered — a full-automation feel where the camera
   // follows the work, not a manual "you scroll to find them" (owner 2026-09-09: "jo agent us
@@ -1365,10 +1605,10 @@ export default function MrLxwaDashboard({
   // `startedAt` that a step only gets once it runs.
   const producerAgent = task?.agents.find((p) => p.items.length)?.agent_id ?? null;
   const panelAgent =
-    (selectedAgentId ? [...allAgents, bossAgent].find((a) => a.id === selectedAgentId) ?? null : null) ??
+    (selectedAgentId ? [...allAgents, bossAgent, publishAgent].find((a) => a.id === selectedAgentId) ?? null : null) ??
     workingAgent ??
-    (lastStep ? [...allAgents, bossAgent].find((a) => a.id === lastStep.agent_id) ?? null : null) ??
-    (producerAgent ? [...allAgents, bossAgent].find((a) => a.id === producerAgent) ?? null : null);
+    (lastStep ? [...allAgents, bossAgent, publishAgent].find((a) => a.id === lastStep.agent_id) ?? null : null) ??
+    (producerAgent ? [...allAgents, bossAgent, publishAgent].find((a) => a.id === producerAgent) ?? null : null);
   // NOT auto-opened on a new order any more (owner, 2026-09-10: the detailed per-agent view
   // "accurate live nahi hai" — remove it from the home dashboard's default view; the compact
   // LiveRunPanel strip + the full AI Agent Network grid are the home dashboard now). The panel
@@ -1699,7 +1939,7 @@ export default function MrLxwaDashboard({
       // (task.steps, real task_steps rows), just also rendered inline here per the owner's
       // reference mockup. Empty until the planner has actually written steps for this task.
       const planSteps = t.steps.map((st) => ({
-        label: [...allAgents, bossAgent].find((a) => a.id === st.agent_id)?.name ?? st.agent_id,
+        label: [...allAgents, bossAgent, publishAgent].find((a) => a.id === st.agent_id)?.name ?? st.agent_id,
         status: st.status,
       }));
       // No CTA button yet — "View in Live Visual" only belongs on the finished summary (the
@@ -1768,7 +2008,7 @@ export default function MrLxwaDashboard({
     // jaisa") — the template above ships immediately so the bubble is never left stale while
     // this resolves, and this quietly replaces it if the model answers in time.
     if (produced) {
-      const agentName = [...allAgents, bossAgent].find((a) => a.id === produced.agentId)?.name ?? "The team";
+      const agentName = [...allAgents, bossAgent, publishAgent].find((a) => a.id === produced.agentId)?.name ?? "The team";
       fetch("/api/chat/narrate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1816,7 +2056,7 @@ export default function MrLxwaDashboard({
     for (const s of t.steps) {
       if (s.status !== "done" || narratedStepIds.current.has(s.key)) continue;
       narratedStepIds.current.add(s.key);
-      const agentName = [...allAgents, bossAgent].find((a) => a.id === s.agent_id)?.name ?? s.agent_id;
+      const agentName = [...allAgents, bossAgent, publishAgent].find((a) => a.id === s.agent_id)?.name ?? s.agent_id;
       const stepLabel = s.label || (s.action ? s.action.replace(/_/g, " ") : "a step");
       // Whether this step actually produced anything — without this the narrator had no way to
       // know a "finished" step came back empty, and cheerfully announced a keyword list that
@@ -2150,7 +2390,7 @@ export default function MrLxwaDashboard({
   // content whichever you clicked. §24.4b asks for exactly this: tabs per agent, showing what
   // that agent did on this task.
   const taskAgents: Agent[] = Array.from(new Set((task?.steps ?? []).map((s) => s.agent_id)))
-    .map((id) => [...allAgents, bossAgent].find((a) => a.id === id))
+    .map((id) => [...allAgents, bossAgent, publishAgent].find((a) => a.id === id))
     .filter((a): a is Agent => !!a);
 
   // Mr. Keyword's own rows for this order, and the topic it was searching — used by the live
@@ -2305,6 +2545,18 @@ export default function MrLxwaDashboard({
                   />
                 ) : panelAgent?.id === "writer" && !researchDone && (researchProgressItems.length > 0 || !!runningStep) ? (
                   <ResearchScreen items={researchProgressItems} running={!!runningStep} />
+                ) : panelAgent?.id === "seo" ? (
+                  <SeoScreen items={producedItems} running={!!runningStep} />
+                ) : panelAgent?.id === "image" ? (
+                  <ImageScreen items={producedItems} running={!!runningStep} />
+                ) : panelAgent?.id === "audit" ? (
+                  <AuditScreen items={producedItems} running={!!runningStep} />
+                ) : panelAgent?.id === "leads" ? (
+                  <LeadsScreen items={producedItems} running={!!runningStep} />
+                ) : panelAgent?.id === "publish" ? (
+                  <PublishScreen items={producedItems} running={!!runningStep} />
+                ) : panelAgent?.id === "social" ? (
+                  <SocialScreen items={producedItems} running={!!runningStep} />
                 ) : producedItems.length === 0 ? (
                   <div className="flex items-center gap-2.5">
                     {isFlowing(task, now) ? (
@@ -2818,7 +3070,7 @@ export default function MrLxwaDashboard({
               {!pendingOrder && task && task.steps.length > 0 && (
                 <ul className="mt-2 space-y-1">
                   {task!.steps.map((st, i) => {
-                    const nm = [...allAgents, bossAgent].find((a) => a.id === st.agent_id)?.name ?? st.agent_id;
+                    const nm = [...allAgents, bossAgent, publishAgent].find((a) => a.id === st.agent_id)?.name ?? st.agent_id;
                     const done = st.status === "done";
                     const run = st.status === "running";
                     const bad = st.status === "failed";
