@@ -85,6 +85,7 @@ import {
   LogOut,
   Star,
   Square,
+  RotateCcw,
 } from "lucide-react";
 
 /* ========================================================================== */
@@ -741,10 +742,14 @@ const ResearchScreen = ({ items, running }: { items: { key: string; payload: any
           </div>
         </div>
       ) : (
-        <div className="flex items-center gap-2 lx-11 font-semibold">
-          <Globe size={13} className="lx-mut" />
-          Researching the open web…
-          <span className="lx-pulse h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: "#22c55e" }} />
+        // Before gpt-researcher's first source has landed there is nothing real yet to name — a
+        // bare "Researching…" line here read as dead/stuck (owner, 2026-09-12: "pehle aisa kiyoun
+        // ata hai ui kharab lagta hai"). Same Wave+shimmer language as BossScreen/SiteBrainScreen
+        // while genuinely idle-before-first-event, so every screen's "still working, nothing to
+        // show yet" moment looks and feels the same rather than this one alone going quiet.
+        <div className="flex flex-col items-center justify-center gap-3 py-8">
+          <Wave n={22} h={18} anim color="var(--lx-cyan)" />
+          <span className="lx-shimmer lx-11 font-medium">Researching the open web…</span>
         </div>
       )}
 
@@ -1460,7 +1465,20 @@ const WriterDocScreen = ({ items, running, color, label }: { items: CanvasItem[]
   }, [latestKey]);
 
   if (!sections.length && !title) {
-    return <div className="lx-10 lx-mut px-1 py-2">{running ? "Writing the outline…" : "No article has been written for this order."}</div>;
+    // Before the first section lands this used to be one muted line on an otherwise blank
+    // paper page — read as stuck/dead (owner, 2026-09-12: "pehle aisa kiyoun ata hai ui kharab
+    // lagta hai aisa outliner etc, isse accha koi dusra animation dedo"; separately, the same
+    // screenshot round: "mr writer sayed stuck hai... abhi task stuck hai sayed"). Same
+    // Wave+shimmer language as every other agent's "still working, nothing real to show yet"
+    // moment (BossScreen/SiteBrainScreen/ResearchScreen) instead of this one alone sitting mute.
+    return running ? (
+      <div className="flex flex-col items-center justify-center gap-3 py-10">
+        <Wave n={22} h={18} anim color={color} />
+        <span className="lx-shimmer lx-11 font-medium" style={{ color: "var(--lx-text)" }}>Writing the outline…</span>
+      </div>
+    ) : (
+      <div className="lx-10 lx-mut px-1 py-2">No article has been written for this order.</div>
+    );
   }
   // Real, live word count — the sum of each finished section's own `words` field (writer.ts's
   // own count for that section), not an estimate: it grows exactly as fast as real sections
@@ -2979,6 +2997,20 @@ export default function MrLxwaDashboard({
     }
   };
 
+  /** "agar dekho koi task stop karu to bad main re start karne ka ek btn dedo ok" (owner,
+   *  2026-09-12) — after a Stop, the same order text is still sitting in `lastOrderMessageRef`
+   *  (set the instant a real order streamed in, line ~2177); resending it through the exact
+   *  same `stream()` door as a normal chat send is a genuine new order, not a resume of the
+   *  cancelled one — there is no cancelled-task state to resume, and the brain plans fresh. */
+  const restartLastOrder = () => {
+    const q = lastOrderMessageRef.current;
+    if (!q || chatBusy) return;
+    setThread((p) => [...p, { who: "user", text: q, time: nowTime() }]);
+    setBotOpen(true);
+    setDesktopAssistantOpen(true);
+    void stream(q);
+  };
+
   const itemLabel = (it: (typeof producedItems)[number]) => {
     // The writer's real event kinds (agent-server/src/agents/writer.ts) — anything else
     // (from other agents in the same task) falls back to a generic "<kind>" line rather than
@@ -3606,6 +3638,22 @@ export default function MrLxwaDashboard({
             {!pendingOrder && task && stepNo != null && totalSteps != null && (
               <span className="lx-10 lx-mut shrink-0">{stepNo}/{totalSteps}</span>
             )}
+            {/* Restart — only once the SAME task has actually stopped (cancelled), and only the
+                order text, not a resume of dead work: "koi task stop karu to bad main re start
+                karne ka ek btn dedo" (owner, 2026-09-12). */}
+            {!pendingOrder && !taskActive && task?.status === "cancelled" && !!lastOrderMessageRef.current && (
+              <button
+                className="lx-pill shrink-0"
+                style={{ cursor: chatBusy ? "default" : "pointer", opacity: chatBusy ? 0.5 : 1 }}
+                disabled={chatBusy}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  restartLastOrder();
+                }}
+              >
+                <RotateCcw size={10} /> Restart
+              </button>
+            )}
             {/* Real cancel, right here — same handler/state as Office's "Stop Task" (BottomBar),
                 so a click here disables both at once and neither goes stale. 2026-09-04, the
                 owner's own words: "current task ko rokne ka, stop karne ka, chat pe hi ek
@@ -3786,6 +3834,16 @@ export default function MrLxwaDashboard({
               <Square size={7} fill="#f87171" stroke="#f87171" />
             </span>
             {cancellingTaskId ? "Stopping…" : "Stop Task"}
+          </button>
+        )}
+        {!taskActive && task?.status === "cancelled" && !!lastOrderMessageRef.current && (
+          <button
+            className="lx-pill"
+            style={{ cursor: chatBusy ? "default" : "pointer", padding: "5px 11px" }}
+            onClick={restartLastOrder}
+            disabled={chatBusy}
+          >
+            <RotateCcw size={11} /> Restart
           </button>
         )}
       </div>
