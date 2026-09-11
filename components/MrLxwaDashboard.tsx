@@ -1183,10 +1183,23 @@ const WriterDocScreen = ({ items, running, color, label }: { items: CanvasItem[]
   if (!sections.length && !title) {
     return <div className="lx-10 lx-mut px-1 py-2">{running ? "Writing the outline…" : "No article has been written for this order."}</div>;
   }
+  // Real, live word count — the sum of each finished section's own `words` field (writer.ts's
+  // own count for that section), not an estimate: it grows exactly as fast as real sections
+  // actually land. Owner, 2026-09-11: wants this top-left, on a white "paper" page — the
+  // reference mockup's own look for the one screen that reads like an actual document.
+  const wordCount = sections.reduce((sum, it) => sum + (typeof it.payload?.words === "number" ? it.payload.words : 0), 0);
   return (
-    <div ref={hostRef} style={{ position: "relative", fontFamily: "Georgia, 'Newsreader', serif" }}>
+    <div
+      ref={hostRef}
+      style={{ position: "relative", background: "#fffefb", color: "#20241f", borderRadius: 8, padding: "14px 18px 18px" }}
+    >
+      {wordCount > 0 && (
+        <div className="lx-10" style={{ color: "#8a8f86", fontFamily: "ui-monospace, monospace", marginBottom: 10 }}>
+          {wordCount} words
+        </div>
+      )}
       {title && (
-        <h1 className="lx-live-anim" style={{ fontSize: 19, fontWeight: 600, lineHeight: 1.3, margin: "0 0 14px", color: "#f2f3f0" }}>
+        <h1 className="lx-live-anim" style={{ fontSize: 19, fontWeight: 600, lineHeight: 1.3, margin: "0 0 14px", color: "#20241f" }}>
           {title}
         </h1>
       )}
@@ -1198,16 +1211,13 @@ const WriterDocScreen = ({ items, running, color, label }: { items: CanvasItem[]
         const stillTyping = isLatest && typedLen < fullText.length;
         return (
           <div key={it.key} ref={setNodeRef(it.key)} className={isLatest ? undefined : "lx-live-anim"}>
-            <h2 style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: 15, fontWeight: 600, margin: "16px 0 6px", color: "#e7e9e6" }}>
+            <h2 style={{ fontSize: 16, fontWeight: 600, margin: "16px 0 6px", color: "#20241f" }}>
               {p.h2 || `Section ${i + 1}`}
             </h2>
-            <p style={{ fontSize: 14, lineHeight: 1.68, color: "#c7ccc6", margin: "0 0 4px" }}>
+            <p style={{ fontSize: 14.5, lineHeight: 1.65, color: "#2c322a", margin: "0 0 4px" }}>
               {boldText(shown, it.key)}
               {stillTyping && <span className="lx-caret" style={{ color }} />}
             </p>
-            {!stillTyping && typeof p.words === "number" && (
-              <div className="lx-10 lx-mut" style={{ marginBottom: 10 }}>{p.words} words</div>
-            )}
           </div>
         );
       })}
