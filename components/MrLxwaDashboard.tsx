@@ -1398,16 +1398,23 @@ const BossScreen = ({ items, running, color, label }: { items: CanvasItem[]; run
   const hostRef = useRef<HTMLDivElement>(null);
   const { setNodeRef, target } = useFollowLatest(pick ? [pick] : []);
   if (!pick) {
-    return (
-      <div className="flex items-center gap-2.5 px-1 py-2">
-        {running ? (
-          <>
-            <Wave n={22} h={16} anim color={color} />
-            <span className="lx-shimmer lx-10 font-medium">Choosing the best topic…</span>
-          </>
-        ) : (
-          <span className="lx-10 lx-mut">Nothing was produced for this order.</span>
-        )}
+    // Owner (2026-09-12, screenshot): a thin one-line bar-and-text row was floating alone in
+    // an otherwise empty card — "animation pasand nahi aya, aisa karo real jaisa kuch, full
+    // section pe ho, normal abhi jaisa animation nahi". Mr. Lxwa is the one agent whose whole
+    // job here IS a decision, not a document or a grid — so its "still thinking" moment fills
+    // the same canvas height every other screen's finished output would, built around the real
+    // brain icon rather than a bare sentence, and pulses instead of sitting static.
+    return running ? (
+      <div className="flex flex-col items-center justify-center gap-4" style={{ minHeight: 300 }}>
+        <span className="lx-boss-think" style={{ ["--bc" as string]: color }}>
+          <BrainCircuit size={40} />
+        </span>
+        <Wave n={26} h={20} anim color={color} />
+        <span className="lx-shimmer lx-12 font-semibold">Choosing the best topic for your site…</span>
+      </div>
+    ) : (
+      <div className="flex items-center justify-center px-1 py-2" style={{ minHeight: 300 }}>
+        <span className="lx-10 lx-mut">Nothing was produced for this order.</span>
       </div>
     );
   }

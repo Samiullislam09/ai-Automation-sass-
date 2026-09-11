@@ -308,6 +308,17 @@ export const LX_CSS = `
   animation:lxShimmer 1.6s linear infinite}
 @keyframes lxShimmer{from{background-position:200% 0}to{background-position:-200% 0}}
 
+/* Mr. Lxwa (the boss) "still deciding" — a pulsing halo behind the real brain icon, filling the
+   canvas instead of one thin row floating in an empty card (owner, 2026-09-12: "full section pe
+   ho, normal abhi jaisa animation nahi"). */
+.lx-boss-think{position:relative;display:flex;align-items:center;justify-content:center;
+  width:64px;height:64px;border-radius:50%;color:var(--bc);
+  background:color-mix(in srgb, var(--bc) 14%, transparent)}
+.lx-boss-think::before,.lx-boss-think::after{content:"";position:absolute;inset:0;border-radius:50%;
+  border:1.5px solid var(--bc);opacity:0;animation:lxBossRing 2.2s ease-out infinite}
+.lx-boss-think::after{animation-delay:1.1s}
+@keyframes lxBossRing{0%{transform:scale(.85);opacity:.55}100%{transform:scale(1.65);opacity:0}}
+
 /* Live Canvas cursor + typing caret (LIVE_CANVAS_SPEC.md §6) — the cursor only ever moves to a
    DOM node behind a REAL event that just arrived (see useFollowLatest in MrLxwaDashboard.tsx);
    this is purely the visual chrome for that move/blink, never what decides when it moves. */
