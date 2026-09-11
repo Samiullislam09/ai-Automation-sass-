@@ -133,7 +133,9 @@ test("a good draft passes; the score is emitted once and every issue separately"
   const issues = data.filter((d) => d.kind === "issue");
   assert.equal(issues.length, out.issues.length, "one event per issue, no more and no fewer");
   assert.deepEqual(issues.map((i) => i.payload.id), out.issues.map((i: any) => i.id));
-  assert.deepEqual(data.map((d) => d.kind).filter((k, i, a) => a.indexOf(k) === i), ["score", "issue"]);
+  // Emission ORDER matters to the live screen: the headline score first, then the bars it
+  // breaks into, then the issues that cost it — each one drawn as it lands.
+  assert.deepEqual(data.map((d) => d.kind).filter((k, i, a) => a.indexOf(k) === i), ["score", "score_category", "issue"]);
 
   assert.equal(progress[progress.length - 1].fraction, 1);
 });
@@ -148,8 +150,16 @@ test("a bad draft fails, names the blockers, and asks for the writer — without
   assert.ok(blocking.length >= 2, out.summary);
   // Every blocker arrives with an instruction, because the next hop is a writer, not a human.
   for (const i of blocking) assert.ok(i.fix.length > 10, `${i.id} has no fix`);
-  // The agent reports; it does not restart the pipeline. Nothing but score/issue is emitted.
-  assert.deepEqual([...new Set(data.map((d) => d.kind))].sort(), ["issue", "score"]);
+  // The agent reports; it does not restart the pipeline. Nothing but what the live screen
+  // reads is emitted — the overall score, its per-category breakdown, and the issues.
+  assert.deepEqual([...new Set(data.map((d) => d.kind))].sort(), ["issue", "score", "score_category"]);
+  // Each bar is real: a 0-100 value over that bucket's OWN checks, with the count it came from.
+  for (const c of data.filter((d) => d.kind === "score_category")) {
+    const p = c.payload as any;
+    assert.ok(typeof p.label === "string" && p.label.length > 0, "a bar with no name");
+    assert.ok(p.value >= 0 && p.value <= 100, `${p.label} scored ${p.value}`);
+    assert.ok(p.total > 0 && p.passed <= p.total, `${p.label}: ${p.passed}/${p.total}`);
+  }
 });
 
 test("the SERP comparison is absent and said to be absent when DataForSEO is unconfigured", async () => {

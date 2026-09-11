@@ -326,6 +326,43 @@ export const LX_CSS = `
 /* A real, already-arrived image revealing itself — never a placeholder growing INTO an image. */
 @keyframes lxImageIn{from{opacity:0;transform:scale(.97)}to{opacity:1;transform:scale(1)}}
 
+/* ---- Live Canvas screens (LIVE_CANVAS_SPEC.md) --------------------------------------- */
+/* SEO — the overall score, then one bar per real category (agents/seo.ts's score_category). */
+.lx-srow{display:flex;align-items:center;gap:12px;padding:7px 0}
+.lx-srow .lb{width:132px;flex:none;font-size:12.5px;color:var(--lx-text)}
+.lx-sbar{flex:1;height:7px;border-radius:99px;background:rgba(255,255,255,.07);overflow:hidden}
+.lx-sbar>i{display:block;height:100%;width:0;border-radius:99px;transition:width .7s cubic-bezier(.3,.8,.3,1)}
+.lx-sval{width:52px;text-align:right;font-size:11.5px;color:var(--lx-mut);font-variant-numeric:tabular-nums}
+
+/* Site Audit — one cell per page the crawler really reported, red only for a page a real
+   issue actually names (AuditIssue.pages), never a decorative sprinkling of red. */
+.lx-nodes{display:grid;grid-template-columns:repeat(auto-fill,minmax(26px,1fr));gap:6px}
+.lx-node{aspect-ratio:1;border-radius:5px;background:rgba(34,197,94,.14);border:1px solid rgba(34,197,94,.3);
+  transition:background .35s,border-color .35s}
+.lx-node.bad{background:rgba(239,68,68,.16);border-color:rgba(239,68,68,.45)}
+
+/* Miss Social — the post as it will actually look, not a row in a list. */
+.lx-scard{max-width:420px;border:1px solid var(--lx-border);border-radius:12px;overflow:hidden;background:var(--lx-in)}
+.lx-shead{display:flex;align-items:center;gap:9px;padding:11px 13px;border-bottom:1px solid var(--lx-border)}
+.lx-savatar{width:34px;height:34px;border-radius:50%;flex:none;
+  background:linear-gradient(135deg,#8b5cf6,#ec4899)}
+.lx-sbody{padding:11px 13px;font-size:13.5px;line-height:1.55;color:var(--lx-text);white-space:pre-wrap}
+.lx-stags{padding:0 13px 11px;font-size:12.5px;color:#60a5fa;display:flex;gap:8px;flex-wrap:wrap}
+.lx-sfoot{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 13px;
+  border-top:1px solid var(--lx-border)}
+
+/* Site Brain — one bubble per real topic cluster, area following its real page count. */
+.lx-clusters{display:flex;flex-wrap:wrap;gap:14px;align-items:center;padding:6px 2px}
+.lx-cbubble{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
+  border-radius:50%;border:1px dashed rgba(59,130,246,.45);background:rgba(59,130,246,.1);
+  color:var(--lx-text);padding:6px;line-height:1.2}
+
+/* Mr. Writer's research — the sources gpt-researcher really opened, one card each. */
+.lx-src{display:flex;gap:10px;padding:9px 11px;border:1px solid var(--lx-border);border-radius:9px;
+  background:rgba(255,255,255,.02)}
+.lx-src-fav{width:22px;height:22px;border-radius:6px;flex:none;display:flex;align-items:center;justify-content:center;
+  font-size:10px;font-weight:700;color:#0b0b10;margin-top:1px}
+
 /* Live Visual's mode crossfade — plain CSS keyed to React's own key-remount (see
    components/MrLxwaDashboard.tsx), not framer-motion: a nested AnimatePresence here got
    stuck with opacity permanently at 0 in dev (confirmed via computed style), most likely a

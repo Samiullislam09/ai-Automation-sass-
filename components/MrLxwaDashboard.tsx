@@ -602,11 +602,18 @@ const KeywordOpportunities = ({
         <span className="lx-kwo-title">Keyword opportunities</span>
         <span className="lx-kwo-count">{items.length} found</span>
       </div>
+      {/* Two measured columns only (owner, 2026-09-11: "keyword pe sirf abhi ke liye Volume and
+          Intent do"). Source and Competition were dropped — and that also FIXES a real bug they
+          caused: six fixed tracks plus gaps needed ~458px before the keyword's own `minmax(0,1fr)`
+          track got any width at all, so in a narrow canvas it collapsed to 0 and the phrase
+          itself rendered invisibly (the `overflow:hidden` on .lx-kwo-text makes its automatic
+          minimum size 0) while the marker, being flex-shrink:0, still painted. That is exactly
+          the "keyword show nahi hota" the owner reported. There is no Intent column because
+          agents/keyword.ts does not measure intent — it measures volume, competition and fit —
+          and a column of guesses is worse than one honest column fewer. */}
       <div className="lx-kwo-grid lx-kwo-th">
         <span>Keyword</span>
-        <span className="hide-sm">Source</span>
         <span className="hide-sm">Volume</span>
-        <span className="hide-sm">Competition</span>
         <span className="hide-sm">Fit</span>
         <span>Action</span>
       </div>
@@ -625,15 +632,9 @@ const KeywordOpportunities = ({
                 {p.gsc ? <span className="lx-pill green ml-2" style={{ padding: "1px 7px", fontSize: 10 }}>already ranking</span> : null}
               </span>
             </div>
-            <span className="lx-kwo-cell hide-sm">
-              {p.source && SOURCE_SHORT[p.source] ? <span className="lx-kwo-src">{SOURCE_SHORT[p.source]}</span> : <span className="lx-mut">—</span>}
-            </span>
             {/* "—" when the free source has no number — never a 0, which would read as "nobody
                 searches this". */}
             <span className={`lx-kwo-cell hide-sm${vol == null ? " mut" : ""}`}>{vol != null ? fmtVol(vol) : "—"}</span>
-            <span className="lx-kwo-cell hide-sm" style={{ color: compColor(p.competitionLevel), fontWeight: compColor(p.competitionLevel) ? 600 : undefined }}>
-              {compLabel(p.competitionLevel)}
-            </span>
             <span className="lx-kwo-cell hide-sm" style={{ color: fitPct != null ? fitColor(fitPct) : undefined, fontWeight: 600 }}>
               {fitPct != null ? `${fitPct}%` : "—"}
             </span>
@@ -747,29 +748,60 @@ const ResearchScreen = ({ items, running }: { items: { key: string; payload: any
         </div>
       )}
 
+      {/* Every source gpt-researcher really opened, one card each — the reference design's own
+          research view (owner, 2026-09-11: "jab artical ke liye research ho tab bhi wo live
+          visual pe aaye"). Domain and its initial are parsed from the REAL URL it reported;
+          the line under it is that step's own words, verbatim. Nothing here names a page the
+          researcher did not open, and there is no invented snippet — gpt-researcher does not
+          hand back page text, so the card shows what it does hand back. */}
+      {(() => {
+        const seen = new Set<string>();
+        const sources: { url: string; host: string; line: string; key: string }[] = [];
+        for (const it of items) {
+          for (const u of urlsFor(it.payload)) {
+            const h = hostOf(u);
+            if (seen.has(h)) continue;
+            seen.add(h);
+            sources.push({ url: u, host: h, line: lineFor(it.payload), key: `${it.key}-${h}` });
+          }
+        }
+        const hue = (s: string) => {
+          let n = 0;
+          for (let i = 0; i < s.length; i++) n += s.charCodeAt(i);
+          return `hsl(${n % 360} 62% 58%)`;
+        };
+        return sources.length > 0 ? (
+          <div className="mt-3">
+            <div className="lx-10 lx-mut mb-2">{sources.length} source{sources.length === 1 ? "" : "s"} read</div>
+            <div className="space-y-2">
+              {sources.map((s) => (
+                <div key={s.key} className="lx-live-anim lx-src">
+                  <span className="lx-src-fav" style={{ background: hue(s.host) }}>{s.host.charAt(0).toUpperCase()}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="lx-10 lx-mut block truncate">{s.host}</span>
+                    <span className="lx-11 block" style={{ color: "#cfcfdd" }}>{s.line}</span>
+                  </span>
+                  <CheckCircle2 size={13} style={{ color: "#22c55e", flexShrink: 0, marginTop: 2 }} />
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null;
+      })()}
+
       {/* The plain history list — every progress line gpt-researcher actually sent, oldest
           first. Kept in full when there is no "reading" screen above it to carry that job;
           shown as a compact trailing log underneath it otherwise, so the panel reads as ONE
           live viewport plus its log, not a stack of repeated cards. */}
       <ul className={readingHost ? "mt-2 space-y-1" : "mt-2 space-y-2"}>
-        {(readingHost ? items.slice(0, -1).slice(-5) : items).map((it) => {
-          const urls = urlsFor(it.payload);
-          return (
-            <li key={it.key} className="lx-live-anim">
-              <div className={`flex items-center gap-2 ${readingHost ? "lx-10 lx-dim" : "lx-11"}`} style={readingHost ? undefined : { color: "#cfcfdd" }}>
-                <Search size={readingHost ? 10 : 12} className="lx-dim shrink-0" />
-                <span className="min-w-0 flex-1 truncate">{lineFor(it.payload)}</span>
-              </div>
-              {!readingHost && urls.length > 0 && (
-                <ul className="mt-1 ml-5 space-y-0.5">
-                  {urls.slice(0, 5).map((u) => (
-                    <li key={u} className="lx-10 lx-mut truncate">{u}</li>
-                  ))}
-                </ul>
-              )}
-            </li>
-          );
-        })}
+        {(readingHost ? items.slice(0, -1).slice(-5) : items).map((it) => (
+          <li key={it.key} className="lx-live-anim">
+            <div className={`flex items-center gap-2 ${readingHost ? "lx-10 lx-dim" : "lx-11"}`} style={readingHost ? undefined : { color: "#cfcfdd" }}>
+              <Search size={readingHost ? 10 : 12} className="lx-dim shrink-0" />
+              <span className="min-w-0 flex-1 truncate">{lineFor(it.payload)}</span>
+            </div>
+          </li>
+        ))}
       </ul>
       {items.length === 0 && (
         <div className="lx-10 lx-mut mt-3 px-1">{running ? "Starting research…" : "No research activity was reported for this order."}</div>
@@ -868,18 +900,21 @@ type CanvasItem = { key: string; kind: string; payload: any };
  *  number. */
 const SeoScreen = ({ items, running, color, label }: { items: CanvasItem[]; running: boolean; color: string; label: string }) => {
   const scoreItem = items.filter((it) => it.kind === "score").slice(-1)[0];
+  const categories = items.filter((it) => it.kind === "score_category");
   const issues = items.filter((it) => it.kind === "issue");
   const hostRef = useRef<HTMLDivElement>(null);
-  const { setNodeRef, target } = useFollowLatest(issues.length ? issues : scoreItem ? [scoreItem] : []);
-  if (!scoreItem && issues.length === 0) {
+  const { setNodeRef, target } = useFollowLatest(categories.length ? categories : issues.length ? issues : scoreItem ? [scoreItem] : []);
+  if (!scoreItem && !categories.length && issues.length === 0) {
     return <div className="lx-10 lx-mut px-1 py-2">{running ? "Running the on-page checks…" : "No SEO check has run for this order."}</div>;
   }
   const s = scoreItem?.payload ?? {};
   const score = typeof s.score === "number" ? s.score : null;
+  const barColor = (v: number) => (v >= 75 ? "#4ade80" : v >= 50 ? "#fbbf24" : "#f87171");
   return (
     <div ref={hostRef} style={{ position: "relative" }}>
+      <div className="lx-12 mb-3 font-semibold">Content score — draft audit</div>
       {score != null && (
-        <div ref={issues.length ? undefined : setNodeRef(scoreItem!.key)} className="lx-live-anim mb-3 flex items-baseline gap-2">
+        <div className="lx-live-anim mb-2 flex items-baseline gap-2">
           <span className="text-3xl font-bold" style={{ color: s.passed ? "#4ade80" : "#fbbf24" }}>{score}</span>
           <span className="lx-11 lx-mut">/ {typeof s.max === "number" ? s.max : 100}</span>
           <span className={`lx-pill ${s.passed ? "green" : "amber"} ml-2`}>
@@ -888,8 +923,28 @@ const SeoScreen = ({ items, running, color, label }: { items: CanvasItem[]; runn
           {s.serpCompared === false && <span className="lx-10 lx-mut">— not compared against the live SERP</span>}
         </div>
       )}
+      {/* One bar per category the agent actually scored (agents/seo.ts's own score_category
+          events, each carrying how many of that bucket's real checks passed). The bar animates
+          to its value on arrival — the width is the real number, the easing is just CSS. */}
+      {categories.length > 0 && (
+        <div className="mb-3">
+          {categories.map((it) => {
+            const p = it.payload ?? {};
+            const v = typeof p.value === "number" ? Math.max(0, Math.min(100, p.value)) : 0;
+            return (
+              <div key={it.key} ref={setNodeRef(it.key)} className="lx-srow lx-live-anim">
+                <span className="lb truncate">{p.label ?? "—"}</span>
+                <span className="lx-sbar"><i style={{ width: `${v}%`, background: barColor(v) }} /></span>
+                <span className="lx-sval">
+                  {typeof p.passed === "number" && typeof p.total === "number" ? `${p.passed}/${p.total}` : v}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
       <div className="space-y-2">
-        {issues.map((it) => <IssueRow key={it.key} payload={it.payload} refCb={setNodeRef(it.key)} />)}
+        {issues.map((it) => <IssueRow key={it.key} payload={it.payload} refCb={categories.length ? undefined : setNodeRef(it.key)} />)}
       </div>
       <AgentCursor target={target} host={hostRef.current} color={color} label={label} />
     </div>
@@ -951,35 +1006,51 @@ const AuditScreen = ({ items, running, color, label }: { items: CanvasItem[]; ru
   const hostRef = useRef<HTMLDivElement>(null);
   const cursorItems = pages.length ? pages : issues.length ? issues : scoreItem ? [scoreItem] : [];
   const { setNodeRef, target } = useFollowLatest(cursorItems);
+  // Which crawled pages a real issue actually names — AuditIssue.pages is the agent's own list
+  // of affected URLs (capped at its own PAGE_SAMPLE), so a cell is only ever red because the
+  // audit said that page has a problem.
+  const badPages = new Set<string>(
+    issues.flatMap((it) => (Array.isArray(it.payload?.pages) ? (it.payload.pages as unknown[]).map(String) : []))
+  );
   if (!pages.length && !issues.length && !scoreItem) {
     return <div className="lx-10 lx-mut px-1 py-2">{running ? "Crawling the site…" : "No audit has run for this order."}</div>;
   }
   return (
     <div ref={hostRef} style={{ position: "relative" }}>
-      {/* One node per page actually crawled (audit.ts's own "page" event, one per page) — never
-          colored red for a specific page, since the agent's own "issue" events don't carry
-          which page they came from (only a sitewide count), and guessing would be exactly the
-          invented-value this whole feature exists to avoid. */}
+      {/* One cell per page the crawler really reported (audit.ts's own "page" event, one per
+          page). A cell turns red only when a real issue NAMES that page: AuditIssue carries
+          `pages: string[]` — the actual URLs it happens on (lib/audit/checks.ts) — so this is
+          read from the agent's own findings, never a decorative sprinkling of red. Pages the
+          issues don't name stay green. */}
       {pages.length > 0 && (
         <div className="mb-3">
-          <div className="lx-10 lx-mut mb-1.5 flex items-center justify-between">
-            <span>{latest?.phase === "perf" ? "Measuring performance" : "Crawling pages"}</span>
-            {total != null && <span>{done} / {total}</span>}
+          <div className="lx-10 lx-mut mb-2 flex items-center justify-between">
+            <span>
+              {latest?.phase === "perf" ? "Measuring performance" : "Site crawl"}
+              {total != null ? ` — ${total} page${total === 1 ? "" : "s"}` : ""}
+            </span>
+            <span>
+              {scoreItem ? `${scoreItem.payload?.score ?? "?"}/100` : `${done}${total != null ? ` / ${total}` : ""}`}
+            </span>
           </div>
-          <div className="grid gap-1" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(14px, 1fr))" }}>
-            {pages.map((it) => (
-              <span
-                key={it.key}
-                ref={pages[pages.length - 1] === it ? setNodeRef(it.key) : undefined}
-                className="lx-live-anim rounded-sm"
-                style={{ aspectRatio: "1", background: "rgba(34,197,94,.35)", border: "1px solid rgba(34,197,94,.5)" }}
-              />
-            ))}
+          <div className="lx-nodes">
+            {pages.map((it) => {
+              const url = String(it.payload?.url ?? "");
+              const bad = url && badPages.has(url);
+              return (
+                <span
+                  key={it.key}
+                  ref={pages[pages.length - 1] === it ? setNodeRef(it.key) : undefined}
+                  title={bad ? `${url} — has an issue` : url}
+                  className={`lx-live-anim lx-node${bad ? " bad" : ""}`}
+                />
+              );
+            })}
           </div>
         </div>
       )}
-      {scoreItem && (
-        <div ref={pages.length ? undefined : setNodeRef(scoreItem.key)} className="lx-live-anim mb-3 flex items-baseline gap-2">
+      {scoreItem && !pages.length && (
+        <div ref={setNodeRef(scoreItem.key)} className="lx-live-anim mb-3 flex items-baseline gap-2">
           <span className="text-2xl font-bold">{scoreItem.payload?.score ?? "?"}</span>
           <span className="lx-11 lx-mut">/ 100 site score</span>
         </div>
@@ -1073,23 +1144,38 @@ const SocialScreen = ({ items, running, color, label }: { items: CanvasItem[]; r
     return <div className="lx-10 lx-mut px-1 py-2">{running ? "Drafting posts…" : "No posts were drafted for this order."}</div>;
   }
   return (
-    <div ref={hostRef} style={{ position: "relative" }} className="space-y-3">
+    <div ref={hostRef} style={{ position: "relative" }} className="space-y-4">
       {posts.map((it) => {
         const p = it.payload ?? {};
+        const tags: string[] = Array.isArray(p.hashtags) ? p.hashtags.map(String) : [];
         return (
-          <div key={it.key} ref={setNodeRef(it.key)} className="lx-live-anim lx-card2 p-3">
-            <div className="mb-2 flex items-center justify-between">
-              <span className="lx-11 font-semibold">{p.label ?? p.network ?? "Post"}</span>
-              {p.overLimit && <span className="lx-pill amber" style={{ fontSize: 10, padding: "1px 8px" }}>over limit</span>}
-            </div>
-            <div className="lx-12" style={{ whiteSpace: "pre-wrap", color: "#d9d9e6" }}>{p.text ?? ""}</div>
-            {Array.isArray(p.hashtags) && p.hashtags.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {p.hashtags.map((h: string, i: number) => (
-                  <span key={i} className="lx-10" style={{ color: "#60a5fa" }}>#{String(h).replace(/^#/, "")}</span>
-                ))}
+          <div key={it.key} ref={setNodeRef(it.key)} className="lx-live-anim">
+            <div className="lx-12 mb-2 font-semibold">{p.label ?? p.network ?? "Post"} — draft</div>
+            {/* The post as it will actually read, in the shape it will be read in. Everything
+                here is the agent's own output: caption, hashtags, and its real over-limit check
+                against that network's own character limit (social.ts's LIMIT table). No image
+                and no "Scheduled 10:00 AM" pill — Miss Social writes an image BRIEF, not an
+                image, and scheduling happens later in Approvals, so both would be props. */}
+            <div className="lx-scard">
+              <div className="lx-shead">
+                <span className="lx-savatar" />
+                <span className="min-w-0">
+                  <span className="lx-12 block truncate font-semibold">Your business</span>
+                  <span className="lx-10 lx-mut block">Draft · awaiting your approval</span>
+                </span>
+                {p.overLimit && <span className="lx-pill amber ml-auto shrink-0" style={{ fontSize: 10, padding: "1px 8px" }}>over limit</span>}
               </div>
-            )}
+              <div className="lx-sbody">{p.text ?? ""}</div>
+              {tags.length > 0 && (
+                <div className="lx-stags">
+                  {tags.map((h, i) => <span key={i}>#{h.replace(/^#/, "")}</span>)}
+                </div>
+              )}
+              <div className="lx-sfoot">
+                <span className="lx-10 lx-mut">preview</span>
+                {p.imageBrief && <span className="lx-10 lx-dim min-w-0 truncate" title={String(p.imageBrief)}>image brief: {String(p.imageBrief)}</span>}
+              </div>
+            </div>
           </div>
         );
       })}
@@ -1112,21 +1198,33 @@ const SiteBrainScreen = ({ items, running, color, label }: { items: CanvasItem[]
   if (!clusters.length) {
     return <div className="lx-10 lx-mut px-1 py-2">{running ? "Grouping the site into topics…" : "No topic clusters were formed for this order."}</div>;
   }
+  // Bubble area follows the cluster's REAL page count (√n, so a 20-page topic reads as bigger
+  // than a 5-page one without dwarfing it). Position is just layout — bubbles flow left to
+  // right — because a real 2D projection of the embeddings is a separate backend job; a
+  // scattered "map" whose coordinates meant nothing would look like data and be decoration.
+  const biggest = Math.max(...clusters.map((it) => (typeof it.payload?.size === "number" ? it.payload.size : 1)), 1);
   return (
-    <div ref={hostRef} style={{ position: "relative" }} className="space-y-2">
-      {clusters.map((it) => {
-        const p = it.payload ?? {};
-        const urls: string[] = Array.isArray(p.page_urls) ? p.page_urls : [];
-        return (
-          <div key={it.key} ref={setNodeRef(it.key)} className="lx-live-anim lx-in rounded-lg px-3 py-2.5">
-            <div className="flex items-center justify-between gap-2">
-              <span className="lx-12 font-semibold">{p.name ?? "Untitled cluster"}</span>
-              {typeof p.size === "number" && <span className="lx-pill blue" style={{ fontSize: 10, padding: "1px 8px" }}>{p.size} page{p.size === 1 ? "" : "s"}</span>}
+    <div ref={hostRef} style={{ position: "relative" }}>
+      <div className="lx-12 mb-3 font-semibold">Site Brain — {clusters.length} topic cluster{clusters.length === 1 ? "" : "s"}</div>
+      <div className="lx-clusters">
+        {clusters.map((it) => {
+          const p = it.payload ?? {};
+          const size = typeof p.size === "number" ? p.size : 1;
+          const d = Math.round(64 + 56 * Math.sqrt(size / biggest));
+          return (
+            <div
+              key={it.key}
+              ref={setNodeRef(it.key)}
+              className="lx-live-anim lx-cbubble"
+              style={{ width: d, height: d }}
+              title={Array.isArray(p.page_urls) ? (p.page_urls as unknown[]).map(String).join("\n") : undefined}
+            >
+              <span className="lx-11 font-semibold" style={{ overflowWrap: "anywhere" }}>{p.name ?? "Untitled"}</span>
+              <span className="lx-10 lx-mut">{size} page{size === 1 ? "" : "s"}</span>
             </div>
-            {urls.length > 0 && <div className="lx-10 lx-mut mt-1.5 truncate">{urls.slice(0, 3).join(" · ")}</div>}
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
       <AgentCursor target={target} host={hostRef.current} color={color} label={label} />
     </div>
   );
@@ -1775,6 +1873,13 @@ export default function MrLxwaDashboard({
   // re-renders) rather than the workingAgent object itself, which is a fresh reference every
   // render.
   const compactStripRef = useRef<HTMLDivElement>(null);
+  // The Live Visual's own scroll box. The canvas inside it can grow far past its 460px window
+  // (a long article, 40 crawled pages), and the thing worth watching is always the newest
+  // thing — so when a run is live, this follows it down the way a terminal follows its own
+  // output. Without it the agent cursor and the paragraph being written sat below the fold and
+  // the owner never saw either (found live 2026-09-11: "cursor hand-moving animation... ispe
+  // nahi ha" — it WAS there, 1,700px below the visible window).
+  const canvasScrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!workingAgent) return;
     const el = compactStripRef.current?.querySelector<HTMLElement>(`[data-agent-id="${workingAgent.id}"]`);
@@ -2586,6 +2691,18 @@ export default function MrLxwaDashboard({
         .flatMap((p) => p.items)
         .sort((a, b) => a.at - b.at)
     : [];
+  // Follow the work down the canvas. Every screen below grows downward as real items land, and
+  // the 460px scroll box shows only its top — so the newest row, the paragraph being written and
+  // the agent cursor pinned to it were all below the fold, invisible, unless the owner scrolled
+  // by hand every few seconds. Only while the step is genuinely RUNNING (a finished run is left
+  // exactly where the reader put it), and only from the bottom of the box: `scrollHeight` is read
+  // after the commit that added the item, so this never guesses where the new content is.
+  useEffect(() => {
+    if (!runningStep) return;
+    const el = canvasScrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, [producedItems.length, runningStep?.key, runningStep?.progressLabel]);
   // This agent's OWN sentences only. Used to also let through the task-level, agent-less lines
   // ("On it — 5 steps", "Writing the article. Starting now…") on every agent's tab as "the frame
   // every agent's work sits inside" — but that meant Mr. Keyword's own screen opened with the
@@ -2702,59 +2819,43 @@ export default function MrLxwaDashboard({
           column's "Agent Status" card was dropped, and "Back to Workflow" / "Minimize Agent"
           dropped too (per request, to give Live Visual more room) — Close (X) already does
           exactly what "Back to Workflow" did (setShowPanel(false)), so nothing was lost. */}
-      <div className="flex items-center gap-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <Robo size={26} />
-          <div className="min-w-0 leading-tight">
-            {/* Real agent, real clock. Was `workingAgent?.name ?? "Mr. Writer"` plus a mock
-                timer that counted up from 272 seconds regardless of anything — so a finished
-                Mr. Keyword run displayed as "Mr. Writer · 00:04:47". elapsedMs()/clock() come
-                from lib/live.ts and freeze at the task's real finishedAt. */}
-            <div className="truncate text-sm font-bold">{panelAgent?.name ?? "Team"}</div>
-            <div className="lx-10 lx-mut truncate">
-              {panelAgent?.role ?? "Waiting for work"}
-              {task ? ` · ${clock(elapsedMs(task, now))}` : ""}
-            </div>
-          </div>
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          <button className="lx-icobtn" aria-label="Close" onClick={closeAgentPanel}>
-            <X size={14} />
-          </button>
-        </div>
+      {/* ONE line for everything that isn't the canvas itself (owner, 2026-09-11: "live badge
+          close icon agent name in sab ko 1 line pe do... taki live visual pe jayda space mile").
+          The old layout stacked three rows above the canvas — a two-line agent block, a "Live
+          Visual" heading row, and a "Finished"/status row with its own icon — roughly 90px of
+          chrome over a 460px box. Name, role+clock, the agent's own current status line, the
+          LIVE badge and Close now share a single row, and the canvas starts right under it. */}
+      <div className="flex items-center gap-2.5">
+        <Robo size={22} />
+        <span className="truncate text-sm font-bold">{panelAgent?.name ?? "Team"}</span>
+        <span className="lx-10 lx-mut hidden shrink-0 sm:inline">
+          {panelAgent?.role ?? "Waiting for work"}
+          {task ? ` · ${clock(elapsedMs(task, now))}` : ""}
+        </span>
+        {/* The running step's own words — was its own row with a pen icon under the heading. */}
+        <span className="lx-10 lx-mut min-w-0 flex-1 truncate">
+          {runningStep?.progressLabel || runningStep?.label || (task && isTerminalTask(task.status) ? "Finished" : "Waiting to start…")}
+        </span>
+        {/* Kept as a permanent LIVE pill at the owner's request (2026-08-31). */}
+        <span className="lx-pill red shrink-0">
+          <span className="lx-pulse h-1.5 w-1.5 rounded-full" style={{ background: "#ef4444" }} /> LIVE
+        </span>
+        <button className="lx-icobtn shrink-0" aria-label="Close" onClick={closeAgentPanel}>
+          <X size={14} />
+        </button>
       </div>
 
-      <div className="mt-4 flex flex-col gap-4">
-        {/* live visual — the primary, full-width focus. Whatever the agent is actually doing
-            right now (search / reading / key points / writing), one section, no duplication
-            of this content anywhere else in the panel. */}
+      <div className="mt-3 flex flex-col gap-4">
         <div className="min-w-0">
-          <div className="flex items-center justify-between">
-            <span className="lx-13 font-semibold">Live Visual</span>
-            {/* LIVE only when evidence is genuinely still arriving — isFlowing() is lib/live.ts's
-                own stall gate (§24.5: "agent ruka hai to screen bhi ruki dikhe"). It used to be
-                a permanently-pulsing red LIVE pill, which said "live" over a task that had
-                finished minutes ago. */}
-            {/* Kept as a permanent LIVE pill at the owner's request (2026-08-31). */}
-            <span className="lx-pill red">
-              <span className="lx-pulse h-1.5 w-1.5 rounded-full" style={{ background: "#ef4444" }} /> LIVE
-            </span>
-          </div>
-
           {/* Fixed height + its own scrollbar: a 20-row keyword table used to push the panel
               (and the page) far past the fold — "content box se bahar nahi jayega". */}
-          <div className="lx-card2 lx-scroll mt-3 p-3" style={{ minHeight: 360, maxHeight: 460, overflowY: "auto" }}>
+          <div ref={canvasScrollRef} className="lx-card2 lx-scroll p-3" style={{ minHeight: 360, maxHeight: 460, overflowY: "auto" }}>
             <div key={runningStep?.key ?? "idle"} className="lx-live-anim">
-              <div className="flex items-center gap-2 lx-11 font-semibold">
-                <PenLine size={13} className="lx-mut" />
-                {runningStep?.progressLabel || runningStep?.label || (task && isTerminalTask(task.status) ? "Finished" : "Waiting to start…")}
-              </div>
-
               {/* Each agent gets the screen its own output deserves (§24.4b's "typed
                   component"), not one generic bullet list. Mr. Keyword's is the Google-style
                   search while it runs and a real table when it is done; everything else keeps
                   the honest per-item list until it earns a screen of its own. */}
-              <div className="mt-3">
+              <div>
                 {panelAgent?.id === "keyword" ? (
                   <KeywordScreen
                     items={keywordItems}

@@ -29,6 +29,20 @@ import { supabase } from "../supabase.js";
  *  It also never publishes and never edits the draft. It measures, and it says what it
  *  measured. Mr. Publish has its own pre-flight (§7.5) and does not trust this one blindly.
  */
+/** The buckets the live SEO screen draws one bar each for. `lib/seoChecks.ts` has no category
+ *  field on its checks — only comment bands grouping them — so the grouping lives here, keyed on
+ *  the check ids that file already exports as its stable contract ("Stable id — the UI, the trend
+ *  and the tests key off this, never off the prose"). Order is the order the bars appear in. */
+const SEO_CATEGORIES: { label: string; match: RegExp }[] = [
+  { label: "Title & meta", match: /^(title|meta-description|slug)/ },
+  { label: "Headings", match: /^(h1-unique|h2-count|heading-order)/ },
+  { label: "Keyword usage", match: /^(keyword-|secondary-keyword|title-keyword)/ },
+  { label: "Links", match: /^(internal-links|external-links)/ },
+  { label: "Readability", match: /^readability-/ },
+  { label: "Trust & authorship", match: /^(eeat-|schema-suggestion|image-alt)/ },
+  { label: "Depth vs the top 10", match: /^(serp-|content-depth)/ },
+];
+
 export class SeoAgent extends Agent {
   type = "seo";
 
@@ -84,6 +98,25 @@ export class SeoAgent extends Agent {
       keyword: result.primaryKeyword,
       wordCount: result.wordCount,
     });
+    // Per-category bars for the live screen (owner, 2026-09-11 — the reference design shows the
+    // overall score broken down, not one number). Each bucket's value is computed with the SAME
+    // arithmetic rollUp() already uses for the overall score (lib/seoChecks.ts: 100 − 25·block
+    // − 5·warn, over that bucket's own checks) — a derived number, never an invented one, and
+    // `passed`/`total` travel with it so the screen can show what it is made of. Buckets come
+    // from the check ids themselves; a check whose id matches no bucket is simply not shown
+    // rather than dropped into a catch-all that would make one bar mean nothing.
+    for (const bucket of SEO_CATEGORIES) {
+      const mine = result.checks.filter((c) => bucket.match.test(c.id));
+      if (!mine.length) continue;
+      const blocks = mine.filter((c) => !c.ok && c.severity === "block").length;
+      const warns = mine.filter((c) => !c.ok && c.severity === "warn").length;
+      ctx.data("score_category", {
+        label: bucket.label,
+        value: Math.max(0, Math.min(100, 100 - blocks * 25 - warns * 5)),
+        passed: mine.filter((c) => c.ok).length,
+        total: mine.length,
+      });
+    }
     for (const issue of result.issues) ctx.data("issue", issue);
 
     if (draft.contentItemId) await saveToContentItem(tenantId, draft.contentItemId, result);
