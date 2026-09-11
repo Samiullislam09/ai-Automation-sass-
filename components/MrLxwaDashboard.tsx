@@ -779,7 +779,7 @@ const ResearchScreen = ({ items, running }: { items: { key: string; payload: any
                   <span className="lx-src-fav" style={{ background: hue(s.host) }}>{s.host.charAt(0).toUpperCase()}</span>
                   <span className="min-w-0 flex-1">
                     <span className="lx-10 lx-mut block truncate">{s.host}</span>
-                    <span className="lx-11 block" style={{ color: "#cfcfdd" }}>{s.line}</span>
+                    <span className="lx-11 block" style={{ color: "var(--lx-text)" }}>{s.line}</span>
                   </span>
                   <CheckCircle2 size={13} style={{ color: "#22c55e", flexShrink: 0, marginTop: 2 }} />
                 </div>
@@ -796,7 +796,7 @@ const ResearchScreen = ({ items, running }: { items: { key: string; payload: any
       <ul className={readingHost ? "mt-2 space-y-1" : "mt-2 space-y-2"}>
         {(readingHost ? items.slice(0, -1).slice(-5) : items).map((it) => (
           <li key={it.key} className="lx-live-anim">
-            <div className={`flex items-center gap-2 ${readingHost ? "lx-10 lx-dim" : "lx-11"}`} style={readingHost ? undefined : { color: "#cfcfdd" }}>
+            <div className={`flex items-center gap-2 ${readingHost ? "lx-10 lx-dim" : "lx-11"}`} style={readingHost ? undefined : { color: "var(--lx-text)" }}>
               <Search size={readingHost ? 10 : 12} className="lx-dim shrink-0" />
               <span className="min-w-0 flex-1 truncate">{lineFor(it.payload)}</span>
             </div>
@@ -886,7 +886,7 @@ const IssueRow = ({ payload, refCb }: { payload: any; refCb?: (el: HTMLElement |
         <span className={`lx-pill ${sev}`} style={{ fontSize: 10, padding: "1px 8px" }}>
           {payload?.severity ?? "info"}
         </span>
-        <span className="lx-11 font-medium" style={{ color: "#d9d9e6" }}>{payload?.what ?? "Issue"}</span>
+        <span className="lx-11 font-medium" style={{ color: "var(--lx-text)" }}>{payload?.what ?? "Issue"}</span>
       </div>
       {payload?.fix && <div className="lx-10 lx-mut mt-1.5">{payload.fix}</div>}
     </div>
@@ -898,24 +898,53 @@ type CanvasItem = { key: string; kind: string; payload: any };
 /** Mr. SEO's live screen — `ctx.data("score", …)` once (seo.ts:72), then one `ctx.data("issue",
  *  …)` per finding (seo.ts:87), as they're found — not a fake gauge sweeping to a precomputed
  *  number. */
+/** The bucket each on-page check belongs to. The ids are lib/seoChecks.ts's own stable contract
+ *  ("Stable id — the UI, the trend and the tests key off this, never off the prose"), so this
+ *  is the real catalogue, not a guess at one. Used to draw the reference design's per-category
+ *  bars from the issue events ALONE — no extra backend round trip, so the bars appear the moment
+ *  the checks do. When agents/seo.ts's own `score_category` events are present they win: the
+ *  agent knows which checks actually RAN (a skipped SERP comparison, say), and this side does
+ *  not, which is exactly why the fallback below never claims "N of M passed" — only how many
+ *  issues were really found in that bucket. */
+const SEO_BUCKETS: { label: string; ids: string[] }[] = [
+  { label: "Title & meta", ids: ["title-present", "title-length", "title-keyword", "title-keyword-position", "meta-description", "slug"] },
+  { label: "Headings", ids: ["h1-unique", "h2-count", "heading-order", "keyword-in-heading"] },
+  { label: "Keyword usage", ids: ["keyword-density", "keyword-first-100", "secondary-keyword-coverage"] },
+  { label: "Links", ids: ["internal-links", "internal-links-resolve", "internal-links-cluster", "external-links"] },
+  { label: "Readability", ids: ["readability-sentences", "readability-paragraphs"] },
+  { label: "Trust & media", ids: ["image-alt", "schema-suggestion", "eeat-author", "eeat-dates", "eeat-proof-cited", "eeat-trust-page"] },
+  { label: "Depth vs the top 10", ids: ["serp-word-count", "content-depth", "serp-topic-coverage"] },
+];
+
 const SeoScreen = ({ items, running, color, label }: { items: CanvasItem[]; running: boolean; color: string; label: string }) => {
   const scoreItem = items.filter((it) => it.kind === "score").slice(-1)[0];
-  const categories = items.filter((it) => it.kind === "score_category");
+  const emitted = items.filter((it) => it.kind === "score_category");
   const issues = items.filter((it) => it.kind === "issue");
   const hostRef = useRef<HTMLDivElement>(null);
+  // Prefer the agent's own bars; otherwise derive them here from the real issues, with the same
+  // arithmetic the agent uses for the overall score (100 − 25·block − 5·warn).
+  const derived = emitted.length
+    ? []
+    : SEO_BUCKETS.map((b) => {
+        const mine = issues.filter((it) => b.ids.includes(String(it.payload?.id ?? "")));
+        const blocks = mine.filter((it) => it.payload?.severity === "block").length;
+        const warns = mine.filter((it) => it.payload?.severity === "warn").length;
+        return { label: b.label, value: Math.max(0, Math.min(100, 100 - blocks * 25 - warns * 5)), issues: mine.length };
+      });
+  const categories = emitted.length ? emitted : [];
   const { setNodeRef, target } = useFollowLatest(categories.length ? categories : issues.length ? issues : scoreItem ? [scoreItem] : []);
   if (!scoreItem && !categories.length && issues.length === 0) {
     return <div className="lx-10 lx-mut px-1 py-2">{running ? "Running the on-page checks…" : "No SEO check has run for this order."}</div>;
   }
   const s = scoreItem?.payload ?? {};
   const score = typeof s.score === "number" ? s.score : null;
-  const barColor = (v: number) => (v >= 75 ? "#4ade80" : v >= 50 ? "#fbbf24" : "#f87171");
+  const barColor = (v: number) => (v >= 75 ? "#3f9166" : v >= 50 ? "#c1861f" : "#c05a4a");
   return (
     <div ref={hostRef} style={{ position: "relative" }}>
       <div className="lx-12 mb-3 font-semibold">Content score — draft audit</div>
       {score != null && (
         <div className="lx-live-anim mb-2 flex items-baseline gap-2">
-          <span className="text-3xl font-bold" style={{ color: s.passed ? "#4ade80" : "#fbbf24" }}>{score}</span>
+          <span className="text-3xl font-bold" style={{ color: s.passed ? "#3f9166" : "#c1861f" }}>{score}</span>
           <span className="lx-11 lx-mut">/ {typeof s.max === "number" ? s.max : 100}</span>
           <span className={`lx-pill ${s.passed ? "green" : "amber"} ml-2`}>
             {s.passed ? "Passed" : `${s.blockers ?? 0} blocker${s.blockers === 1 ? "" : "s"}`}
@@ -923,9 +952,7 @@ const SeoScreen = ({ items, running, color, label }: { items: CanvasItem[]; runn
           {s.serpCompared === false && <span className="lx-10 lx-mut">— not compared against the live SERP</span>}
         </div>
       )}
-      {/* One bar per category the agent actually scored (agents/seo.ts's own score_category
-          events, each carrying how many of that bucket's real checks passed). The bar animates
-          to its value on arrival — the width is the real number, the easing is just CSS. */}
+      {/* One bar per category. The width is the real number either way; the easing is just CSS. */}
       {categories.length > 0 && (
         <div className="mb-3">
           {categories.map((it) => {
@@ -941,6 +968,19 @@ const SeoScreen = ({ items, running, color, label }: { items: CanvasItem[]; runn
               </div>
             );
           })}
+        </div>
+      )}
+      {derived.length > 0 && issues.length > 0 && (
+        <div className="mb-3">
+          {derived.map((b) => (
+            <div key={b.label} className="lx-srow lx-live-anim">
+              <span className="lb truncate">{b.label}</span>
+              <span className="lx-sbar"><i style={{ width: `${b.value}%`, background: barColor(b.value) }} /></span>
+              {/* Deliberately the issue COUNT, not "N of M passed": this side cannot know which
+                  checks actually ran, so it never implies a check that was skipped. */}
+              <span className="lx-sval">{b.issues === 0 ? "clear" : `${b.issues} issue${b.issues === 1 ? "" : "s"}`}</span>
+            </div>
+          ))}
         </div>
       )}
       <div className="space-y-2">
@@ -1089,7 +1129,7 @@ const LeadsScreen = ({ items, running, color, label }: { items: CanvasItem[]; ru
               )}
             </div>
             {p.website && <div className="lx-10 lx-mut truncate">{p.website}</div>}
-            {p.why && <div className="lx-11 mt-1" style={{ color: "#cfcfdd" }}>{p.why}</div>}
+            {p.why && <div className="lx-11 mt-1" style={{ color: "var(--lx-text)" }}>{p.why}</div>}
           </div>
         );
       })}
@@ -1289,7 +1329,7 @@ const WriterDocScreen = ({ items, running, color, label }: { items: CanvasItem[]
   return (
     <div
       ref={hostRef}
-      style={{ position: "relative", background: "#fffefb", color: "#20241f", borderRadius: 8, padding: "14px 18px 18px" }}
+      style={{ position: "relative" }}
     >
       {wordCount > 0 && (
         <div className="lx-10" style={{ color: "#8a8f86", fontFamily: "ui-monospace, monospace", marginBottom: 10 }}>
@@ -1309,10 +1349,10 @@ const WriterDocScreen = ({ items, running, color, label }: { items: CanvasItem[]
         const stillTyping = isLatest && typedLen < fullText.length;
         return (
           <div key={it.key} ref={setNodeRef(it.key)} className={isLatest ? undefined : "lx-live-anim"}>
-            <h2 style={{ fontSize: 16, fontWeight: 600, margin: "16px 0 6px", color: "#20241f" }}>
+            <h2 style={{ fontSize: 16, fontWeight: 600, margin: "16px 0 6px", color: "var(--lx-text)" }}>
               {p.h2 || `Section ${i + 1}`}
             </h2>
-            <p style={{ fontSize: 14.5, lineHeight: 1.65, color: "#2c322a", margin: "0 0 4px" }}>
+            <p style={{ fontSize: 14.5, lineHeight: 1.65, color: "var(--lx-text)", margin: "0 0 4px" }}>
               {boldText(shown, it.key)}
               {stillTyping && <span className="lx-caret" style={{ color }} />}
             </p>
@@ -2854,8 +2894,11 @@ export default function MrLxwaDashboard({
               {/* Each agent gets the screen its own output deserves (§24.4b's "typed
                   component"), not one generic bullet list. Mr. Keyword's is the Google-style
                   search while it runs and a real table when it is done; everything else keeps
-                  the honest per-item list until it earns a screen of its own. */}
-              <div>
+                  the honest per-item list until it earns a screen of its own.
+                  ON PAPER: the reference design puts every one of these on a light page inside
+                  the dark shell (owner, 2026-09-12). `.lx-paper` re-points the theme tokens the
+                  screens already use, so they all flip to ink-on-paper without knowing it. */}
+              <div className="lx-paper">
                 {panelAgent?.id === "keyword" ? (
                   <KeywordScreen
                     items={keywordItems}

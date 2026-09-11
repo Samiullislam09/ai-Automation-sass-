@@ -327,6 +327,51 @@ export const LX_CSS = `
 @keyframes lxImageIn{from{opacity:0;transform:scale(.97)}to{opacity:1;transform:scale(1)}}
 
 /* ---- Live Canvas screens (LIVE_CANVAS_SPEC.md) --------------------------------------- */
+/* THE PAPER SURFACE. The reference design puts every agent's live screen on a light "paper"
+   page inside the dark shell — a document, a table, a browser window, a post: things that are
+   white in real life. Rather than restyle nine components, this re-points the SAME theme tokens
+   they already use, so everything inside flips to ink-on-paper at once and nothing has to know
+   it is on paper. Owner, 2026-09-12, comparing the live SEO tab to the mockup's white one. */
+.lx-paper{
+  --lx-text:#20241f; --lx-mut:#5a6058; --lx-dim:#8a8f86;
+  --lx-border:#e9e4da; --lx-in:#fdfcf9; --lx-card2:#faf8f2;
+  --lx-purple:#7a5fc9; --lx-violet:#6d4fc0; --lx-blue:#3d7ea6; --lx-cyan:#3a7d8c;
+  --lx-green:#3f9166; --lx-red:#c05a4a;
+  background:#fffefb;color:#20241f;border-radius:10px;padding:16px 18px;
+}
+/* Pills sit on paper now, so their dark-theme translucency would wash out. */
+.lx-paper .lx-pill{background:#fff;border-color:#e9e4da}
+.lx-paper .lx-pill.green{color:#2a6b48;background:#e9f5ee;border-color:#bfe0cb}
+.lx-paper .lx-pill.amber{color:#8a5f10;background:#fbf2df;border-color:#ecd9ac}
+.lx-paper .lx-pill.red  {color:#a13939;background:#f8e9e6;border-color:#f0c3ba}
+.lx-paper .lx-pill.blue {color:#2f6b8a;background:#e8f1f6;border-color:#c3dae6}
+.lx-paper .lx-pill.mut  {color:#6b7168;background:#f4f2eb;border-color:#e4e0d5}
+.lx-paper .lx-sbar{background:#f0ece2}
+.lx-paper .lx-node{background:#e3f2e8;border-color:#bfe0cb}
+.lx-paper .lx-node.bad{background:#fbe9e5;border-color:#f0bcae}
+.lx-paper .lx-src{background:#fdfcf9}
+.lx-paper .lx-scard{background:#fff}
+.lx-paper .lx-cbubble{background:#eef4f8;border-color:#c3dae6;color:#20241f}
+.lx-paper .lx-kwo-row{background:#fdfcf9;border-color:#e9e4da}
+.lx-paper .lx-kwo-row:hover{background:#faf7f0;border-color:#d8d3c4}
+.lx-paper .lx-kwo-row.best{border-color:#c9b8f0;background:#faf7ff;box-shadow:0 0 0 1px rgba(122,95,201,.18)}
+.lx-paper .lx-kwo-mark{border-color:#e4e0d5;color:#8a8f86}
+.lx-paper .lx-kwo-row.best .lx-kwo-mark{border-color:#c9b8f0;color:#6d4fc0;background:#f1ebff}
+.lx-paper .lx-kwo-count{color:#6d4fc0;background:#f1ebff;border-color:#d9ccf5}
+/* The few places inside a canvas that paint their own dark surface rather than reading a token:
+   Mr. Keyword's Google-style search box, Mr. Writer's browser-chrome "reading" frame, and the
+   shimmer used for "working…". On paper they need their own light values. */
+.lx-paper .lx-serp,.lx-paper .lx-read-frame{background:#fff;border-color:#e9e4da}
+.lx-paper .lx-serp-bar{background:#fff;border-color:#e9e4da}
+.lx-paper .lx-serp-caret{background:#8a8f86}
+.lx-paper .lx-serp-row{border-bottom-color:#f2efe8}
+.lx-paper .lx-serp-title{color:#3d7ea6}
+.lx-paper .lx-read-frame{background:#fff}
+.lx-paper .lx-read-host{color:#20241f}
+.lx-paper .lx-read-skel{background:linear-gradient(90deg,#efece4,#f7f5ef,#efece4)}
+.lx-paper .lx-read-scrim{background:linear-gradient(180deg,transparent,#fff)}
+.lx-paper .lx-shimmer{background:linear-gradient(90deg,#8a8f86 0%,#20241f 50%,#8a8f86 100%);
+  background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent}
 /* SEO — the overall score, then one bar per real category (agents/seo.ts's score_category). */
 .lx-srow{display:flex;align-items:center;gap:12px;padding:7px 0}
 .lx-srow .lb{width:132px;flex:none;font-size:12.5px;color:var(--lx-text)}
