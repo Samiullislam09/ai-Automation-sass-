@@ -401,7 +401,14 @@ export const LX_CSS = `
 .lx-kwo-title{font-size:15px;font-weight:700;color:var(--lx-text)}
 .lx-kwo-count{font-size:11px;font-weight:600;color:#b9a5ff;background:rgba(139,92,246,.14);
   border:1px solid rgba(139,92,246,.35);border-radius:8px;padding:2px 8px}
-.lx-kwo-grid{display:grid;grid-template-columns:minmax(0,1fr) 118px 64px 84px 56px 62px;gap:10px;align-items:center}
+/* Four tracks, matching the four cells the row actually renders (Keyword, Volume, Fit, Action).
+   It used to declare SIX — two of them left over from the dropped Source/Competition columns —
+   and an over-declared track still reserves its width, so the keyword's own track was squeezed
+   to zero and the phrase rendered invisibly (overflow:hidden gives it an automatic minimum size
+   of 0, while the flex-shrink:0 marker beside it kept painting). That is the "keyword show nahi
+   hota" bug, found live 2026-09-11. The 120px floor is the belt to that fix's braces: this
+   column can never again be squeezed out of existence, whatever is added beside it. */
+.lx-kwo-grid{display:grid;grid-template-columns:minmax(120px,1fr) 72px 60px 68px;gap:10px;align-items:center}
 .lx-kwo-th{padding:0 12px 6px;font-size:11px;font-weight:600;color:var(--lx-mut)}
 .lx-kwo-th>span:not(:first-child){text-align:center}
 .lx-kwo-row{padding:10px 12px;border:1px solid var(--lx-border);border-radius:12px;background:rgba(255,255,255,.02);
@@ -424,7 +431,7 @@ export const LX_CSS = `
 .lx-kwo-more{display:inline-flex;align-items:center;gap:6px;margin:6px auto 0;padding:6px 12px;border:none;background:none;
   color:var(--lx-mut);font-size:12.5px;cursor:pointer}
 .lx-kwo-more:hover{color:var(--lx-text)}
-@media (max-width:640px){.lx-kwo-grid{grid-template-columns:minmax(0,1fr) 62px}.lx-kwo-grid>.hide-sm{display:none}}
+@media (max-width:640px){.lx-kwo-grid{grid-template-columns:minmax(90px,1fr) 68px}.lx-kwo-grid>.hide-sm{display:none}}
 
 /* "Reading Web Pages" browser-chrome visual — components/MrLxwaDashboard.tsx's ResearchScreen.
    Host + breadcrumb are real (parsed from the real source URL); the body is a deliberately
