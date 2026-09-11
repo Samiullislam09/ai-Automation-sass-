@@ -71,10 +71,18 @@ async function reserve(): Promise<string> {
   return mine;
 }
 
+// Every key staying saturated this long means demand has genuinely outrun the pool (many
+// concurrent tasks, system-wide) — not a bug, but silently queuing forever behind it looks
+// identical to a hang from the live canvas's point of view. Failing with a clear reason after a
+// bounded wait turns that into a real, reported error the task can act on (retry, or the owner
+// adding capacity) instead of a task that just never seems to move.
+const MAX_RESERVE_WAIT_MS = 5 * 60_000;
+
 async function reserveLocked(): Promise<string> {
   if (keyStates.length === 0) {
     throw new Error("No NVIDIA key configured — set NVIDIA_API_KEYS_BG or NVIDIA_API_KEY");
   }
+  const waitStarted = Date.now();
   for (;;) {
     const start = cursor++ % keyStates.length;
     for (let i = 0; i < keyStates.length; i++) {
@@ -85,6 +93,9 @@ async function reserveLocked(): Promise<string> {
         state.sent.push(now);
         return state.key;
       }
+    }
+    if (Date.now() - waitStarted >= MAX_RESERVE_WAIT_MS) {
+      throw new Error(`NVIDIA key pool has been at its rate limit for ${Math.round(MAX_RESERVE_WAIT_MS / 60_000)} minutes straight — too many jobs running at once, not a hang`);
     }
     // Every key in the pool is full — wait for whichever frees up soonest, then recheck.
     const now = Date.now();
@@ -99,12 +110,40 @@ export type NvidiaFetchOptions = RequestInit & {
   label?: string;
 };
 
+// No per-request timeout existed here at all until now — a stalled NVIDIA connection (dead
+// socket, provider-side hang) blocked forever, with nothing to retry because `fetch` itself
+// never rejected or resolved. Found live 2026-09-12 (owner, screenshot): a writer task sat on
+// "Writing the outline…" for 11+ minutes, no section ever landing — every section's own call
+// shares this one door. 90s is generous for a real completion (writer.ts's own sections rarely
+// take more than 15-20s) but short enough that a genuine hang fails fast instead of eating the
+// whole task.
+const REQUEST_TIMEOUT_MS = 90_000;
+
 export async function nvidiaFetch(url: string, init: NvidiaFetchOptions = {}): Promise<Response> {
-  const { retries = 3, label = "nvidia", headers, ...rest } = init;
+  const { retries = 3, label = "nvidia", headers, signal, ...rest } = init;
 
   for (let attempt = 1; ; attempt++) {
     const key = await reserve();
-    const res = await fetch(url, { ...rest, headers: { ...headers, Authorization: `Bearer ${key}` } });
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        ...rest,
+        headers: { ...headers, Authorization: `Bearer ${key}` },
+        // A caller's own signal (if any) still wins for cancellation; the timeout is added
+        // alongside it, not instead of it.
+        signal: signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+    } catch (e: any) {
+      // A hang/timeout or a dropped connection — retried exactly like a 429/5xx below (same
+      // backoff schedule), because from here it looks the same: "try again shortly." Only once
+      // retries are exhausted does this actually fail the caller, which is a real, reported
+      // failure — not a silent multi-minute stall that looks identical to "still working."
+      if (attempt > retries) throw e;
+      const waitMs = Math.min(30_000, 2 ** attempt * 1000);
+      console.warn(`[${label}] request failed (${e?.name ?? "error"}: ${e?.message ?? e}) — retrying in ${Math.round(waitMs / 1000)}s (attempt ${attempt}/${retries})`);
+      await sleep(waitMs);
+      continue;
+    }
 
     if (res.status !== 429 && res.status < 500) {
       // Fire-and-forget on a CLONE — the real `res` is handed back untouched (its body is a

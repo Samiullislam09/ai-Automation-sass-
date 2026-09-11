@@ -564,6 +564,12 @@ export const LX_CSS = `
   box-shadow:0 4px 18px rgba(124,58,237,.3)}
 .lx-ai{background:rgba(255,255,255,.03);border:1px solid var(--lx-border);
   border-radius:4px 14px 14px 14px}
+/* Owner, 2026-09-12: "chatbox responsive nahi hai". Neither bubble had a hard cap of its own —
+   .lx-me relied on an inline maxWidth and .lx-ai had none at all — so a long unbroken run
+   (a certification list, a URL) could force the bubble, and the whole assistant panel with it,
+   wider than the viewport instead of wrapping. Both now own their width/wrap behaviour directly
+   rather than depending on the caller to set it right. */
+.lx-me,.lx-ai{max-width:100%;overflow-wrap:anywhere;word-break:break-word}
 
 @media (prefers-reduced-motion:reduce){
   .lx-root *,.lx-root *::before,.lx-root *::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}

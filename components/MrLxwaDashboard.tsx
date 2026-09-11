@@ -3505,7 +3505,7 @@ export default function MrLxwaDashboard({
       </div>
 
       {aTab === "assistant" ? (
-        <div ref={chatRef} className="lx-scroll flex-1 space-y-3 overflow-y-auto px-3 py-3">
+        <div ref={chatRef} className="lx-scroll flex-1 space-y-3 overflow-y-auto overflow-x-hidden px-3 py-3">
           {/* real conversation with /api/chat (same endpoint components/kit.tsx's BossChat
               uses) — the opening line above is the model's actual "__hello__" reply, not a
               scripted mock, and everything below is genuinely sent/received. */}
