@@ -1202,7 +1202,7 @@ const WriterDocScreen = ({ items, running, color, label }: { items: CanvasItem[]
               {p.h2 || `Section ${i + 1}`}
             </h2>
             <p style={{ fontSize: 14, lineHeight: 1.68, color: "#c7ccc6", margin: "0 0 4px" }}>
-              {shown}
+              {boldText(shown, it.key)}
               {stillTyping && <span className="lx-caret" style={{ color }} />}
             </p>
             {!stillTyping && typeof p.words === "number" && (
