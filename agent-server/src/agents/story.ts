@@ -102,13 +102,21 @@ export class StoryAgent extends Agent {
     for (const [i, page] of outline.entries()) {
       const isCta = i === outline.length - 1;
       const image = await this.pictureFor({ tenantId, articleId, index: i, page, newImages, reusable, brandName, brandColor, title: article.title });
-      pages.push({
+      const built: StoryPage = {
         headline: page.headline,
         body: isCta ? undefined : page.body,
         image: image.url,
         alt: image.alt,
         ...(isCta && article.url ? { cta: { text: "Read the full article", href: article.url } } : {}),
-      });
+      };
+      pages.push(built);
+      // The live screen's own filmstrip (owner, 2026-09-12: "image editing jaisa vibe aaye") —
+      // story.ts sent zero ctx.data(...) events before this, only onProgress phase labels, so
+      // there was nothing real to show per page while it built them. One event per page, in
+      // build order, with the REAL image URL and headline this exact page ended up with —
+      // never a placeholder while `image` is still being drawn, since `pictureFor` above has
+      // already resolved to a real, stored URL by the time this fires.
+      ctx.data("story_page", { index: i, total: outline.length, ...built });
     }
 
     // ── 5 · the AMP, and the check that it is real AMP ─────────────────────────────────

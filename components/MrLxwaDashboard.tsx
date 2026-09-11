@@ -1200,6 +1200,56 @@ const PublishScreen = ({ items, running, color, label }: { items: CanvasItem[]; 
   );
 };
 
+/** Mr. Story's live screen — one `ctx.data("story_page", …)` per page as it's actually built
+ *  (agents/story.ts, added alongside this UI — story.ts sent ZERO live events before this,
+ *  only `ctx.onProgress` phase labels, exactly the gap Site Brain had). Each page carries the
+ *  REAL image URL it ended up with (already drawn by Mr. Image, or reused from the article's
+ *  own pictures) and its real headline — never a placeholder while a picture is still being
+ *  generated, since the event only fires once `pictureFor` has resolved a real, stored URL. A
+ *  filmstrip of real 9:16 cards, not a bullet list — the "image editing" feel the reference
+ *  design's own agents (Image, Publish) already have. */
+const StoryScreen = ({ items, running, color, label }: { items: CanvasItem[]; running: boolean; color: string; label: string }) => {
+  const pages = items.filter((it) => it.kind === "story_page" && it.payload?.image);
+  const hostRef = useRef<HTMLDivElement>(null);
+  const { setNodeRef, target } = useFollowLatest(pages);
+  if (!pages.length) {
+    return (
+      <div className="flex items-center gap-2.5 px-1 py-2">
+        {running ? (
+          <>
+            <Wave n={22} h={16} anim color={color} />
+            <span className="lx-shimmer lx-10 font-medium">Building the story pages…</span>
+          </>
+        ) : (
+          <span className="lx-10 lx-mut">No story pages were built for this order.</span>
+        )}
+      </div>
+    );
+  }
+  const total = typeof pages[pages.length - 1]?.payload?.total === "number" ? pages[pages.length - 1].payload.total : pages.length;
+  return (
+    <div ref={hostRef} style={{ position: "relative" }}>
+      <div className="lx-12 mb-3 font-semibold">Web story — {pages.length} of {total} page{total === 1 ? "" : "s"}</div>
+      <div className="lx-story-strip">
+        {pages.map((it) => {
+          const p = it.payload ?? {};
+          return (
+            <div key={it.key} ref={setNodeRef(it.key)} className="lx-live-anim lx-story-page">
+              {/* eslint-disable-next-line @next/next/no-img-element -- a real generated/stored
+                  URL, not a static asset next/image can optimize. */}
+              <img src={String(p.image)} alt={p.alt ?? ""} />
+              {typeof p.index === "number" && <span className="n">{p.index + 1}</span>}
+              {p.cta && <span className="cta">CTA</span>}
+              {p.headline && <span className="cap">{p.headline}</span>}
+            </div>
+          );
+        })}
+      </div>
+      <AgentCursor target={target} host={hostRef.current} color={color} label={label} />
+    </div>
+  );
+};
+
 /** Miss Social's live screen — one `ctx.data("post", …)` per network drafted (social.ts:89):
  *  the real caption, real hashtags, and `overLimit` (a real length check against that
  *  network's own limit, social.ts's `LIMIT` table) — never a fabricated schedule time, since
@@ -3028,6 +3078,8 @@ export default function MrLxwaDashboard({
                   <LeadsScreen items={producedItems} running={!!runningStep} color={panelAgent.color} label={panelAgent.name} />
                 ) : panelAgent?.id === "publish" ? (
                   <PublishScreen items={producedItems} running={!!runningStep} color={panelAgent.color} label={panelAgent.name} />
+                ) : panelAgent?.id === "story" ? (
+                  <StoryScreen items={producedItems} running={!!runningStep} color={panelAgent.color} label={panelAgent.name} />
                 ) : panelAgent?.id === "social" ? (
                   <SocialScreen items={producedItems} running={!!runningStep} color={panelAgent.color} label={panelAgent.name} />
                 ) : panelAgent?.id === "analyst" ? (

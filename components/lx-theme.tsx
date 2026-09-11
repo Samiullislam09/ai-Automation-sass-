@@ -408,6 +408,22 @@ export const LX_CSS = `
 .lx-src-fav{width:22px;height:22px;border-radius:6px;flex:none;display:flex;align-items:center;justify-content:center;
   font-size:10px;font-weight:700;color:#0b0b10;margin-top:1px}
 
+/* Mr. Story — a filmstrip of real 9:16 story pages, each the real image this page ended up
+   with plus its real headline as an overlay (the "image editing" vibe owner, 2026-09-12, asked
+   for): a phone-shaped frame, not a bare list row. */
+.lx-story-strip{display:flex;gap:12px;overflow-x:auto;padding:4px 2px 10px}
+.lx-story-page{position:relative;flex:none;width:120px;aspect-ratio:9/16;border-radius:14px;overflow:hidden;
+  background:#111 linear-gradient(160deg,#2a2f38,#14171c);border:1px solid var(--lx-border);
+  box-shadow:0 10px 24px -12px rgba(0,0,0,.5)}
+.lx-story-page img{width:100%;height:100%;object-fit:cover;display:block}
+.lx-story-page .cap{position:absolute;left:0;right:0;bottom:0;padding:8px 9px 9px;
+  background:linear-gradient(180deg,transparent,rgba(0,0,0,.82) 55%);color:#fff;
+  font-size:10.5px;line-height:1.28;font-weight:600}
+.lx-story-page .n{position:absolute;top:7px;left:8px;font-family:"IBM Plex Mono",monospace;font-size:9.5px;
+  color:#fff;background:rgba(0,0,0,.45);border-radius:5px;padding:1px 6px}
+.lx-story-page .cta{position:absolute;top:7px;right:8px;font-size:9px;font-weight:700;color:#0b0b10;
+  background:#facc15;border-radius:5px;padding:1.5px 6px}
+
 /* Live Visual's mode crossfade — plain CSS keyed to React's own key-remount (see
    components/MrLxwaDashboard.tsx), not framer-motion: a nested AnimatePresence here got
    stuck with opacity permanently at 0 in dev (confirmed via computed style), most likely a
