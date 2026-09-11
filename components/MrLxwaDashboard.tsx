@@ -1143,6 +1143,15 @@ const SiteBrainScreen = ({ items, running, color, label }: { items: CanvasItem[]
  *  that already arrived, not a timer pretending to write. EARLIER sections render in full at
  *  once (they already finished); only the newest one animates, and only once — reopening this
  *  screen replays nothing. */
+// writer.ts's own prompt tells the model to "Start with '## <h2>' then the prose"
+// (agent-server/src/lib/writerPipeline.ts:215) — so `section.text` genuinely, by design,
+// repeats its own h2 as a literal leading markdown heading line before the real body starts.
+// `h2` already renders that heading cleanly above; this strips the redundant duplicate off the
+// TEXT ONLY — the section's real stored text is untouched, this is presentation only. A
+// mismatch between the leading line and `h2` (a model that titled the line slightly
+// differently) still strips: it's a markdown heading line either way, never body prose.
+const stripLeadingHeading = (text: string): string => text.replace(/^\s*#{1,6}[^\n]*\n+/, "");
+
 const WriterDocScreen = ({ items, running, color, label }: { items: CanvasItem[]; running: boolean; color: string; label: string }) => {
   const sections = items.filter((it) => it.kind === "section");
   const draftItem = items.filter((it) => it.kind === "draft").slice(-1)[0];
@@ -1156,7 +1165,7 @@ const WriterDocScreen = ({ items, running, color, label }: { items: CanvasItem[]
   useEffect(() => {
     if (!latestKey || typedKeyRef.current === latestKey) return;
     typedKeyRef.current = latestKey;
-    const text = String(sections[sections.length - 1]?.payload?.text ?? "");
+    const text = stripLeadingHeading(String(sections[sections.length - 1]?.payload?.text ?? ""));
     setTypedLen(0);
     if (!text) return;
     let i = 0;
@@ -1183,7 +1192,7 @@ const WriterDocScreen = ({ items, running, color, label }: { items: CanvasItem[]
       )}
       {sections.map((it, i) => {
         const p = it.payload ?? {};
-        const fullText = String(p.text ?? "");
+        const fullText = stripLeadingHeading(String(p.text ?? ""));
         const isLatest = it.key === latestKey;
         const shown = isLatest ? fullText.slice(0, typedLen) : fullText;
         const stillTyping = isLatest && typedLen < fullText.length;
