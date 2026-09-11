@@ -308,6 +308,24 @@ export const LX_CSS = `
   animation:lxShimmer 1.6s linear infinite}
 @keyframes lxShimmer{from{background-position:200% 0}to{background-position:-200% 0}}
 
+/* Live Canvas cursor + typing caret (LIVE_CANVAS_SPEC.md §6) — the cursor only ever moves to a
+   DOM node behind a REAL event that just arrived (see useFollowLatest in MrLxwaDashboard.tsx);
+   this is purely the visual chrome for that move/blink, never what decides when it moves. */
+.lx-cursor{position:absolute;top:0;left:0;display:flex;align-items:center;gap:6px;opacity:0;
+  pointer-events:none;transition:transform .5s cubic-bezier(.3,.7,.2,1), opacity .3s;z-index:5}
+.lx-cursor.show{opacity:1}
+.lx-cursor .tip{width:0;height:0;border-style:solid;border-width:0 5px 9px 0;
+  border-color:transparent currentColor transparent transparent;transform:rotate(20deg);
+  filter:drop-shadow(0 1px 1px rgba(0,0,0,.35))}
+.lx-cursor .tag{font-family:"IBM Plex Mono",monospace;font-size:10.5px;font-weight:500;
+  color:#0b0b10;background:currentColor;padding:2.5px 7px;border-radius:0 6px 6px 6px;
+  white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.35)}
+.lx-caret{display:inline-block;width:2px;height:1em;background:currentColor;
+  vertical-align:text-bottom;margin-left:1px;animation:lxCaretBlink 1s steps(1) infinite}
+@keyframes lxCaretBlink{50%{opacity:0}}
+/* A real, already-arrived image revealing itself — never a placeholder growing INTO an image. */
+@keyframes lxImageIn{from{opacity:0;transform:scale(.97)}to{opacity:1;transform:scale(1)}}
+
 /* Live Visual's mode crossfade — plain CSS keyed to React's own key-remount (see
    components/MrLxwaDashboard.tsx), not framer-motion: a nested AnimatePresence here got
    stuck with opacity permanently at 0 in dev (confirmed via computed style), most likely a

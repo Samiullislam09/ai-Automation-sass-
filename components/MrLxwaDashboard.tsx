@@ -789,14 +789,67 @@ const ResearchScreen = ({ items, running }: { items: { key: string; payload: any
  *  earlier reference design assumed. Nothing here invents a value: an agent that hasn't sent a
  *  field yet leaves that part of the screen simply absent, never a placeholder guess. */
 
+/** Owner, 2026-09-11: "same html jaisa... live cursor" — the reference mockup's cursor that
+ *  visibly moves to whatever the agent is working on right now. §6 of LIVE_CANVAS_SPEC.md is
+ *  explicit about WHY this is still allowed under the "no simulation" rule: "jab bhi ek naya
+ *  data.* event aaye jo ek specific DOM element se juda ho, us element ka ref capture karo aur
+ *  cursor ko wahi move karo. Agar koi naya event nahi aaya, cursor apni last position pe ruka
+ *  rehta hai." The trigger is always a real item that already arrived — `useFollowLatest` only
+ *  watches `items.length` growing, never a timer — so the cursor's MOVEMENT is decorative CSS
+ *  transition over a real fact, the same category as `.lx-live-anim`'s fade-in, not a fabricated
+ *  "agent is thinking" loop. */
+function useFollowLatest<T extends { key: string }>(items: T[]) {
+  const nodes = useRef<Record<string, HTMLElement | null>>({});
+  const [target, setTarget] = useState<HTMLElement | null>(null);
+  const setNodeRef = (key: string) => (el: HTMLElement | null) => {
+    nodes.current[key] = el;
+  };
+  useEffect(() => {
+    const last = items[items.length - 1];
+    if (last && nodes.current[last.key]) setTarget(nodes.current[last.key]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items.length]);
+  return { setNodeRef, target };
+}
+
+/** The cursor itself — a colored tip + agent-name tag, positioned relative to `host` (the
+ *  screen's own outer `position:relative` wrapper) and re-measured whenever `target` changes.
+ *  Renders nothing (not even a hidden, opacity:0 node holding stale coordinates) once the
+ *  screen has no real target yet, e.g. before the first item lands. */
+const AgentCursor = ({ target, host, color, label }: { target: HTMLElement | null; host: HTMLElement | null; color: string; label: string }) => {
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  useEffect(() => {
+    if (!target || !host) {
+      setPos(null);
+      return;
+    }
+    const measure = () => {
+      const hr = host.getBoundingClientRect();
+      const tr = target.getBoundingClientRect();
+      setPos({ x: tr.left - hr.left - 4, y: tr.top - hr.top - 22 });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(host);
+    return () => ro.disconnect();
+  }, [target, host]);
+  if (!pos) return null;
+  return (
+    <div className="lx-cursor show" style={{ color, transform: `translate(${pos.x}px, ${pos.y}px)` }}>
+      <span className="tip" />
+      <span className="tag">{label}</span>
+    </div>
+  );
+};
+
 /** SEO and Audit both emit an `"issue"` kind with the identical `{id, severity, what, fix}`
  *  shape (lib/seoChecks.ts's `SeoIssue`, agent-server/src/lib/audit/checks.ts's `AuditIssue`) —
  *  one row renderer, reused by both screens below, rather than two copies that would silently
  *  drift apart. */
-const IssueRow = ({ payload }: { payload: any }) => {
+const IssueRow = ({ payload, refCb }: { payload: any; refCb?: (el: HTMLElement | null) => void }) => {
   const sev = payload?.severity === "block" ? "red" : payload?.severity === "warn" ? "amber" : "mut";
   return (
-    <div className="lx-live-anim lx-in rounded-lg px-3 py-2.5">
+    <div ref={refCb} className="lx-live-anim lx-in rounded-lg px-3 py-2.5">
       <div className="flex items-center gap-2">
         <span className={`lx-pill ${sev}`} style={{ fontSize: 10, padding: "1px 8px" }}>
           {payload?.severity ?? "info"}
@@ -813,18 +866,20 @@ type CanvasItem = { key: string; kind: string; payload: any };
 /** Mr. SEO's live screen — `ctx.data("score", …)` once (seo.ts:72), then one `ctx.data("issue",
  *  …)` per finding (seo.ts:87), as they're found — not a fake gauge sweeping to a precomputed
  *  number. */
-const SeoScreen = ({ items, running }: { items: CanvasItem[]; running: boolean }) => {
+const SeoScreen = ({ items, running, color, label }: { items: CanvasItem[]; running: boolean; color: string; label: string }) => {
   const scoreItem = items.filter((it) => it.kind === "score").slice(-1)[0];
   const issues = items.filter((it) => it.kind === "issue");
+  const hostRef = useRef<HTMLDivElement>(null);
+  const { setNodeRef, target } = useFollowLatest(issues.length ? issues : scoreItem ? [scoreItem] : []);
   if (!scoreItem && issues.length === 0) {
     return <div className="lx-10 lx-mut px-1 py-2">{running ? "Running the on-page checks…" : "No SEO check has run for this order."}</div>;
   }
   const s = scoreItem?.payload ?? {};
   const score = typeof s.score === "number" ? s.score : null;
   return (
-    <div>
+    <div ref={hostRef} style={{ position: "relative" }}>
       {score != null && (
-        <div className="lx-live-anim mb-3 flex items-baseline gap-2">
+        <div ref={issues.length ? undefined : setNodeRef(scoreItem!.key)} className="lx-live-anim mb-3 flex items-baseline gap-2">
           <span className="text-3xl font-bold" style={{ color: s.passed ? "#4ade80" : "#fbbf24" }}>{score}</span>
           <span className="lx-11 lx-mut">/ {typeof s.max === "number" ? s.max : 100}</span>
           <span className={`lx-pill ${s.passed ? "green" : "amber"} ml-2`}>
@@ -834,8 +889,9 @@ const SeoScreen = ({ items, running }: { items: CanvasItem[]; running: boolean }
         </div>
       )}
       <div className="space-y-2">
-        {issues.map((it) => <IssueRow key={it.key} payload={it.payload} />)}
+        {issues.map((it) => <IssueRow key={it.key} payload={it.payload} refCb={setNodeRef(it.key)} />)}
       </div>
+      <AgentCursor target={target} host={hostRef.current} color={color} label={label} />
     </div>
   );
 };
@@ -844,16 +900,27 @@ const SeoScreen = ({ items, running }: { items: CanvasItem[]; running: boolean }
  *  (image.ts:112/340). `slot` is a free string off the media plan (`ImageSlot`), never an
  *  invented enum — bucketed by substring match so a slot naming scheme change never breaks
  *  this into an unstyled fallback. */
-const ImageScreen = ({ items, running }: { items: CanvasItem[]; running: boolean }) => {
+const ImageScreen = ({ items, running, color, label }: { items: CanvasItem[]; running: boolean; color: string; label: string }) => {
   const images = items.filter((it) => it.kind === "image" && it.payload?.url);
+  const hostRef = useRef<HTMLDivElement>(null);
+  const { setNodeRef, target } = useFollowLatest(images);
   if (images.length === 0) {
     return <div className="lx-10 lx-mut px-1 py-2">{running ? "Generating images…" : "No images were produced for this order."}</div>;
   }
   const isHero = (slot: unknown) => /hero/i.test(String(slot ?? ""));
   const hero = images.find((it) => isHero(it.payload?.slot)) ?? null;
   const rest = images.filter((it) => it !== hero);
+  // The reveal itself — a real image that just landed fades/scales in rather than snapping into
+  // place, the same "real event, decorative transition" rule the cursor above follows. Keyed by
+  // `it.key` so a genuinely new image always re-triggers the animation, never a re-render of one
+  // already on screen.
   const Tile = ({ it }: { it: CanvasItem }) => (
-    <div key={it.key} className="lx-live-anim overflow-hidden rounded-lg" style={{ border: "1px solid var(--lx-border)" }}>
+    <div
+      ref={setNodeRef(it.key)}
+      key={it.key}
+      className="lx-live-anim overflow-hidden rounded-lg"
+      style={{ border: "1px solid var(--lx-border)", animation: "lxLiveFade .5s ease-out both, lxImageIn .5s ease-out both" }}
+    >
       {/* eslint-disable-next-line @next/next/no-img-element -- a real generated URL from an
           arbitrary provider (Cloudflare/NIM), not a static asset next/image can optimize. */}
       <img src={it.payload.url} alt={it.payload?.alt ?? ""} className="aspect-video w-full object-cover" />
@@ -861,9 +928,10 @@ const ImageScreen = ({ items, running }: { items: CanvasItem[]; running: boolean
     </div>
   );
   return (
-    <div>
+    <div ref={hostRef} style={{ position: "relative" }}>
       {hero && <div className="mb-3"><Tile it={hero} /></div>}
       {rest.length > 0 && <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">{rest.map((it) => <Tile key={it.key} it={it} />)}</div>}
+      <AgentCursor target={target} host={hostRef.current} color={color} label={label} />
     </div>
   );
 };
@@ -873,41 +941,53 @@ const ImageScreen = ({ items, running }: { items: CanvasItem[]; running: boolean
  *  (`ctx.data("score", {score,blocks,warns,pages})`, audit.ts:116/173), and every issue found
  *  along the way — same `IssueRow` as SEO, since audit.ts's own `AuditIssue` is the identical
  *  `{id,severity,what,fix}` shape. */
-const AuditScreen = ({ items, running }: { items: CanvasItem[]; running: boolean }) => {
+const AuditScreen = ({ items, running, color, label }: { items: CanvasItem[]; running: boolean; color: string; label: string }) => {
   const pages = items.filter((it) => it.kind === "page");
   const issues = items.filter((it) => it.kind === "issue");
   const scoreItem = items.filter((it) => it.kind === "score").slice(-1)[0];
   const latest = pages[pages.length - 1]?.payload;
   const total = typeof latest?.total === "number" ? latest.total : null;
   const done = typeof latest?.done === "number" ? latest.done : pages.length;
+  const hostRef = useRef<HTMLDivElement>(null);
+  const cursorItems = pages.length ? pages : issues.length ? issues : scoreItem ? [scoreItem] : [];
+  const { setNodeRef, target } = useFollowLatest(cursorItems);
   if (!pages.length && !issues.length && !scoreItem) {
     return <div className="lx-10 lx-mut px-1 py-2">{running ? "Crawling the site…" : "No audit has run for this order."}</div>;
   }
   return (
-    <div>
-      {total != null && total > 0 && (
+    <div ref={hostRef} style={{ position: "relative" }}>
+      {/* One node per page actually crawled (audit.ts's own "page" event, one per page) — never
+          colored red for a specific page, since the agent's own "issue" events don't carry
+          which page they came from (only a sitewide count), and guessing would be exactly the
+          invented-value this whole feature exists to avoid. */}
+      {pages.length > 0 && (
         <div className="mb-3">
           <div className="lx-10 lx-mut mb-1.5 flex items-center justify-between">
             <span>{latest?.phase === "perf" ? "Measuring performance" : "Crawling pages"}</span>
-            <span>{done} / {total}</span>
+            {total != null && <span>{done} / {total}</span>}
           </div>
-          <div className="h-1.5 overflow-hidden rounded-full" style={{ background: "var(--lx-in)" }}>
-            <div
-              className="h-full rounded-full"
-              style={{ width: `${Math.min(100, Math.round((done / total) * 100))}%`, background: "var(--lx-cyan)", transition: "width .5s ease" }}
-            />
+          <div className="grid gap-1" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(14px, 1fr))" }}>
+            {pages.map((it) => (
+              <span
+                key={it.key}
+                ref={pages[pages.length - 1] === it ? setNodeRef(it.key) : undefined}
+                className="lx-live-anim rounded-sm"
+                style={{ aspectRatio: "1", background: "rgba(34,197,94,.35)", border: "1px solid rgba(34,197,94,.5)" }}
+              />
+            ))}
           </div>
         </div>
       )}
       {scoreItem && (
-        <div className="lx-live-anim mb-3 flex items-baseline gap-2">
+        <div ref={pages.length ? undefined : setNodeRef(scoreItem.key)} className="lx-live-anim mb-3 flex items-baseline gap-2">
           <span className="text-2xl font-bold">{scoreItem.payload?.score ?? "?"}</span>
           <span className="lx-11 lx-mut">/ 100 site score</span>
         </div>
       )}
       <div className="space-y-2">
-        {issues.map((it) => <IssueRow key={it.key} payload={it.payload} />)}
+        {issues.map((it) => <IssueRow key={it.key} payload={it.payload} refCb={!pages.length ? setNodeRef(it.key) : undefined} />)}
       </div>
+      <AgentCursor target={target} host={hostRef.current} color={color} label={label} />
     </div>
   );
 };
@@ -916,19 +996,21 @@ const AuditScreen = ({ items, running }: { items: CanvasItem[]; running: boolean
  *  discovery/scoring finds them. `band` is a free string off the agent's own scoring, matched
  *  by substring the same defensive way ImageScreen matches `slot`, rather than a hardcoded
  *  enum this screen would silently stop coloring the day the agent's own wording changes. */
-const LeadsScreen = ({ items, running }: { items: CanvasItem[]; running: boolean }) => {
+const LeadsScreen = ({ items, running, color, label }: { items: CanvasItem[]; running: boolean; color: string; label: string }) => {
   const leads = items.filter((it) => it.kind === "lead");
+  const hostRef = useRef<HTMLDivElement>(null);
+  const { setNodeRef, target } = useFollowLatest(leads);
   if (!leads.length) {
     return <div className="lx-10 lx-mut px-1 py-2">{running ? "Finding leads…" : "No leads were found for this order."}</div>;
   }
   return (
-    <div className="space-y-2">
+    <div ref={hostRef} style={{ position: "relative" }} className="space-y-2">
       {leads.map((it) => {
         const p = it.payload ?? {};
         const band = String(p.band ?? "").toLowerCase();
         const tier = /hi|high/.test(band) ? "green" : /lo|low/.test(band) ? "mut" : "amber";
         return (
-          <div key={it.key} className="lx-live-anim lx-in rounded-lg px-3 py-2.5">
+          <div key={it.key} ref={setNodeRef(it.key)} className="lx-live-anim lx-in rounded-lg px-3 py-2.5">
             <div className="flex items-center justify-between gap-2">
               <span className="lx-12 truncate font-semibold">{p.name ?? "?"}</span>
               {typeof p.score === "number" && (
@@ -940,6 +1022,7 @@ const LeadsScreen = ({ items, running }: { items: CanvasItem[]; running: boolean
           </div>
         );
       })}
+      <AgentCursor target={target} host={hostRef.current} color={color} label={label} />
     </div>
   );
 };
@@ -951,24 +1034,29 @@ const LeadsScreen = ({ items, running }: { items: CanvasItem[]; running: boolean
  *  shared running-step label above this screen, so this component itself only ever draws the
  *  one real, verified outcome. `verified` is a real `fetch(url).status===200` check
  *  (publish.ts), never assumed true because the call succeeded. */
-const PublishScreen = ({ items, running }: { items: CanvasItem[]; running: boolean }) => {
+const PublishScreen = ({ items, running, color, label }: { items: CanvasItem[]; running: boolean; color: string; label: string }) => {
   const pub = items.filter((it) => it.kind === "published").slice(-1)[0];
+  const hostRef = useRef<HTMLDivElement>(null);
+  const { setNodeRef, target } = useFollowLatest(pub ? [pub] : []);
   if (!pub) {
     return <div className="lx-10 lx-mut px-1 py-2">{running ? "Publishing…" : "Nothing has been published for this order yet."}</div>;
   }
   const p = pub.payload ?? {};
   return (
-    <div className="lx-live-anim overflow-hidden rounded-lg" style={{ border: "1px solid var(--lx-border)" }}>
-      <div className="flex items-center gap-2 px-3 py-2" style={{ background: "var(--lx-in)", borderBottom: "1px solid var(--lx-border)" }}>
-        <Globe size={12} className="lx-mut shrink-0" />
-        <span className="lx-10 lx-mono lx-mut truncate">{p.url ?? "publishing…"}</span>
+    <div ref={hostRef} style={{ position: "relative" }}>
+      <div className="lx-live-anim overflow-hidden rounded-lg" style={{ border: "1px solid var(--lx-border)" }}>
+        <div className="flex items-center gap-2 px-3 py-2" style={{ background: "var(--lx-in)", borderBottom: "1px solid var(--lx-border)" }}>
+          <Globe size={12} className="lx-mut shrink-0" />
+          <span className="lx-10 lx-mono lx-mut truncate">{p.url ?? "publishing…"}</span>
+        </div>
+        <div className="p-3">
+          <div className="lx-12 mb-2 font-semibold">{p.title ?? "Untitled"}</div>
+          <span ref={setNodeRef(pub.key)} className={`lx-pill ${p.verified ? "green" : "amber"}`}>
+            {p.verified ? <CheckCircle2 size={12} /> : null} {p.verified ? "Verified live" : "Published — not yet verified"}
+          </span>
+        </div>
       </div>
-      <div className="p-3">
-        <div className="lx-12 mb-2 font-semibold">{p.title ?? "Untitled"}</div>
-        <span className={`lx-pill ${p.verified ? "green" : "amber"}`}>
-          {p.verified ? <CheckCircle2 size={12} /> : null} {p.verified ? "Verified live" : "Published — not yet verified"}
-        </span>
-      </div>
+      <AgentCursor target={target} host={hostRef.current} color={color} label={label} />
     </div>
   );
 };
@@ -977,17 +1065,19 @@ const PublishScreen = ({ items, running }: { items: CanvasItem[]; running: boole
  *  the real caption, real hashtags, and `overLimit` (a real length check against that
  *  network's own limit, social.ts's `LIMIT` table) — never a fabricated schedule time, since
  *  scheduling happens later in Approvals, not inside this agent's own run. */
-const SocialScreen = ({ items, running }: { items: CanvasItem[]; running: boolean }) => {
+const SocialScreen = ({ items, running, color, label }: { items: CanvasItem[]; running: boolean; color: string; label: string }) => {
   const posts = items.filter((it) => it.kind === "post");
+  const hostRef = useRef<HTMLDivElement>(null);
+  const { setNodeRef, target } = useFollowLatest(posts);
   if (!posts.length) {
     return <div className="lx-10 lx-mut px-1 py-2">{running ? "Drafting posts…" : "No posts were drafted for this order."}</div>;
   }
   return (
-    <div className="space-y-3">
+    <div ref={hostRef} style={{ position: "relative" }} className="space-y-3">
       {posts.map((it) => {
         const p = it.payload ?? {};
         return (
-          <div key={it.key} className="lx-live-anim lx-card2 p-3">
+          <div key={it.key} ref={setNodeRef(it.key)} className="lx-live-anim lx-card2 p-3">
             <div className="mb-2 flex items-center justify-between">
               <span className="lx-11 font-semibold">{p.label ?? p.network ?? "Post"}</span>
               {p.overLimit && <span className="lx-pill amber" style={{ fontSize: 10, padding: "1px 8px" }}>over limit</span>}
@@ -1003,6 +1093,7 @@ const SocialScreen = ({ items, running }: { items: CanvasItem[]; running: boolea
           </div>
         );
       })}
+      <AgentCursor target={target} host={hostRef.current} color={color} label={label} />
     </div>
   );
 };
@@ -1014,18 +1105,20 @@ const SocialScreen = ({ items, running }: { items: CanvasItem[]; running: boolea
  *  2D scatter plot: a real embedding projection (UMAP/PCA) is its own backend job the plan
  *  defers to a later phase, and drawing invented (x,y) positions instead would be exactly the
  *  fabrication this whole feature exists to avoid. */
-const SiteBrainScreen = ({ items, running }: { items: CanvasItem[]; running: boolean }) => {
+const SiteBrainScreen = ({ items, running, color, label }: { items: CanvasItem[]; running: boolean; color: string; label: string }) => {
   const clusters = items.filter((it) => it.kind === "cluster");
+  const hostRef = useRef<HTMLDivElement>(null);
+  const { setNodeRef, target } = useFollowLatest(clusters);
   if (!clusters.length) {
     return <div className="lx-10 lx-mut px-1 py-2">{running ? "Grouping the site into topics…" : "No topic clusters were formed for this order."}</div>;
   }
   return (
-    <div className="space-y-2">
+    <div ref={hostRef} style={{ position: "relative" }} className="space-y-2">
       {clusters.map((it) => {
         const p = it.payload ?? {};
         const urls: string[] = Array.isArray(p.page_urls) ? p.page_urls : [];
         return (
-          <div key={it.key} className="lx-live-anim lx-in rounded-lg px-3 py-2.5">
+          <div key={it.key} ref={setNodeRef(it.key)} className="lx-live-anim lx-in rounded-lg px-3 py-2.5">
             <div className="flex items-center justify-between gap-2">
               <span className="lx-12 font-semibold">{p.name ?? "Untitled cluster"}</span>
               {typeof p.size === "number" && <span className="lx-pill blue" style={{ fontSize: 10, padding: "1px 8px" }}>{p.size} page{p.size === 1 ? "" : "s"}</span>}
@@ -1034,6 +1127,82 @@ const SiteBrainScreen = ({ items, running }: { items: CanvasItem[]; running: boo
           </div>
         );
       })}
+      <AgentCursor target={target} host={hostRef.current} color={color} label={label} />
+    </div>
+  );
+};
+
+/** Mr. Writer's real document — owner, 2026-09-11: "article likhta hai real jaisa", pointing at
+ *  the reference mockup's typed document. Before this, once research finished, sections fell
+ *  into the generic per-item bullet list ("Section written: "X" (200 words)") — never an actual
+ *  growing article. `section` events (writer.ts:123, `{h2, words, text}`) are each ALREADY the
+ *  finished, real text for that section — gpt-oss doesn't stream token-by-token here — so
+ *  typing it out character by character is a presentation pace over real, already-written
+ *  words, never inventing ones the agent hasn't produced yet: exactly the same category as the
+ *  cursor's own transition (see useFollowLatest's header comment), triggered by a real event
+ *  that already arrived, not a timer pretending to write. EARLIER sections render in full at
+ *  once (they already finished); only the newest one animates, and only once — reopening this
+ *  screen replays nothing. */
+const WriterDocScreen = ({ items, running, color, label }: { items: CanvasItem[]; running: boolean; color: string; label: string }) => {
+  const sections = items.filter((it) => it.kind === "section");
+  const draftItem = items.filter((it) => it.kind === "draft").slice(-1)[0];
+  const title = (draftItem?.payload?.title as string | undefined) ?? undefined;
+  const latestKey = sections[sections.length - 1]?.key ?? null;
+  const typedKeyRef = useRef<string | null>(null);
+  const [typedLen, setTypedLen] = useState(0);
+  const hostRef = useRef<HTMLDivElement>(null);
+  const { setNodeRef, target } = useFollowLatest(sections);
+
+  useEffect(() => {
+    if (!latestKey || typedKeyRef.current === latestKey) return;
+    typedKeyRef.current = latestKey;
+    const text = String(sections[sections.length - 1]?.payload?.text ?? "");
+    setTypedLen(0);
+    if (!text) return;
+    let i = 0;
+    let raf = 0;
+    const step = () => {
+      i += Math.max(1, Math.round(text.length / 50)); // ~50 frames regardless of section length
+      setTypedLen(Math.min(text.length, i));
+      if (i < text.length) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [latestKey]);
+
+  if (!sections.length && !title) {
+    return <div className="lx-10 lx-mut px-1 py-2">{running ? "Writing the outline…" : "No article has been written for this order."}</div>;
+  }
+  return (
+    <div ref={hostRef} style={{ position: "relative", fontFamily: "Georgia, 'Newsreader', serif" }}>
+      {title && (
+        <h1 className="lx-live-anim" style={{ fontSize: 19, fontWeight: 600, lineHeight: 1.3, margin: "0 0 14px", color: "#f2f3f0" }}>
+          {title}
+        </h1>
+      )}
+      {sections.map((it, i) => {
+        const p = it.payload ?? {};
+        const fullText = String(p.text ?? "");
+        const isLatest = it.key === latestKey;
+        const shown = isLatest ? fullText.slice(0, typedLen) : fullText;
+        const stillTyping = isLatest && typedLen < fullText.length;
+        return (
+          <div key={it.key} ref={setNodeRef(it.key)} className={isLatest ? undefined : "lx-live-anim"}>
+            <h2 style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: 15, fontWeight: 600, margin: "16px 0 6px", color: "#e7e9e6" }}>
+              {p.h2 || `Section ${i + 1}`}
+            </h2>
+            <p style={{ fontSize: 14, lineHeight: 1.68, color: "#c7ccc6", margin: "0 0 4px" }}>
+              {shown}
+              {stillTyping && <span className="lx-caret" style={{ color }} />}
+            </p>
+            {!stillTyping && typeof p.words === "number" && (
+              <div className="lx-10 lx-mut" style={{ marginBottom: 10 }}>{p.words} words</div>
+            )}
+          </div>
+        );
+      })}
+      <AgentCursor target={target} host={hostRef.current} color={color} label={label} />
     </div>
   );
 };
@@ -2576,20 +2745,22 @@ export default function MrLxwaDashboard({
                   />
                 ) : panelAgent?.id === "writer" && !researchDone && (researchProgressItems.length > 0 || !!runningStep) ? (
                   <ResearchScreen items={researchProgressItems} running={!!runningStep} />
+                ) : panelAgent?.id === "writer" ? (
+                  <WriterDocScreen items={producedItems} running={!!runningStep} color={panelAgent.color} label={panelAgent.name} />
                 ) : panelAgent?.id === "seo" ? (
-                  <SeoScreen items={producedItems} running={!!runningStep} />
+                  <SeoScreen items={producedItems} running={!!runningStep} color={panelAgent.color} label={panelAgent.name} />
                 ) : panelAgent?.id === "image" ? (
-                  <ImageScreen items={producedItems} running={!!runningStep} />
+                  <ImageScreen items={producedItems} running={!!runningStep} color={panelAgent.color} label={panelAgent.name} />
                 ) : panelAgent?.id === "audit" ? (
-                  <AuditScreen items={producedItems} running={!!runningStep} />
+                  <AuditScreen items={producedItems} running={!!runningStep} color={panelAgent.color} label={panelAgent.name} />
                 ) : panelAgent?.id === "leads" ? (
-                  <LeadsScreen items={producedItems} running={!!runningStep} />
+                  <LeadsScreen items={producedItems} running={!!runningStep} color={panelAgent.color} label={panelAgent.name} />
                 ) : panelAgent?.id === "publish" ? (
-                  <PublishScreen items={producedItems} running={!!runningStep} />
+                  <PublishScreen items={producedItems} running={!!runningStep} color={panelAgent.color} label={panelAgent.name} />
                 ) : panelAgent?.id === "social" ? (
-                  <SocialScreen items={producedItems} running={!!runningStep} />
+                  <SocialScreen items={producedItems} running={!!runningStep} color={panelAgent.color} label={panelAgent.name} />
                 ) : panelAgent?.id === "analyst" ? (
-                  <SiteBrainScreen items={producedItems} running={!!runningStep} />
+                  <SiteBrainScreen items={producedItems} running={!!runningStep} color={panelAgent.color} label={panelAgent.name} />
                 ) : producedItems.length === 0 ? (
                   <div className="flex items-center gap-2.5">
                     {isFlowing(task, now) ? (
@@ -2627,6 +2798,19 @@ export default function MrLxwaDashboard({
               </div>
             </div>
           </div>
+
+          {/* The "wire" — the single freshest real sentence for whichever agent's screen is open
+              above, the same one-line ticker the reference mockup keeps under its canvas.
+              Sourced from `panelLines` (already scoped to `panelAgent` — see its own comment),
+              never a separate feed: this is not new data, just the latest of what's already
+              real, kept visible even while the eye is on the canvas above it. */}
+          {panelLines.length > 0 && (
+            <div className="lx-10 lx-mono lx-mut mt-2 truncate px-1">
+              <span className="lx-dim">{new Date(panelLines[panelLines.length - 1].at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+              {"  "}
+              {panelLines[panelLines.length - 1].text}
+            </div>
+          )}
         </div>
 
         {/* writer progress — secondary, below the live visual. Real: a clean title derived from
