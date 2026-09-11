@@ -470,6 +470,21 @@ function resolveStepKey(steps: StepState[], agentId: string | null, stepId: stri
   return stepId ? { key: stepId, planned: false } : null;
 }
 
+/** Open this agent's own planned step — the lowest-numbered one it still has outstanding — when
+ *  real evidence says it is working. Only ever promotes a step that is still `pending`, and only
+ *  a PLANNED one (a `task_steps` row), so it can neither rewind a finished step nor invent a
+ *  parallel one. Shared by `run_started` (the run began) and `data` (it produced something),
+ *  because either is proof on its own and neither is guaranteed to arrive first: a broadcast can
+ *  beat the fetch that loads the task's steps, which left the step `pending` forever. */
+function openPlannedStep(steps: StepState[], agentId: string | null, at: number, runId: string | null): StepState[] {
+  if (!agentId) return steps;
+  const open = resolveStepKey(steps, agentId, null);
+  if (!open?.planned) return steps;
+  const cur = steps.find((s) => s.key === open.key);
+  if (!cur || cur.status !== "pending") return steps;
+  return upsertStep(steps, open.key, { agent_id: agentId }, { status: "running", startedAt: cur.startedAt ?? at }, runId);
+}
+
 /** The task is over because the work succeeded: any step still pending/running is finished by
  *  definition (the orchestrator only emits a success `task_finished` once every required
  *  task_steps row is terminal). Failed/skipped/cancelled steps keep their own word. */
@@ -621,13 +636,7 @@ export function foldEvents(state: LiveState, incoming: IncomingEvent): LiveState
         // (found live 2026-09-10: Mr. Keyword ran a minute of real progress lines while its
         // own network card, and every other agent's, stayed "Waiting"). A run starting at all
         // is itself proof the agent's turn began, whether or not it ever names a sub-step.
-        const open = resolveStepKey(t.steps, agentId, null);
-        if (open && !failed.some((s) => s.key === open.key)) {
-          const cur = t.steps.find((s) => s.key === open.key);
-          if (cur && cur.status === "pending") {
-            t.steps = upsertStep(t.steps, open.key, { agent_id: agentId }, { status: "running", startedAt: cur.startedAt ?? at }, runId);
-          }
-        }
+        if (!failed.length) t.steps = openPlannedStep(t.steps, agentId, at, runId);
         t.agents = upsertPane(t.agents, agentId, (p) => ({ ...p, status: "running", lastEventAt: Math.max(p.lastEventAt, at) }));
       }
       break;
@@ -703,6 +712,13 @@ export function foldEvents(state: LiveState, incoming: IncomingEvent): LiveState
         items: insertOrdered(p.items, item),
         lastEventAt: Math.max(p.lastEventAt, at),
       }));
+      // An agent producing output IS that agent working, so its planned step must not still read
+      // "Waiting". `run_started` normally opens it, but that event can arrive before this task's
+      // task_steps rows have even been fetched — in which case there was no planned step to open
+      // yet and nothing ever opened it afterwards. Found live 2026-09-12: Mr. SEO emitted its
+      // whole score and every issue, and its tab still said "Waiting" with the task stuck at
+      // "3 of 4". Same rule as run_started's own promotion: only a step still `pending`.
+      t.steps = openPlannedStep(t.steps, agentId, at, runId);
       break;
     }
 
@@ -715,8 +731,15 @@ export function foldEvents(state: LiveState, incoming: IncomingEvent): LiveState
         }));
         // The agent's whole run succeeded — the orchestrator marks its task_steps row done on
         // exactly this event, so the planned step this run was (see resolveStepKey) is done too.
-        // Only the step it was actually running: a queued later step of the same agent stays put.
-        t.steps = finalizeSteps(t.steps, at, (s) => s.agent_id === agentId && s.status === "running");
+        // Its own open planned step counts whether or not anything managed to mark it `running`
+        // first (see the `data` case above for how it can still be `pending` here); a queued
+        // LATER step of the same agent stays put, because only the lowest open one is its turn.
+        const mine = resolveStepKey(t.steps, agentId, null);
+        t.steps = finalizeSteps(
+          t.steps,
+          at,
+          (s) => s.agent_id === agentId && (s.status === "running" || (!!mine?.planned && s.key === mine.key)),
+        );
       }
       break;
 

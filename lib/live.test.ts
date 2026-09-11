@@ -401,6 +401,29 @@ const active = (t: ReturnType<typeof one>) =>
   t.steps.some((s) => s.status === "pending" || s.status === "running");
 const doneCount = (t: ReturnType<typeof one>) => t.steps.filter((s) => s.status === "done").length;
 
+test("an agent whose run_started arrived before its steps were loaded still finishes done, not 'Waiting'", () => {
+  // Found live 2026-09-12: Mr. SEO emitted its whole score and every issue, its run finished,
+  // and its tab still read "Waiting" with the task stuck on "3 of 4" forever. The broadcast beat
+  // the fetch that loads task_steps, so run_started had no planned step to open, and
+  // run_finished only ever finalized steps that were already `running`.
+  let s = emptyLive;
+  // Events first — nothing knows this task has any steps yet.
+  s = foldEvents(s, ev({ type: "run_started", agent_id: "seo" } as any, 1000));
+  s = foldEvents(s, ev({ type: "data", agent_id: "seo", kind: "score", payload: { score: 65 } } as any, 1200));
+  // THEN the steps row shows up, as `pending`, exactly as the server had it when it was written.
+  s = hydrateTask(s, {
+    task: { id: TASK, status: "running", kind: "write_article", created_at: iso(0) },
+    steps: [{ id: "seo-uuid", no: 1, agent_id: "seo", action: "check_seo", status: "pending" }],
+  });
+  // One more real event after the steps exist — this is what has to rescue it.
+  s = foldEvents(s, ev({ type: "data", agent_id: "seo", kind: "issue", payload: { id: "x", severity: "warn" } } as any, 1400));
+  assert.equal(one(s).steps.find((x) => x.key === "seo-uuid")?.status, "running", "producing output IS working");
+
+  s = foldEvents(s, ev({ type: "run_finished", output: {}, ms: 400, cost_units: 1, llm_calls: 1, tokens_in: 1, tokens_out: 1, agent_id: "seo" } as any, 1800));
+  assert.equal(one(s).steps.find((x) => x.key === "seo-uuid")?.status, "done", "a finished run finishes its own step");
+  assert.equal(doneCount(one(s)), 1);
+});
+
 test("an agent's sub-step events land on its planned step instead of spawning parallel steps", () => {
   let s = hydrateTask(emptyLive, {
     task: { id: TASK, status: "running", kind: "find_keywords", created_at: iso(0) },
