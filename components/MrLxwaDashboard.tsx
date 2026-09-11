@@ -2962,15 +2962,50 @@ export default function MrLxwaDashboard({
               a draft, and one where a topic had to be picked shows Mr Lxwa's own pick_topic step
               first). Was computed all along and shown only on the Office page; the owner asked
               for it here too, 2026-08-31 ("boss ne jo plan bana ye ha wo b dikhna chaaya"). */}
+          {/* Drawn as the live checklist it actually is, not a paragraph of planner output
+              (owner, 2026-09-11: "jab plan etc banaye tab koi na koi best ui ux karo"). Each
+              line gets its own row, its own marker, and — when the plan and the real task_steps
+              line up one-to-one — that step's REAL status: a green check for done, a pulsing
+              ring for the one running, a plain number for one that hasn't started. When they
+              don't line up (a plan with parallel "3a/3b" steps against a different step count),
+              the markers stay plain numbers rather than guessing which line is which. */}
           {task && task.outline.length > 0 && (
             <div className="lx-card2 mt-3 p-3">
               <div className="flex items-center gap-1.5 lx-11 font-semibold" style={{ color: "var(--lx-violet)" }}>
                 <BrainCircuit size={13} /> Mr Lxwa&apos;s Plan
               </div>
-              <ol className="mt-1.5 space-y-1">
-                {task.outline.map((line, i) => (
-                  <li key={i} className="lx-11" style={{ color: "#cfcfdd" }}>{line}</li>
-                ))}
+              <ol className="mt-2 space-y-1.5">
+                {task.outline.map((line, i) => {
+                  const ordered = [...task.steps].sort((a, b) => (a.no ?? 0) - (b.no ?? 0));
+                  const step = ordered.length === task.outline.length ? ordered[i] : null;
+                  const done = step?.status === "done";
+                  const failed = step?.status === "failed";
+                  const live = step?.status === "running";
+                  return (
+                    <li key={i} className="flex items-start gap-2.5">
+                      <span
+                        className={`flex shrink-0 items-center justify-center rounded-full ${live ? "lx-pulse" : ""}`}
+                        style={{
+                          width: 18,
+                          height: 18,
+                          marginTop: 1,
+                          fontSize: 10,
+                          fontWeight: 700,
+                          color: done ? "#4ade80" : failed ? "#f87171" : live ? "#fff" : "var(--lx-mut)",
+                          background: live ? "var(--lx-violet)" : "rgba(255,255,255,.05)",
+                          border: `1px solid ${done ? "rgba(34,197,94,.5)" : failed ? "rgba(239,68,68,.5)" : live ? "transparent" : "var(--lx-border)"}`,
+                        }}
+                      >
+                        {done ? <CheckCircle2 size={11} /> : failed ? <XCircle size={11} /> : i + 1}
+                      </span>
+                      {/* planner.ts already numbers its own lines ("1. Mr. Keyword…") — dropped
+                          here so the number isn't printed twice next to our own marker. */}
+                      <span className="lx-11" style={{ color: done ? "var(--lx-mut)" : "#cfcfdd", lineHeight: 1.5 }}>
+                        {line.replace(/^\s*\d+[a-z]?[.)]\s*/i, "")}
+                      </span>
+                    </li>
+                  );
+                })}
               </ol>
             </div>
           )}
