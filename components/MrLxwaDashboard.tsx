@@ -1007,6 +1007,37 @@ const SocialScreen = ({ items, running }: { items: CanvasItem[]; running: boolea
   );
 };
 
+/** Site Brain's (Mr. Analyst) live screen — one `ctx.data("cluster", {name,size,page_urls})`
+ *  per topic cluster, as each is labeled (agent-server/src/agents/analyst.ts, added alongside
+ *  this UI — analyst.ts sent ZERO live events before this pass, only `ctx.onProgress` phase
+ *  labels, so a Site Brain run had nothing to show here until now). Deliberately a list, not a
+ *  2D scatter plot: a real embedding projection (UMAP/PCA) is its own backend job the plan
+ *  defers to a later phase, and drawing invented (x,y) positions instead would be exactly the
+ *  fabrication this whole feature exists to avoid. */
+const SiteBrainScreen = ({ items, running }: { items: CanvasItem[]; running: boolean }) => {
+  const clusters = items.filter((it) => it.kind === "cluster");
+  if (!clusters.length) {
+    return <div className="lx-10 lx-mut px-1 py-2">{running ? "Grouping the site into topics…" : "No topic clusters were formed for this order."}</div>;
+  }
+  return (
+    <div className="space-y-2">
+      {clusters.map((it) => {
+        const p = it.payload ?? {};
+        const urls: string[] = Array.isArray(p.page_urls) ? p.page_urls : [];
+        return (
+          <div key={it.key} className="lx-live-anim lx-in rounded-lg px-3 py-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="lx-12 font-semibold">{p.name ?? "Untitled cluster"}</span>
+              {typeof p.size === "number" && <span className="lx-pill blue" style={{ fontSize: 10, padding: "1px 8px" }}>{p.size} page{p.size === 1 ? "" : "s"}</span>}
+            </div>
+            {urls.length > 0 && <div className="lx-10 lx-mut mt-1.5 truncate">{urls.slice(0, 3).join(" · ")}</div>}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 /** One tile in the network's bottom stats strip. */
 const StatTile = ({
   icon: Icon,
@@ -2557,6 +2588,8 @@ export default function MrLxwaDashboard({
                   <PublishScreen items={producedItems} running={!!runningStep} />
                 ) : panelAgent?.id === "social" ? (
                   <SocialScreen items={producedItems} running={!!runningStep} />
+                ) : panelAgent?.id === "analyst" ? (
+                  <SiteBrainScreen items={producedItems} running={!!runningStep} />
                 ) : producedItems.length === 0 ? (
                   <div className="flex items-center gap-2.5">
                     {isFlowing(task, now) ? (

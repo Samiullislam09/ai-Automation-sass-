@@ -475,6 +475,14 @@ export class AnalystAgent extends Agent {
         // Derived from measured vectors, but the LABEL is a model's word for the group, so
         // never "high": it is a name we would happily let the user correct.
         confidence.topic_clusters = embedded.length >= CLUSTER_MIN_PAGES * 2 ? "medium" : "low";
+        // Site Brain's own live presence (owner, 2026-09-11 — LIVE_CANVAS_SPEC.md §4): before
+        // this, analyst.ts sent zero `ctx.data(...)` events, so a Site Brain run had nothing to
+        // show on the live dashboard, ever — only `ctx.onProgress` phase labels. One real event
+        // per cluster this run actually formed, as it's labeled — no invented (x,y) scatter
+        // position (that needs a real 2D projection job the plan itself defers to a later
+        // phase); `page_urls` is capped the same way `sources.topic_clusters` above already is,
+        // so this never ships an unbounded list for a site with hundreds of pages in one topic.
+        for (const c of clusters) ctx.data("cluster", { name: c.name, size: c.size, page_urls: c.page_urls.slice(0, 8) });
       }
     } catch (e: any) {
       console.error("[analyst] clustering failed:", e?.message);
