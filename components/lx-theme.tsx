@@ -366,6 +366,8 @@ export const LX_CSS = `
 .lx-paper .lx-serp-caret{background:#8a8f86}
 .lx-paper .lx-serp-row{border-bottom-color:#f2efe8}
 .lx-paper .lx-serp-title{color:#3d7ea6}
+.lx-paper .lx-serp-tabs{border-bottom-color:#e9e4da}
+.lx-paper .lx-serp-tabs span.on{color:#3d7ea6;border-bottom-color:#3d7ea6}
 .lx-paper .lx-read-frame{background:#fff}
 .lx-paper .lx-read-host{color:#20241f}
 .lx-paper .lx-read-skel{background:linear-gradient(90deg,#efece4,#f7f5ef,#efece4)}
@@ -437,10 +439,15 @@ export const LX_CSS = `
    agents/keyword.ts actually returned. The chrome (search bar, caret, scanning bar) is what
    sells "searching, right now" — the words inside it are honest. */
 .lx-serp-top{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--lx-mut);text-transform:uppercase;letter-spacing:.02em}
+.lx-serp-brand{display:flex}
+.lx-g{font-family:arial,sans-serif;font-size:22px;font-weight:700;letter-spacing:-.5px}
 .lx-serp-bar{display:flex;align-items:center;gap:8px;margin-top:8px;background:#0b0b16;border:1px solid rgba(255,255,255,.08);
   border-radius:999px;padding:8px 14px}
 .lx-serp-caret{display:inline-block;width:1px;height:12px;margin-left:2px;vertical-align:-2px;background:#8b8ba0;animation:lxCaret 1s step-end infinite}
 @keyframes lxCaret{0%,49%{opacity:1}50%,100%{opacity:0}}
+.lx-serp-tabs{display:flex;gap:16px;margin-top:10px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,.08);font-size:11.5px;color:var(--lx-dim)}
+.lx-serp-tabs span{padding-bottom:8px}
+.lx-serp-tabs span.on{color:#8ab4f8;border-bottom:2.5px solid #8ab4f8;font-weight:600}
 .lx-serp-meta{font-size:11px;color:var(--lx-dim);margin:10px 2px 2px}
 .lx-serp-row{display:flex;gap:10px;padding:8px 2px;border-bottom:1px solid rgba(255,255,255,.05)}
 .lx-serp-row:last-child{border-bottom:none}

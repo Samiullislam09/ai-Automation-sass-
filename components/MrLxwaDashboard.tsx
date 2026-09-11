@@ -495,8 +495,19 @@ const KeywordScreen = ({
   if (running) {
     return (
       <div className="lx-serp">
-        <div className="lx-serp-top">
-          <Globe size={12} /> Google Search
+        {/* A real Google wordmark (four brand colors, no icon standing in for it) plus the
+            actual results tabs Google itself shows — static chrome, same on every run, never
+            claiming a number Google didn't give us. Owner, 2026-09-12: "iska ui real google
+            search engine jaisa karo". */}
+        <div className="lx-serp-brand">
+          <span className="lx-g">
+            <span style={{ color: "#4285F4" }}>G</span>
+            <span style={{ color: "#EA4335" }}>o</span>
+            <span style={{ color: "#FBBC05" }}>o</span>
+            <span style={{ color: "#4285F4" }}>g</span>
+            <span style={{ color: "#34A853" }}>l</span>
+            <span style={{ color: "#EA4335" }}>e</span>
+          </span>
         </div>
         {/* the search box — real topic, never a placeholder, with a typing caret so an idle
             moment (before the first keyword lands) still reads as "searching" rather than
@@ -507,10 +518,15 @@ const KeywordScreen = ({
             {topic || "…"}
             <span className="lx-serp-caret" />
           </span>
-          <Search size={13} className="lx-dim shrink-0" />
+          <Mic size={13} className="lx-dim shrink-0" />
+        </div>
+        <div className="lx-serp-tabs">
+          {["All", "Images", "News", "Shopping"].map((t, i) => (
+            <span key={t} className={i === 0 ? "on" : undefined}>{t}</span>
+          ))}
         </div>
         <div className="lx-serp-meta">
-          {items.length === 0 ? "Searching…" : `Found ${items.length} keyword idea${items.length === 1 ? "" : "s"} so far…`}
+          {items.length === 0 ? "Searching…" : `About ${items.length} keyword idea${items.length === 1 ? "" : "s"} found`}
         </div>
         <div>
           {items.map((it) => {
