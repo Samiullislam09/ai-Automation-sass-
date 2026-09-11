@@ -1061,7 +1061,14 @@ const ImageScreen = ({ items, running, color, label }: { items: CanvasItem[]; ru
  *  along the way — same `IssueRow` as SEO, since audit.ts's own `AuditIssue` is the identical
  *  `{id,severity,what,fix}` shape. */
 const AuditScreen = ({ items, running, color, label }: { items: CanvasItem[]; running: boolean; color: string; label: string }) => {
-  const pages = items.filter((it) => it.kind === "page");
+  // audit.ts fires "page" TWICE over the run — once per page crawled (audit.ts:82), and again
+  // for a much smaller subset actually perf-measured (audit.ts:150, `phase:"perf"`). Mixing both
+  // into one grid/count made the header flip between two different totals mid-run and the grid
+  // grow by a confusing second batch after the crawl looked finished (owner, 2026-09-12: "suru
+  // pe upar pe aisa pages ata hai fir pages aa jata hai"). The grid is the real crawl only, one
+  // cell per page actually crawled; the perf pass stays out of it entirely rather than
+  // pretending to be more pages.
+  const pages = items.filter((it) => it.kind === "page" && it.payload?.phase !== "perf");
   const issues = items.filter((it) => it.kind === "issue");
   const scoreItem = items.filter((it) => it.kind === "score").slice(-1)[0];
   const latest = pages[pages.length - 1]?.payload;
@@ -1089,10 +1096,7 @@ const AuditScreen = ({ items, running, color, label }: { items: CanvasItem[]; ru
       {pages.length > 0 && (
         <div className="mb-3">
           <div className="lx-10 lx-mut mb-2 flex items-center justify-between">
-            <span>
-              {latest?.phase === "perf" ? "Measuring performance" : "Site crawl"}
-              {total != null ? ` — ${total} page${total === 1 ? "" : "s"}` : ""}
-            </span>
+            <span>Site crawl{total != null ? ` — ${total} page${total === 1 ? "" : "s"}` : ""}</span>
             <span>
               {scoreItem ? `${scoreItem.payload?.score ?? "?"}/100` : `${done}${total != null ? ` / ${total}` : ""}`}
             </span>
@@ -1259,8 +1263,25 @@ const SiteBrainScreen = ({ items, running, color, label }: { items: CanvasItem[]
   const clusters = items.filter((it) => it.kind === "cluster");
   const hostRef = useRef<HTMLDivElement>(null);
   const { setNodeRef, target } = useFollowLatest(clusters);
+  // Real animation while there is real nothing to show yet — most of Site Brain's run (reading
+  // pages, working out offerings/proof/voice, gaps) happens before a single cluster exists, and
+  // a bare grey line here read as frozen (owner, 2026-09-12: "analytic pe koi animation nahi ho
+  // raha... complete hone ke baad achanak sab aa gaya"). Same Wave+shimmer the generic fallback
+  // already uses elsewhere in this panel — not a new decoration, just this screen's own copy of
+  // it so the canvas itself never sits blank while genuinely working.
   if (!clusters.length) {
-    return <div className="lx-10 lx-mut px-1 py-2">{running ? "Grouping the site into topics…" : "No topic clusters were formed for this order."}</div>;
+    return (
+      <div className="flex items-center gap-2.5 px-1 py-2">
+        {running ? (
+          <>
+            <Wave n={22} h={16} anim color={color} />
+            <span className="lx-shimmer lx-10 font-medium">Grouping the site into topics…</span>
+          </>
+        ) : (
+          <span className="lx-10 lx-mut">No topic clusters were formed for this order.</span>
+        )}
+      </div>
+    );
   }
   // Bubble area follows the cluster's REAL page count (√n, so a 20-page topic reads as bigger
   // than a 5-page one without dwarfing it). Position is just layout — bubbles flow left to
@@ -1288,6 +1309,46 @@ const SiteBrainScreen = ({ items, running, color, label }: { items: CanvasItem[]
             </div>
           );
         })}
+      </div>
+      <AgentCursor target={target} host={hostRef.current} color={color} label={label} />
+    </div>
+  );
+};
+
+/** Mr. Lxwa's (the boss/brain) own live screen — owner, 2026-09-12: "mr lxwa yani boss ai ka koi
+ *  bhi animation nahi ha". Before this it fell into the generic fallback list, which draws a
+ *  Working… shimmer only when `producedItems` is truly empty — the boss's own real output,
+ *  `ctx.data("topic_picked", {topic, why})`, made that check pass the instant it landed, so the
+ *  "waiting" state and the "done" state looked identical (a plain sentence either way). Its own
+ *  screen makes the pick a real card once it exists, matching the same visual language every
+ *  other agent's finished output already has. */
+const BossScreen = ({ items, running, color, label }: { items: CanvasItem[]; running: boolean; color: string; label: string }) => {
+  const pick = items.filter((it) => it.kind === "topic_picked").slice(-1)[0];
+  const hostRef = useRef<HTMLDivElement>(null);
+  const { setNodeRef, target } = useFollowLatest(pick ? [pick] : []);
+  if (!pick) {
+    return (
+      <div className="flex items-center gap-2.5 px-1 py-2">
+        {running ? (
+          <>
+            <Wave n={22} h={16} anim color={color} />
+            <span className="lx-shimmer lx-10 font-medium">Choosing the best topic…</span>
+          </>
+        ) : (
+          <span className="lx-10 lx-mut">Nothing was produced for this order.</span>
+        )}
+      </div>
+    );
+  }
+  const p = pick.payload ?? {};
+  return (
+    <div ref={hostRef} style={{ position: "relative" }}>
+      <div ref={setNodeRef(pick.key)} className="lx-live-anim lx-in rounded-lg px-4 py-3">
+        <div className="flex items-center gap-1.5 lx-10 lx-mut">
+          <CheckCircle2 size={12} style={{ color: "#3f9166" }} /> Topic chosen
+        </div>
+        <div className="lx-13 mt-1 font-bold leading-snug">{p.topic ?? "a topic"}</div>
+        {p.why && <div className="lx-11 lx-mut mt-1.5">{p.why}</div>}
       </div>
       <AgentCursor target={target} host={hostRef.current} color={color} label={label} />
     </div>
@@ -2926,8 +2987,17 @@ export default function MrLxwaDashboard({
           {/* Fixed height + its own scrollbar: a 20-row keyword table used to push the panel
               (and the page) far past the fold — "content box se bahar nahi jayega". */}
           <div ref={canvasScrollRef} className="lx-card2 lx-scroll p-3" style={{ minHeight: 360, maxHeight: 460, overflowY: "auto" }}>
-            <div key={runningStep?.key ?? "idle"} className="lx-live-anim">
-              {/* Each agent gets the screen its own output deserves (§24.4b's "typed
+            <div>
+              {/* NOT keyed to `runningStep?.key` any more (owner, 2026-09-12: "cursor kahi bhi
+                  work nahi karta... achanak full article aa jata hai"). It used to be — a fade-in
+                  on every step change — but that REMOUNTS this whole subtree every time a step
+                  starts, ends, or the task finishes. WriterDocScreen's typing animation lives in
+                  its OWN state (typedLen); a remount at exactly the moment writing finished wiped
+                  that state and restarted the reveal instantly rather than smoothly, which is
+                  what read as "achanak full article aa jata hai". Each screen below now owns its
+                  own entrance animation on its own rows (`lx-live-anim` per item), so nothing
+                  here needs to force a fade by remounting.
+                  Each agent gets the screen its own output deserves (§24.4b's "typed
                   component"), not one generic bullet list. Mr. Keyword's is the Google-style
                   search while it runs and a real table when it is done; everything else keeps
                   the honest per-item list until it earns a screen of its own.
@@ -2935,7 +3005,9 @@ export default function MrLxwaDashboard({
                   the dark shell (owner, 2026-09-12). `.lx-paper` re-points the theme tokens the
                   screens already use, so they all flip to ink-on-paper without knowing it. */}
               <div className="lx-paper">
-                {panelAgent?.id === "keyword" ? (
+                {panelAgent?.id === "boss" ? (
+                  <BossScreen items={producedItems} running={!!runningStep} color={panelAgent.color} label={panelAgent.name} />
+                ) : panelAgent?.id === "keyword" ? (
                   <KeywordScreen
                     items={keywordItems}
                     topic={taskTopic}
