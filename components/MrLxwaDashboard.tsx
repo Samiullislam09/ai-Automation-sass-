@@ -848,7 +848,22 @@ function useFollowLatest<T extends { key: string }>(items: T[]) {
  *  screen's own outer `position:relative` wrapper) and re-measured whenever `target` changes.
  *  Renders nothing (not even a hidden, opacity:0 node holding stale coordinates) once the
  *  screen has no real target yet, e.g. before the first item lands. */
-const AgentCursor = ({ target, host, color, label }: { target: HTMLElement | null; host: HTMLElement | null; color: string; label: string }) => {
+const AgentCursor = ({
+  target,
+  host,
+  color,
+  label,
+  follow,
+}: {
+  target: HTMLElement | null;
+  host: HTMLElement | null;
+  color: string;
+  label: string;
+  /** Bump to re-measure while the target NODE stays the same but moves — the typing caret is one
+   *  span that travels across the line, so without this the cursor would pin to where it first
+   *  appeared and never ride along with the words. */
+  follow?: number;
+}) => {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   useEffect(() => {
     if (!target || !host) {
@@ -864,10 +879,19 @@ const AgentCursor = ({ target, host, color, label }: { target: HTMLElement | nul
     const ro = new ResizeObserver(measure);
     ro.observe(host);
     return () => ro.disconnect();
-  }, [target, host]);
+  }, [target, host, follow]);
   if (!pos) return null;
   return (
-    <div className="lx-cursor show" style={{ color, transform: `translate(${pos.x}px, ${pos.y}px)` }}>
+    <div
+      className="lx-cursor show"
+      style={{
+        color,
+        transform: `translate(${pos.x}px, ${pos.y}px)`,
+        // Riding a moving caret wants a short catch-up; jumping between rows wants the slower,
+        // deliberate glide the reference design has.
+        ...(follow != null ? { transition: "transform .12s linear, opacity .3s" } : null),
+      }}
+    >
       <span className="tip" />
       <span className="tag">{label}</span>
     </div>
@@ -1298,6 +1322,7 @@ const WriterDocScreen = ({ items, running, color, label }: { items: CanvasItem[]
   const typedKeyRef = useRef<string | null>(null);
   const [typedLen, setTypedLen] = useState(0);
   const hostRef = useRef<HTMLDivElement>(null);
+  const caretRef = useRef<HTMLSpanElement>(null);
   const { setNodeRef, target } = useFollowLatest(sections);
 
   useEffect(() => {
@@ -1306,12 +1331,17 @@ const WriterDocScreen = ({ items, running, color, label }: { items: CanvasItem[]
     const text = stripLeadingHeading(String(sections[sections.length - 1]?.payload?.text ?? ""));
     setTypedLen(0);
     if (!text) return;
-    let i = 0;
+    // Paced by TIME, not by frame count, so a section reads as being written rather than
+    // flashing into place — ~4s end to end whatever its length (owner, 2026-09-12: "same html
+    // jaisa live animated... jaisa jaisa kaam kare waisa"). Still every character of the real,
+    // finished section the writer actually sent: the pace is presentation, the words are not.
+    const DURATION = 4000;
+    const started = performance.now();
     let raf = 0;
-    const step = () => {
-      i += Math.max(1, Math.round(text.length / 50)); // ~50 frames regardless of section length
-      setTypedLen(Math.min(text.length, i));
-      if (i < text.length) raf = requestAnimationFrame(step);
+    const step = (nowMs: number) => {
+      const done = Math.min(1, (nowMs - started) / DURATION);
+      setTypedLen(Math.round(text.length * done));
+      if (done < 1) raf = requestAnimationFrame(step);
     };
     raf = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf);
@@ -1326,6 +1356,8 @@ const WriterDocScreen = ({ items, running, color, label }: { items: CanvasItem[]
   // actually land. Owner, 2026-09-11: wants this top-left, on a white "paper" page — the
   // reference mockup's own look for the one screen that reads like an actual document.
   const wordCount = sections.reduce((sum, it) => sum + (typeof it.payload?.words === "number" ? it.payload.words : 0), 0);
+  const latestFull = stripLeadingHeading(String(sections[sections.length - 1]?.payload?.text ?? ""));
+  const typing = !!latestKey && typedLen < latestFull.length;
   return (
     <div
       ref={hostRef}
@@ -1354,12 +1386,16 @@ const WriterDocScreen = ({ items, running, color, label }: { items: CanvasItem[]
             </h2>
             <p style={{ fontSize: 14.5, lineHeight: 1.65, color: "var(--lx-text)", margin: "0 0 4px" }}>
               {boldText(shown, it.key)}
-              {stillTyping && <span className="lx-caret" style={{ color }} />}
+              {stillTyping && <span ref={caretRef} className="lx-caret" style={{ color }} />}
             </p>
           </div>
         );
       })}
-      <AgentCursor target={target} host={hostRef.current} color={color} label={label} />
+      {/* While a section is being written the cursor rides the caret itself, so it moves with
+          the words the way the reference design does; the moment typing stops it falls back to
+          the section block (useFollowLatest's own target) and rests there, because nothing new
+          has happened. Re-pointed on every typedLen tick — that is what makes it travel. */}
+      <AgentCursor target={typing ? caretRef.current : target} host={hostRef.current} color={color} label={label} follow={typedLen} />
     </div>
   );
 };
