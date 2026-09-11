@@ -1033,6 +1033,11 @@ export function defaultSource(): WorkspaceSource {
 export const STALL_MS = 8000;
 /** The fallback cadence when Realtime will not connect. Named because the UI says it out loud. */
 export const POLL_MS = 3000;
+/** How long a RUNNING task may go quiet, while otherwise "live", before the heartbeat effect
+ *  below stops trusting the silence and reconciles from the tables. Deliberately a beat after
+ *  STALL_MS: the UI's own "agent went quiet" affordance should read as true first, and this
+ *  fixing that silence a moment later should feel like the screen catching up, not flickering. */
+const STALE_MS = STALL_MS + 1000;
 
 export type Connection = "connecting" | "live" | "polling" | "offline";
 
@@ -1208,6 +1213,34 @@ export function useLiveEvents(tenantId: string | null, opts?: { source?: Workspa
     }, POLL_MS);
     return () => clearInterval(id);
   }, [tenantId, connected, pull, source, limit]);
+
+  /* ── heartbeat: catch a SILENT broadcast gap even while "live" ─────────────────────── */
+  // The poll-fallback above only reacts to `channel.subscribe`'s own status callback — but
+  // Supabase's Realtime client can recover from a brief socket hiccup entirely on its own,
+  // with no CLOSED/TIMED_OUT callback ever firing. Any broadcast sent during that silent gap
+  // is gone for good (broadcast has no replay/ack, unlike a table read), yet `connected` never
+  // leaves "live", so the poll effect above never starts either — the task just sits there
+  // with no new events until something else forces a re-read. In practice that "something
+  // else" ends up being the task's own FINAL event (`task_finished`), whose `finalizeSteps()`
+  // marks every still-open step "done" in one shot — exactly the "progress ruka raha, phir ek
+  // saath sab complete ho gaya" reported live (2026-09-11). This effect is the actual fix: even
+  // while genuinely "live", it watches each RUNNING task's own `lastEventAt`, and silently
+  // reconciles (the same `pull()` the poll-fallback already uses) the moment one goes quiet
+  // too long — closing the gap without ever telling the user we left "live", because we
+  // didn't. Scoped to `status === "running"` (not just non-terminal) so a task that is merely
+  // `queued`/`scheduled` — genuinely silent because nothing has started yet — is never treated
+  // as stale.
+  useEffect(() => {
+    if (!tenantId || connected !== "live") return;
+    const id = setInterval(() => {
+      const now = Date.now();
+      const running = Object.values(stateRef.current.byTask).filter((t) => t.status === "running");
+      for (const t of running) {
+        if (now - t.lastEventAt > STALE_MS) void pull(t.task_id, true);
+      }
+    }, POLL_MS);
+    return () => clearInterval(id);
+  }, [tenantId, connected, pull]);
 
   // Newest first, by the task's own clock rather than by which code path happened to add it:
   // a broadcast prepends, a poll appends, and the rail must not reorder itself depending on
