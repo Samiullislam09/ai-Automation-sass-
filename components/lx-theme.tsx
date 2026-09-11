@@ -373,7 +373,8 @@ export const LX_CSS = `
    Mr. Keyword's Google-style search box, Mr. Writer's browser-chrome "reading" frame, and the
    shimmer used for "working…". On paper they need their own light values. */
 .lx-paper .lx-serp,.lx-paper .lx-read-frame{background:#fff;border-color:#e9e4da}
-.lx-paper .lx-serp-bar{background:#fff;border-color:#e9e4da}
+.lx-paper .lx-serp-bar{background:rgba(255,255,255,.55);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  border-color:#e9e4da;box-shadow:0 1px 0 #fff inset,0 4px 14px rgba(32,36,31,.06)}
 .lx-paper .lx-serp-caret{background:#8a8f86}
 .lx-paper .lx-serp-row{border-bottom-color:#f2efe8}
 .lx-paper .lx-serp-title{color:#3d7ea6}
@@ -452,8 +453,15 @@ export const LX_CSS = `
 .lx-serp-top{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--lx-mut);text-transform:uppercase;letter-spacing:.02em}
 .lx-serp-brand{display:flex}
 .lx-g{font-family:arial,sans-serif;font-size:22px;font-weight:700;letter-spacing:-.5px}
-.lx-serp-bar{display:flex;align-items:center;gap:8px;margin-top:8px;background:#0b0b16;border:1px solid rgba(255,255,255,.08);
-  border-radius:999px;padding:8px 14px}
+/* Owner, 2026-09-12: "real search animation ho, glass effect wala" — a frosted pill (translucent
+   fill + backdrop blur + a soft ring that breathes while searching), not a flat solid bar. */
+.lx-serp-bar{display:flex;align-items:center;gap:8px;margin-top:8px;background:rgba(255,255,255,.06);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  border:1px solid rgba(255,255,255,.14);border-radius:999px;padding:8px 14px;
+  box-shadow:0 1px 0 rgba(255,255,255,.05) inset, 0 6px 18px rgba(0,0,0,.18);
+  animation:lxSerpGlow 2.4s ease-in-out infinite}
+@keyframes lxSerpGlow{0%,100%{box-shadow:0 1px 0 rgba(255,255,255,.05) inset,0 6px 18px rgba(0,0,0,.18),0 0 0 0 rgba(66,133,244,0)}
+  50%{box-shadow:0 1px 0 rgba(255,255,255,.05) inset,0 6px 18px rgba(0,0,0,.18),0 0 0 3px rgba(66,133,244,.14)}}
 .lx-serp-caret{display:inline-block;width:1px;height:12px;margin-left:2px;vertical-align:-2px;background:#8b8ba0;animation:lxCaret 1s step-end infinite}
 @keyframes lxCaret{0%,49%{opacity:1}50%,100%{opacity:0}}
 .lx-serp-tabs{display:flex;gap:16px;margin-top:10px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,.08);font-size:11.5px;color:var(--lx-dim)}

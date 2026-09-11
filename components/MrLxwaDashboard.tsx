@@ -2960,6 +2960,28 @@ export default function MrLxwaDashboard({
   // Mr. Keyword's own rows for this order, and the topic it was searching — used by the live
   // keyword screen below.
   const keywordItems = producedItems.filter((it) => it.kind === "keyword");
+
+  /** A brief hold on Mr. Keyword's own screen once it hands off to Mr. Writer — owner,
+   *  2026-09-12: "research ke baad 1-2 sec tak jo keyword mila wo show hoga ok, uske baad new mr
+   *  writer wale animation pe jayega". `panelAgent` switches to Writer the instant Writer's step
+   *  starts, which used to swap the canvas away from the keyword table before there was time to
+   *  actually read which keyword won. This holds the CANVAS (not the header — the agent name/step
+   *  label above it are free to move on right away) on the keyword table for ~1.5s of real,
+   *  already-decided data — not a fabricated delay, the keyword was already picked. */
+  const [holdKeywordCanvas, setHoldKeywordCanvas] = useState(false);
+  const prevCanvasAgentIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = prevCanvasAgentIdRef.current;
+    const curr = panelAgent?.id ?? null;
+    prevCanvasAgentIdRef.current = curr;
+    if (prev === "keyword" && curr && curr !== "keyword") {
+      setHoldKeywordCanvas(true);
+      const t = setTimeout(() => setHoldKeywordCanvas(false), 1500);
+      return () => clearTimeout(t);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panelAgent?.id]);
+  const canvasAgentId = holdKeywordCanvas ? "keyword" : panelAgent?.id;
   // gpt-researcher's own live events (agents/writer.ts's onProgress, forwarded verbatim — see
   // conduct_research.py) — real, while the research step runs, before the outline exists. Once
   // "research" (the researcher's own resolve) or "section" (the outline moved past it) shows
@@ -3091,8 +3113,12 @@ export default function MrLxwaDashboard({
         <div className="min-w-0">
           {/* Fixed height + its own scrollbar: a 20-row keyword table used to push the panel
               (and the page) far past the fold — "content box se bahar nahi jayega". */}
-          <div ref={canvasScrollRef} className="lx-card2 lx-scroll p-3" style={{ minHeight: 360, maxHeight: 460, overflowY: "auto" }}>
-            <div>
+          <div
+            ref={canvasScrollRef}
+            className="lx-card2 lx-scroll p-3 flex flex-col"
+            style={{ minHeight: 360, maxHeight: 460, overflowY: "auto" }}
+          >
+            <div className="flex flex-1 flex-col" style={{ minHeight: 0 }}>
               {/* NOT keyed to `runningStep?.key` any more (owner, 2026-09-12: "cursor kahi bhi
                   work nahi karta... achanak full article aa jata hai"). It used to be — a fade-in
                   on every step change — but that REMOUNTS this whole subtree every time a step
@@ -3108,15 +3134,19 @@ export default function MrLxwaDashboard({
                   the honest per-item list until it earns a screen of its own.
                   ON PAPER: the reference design puts every one of these on a light page inside
                   the dark shell (owner, 2026-09-12). `.lx-paper` re-points the theme tokens the
-                  screens already use, so they all flip to ink-on-paper without knowing it. */}
-              <div className="lx-paper">
+                  screens already use, so they all flip to ink-on-paper without knowing it.
+                  `flex-1` here (owner, 2026-09-12, screenshot: "abhi half white bg hai isko karo
+                  full white") — the paper div used to be only as tall as its own content, so on a
+                  short screen (the Google box, before any keyword has landed) the dark card
+                  showed through underneath it. Now it always fills the full card height. */}
+              <div className="lx-paper flex-1">
                 {panelAgent?.id === "boss" ? (
                   <BossScreen items={producedItems} running={!!runningStep} color={panelAgent.color} label={panelAgent.name} />
-                ) : panelAgent?.id === "keyword" ? (
+                ) : canvasAgentId === "keyword" ? (
                   <KeywordScreen
                     items={keywordItems}
                     topic={taskTopic}
-                    running={!!runningStep}
+                    running={holdKeywordCanvas ? false : !!runningStep}
                     onWriteArticle={orderArticleFor}
                   />
                 ) : panelAgent?.id === "writer" && !researchDone && (researchProgressItems.length > 0 || !!runningStep) ? (

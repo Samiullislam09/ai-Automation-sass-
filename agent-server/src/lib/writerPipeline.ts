@@ -369,14 +369,23 @@ export async function writeArticlePipeline(
   const outline = await buildOutline(topic, blueprint, context, complete, research);
 
   // Truly concurrent — see the file header for why this is the deliberate reading of the
-  // plan's "parallel" against its "previous section's last 2 lines".
-  const texts = await Promise.all(outline.sections.map((s) => writeSection(topic, outline, s, context, complete)));
-  const sections: PipelineSection[] = outline.sections.map((s, i) => ({
-    h2: s.h2,
-    text: texts[i],
-    words: texts[i].trim().split(/\s+/).filter(Boolean).length,
-  }));
-  for (const section of sections) opts.onSection?.(section);
+  // plan's "parallel" against its "previous section's last 2 lines". `onSection` fires the
+  // instant EACH ONE resolves, not after every section is done: the old `Promise.all` then
+  // `for` loop waited for the slowest section before emitting anything, so the live canvas sat
+  // on "Writing the outline…" for the entire generation window and then dumped every section
+  // at once (owner, 2026-09-12, screenshot: elapsed climbing past six minutes with a blank
+  // canvas — "outliner bahut der tak aisa hi rehta hai"). `sections` is still written by index
+  // so order and `polishArticle`'s input are unaffected — only the moment each one is reported
+  // moved earlier, to whenever that section's own call actually finished.
+  const sections: PipelineSection[] = new Array(outline.sections.length);
+  await Promise.all(
+    outline.sections.map(async (s, i) => {
+      const text = await writeSection(topic, outline, s, context, complete);
+      const section: PipelineSection = { h2: s.h2, text, words: text.trim().split(/\s+/).filter(Boolean).length };
+      sections[i] = section;
+      opts.onSection?.(section);
+    })
+  );
 
   const polished = await polishArticle(outline, topic, sections, context, complete);
   const meta = await writeMeta(outline, topic, polished, complete, context);
