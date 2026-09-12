@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { planImages, inlineCount, cardFor, describesSection, buildPrompt, seedFor, stepLines, figureLines, type ArticleForImages } from "./plan.js";
+import { planImages, inlineCount, requiredImageFloor, countRealImages, cardFor, describesSection, buildPrompt, seedFor, stepLines, figureLines, type ArticleForImages } from "./plan.js";
 import type { SiteProfile } from "../siteProfile.js";
 
 /** The gates, from fixtures, with no model and no network. Every test here is one of the
@@ -181,4 +181,27 @@ test("thumb and hero are two different subjects, never the same picture twice", 
   const [thumb, hero] = plan.slots;
   assert.notEqual(thumb.subject, hero.subject);
   assert.notEqual(seedFor("art-1", thumb.slot), seedFor("art-1", hero.slot));
+});
+
+/* ---------------------------------------------------------------- the hard image floor --- */
+/* documnet/Article_Writing_Rules.md section 5, forced (owner, 2026-09-13: "images ko bhi hard
+ * block karo") — agents/publish.ts's Guard 4 refuses to publish under this floor. */
+
+test("requiredImageFloor is thumb + hero + the same inline ladder inlineCount already uses", () => {
+  assert.equal(requiredImageFloor(600, 5), 2);
+  assert.equal(requiredImageFloor(2000, 5), 4);
+  assert.equal(requiredImageFloor(3000, 5), 5);
+  assert.equal(requiredImageFloor(3000, 1), 3, "never more than the article has sections for");
+});
+
+test("countRealImages counts photos, illustrations and deliberate content cards — only a template fallback does not count", () => {
+  assert.equal(
+    countRealImages([{ kind: "photo" }, { kind: "illustration" }, { kind: "card" }, { kind: "template" }, {}]),
+    // "card" is agents/image.ts's own gate 3 (a factual section drawn as its own real numbers,
+    // correctly never sent to a diffusion model) — a deliberate choice, not a failure, so it
+    // counts. An entry with no kind at all is treated the same as "template": not proven real.
+    3,
+  );
+  assert.equal(countRealImages([]), 0);
+  assert.equal(countRealImages([{ kind: "template" }, { kind: "template" }]), 0);
 });

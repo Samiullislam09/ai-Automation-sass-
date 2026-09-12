@@ -73,6 +73,24 @@ export function inlineCount(wordCount: number, sections: number): number {
   return Math.max(0, Math.min(byLength, sections));
 }
 
+/** documnet/Article_Writing_Rules.md section 5, forced (owner, 2026-09-13: "images ko bhi hard
+ *  block karo") — supersedes the earlier §19.4.4 "publish never waits on pictures" promise:
+ *  thumb + hero are always attempted, plus the inline ladder above, so this is the real floor a
+ *  finished article must actually meet before it may publish. */
+export function requiredImageFloor(wordCount: number, sections: number): number {
+  return 2 + inlineCount(wordCount, sections);
+}
+
+/** A "real" image: an actual photo/illustration, or a deliberate content card (kind "card" —
+ *  agents/image.ts's own gate 3, drawing a section's real numbers rather than sending a factual
+ *  chart to a diffusion model, which is correct, not a failure). Whitelisted, not blacklisted:
+ *  kind "template" (the budget ran out, or every provider failed) does not count, and neither
+ *  does anything unrecognized — an image this floor cannot vouch for is not proven real. */
+const REAL_KINDS = new Set(["photo", "illustration", "card"]);
+export function countRealImages(images: { kind?: string | null }[]): number {
+  return images.filter((i) => !!i.kind && REAL_KINDS.has(i.kind)).length;
+}
+
 /* ---------------------------------------------------------------- gate 3: what kind ----- */
 
 /** Words that mean "this passage is explaining a fact with a shape" — a map, a chart, a table.

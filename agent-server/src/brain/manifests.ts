@@ -207,10 +207,13 @@ export const MANIFESTS: Manifest[] = [
         output: { images: "object[]", imageSetId: "string", generated: "number" },
         provides: "images",
         needs: ["article"],
-        // §5.5's own word for this, and §19.4.4's promise: a publish never waits on pictures.
-        // If Mr. Image is down the plan runs without him and the article goes out with
-        // template cards, rather than the whole order stopping.
-        optional: true,
+        // NOT optional as of 2026-09-13 — the owner's own instruction ("images ko bhi hard block
+        // karo") overrides §5.5/§19.4.4's older "a publish never waits on pictures" promise. This
+        // step now has to run and produce something before publish_article's own plan is even
+        // valid; agents/publish.ts's Guard 4 is the second, stricter check — that what it
+        // produced was actually enough REAL pictures (not every one a budget-exhausted template
+        // fallback), which this flag alone cannot express.
+        optional: false,
         irreversible: false,
         // Measured: Cloudflare answered in 3.7s per image (2026-09-05) and an article takes 2-5
         // of them, plus one brief call and the sharp work. A template fallback is far quicker.

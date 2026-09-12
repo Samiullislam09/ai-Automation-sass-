@@ -10,8 +10,9 @@
  *
  *    • PLAN_WORLD — the same manifests with Mr. SEO and Mr. Publish live and publish also
  *      needing images, i.e. exactly the registry drawn in §5.5's mermaid
- *      (publish needs [article, images, seo_passed], images optional). This is the registry the
- *      plan's table describes, and against it the counts come out 1 / 1 / 4 / 5 as written.
+ *      (publish needs [article, images, seo_passed] — images was optional here until 2026-09-13,
+ *      when the owner made it required; see manifests.ts's own comment on make_images). This is
+ *      the registry the plan's table describes, and against it the counts come out 1/1/4/5.
  *
  *  Keeping both is the point: the second proves the algorithm, the first proves we do not lie
  *  about what the product can do this week.
@@ -359,26 +360,78 @@ test("a target whose own agent is a stub → agent_unhealthy, named", () => {
   assert.match(res.message, /^Miss Social abhi available nahi hai/);
 });
 
+// make_images was the real-world example of an optional provider here until 2026-09-13, when
+// the owner made images a hard requirement (agent-server/src/brain/manifests.ts's own comment
+// on make_images, and agents/publish.ts's Guard 4). The MECHANISM this test proves — an optional
+// step whose agent is down is skipped, with downstream steps not waiting on it — still exists in
+// the planner and is still worth a test; it just needs a manifest that is actually optional now,
+// so this proves it with two small synthetic ones instead of coupling to a real agent's product
+// behaviour, which is exactly what broke this test the last time that behaviour changed.
 test("an OPTIONAL step whose agent is down is skipped with a note, and the plan still runs", () => {
-  const reg = planWorld({ healthy: { image: false } }); // images optional:true, seo_passed is not
-  const p = okPlan(plan(intent("write_article", { topic: "solar" }, "publish"), reg));
+  const trim: Manifest = {
+    id: "trim",
+    name: "Mr. Trim",
+    version: "1.0.0",
+    description: "an optional finishing touch",
+    actions: [
+      {
+        id: "trim_it",
+        phrases: ["trim karo"],
+        input: { article: "object" },
+        output: { trimmed: "boolean" },
+        provides: "trim_done",
+        needs: ["article"],
+        optional: true,
+        irreversible: false,
+        estimated_seconds: 10,
+        cost_units: 1,
+      },
+    ],
+    office: { room: "trim", ico: "✂️", color: "#cccccc" },
+  };
+  const user: Manifest = {
+    id: "user",
+    name: "Mr. User",
+    version: "1.0.0",
+    description: "wants the article, trimmed or not",
+    actions: [
+      {
+        id: "use_it",
+        phrases: ["use karo"],
+        input: { article: "object" },
+        output: { used: "boolean" },
+        provides: "used_out",
+        needs: ["article", "trim_done"],
+        irreversible: false,
+        estimated_seconds: 10,
+        cost_units: 1,
+      },
+    ],
+    office: { room: "user", ico: "👤", color: "#cccccc" },
+  };
+  const reg = buildRegistry([...MANIFESTS, trim, user], { stubs: STUB_AGENTS, notRouted: NOT_YET_ROUTED, healthy: { trim: false } });
+  const p = okPlan(plan(intent("use_it", { article: { title: "x" } }), reg));
 
-  assert.deepEqual(shape(p.steps), [
-    "1:keyword.find_keywords",
-    "2:writer.write_article",
-    "3:seo.check_seo",
-    "4:publish.publish_article",
-  ]);
-  assert.ok(p.outline.some((l) => l.includes("Mr. Image") && l.includes("skip")));
-  // The publish step must not wait for a step that will never run.
-  assert.deepEqual([...p.steps[3].needs].sort(), ["article", "seo_passed"]);
-  assert.equal((p.steps[3].input as { __from?: Record<string, string> }).__from?.images, undefined);
+  assert.deepEqual(shape(p.steps), ["1:user.use_it"]);
+  assert.ok(p.outline.some((l) => l.includes("Mr. Trim") && l.includes("skip")));
+  // The consuming step must not wait for a step that will never run — "article" came straight
+  // from the intent's own params, so it never appears as a cross-step need at all.
+  assert.ok(!p.steps[0].needs.includes("trim_done"));
+  assert.equal((p.steps[0].input as { __from?: Record<string, string> }).__from?.trim_done, undefined);
 });
 
 test("a REQUIRED step whose agent is down fails the plan — seo_passed is not optional", () => {
   const reg = planWorld({ healthy: { seo: false } });
   const res = failed(plan(intent("write_article", { topic: "solar" }, "publish"), reg));
   assert.deepEqual(res.failure, { kind: "agent_unhealthy", agent_id: "seo", required: true });
+});
+
+test("images are REQUIRED as of 2026-09-13 — a publish plan fails outright if Mr. Image is down", () => {
+  // Owner's own words: "images ko bhi hard block karo" — this supersedes the older §19.4.4
+  // "a publish never waits on pictures" decision the test above this one used to demonstrate.
+  const reg = planWorld({ healthy: { image: false } });
+  const res = failed(plan(intent("write_article", { topic: "solar" }, "publish"), reg));
+  assert.deepEqual(res.failure, { kind: "agent_unhealthy", agent_id: "image", required: true });
 });
 
 test("a need nobody provides → no_provider, naming the need and the step that wanted it", () => {

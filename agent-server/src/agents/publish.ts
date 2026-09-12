@@ -1,6 +1,7 @@
 import type { Job } from "pg-boss";
 import { Agent, type AgentContext, type AgentJobData } from "./base.js";
 import { publishContentItem, type PublishImage } from "../lib/publish.js";
+import { requiredImageFloor, countRealImages } from "../lib/media/plan.js";
 import { supabase } from "../supabase.js";
 
 /** Mr. Publish — the only agent that touches the customer's live website.
@@ -76,6 +77,29 @@ export class PublishAgent extends Agent {
     }
 
     if (!item.body?.trim()) throw new Error("Draft khaali hai — publish karne ko kuch nahi.");
+
+    // ── Guard 4: real images actually exist ─────────────────────────────────────────────
+    // documnet/Article_Writing_Rules.md section 5, forced (owner, 2026-09-13: "images ko bhi
+    // hard block karo... publish ko rukega jab tak kam se kam 2 real images na ban jayein").
+    // This SUPERSEDES the earlier §19.4.4 promise that a publish never waits on pictures — that
+    // was a deliberate decision too, just an older one, and this one is the owner's explicit
+    // instruction overriding it. Counted from EVERY image made for this article, not only the
+    // approved ones below: whether a human has clicked "approve" is a separate concern (still
+    // gates what actually appears on the page, unchanged) from whether real pictures exist at
+    // all. A "template" fallback (the budget ran out, or every provider failed) does not count;
+    // a deliberate content card (agents/image.ts's own gate 3, for a section that names facts a
+    // diffusion model would draw wrong) does — see countRealImages's own comment.
+    const wordCount = Number((item.meta as any)?.wordCount) || 0;
+    const sectionCount = Number((item.meta as any)?.sections) || 0;
+    const floor = requiredImageFloor(wordCount, sectionCount);
+    const madeImages = await allImagesFor(tenantId, item.id);
+    const realCount = countRealImages(madeImages);
+    if (realCount < floor) {
+      throw new Error(
+        `Is article ke paas sirf ${realCount} real image(s) hain, kam se kam ${floor} chahiye ` +
+          `(${wordCount} words, ${sectionCount} section). Pehle Mr. Image se images banwao ya redo karwao, phir publish karo.`,
+      );
+    }
 
     // ── Publish ─────────────────────────────────────────────────────────────────────────
     ctx.onProgress({ label: `Publishing "${item.title ?? "the draft"}"…` });
@@ -170,6 +194,26 @@ async function verifyLive(url: string | undefined, title: string | null): Promis
   } catch (e: any) {
     return { verified: false, note: `Page check nahi ho paya (${e?.message ?? "network error"}) — publish ho chuka hai.` };
   }
+}
+
+/** Every image ever made for this article, whatever its review status — Guard 4 above cares
+ *  whether real pictures EXIST, not whether a human has approved them yet (that is
+ *  approvedImages() below, a separate and unchanged concern for what actually appears on the
+ *  page). Rejected sets are excluded: a picture the customer explicitly turned down should not
+ *  count toward "real images exist" any more than one that was never made. */
+async function allImagesFor(tenantId: string, articleId: string): Promise<{ kind?: string }[]> {
+  const { data, error } = await supabase
+    .from("content_items")
+    .select("meta, status")
+    .eq("tenant_id", tenantId)
+    .eq("type", "image_set")
+    .eq("blueprint->>parent_article_id", articleId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error || !data || data.status === "rejected") return [];
+  const raw: any[] = Array.isArray((data.meta as any)?.images) ? (data.meta as any).images : [];
+  return raw.filter((i) => i?.slot !== "og").map((i) => ({ kind: i?.kind ? String(i.kind) : undefined }));
 }
 
 /** The approved image set for an article, in the order a post wants them: the thumbnail (which
