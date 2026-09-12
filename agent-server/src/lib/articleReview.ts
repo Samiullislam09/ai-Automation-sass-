@@ -1,4 +1,5 @@
-import { gateArticle, AI_CLICHES, words, prose, paragraphs, sentences, FIGURE } from "./qualityGate.js";
+import { gateArticle, BANNED_PHRASES, words, prose, paragraphs, sentences, FIGURE } from "./qualityGate.js";
+export { BANNED_PHRASES };
 import { reviseArticle, auditHumanization, type Completer, type HumanizeAudit } from "./writerPipeline.js";
 
 /** THE HARD REVIEW. documnet/Article_Writing_Rules.md, every section forced, not advised.
@@ -55,40 +56,6 @@ const EXTERNAL_LINKS_MIN = 2; // section 12
 const ARTICLE_MIN_WORDS = 700; // section 10
 const MAX_SEMICOLONS = 1; // section 15, lever 8: "cut almost entirely"
 const SAME_OPENING_RUN = 3; // section 11: no more than two answers in a row open the same way
-
-/** Section 11's banned list, section 15's lever 1, 3 and 7 words, and the gate's own cliché list,
- *  merged. Zero tolerance here: the gate's older "block at six" threshold is a softer rule than
- *  the doc's own checklist line ("Zero banned filler phrases"). */
-const EXTRA_BANNED = [
-  "delve",
-  "leverage",
-  "robust",
-  "streamline",
-  "comprehensive",
-  "notably",
-  "pivotal",
-  "foster",
-  "facilitate",
-  "generally speaking",
-  "in many cases",
-  "unlock",
-  "elevate",
-  "seamless",
-  "vibrant tapestry",
-  "in conclusion",
-  "ultimately",
-  "overall",
-  "that said",
-  "additionally",
-  "in addition",
-  "as a result",
-  "whether you're",
-  "in today's world",
-];
-
-export const BANNED_PHRASES: readonly string[] = [
-  ...new Set([...AI_CLICHES, ...EXTRA_BANNED].map((p) => p.toLowerCase().replace(/[,\s]+$/, "").trim()).filter(Boolean)),
-];
 
 export type LinkRef = { url: string; title: string };
 

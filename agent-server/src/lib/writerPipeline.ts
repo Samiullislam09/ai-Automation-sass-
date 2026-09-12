@@ -1,6 +1,6 @@
 import { nvidiaFetch } from "./nvidia.js";
 import type { WriterContext } from "./writer.js";
-import { hasMarkdownTable, markdownListItemCount, questionAnswerPairCount, MIN_LIST_ITEMS, MIN_QA_PAIRS } from "./qualityGate.js";
+import { hasMarkdownTable, markdownListItemCount, questionAnswerPairCount, MIN_LIST_ITEMS, MIN_QA_PAIRS, BANNED_PHRASES } from "./qualityGate.js";
 
 /** Section-by-section writing — MASTER_PLAN §16.3 Upgrade E, and the self-audit's own words
  *  for why the old one-shot writer had to go: "ek shot me 1800 words hamesha flat hote hain".
@@ -219,6 +219,14 @@ export async function writeSection(
     `Start with "## ${section.h2}" then the prose. The very next paragraph after the heading must answer "${section.readerQuestion}" directly in its first sentence (the number, the yes/no, or the name first), in 40-58 words total — this is the length Google most often lifts into a featured snippet, so do not open with throat-clearing.`,
     `Short paragraphs (2-4 sentences) for everything after that first one. No filler, no "in today's fast-paced world" openings. Never use an em dash (—); use a period, comma, or colon instead. Use only facts present in the context above — never invent a statistic, price, award, client name or date.`,
     `Rhythm: at least one sentence of 6 words or fewer for every 150 words, and never three sentences in a row within 5 words of each other in length. No semicolons. Never write "the best", "guaranteed", "#1" or "number one", and never "studies show" or "experts say" unless that sentence links the real source. If the heading asks how to do something, or for steps, types, ways or tips, include a list of 5-8 items of 3-8 words each.`,
+    // documnet/Article_Writing_Rules.md Part 2 (sections 14-18, the humanization levers) — given
+    // to the model BEFORE it writes a word (owner, 2026-09-13: "AI article likhne se pehle ye
+    // rules usko diye jayenge, uske baad article write start hoga"), not left to a rewrite loop
+    // to catch afterward. lib/articleReview.ts still checks and rewrites whatever gets through
+    // anyway — this is the doc's own advice (§18: "into the writer-agent's own system prompt, not
+    // a separate pass... cheaper, first draft starts closer to human"), not a replacement for it.
+    `Never use any of these words or phrases, in any form: ${BANNED_PHRASES.join(", ")}.`,
+    `Every abstract claim needs a concrete anchor from the context above: a real number, name, date or example — never a bare generalization like "many businesses" or "results may vary". Write in a direct, first-hand voice: contractions where natural, no hedge phrases ("it is important to note", "generally speaking"), no acknowledgment-style opener, no summarizing what you just said in a closing line. Never open the direct answer with "it depends", "when it comes to", "there are many/several", or "let's" — state the actual answer first.`,
     `Output markdown only — no preamble, no explanation.`,
   ].filter(Boolean).join("\n\n");
 
@@ -278,7 +286,7 @@ export async function polishArticle(
     `WHAT TO FIX:`,
     `1. Write or rewrite the opening (before the first ##) so it answers the primary topic in the first 100 words — no throat-clearing.`,
     `2. Smooth the transition between each pair of sections — right now they were written independently and may jump.`,
-    `3. Remove repeated phrases and any AI-cliché wording (delve, tapestry, in today's fast-paced world, game-changer, unlock, unleash, and similar).`,
+    `3. Remove repeated phrases and any of these words or phrases, in any form: ${BANNED_PHRASES.join(", ")}.`,
     `4. End with one concrete next step the reader can take.`,
     `5. Do NOT add facts that are not already in the draft or the context above.`,
     `6. Replace every em dash (—) with a period, comma, or colon. Check that the paragraph right after each ## heading still answers it directly in 40-58 words after your edits; a rewrite that pushes it outside that range needs a further trim, not a new fact added to pad it back out.`,

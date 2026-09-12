@@ -140,6 +140,43 @@ export const AI_CLICHES: readonly string[] = [
   "as mentioned earlier",
 ];
 
+/** documnet/Article_Writing_Rules.md sections 11 and 15 (levers 1, 3 and 7), merged with
+ *  AI_CLICHES above into one zero-tolerance list — owner, 2026-09-13: "artical ko humanize karne
+ *  ke liye jo rules the wo bhi hard force honge... AI article likhne se pehle ye rules usko diye
+ *  jayenge". The canonical copy lives here (not in lib/articleReview.ts or lib/writerPipeline.ts)
+ *  so BOTH the generation prompt (writerPipeline.ts's writeSection, BEFORE a word is written) and
+ *  the post-hoc check (articleReview.ts, AFTER) read the exact same list — neither file imports
+ *  the other, so this is the one place both can reach without a cycle. */
+const EXTRA_BANNED_PHRASES = [
+  "delve",
+  "leverage",
+  "robust",
+  "streamline",
+  "comprehensive",
+  "notably",
+  "pivotal",
+  "foster",
+  "facilitate",
+  "generally speaking",
+  "in many cases",
+  "unlock",
+  "elevate",
+  "seamless",
+  "vibrant tapestry",
+  "in conclusion",
+  "ultimately",
+  "overall",
+  "that said",
+  "additionally",
+  "in addition",
+  "as a result",
+  "whether you're",
+  "in today's world",
+];
+export const BANNED_PHRASES: readonly string[] = [
+  ...new Set([...AI_CLICHES, ...EXTRA_BANNED_PHRASES].map((p) => p.toLowerCase().replace(/[,\s]+$/, "").trim()).filter(Boolean)),
+];
+
 /** Text that should never survive into a blog post: unfilled template slots, the model
  *  talking about itself, leaked reasoning, code fences. */
 const PLACEHOLDER_PATTERNS: { re: RegExp; label: string }[] = [
