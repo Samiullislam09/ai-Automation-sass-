@@ -65,6 +65,14 @@ export class ImageAgent extends Agent {
       return { made: false, question: "I need to know which article the images are for.", images: [] };
     }
 
+    // `ctx.onProgress` writes to jobs_log and is THROTTLED — it is not the live channel (see
+    // agents/base.ts). Until now this agent used only that, plus one `ctx.progress(1, …)` at the
+    // very end, so the live canvas had literally nothing to draw for the 15-40s between the job
+    // starting and the first picture landing. Owner, 2026-09-12: "images, seo etc kaam live
+    // visual pe dikha hi nahi, jab done hua tab dikhai diya... har agent ka live bina delay bina
+    // stuck ke chahiye". Every `ctx.progress` added here marks a REAL stage that genuinely just
+    // completed — never a tick invented to make a bar move.
+    ctx.progress(0.05, "Reading the article…");
     ctx.onProgress({ phase: "reading", label: "Reading the article…", at: new Date().toISOString() });
     const article = await loadArticle(tenantId, articleId);
     if (!article) return { made: false, question: "That article isn't on file, so there's nothing to illustrate.", images: [] };
@@ -73,6 +81,7 @@ export class ImageAgent extends Agent {
     const profile = (profileRow?.profile as any) ?? null;
     const brand = { color: (profile?.voice as any)?.brand_color || undefined, name: (profile?.what_they_do ?? "").split(/[.,]/)[0]?.trim() || undefined };
 
+    ctx.progress(0.12, "Deciding what each picture should show…");
     ctx.onProgress({ phase: "planning", label: "Deciding what each picture should show…", at: new Date().toISOString() });
     const plan = await planImages(article, profile);
     ctx.log(`Planned ${plan.slots.length} image(s): ${plan.slots.map((s) => `${s.slot}${s.anchor ? ` → "${s.anchor}"` : ""}${s.kind === "card" ? " (card)" : ""}`).join(", ")}`);
@@ -99,7 +108,24 @@ export class ImageAgent extends Agent {
     let generated = 0;
     let fallbacks = 0;
 
+    // The plan itself is real produced output — the model has decided, for each picture, which
+    // heading it belongs to and what it should depict. Emitting it here means the canvas can
+    // show the real briefs (and how many pictures are coming) while they are being drawn,
+    // instead of an empty box until the first one finishes rendering.
+    for (const slot of slotsToDo) {
+      ctx.data("image_slot", {
+        slot: slot.slot,
+        kind: slot.kind,
+        anchor: slot.anchor,
+        depicts: slot.depicts,
+        alt: slot.alt,
+        total: slotsToDo.length,
+      });
+    }
+
     for (const [i, slot] of slotsToDo.entries()) {
+      // 0.15 → 0.95 across the real slots, stepped as each one actually finishes below.
+      ctx.progress(0.15 + (0.8 * i) / Math.max(1, slotsToDo.length), `Making ${slot.slot} (${i + 1} of ${slotsToDo.length})…`);
       ctx.onProgress({ phase: "rendering", label: `Making ${slot.slot}…`, done: i, total: slotsToDo.length, at: new Date().toISOString() });
       const row = await this.oneSlot({ tenantId, article, slot, plan, profile, brand, budget, bump: Number(d.bump) || 0 }, ctx);
       if (row.provider !== "template") {

@@ -169,6 +169,28 @@ async function processJob(type: AgentType, job: JobWithMetadata<AgentJobData>) {
   // Everything above and below is unchanged for ordinary jobs — the `brainRef` branches are
   // the whole of the strangler seam (brain/adapter.ts explains why a step rides the agent's
   // own queue instead of a new one).
+  // THE STEP LIFECYCLE, ON THE WIRE.
+  //
+  // Until 2026-09-12 this worker emitted only `data`, `progress` and `log` — never
+  // `run_started` / `run_finished` / `run_error`. Those three event types were fully defined
+  // (brain/events.ts, and lib/live.ts folds all of them correctly), but the only code that ever
+  // sent them was vendor/agent-contract's `runAction`, which the brain does not use: the live
+  // path is brain/adapter.ts → the queue → this file. So on the dashboard a step could only ever
+  // go pending → running (inferred from the first `data` event) and NEVER running → done until
+  // the whole task finished.
+  //
+  // That one gap is exactly what the owner reported on 2026-09-12, twice:
+  //   · "keyword ne keyword nikal diya, phir bhi dikha raha tha working" — Mr. Keyword's step
+  //     stayed `running` for the rest of the chain, so its screen kept drawing the live search
+  //     box instead of its finished table.
+  //   · "writer ke baad achanak live visual stuck ho gaya... images, seo etc live visual pe
+  //     dikha hi nahi, jab done hua tab dikhai diya" — the panel follows the running step, and
+  //     since Mr. Writer's never closed, Mr. Image and Mr. SEO never got the canvas while they
+  //     worked. At `task_finished` every step closed at once and everything appeared together.
+  //
+  // Each of these is a real fact about this job at the moment it is sent: it started, it
+  // finished, or it failed. None of them is a synthesised tick.
+  liveEvent({ type: "run_started", action: type, attempt });
   try {
     // withCostLedger: every NVIDIA call made anywhere inside AGENTS[type].run() — however many
     // awaits deep — gets attributed here via AsyncLocalStorage (lib/costLedger.ts), not by
@@ -178,6 +200,26 @@ async function processJob(type: AgentType, job: JobWithMetadata<AgentJobData>) {
     const result = withCost(rawResult, cost);
     await logJobFinish(logId, result);
     emitAgentStatus({ agent: type, tenant: tenantId, status: "idle", task: "Done" });
+    // Sent BEFORE onStepDone: that call dispatches the next step, which starts emitting its own
+    // events immediately. Closing this one first is what keeps "who is working now" a single
+    // unambiguous answer on the dashboard instead of two agents reading `running` at once.
+    // `output` stays null on the wire ON PURPOSE — the real output is already written to this
+    // step's `task_steps.output` row by onStepDone below, and copying a whole article body onto
+    // a broadcast channel every agent's finish would be waste, not information. The token split
+    // is likewise null rather than guessed: lib/costLedger.ts measures ONE total (the provider
+    // returns no in/out breakdown), so the total goes in `tokens_total` and the two halves are
+    // reported as unmeasured instead of being invented as 0 and N.
+    liveEvent({
+      type: "run_finished",
+      attempt,
+      output: null,
+      ms: Date.now() - startedAt,
+      cost_units: Number(cost.costUsd?.toFixed?.(4) ?? 0),
+      llm_calls: cost.calls ?? 0,
+      tokens_in: null,
+      tokens_out: null,
+      tokens_total: cost.tokens ?? 0,
+    });
     if (brainRef) {
       // Reporting back must never turn a finished job into a failed one: the work is done and
       // logged either way, and a retry would repeat it.
@@ -200,6 +242,12 @@ async function processJob(type: AgentType, job: JobWithMetadata<AgentJobData>) {
       // pg-boss owns the retrying (queues.ts: retryLimit 2). The brain is only told once the
       // last attempt is spent, so the two retry policies cannot multiply into nine tries.
       const lastAttempt = attempt >= attempts;
+      // Same gap as run_finished above: a failed run never reached the live feed as a run-level
+      // event, so a step that died just stayed "running" on the dashboard until the whole task
+      // resolved. Sent on every attempt with `retryable` saying which this was, so a retry that
+      // later succeeds reads as exactly that (lib/live.ts re-opens the step on the next event)
+      // rather than as a silent stall.
+      liveEvent({ type: "run_error", attempt, message: explained.message, retryable: !lastAttempt, ms: durationMs });
       if (lastAttempt) {
         try {
           await onStepFailed(brainRef.task_id, brainRef.tenant_id, brainRef.step_id, explained.message, false);

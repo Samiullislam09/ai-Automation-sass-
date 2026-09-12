@@ -507,3 +507,77 @@ test("events for another task never contaminate this one", () => {
   assert.equal(s.byTask["task-2"].items.length, 1);
   assert.deepEqual(s.order, ["task-2", TASK], "newest first");
 });
+
+/* ── 9 · The real production stream, agent to agent ──────────────────────────────────────
+ * Every test above that ends a step does it with `run_finished` or `task_finished`. Until
+ * 2026-09-12 the live path (agent-server/src/workers.ts) emitted NEITHER — only `data`,
+ * `progress` and `log` — so nothing in this suite exercised what the dashboard actually
+ * received, and a step could only ever go pending → running and never close until the whole
+ * task did. Both of the owner's reports that day were that one gap:
+ *   · Mr. Keyword kept drawing its live search box after it had really finished;
+ *   · the panel froze on Mr. Writer, so Mr. Image and Mr. SEO were never seen working at all
+ *     and everything appeared at once at the end.
+ * These two tests are the shape of the real stream, and they fail against the old worker. */
+
+const chain = () =>
+  hydrateTask(emptyLive, {
+    task: { id: TASK, status: "running", kind: "write_article", created_at: iso(0) },
+    steps: [
+      { id: "s-kw", no: 1, agent_id: "keyword", action: "find_keywords", status: "pending" },
+      { id: "s-wr", no: 2, agent_id: "writer", action: "write_article", status: "pending" },
+      { id: "s-img", no: 3, agent_id: "image", action: "make_images", status: "pending" },
+    ],
+  });
+
+test("a hand-off closes the previous agent's step: exactly one step runs at a time", () => {
+  let s = chain();
+  s = foldEvents(s, ev({ type: "run_started", agent_id: "keyword", run_id: "job-kw", action: "find_keywords" } as any, 1000));
+  s = foldEvents(s, ev({ type: "data", agent_id: "keyword", run_id: "job-kw", kind: "keyword", payload: { keyword: "iso 9001 cost" } } as any, 1200));
+  assert.equal(one(s).steps.find((x) => x.key === "s-kw")?.status, "running");
+
+  // The worker now reports its own finish BEFORE the next step is dispatched.
+  s = foldEvents(s, ev({ type: "run_finished", agent_id: "keyword", run_id: "job-kw", output: null, ms: 900, cost_units: 0, llm_calls: 1, tokens_in: null, tokens_out: null } as any, 1800));
+  s = foldEvents(s, ev({ type: "run_started", agent_id: "writer", run_id: "job-wr", action: "write_article" } as any, 1900));
+  s = foldEvents(s, ev({ type: "data", agent_id: "writer", run_id: "job-wr", kind: "section", payload: { h2: "Cost", text: "x", words: 1 } } as any, 2000));
+
+  const t = one(s);
+  assert.equal(t.steps.find((x) => x.key === "s-kw")?.status, "done", "the finished agent's step must close");
+  assert.equal(t.steps.find((x) => x.key === "s-wr")?.status, "running");
+  assert.deepEqual(t.steps.filter((x) => x.status === "running").map((x) => x.agent_id), ["writer"]);
+  assert.equal(t.steps.filter((x) => x.status === "running").length, 1, "never two agents 'working' at once");
+});
+
+test("a later agent that only sends data is seen working, and the earlier ones are already done", () => {
+  // Mr. Image's own report: it emits data/progress, never sub-step events. The panel follows
+  // whichever step is running, so this is precisely what decides whether it is ever watched.
+  let s = chain();
+  let clock = 1000;
+  for (const a of ["keyword", "writer"]) {
+    s = foldEvents(s, ev({ type: "run_started", agent_id: a, run_id: `job-${a}`, action: a } as any, clock));
+    s = foldEvents(s, ev({ type: "data", agent_id: a, run_id: `job-${a}`, kind: "x", payload: {} } as any, clock + 50));
+    s = foldEvents(s, ev({ type: "run_finished", agent_id: a, run_id: `job-${a}`, output: null, ms: 10, cost_units: 0, llm_calls: 0, tokens_in: null, tokens_out: null } as any, clock + 100));
+    clock += 200;
+  }
+  s = foldEvents(s, ev({ type: "run_started", agent_id: "image", run_id: "job-image", action: "make_images" } as any, clock));
+  s = foldEvents(s, ev({ type: "progress", agent_id: "image", run_id: "job-image", fraction: 0.12, label: "Deciding what each picture should show…" } as any, clock + 100));
+
+  const t = one(s);
+  assert.equal(t.steps.find((x) => x.key === "s-kw")?.status, "done");
+  assert.equal(t.steps.find((x) => x.key === "s-wr")?.status, "done");
+  assert.equal(t.steps.find((x) => x.key === "s-img")?.status, "running", "the agent working NOW is the one running");
+  assert.equal(doneCount(t), 2);
+});
+
+test("a retried run: run_error with retryable does not bury the step before the retry lands", () => {
+  let s = chain();
+  s = foldEvents(s, ev({ type: "run_started", agent_id: "keyword", run_id: "job-kw", attempt: 1, action: "find_keywords" } as any, 1000));
+  s = foldEvents(s, ev({ type: "run_error", agent_id: "keyword", run_id: "job-kw", attempt: 1, message: "NVIDIA timed out", retryable: true, ms: 90000 } as any, 91000));
+  assert.equal(one(s).steps.find((x) => x.key === "s-kw")?.status, "failed", "a real error is shown as one");
+
+  // pg-boss retries; the next attempt's own events must bring the step back to life.
+  // SAME run_id — pg-boss retries reuse the job id. Only `attempt` tells the two runs apart.
+  s = foldEvents(s, ev({ type: "run_started", agent_id: "keyword", run_id: "job-kw", attempt: 2, action: "find_keywords" } as any, 92000));
+  s = foldEvents(s, ev({ type: "data", agent_id: "keyword", run_id: "job-kw", kind: "keyword", payload: { keyword: "iso 9001 cost" } } as any, 92500));
+  s = foldEvents(s, ev({ type: "run_finished", agent_id: "keyword", run_id: "job-kw", attempt: 2, output: null, ms: 800, cost_units: 0, llm_calls: 1, tokens_in: null, tokens_out: null } as any, 93000));
+  assert.equal(one(s).steps.find((x) => x.key === "s-kw")?.status, "done", "the retry that succeeded is the outcome");
+});

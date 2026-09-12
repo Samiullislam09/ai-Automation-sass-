@@ -333,6 +333,7 @@ export class KeywordAgent extends Agent {
     // ── Research only ───────────────────────────────────────────────────────────────────
     if (mode === "none") {
       const pick = recommend(source, related);
+      if (pick) ctx.data("keyword_picked", { keyword: pick.keyword, why: pick.why, mode: "research" });
       return {
         ...base,
         chained: false,
@@ -351,6 +352,20 @@ export class KeywordAgent extends Agent {
     // ── Straight to the writer ──────────────────────────────────────────────────────────
     if (mode === "write") {
       const blueprint = buildBlueprint(t, research, profile);
+      // WHICH keyword the article is actually going to target, said out loud (owner, 2026-09-12:
+      // "jo keyword aya and konsa keyword select hua ye nahi dikha, isko bhi dikhao live visual
+      // pe"). In this mode that is the seed topic itself — buildBlueprint makes `t` the primary
+      // keyword and everything researched above becomes the brief around it — so this reports
+      // exactly what the writer was handed, never a "winner" the code did not actually choose.
+      // `best` is the strongest RELATED keyword by the same recommend() rule the other two modes
+      // use; it is offered as research, clearly not as the thing being written.
+      const best = recommend(source, related);
+      ctx.data("keyword_picked", {
+        keyword: t,
+        why: "This is the topic the article was ordered for — the keywords found here shaped its brief.",
+        mode: "write",
+        best: best ? { keyword: best.keyword, why: best.why } : null,
+      });
       await enqueue("writer", { tenantId, topic: t, blueprint, scheduleRunId, autoPublish, taskLabel: `Writing "${t}"` });
       return { ...base, chained: true, blueprint };
     }
@@ -358,6 +373,7 @@ export class KeywordAgent extends Agent {
     // ── Ask first, then write ───────────────────────────────────────────────────────────
     const candidates = buildCandidates(t, related, siteContext, seedVolume, seedCompetition, seedOpportunity);
     const pick = recommend(source, candidates) ?? { keyword: t, why: "Only one option was available." };
+    ctx.data("keyword_picked", { keyword: pick.keyword, why: pick.why, mode: "choose" });
     const expiresAt = new Date(Date.now() + CHOICE_SECONDS * 1000);
 
     const { data: choice, error } = await supabase

@@ -86,6 +86,7 @@ import {
   Star,
   Square,
   RotateCcw,
+  Bug,
 } from "lucide-react";
 
 /* ========================================================================== */
@@ -472,11 +473,17 @@ const KeywordScreen = ({
   items,
   topic,
   running,
+  picked,
   onWriteArticle,
 }: {
   items: { key: string; payload: any }[];
   topic: string | null;
   running: boolean;
+  /** agents/keyword.ts's own `keyword_picked` event: the keyword the article is ACTUALLY going
+   *  to target, and why. Owner, 2026-09-12: "jo keyword aya and konsa keyword select hua ye nahi
+   *  dikha, isko bhi dikhao live visual pe". The table shows what was found; this says what was
+   *  chosen — two different facts, and only the agent knows the second one. */
+  picked?: { key: string; payload: any } | null;
   onWriteArticle: (keyword: string) => void;
 }) => {
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
@@ -492,9 +499,30 @@ const KeywordScreen = ({
   const dotColor = (level: unknown) =>
     level === "low" ? "#4ade80" : level === "medium" ? "#fbbf24" : level === "high" ? "#f87171" : "#5b5b72";
 
+  // The decision, stated plainly — shown above the research in both the live and finished views,
+  // because "which one won" is the single thing the owner could not see before. Every field is
+  // the agent's own: the keyword it handed the writer, its own sentence for why, and (only when
+  // the agent actually reported one) the strongest related keyword it found alongside it.
+  const pickedCard = picked?.payload ? (
+    <div className="lx-live-anim lx-in mb-3 rounded-lg px-3.5 py-3">
+      <div className="flex items-center gap-1.5 lx-10 lx-mut">
+        <CheckCircle2 size={12} style={{ color: "#3f9166" }} /> Keyword selected
+      </div>
+      <div className="lx-13 mt-1 font-bold leading-snug">{String(picked.payload.keyword ?? "—")}</div>
+      {picked.payload.why && <div className="lx-11 lx-mut mt-1">{String(picked.payload.why)}</div>}
+      {picked.payload.best?.keyword && (
+        <div className="lx-10 lx-dim mt-1.5">
+          Strongest related keyword found: <span style={{ color: "var(--lx-text)" }}>{String(picked.payload.best.keyword)}</span>
+        </div>
+      )}
+    </div>
+  ) : null;
+
   if (running) {
     return (
-      <div className="lx-serp">
+      <div>
+        {pickedCard}
+        <div className="lx-serp">
         {/* A real Google wordmark (four brand colors, no icon standing in for it) plus the
             actual results tabs Google itself shows — static chrome, same on every run, never
             claiming a number Google didn't give us. Owner, 2026-09-12: "iska ui real google
@@ -554,19 +582,25 @@ const KeywordScreen = ({
             );
           })}
         </div>
-        {items.length > 0 && (
-          <div className="lx-serp-foot">
-            <div className="lx-track" style={{ flex: 1 }}>
-              <div className="lx-serp-scan" />
+          {items.length > 0 && (
+            <div className="lx-serp-foot">
+              <div className="lx-track" style={{ flex: 1 }}>
+                <div className="lx-serp-scan" />
+              </div>
+              Scanning search data…
             </div>
-            Scanning search data…
-          </div>
-        )}
+          )}
+        </div>
       </div>
     );
   }
 
-  return <KeywordOpportunities items={items} onWriteArticle={onWriteArticle} />;
+  return (
+    <div>
+      {pickedCard}
+      <KeywordOpportunities items={items} onWriteArticle={onWriteArticle} />
+    </div>
+  );
 };
 
 /** The finished keyword table, laid out to the owner's reference mockup (2026-09-10): a titled
@@ -1453,39 +1487,89 @@ const BossScreen = ({ items, running, color, label }: { items: CanvasItem[]; run
 // differently) still strips: it's a markdown heading line either way, never body prose.
 const stripLeadingHeading = (text: string): string => text.replace(/^\s*#{1,6}[^\n]*\n+/, "");
 
-const WriterDocScreen = ({ items, running, color, label }: { items: CanvasItem[]; running: boolean; color: string; label: string }) => {
+/** How fast the article types itself out, and how hard it catches up when a burst lands.
+ *
+ *  Owner, 2026-09-12: "writer ne article likhna shuru kar diya and ek dam super fast achanak
+ *  pura article likh gaya — aisa karo jaisa ChatGPT pe aata hai, typing writing jaisa, and auto
+ *  scroll ho jaisa jaisa article likhta jaye."
+ *
+ *  The old version typed only the NEWEST section and snapped every earlier one in whole, so when
+ *  the backend handed over several sections at once (which is exactly what it did until
+ *  writerPipeline.ts started emitting each one as it finished) the article appeared instantly
+ *  with only its tail animating. This reveals the document as ONE continuous stream from the
+ *  top, exactly like a chat answer: a single character counter that only ever moves forward,
+ *  across every section in order.
+ *
+ *  It can never reveal a character the writer has not actually sent — `arrived` (the real, total
+ *  length of every section event received so far) is a hard ceiling on every frame. The pace is
+ *  presentation; the words are the agent's own. */
+const TYPE_BASE_CPS = 200;
+/** Backlog catch-up: a big burst speeds the stream up instead of making the reader wait minutes
+ *  for it to drain, and the speed eases back down as it catches up. */
+const TYPE_BACKLOG_DIVISOR = 12;
+
+const WriterDocScreen = ({
+  items,
+  running,
+  color,
+  label,
+  scrollRef,
+}: {
+  items: CanvasItem[];
+  running: boolean;
+  color: string;
+  label: string;
+  scrollRef?: React.RefObject<HTMLDivElement>;
+}) => {
   const sections = items.filter((it) => it.kind === "section");
   const draftItem = items.filter((it) => it.kind === "draft").slice(-1)[0];
   const title = (draftItem?.payload?.title as string | undefined) ?? undefined;
-  const latestKey = sections[sections.length - 1]?.key ?? null;
-  const typedKeyRef = useRef<string | null>(null);
-  const [typedLen, setTypedLen] = useState(0);
   const hostRef = useRef<HTMLDivElement>(null);
   const caretRef = useRef<HTMLSpanElement>(null);
   const { setNodeRef, target } = useFollowLatest(sections);
 
+  // Every section's real text, in order, and the total that has genuinely arrived.
+  const texts = sections.map((it) => stripLeadingHeading(String(it.payload?.text ?? "")));
+  const arrived = texts.reduce((n, t) => n + t.length, 0);
+
+  // Opening a task that is ALREADY over replays nothing — there is nothing arriving, and typing
+  // out a finished article as if it were being written now would be theatre. Decided once, on
+  // mount: a writer that finishes mid-stream keeps streaming to the end rather than snapping.
+  const replayNothing = useRef(!running);
+  const [revealed, setRevealed] = useState(() => (replayNothing.current ? Number.MAX_SAFE_INTEGER : 0));
+  const revealedRef = useRef(revealed);
+
   useEffect(() => {
-    if (!latestKey || typedKeyRef.current === latestKey) return;
-    typedKeyRef.current = latestKey;
-    const text = stripLeadingHeading(String(sections[sections.length - 1]?.payload?.text ?? ""));
-    setTypedLen(0);
-    if (!text) return;
-    // Paced by TIME, not by frame count, so a section reads as being written rather than
-    // flashing into place — ~4s end to end whatever its length (owner, 2026-09-12: "same html
-    // jaisa live animated... jaisa jaisa kaam kare waisa"). Still every character of the real,
-    // finished section the writer actually sent: the pace is presentation, the words are not.
-    const DURATION = 4000;
-    const started = performance.now();
+    if (replayNothing.current || revealedRef.current >= arrived) return;
     let raf = 0;
+    let last = performance.now();
     const step = (nowMs: number) => {
-      const done = Math.min(1, (nowMs - started) / DURATION);
-      setTypedLen(Math.round(text.length * done));
-      if (done < 1) raf = requestAnimationFrame(step);
+      const dt = Math.min(0.1, (nowMs - last) / 1000);
+      last = nowMs;
+      const backlog = arrived - revealedRef.current;
+      const cps = TYPE_BASE_CPS + backlog / TYPE_BACKLOG_DIVISOR;
+      const next = Math.min(arrived, revealedRef.current + cps * dt);
+      revealedRef.current = next;
+      setRevealed(next);
+      if (next < arrived) raf = requestAnimationFrame(step);
     };
     raf = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [latestKey]);
+  }, [arrived]);
+
+  // Auto-scroll (the owner's second half of the same ask): keep the caret in view inside the
+  // canvas's own scroll box as the text grows past the fold — never the page, only this box.
+  useEffect(() => {
+    const box = scrollRef?.current;
+    const caret = caretRef.current;
+    if (!box || !caret) return;
+    const boxRect = box.getBoundingClientRect();
+    const caretRect = caret.getBoundingClientRect();
+    const margin = 28;
+    if (caretRect.bottom > boxRect.bottom - margin) {
+      box.scrollTop += caretRect.bottom - (boxRect.bottom - margin);
+    }
+  }, [revealed, scrollRef]);
 
   if (!sections.length && !title) {
     // Before the first section lands this used to be one muted line on an otherwise blank
@@ -1503,13 +1587,31 @@ const WriterDocScreen = ({ items, running, color, label }: { items: CanvasItem[]
       <div className="lx-10 lx-mut px-1 py-2">No article has been written for this order.</div>
     );
   }
-  // Real, live word count — the sum of each finished section's own `words` field (writer.ts's
-  // own count for that section), not an estimate: it grows exactly as fast as real sections
-  // actually land. Owner, 2026-09-11: wants this top-left, on a white "paper" page — the
-  // reference mockup's own look for the one screen that reads like an actual document.
-  const wordCount = sections.reduce((sum, it) => sum + (typeof it.payload?.words === "number" ? it.payload.words : 0), 0);
-  const latestFull = stripLeadingHeading(String(sections[sections.length - 1]?.payload?.text ?? ""));
-  const typing = !!latestKey && typedLen < latestFull.length;
+  // Where each section starts in the one continuous character stream, so a single counter can
+  // walk the whole document top to bottom.
+  const offsets: number[] = [];
+  let running_offset = 0;
+  for (const t of texts) {
+    offsets.push(running_offset);
+    running_offset += t.length;
+  }
+  const typing = revealed < arrived;
+
+  // Real, live word count. A section that is fully on screen contributes writer.ts's OWN count
+  // for it (`words`); the one still being typed contributes exactly the words currently visible.
+  // So the number grows with the text the reader can actually see and lands on the agent's real
+  // total — never an estimate, and never the finished total shown over a half-typed page.
+  let wordCount = 0;
+  for (let i = 0; i < sections.length; i++) {
+    const shownLen = Math.max(0, Math.min(texts[i].length, revealed - offsets[i]));
+    if (shownLen <= 0) continue;
+    if (shownLen >= texts[i].length && typeof sections[i].payload?.words === "number") {
+      wordCount += sections[i].payload.words as number;
+    } else {
+      wordCount += texts[i].slice(0, shownLen).trim().split(/\s+/).filter(Boolean).length;
+    }
+  }
+
   return (
     <div
       ref={hostRef}
@@ -1527,12 +1629,15 @@ const WriterDocScreen = ({ items, running, color, label }: { items: CanvasItem[]
       )}
       {sections.map((it, i) => {
         const p = it.payload ?? {};
-        const fullText = stripLeadingHeading(String(p.text ?? ""));
-        const isLatest = it.key === latestKey;
-        const shown = isLatest ? fullText.slice(0, typedLen) : fullText;
-        const stillTyping = isLatest && typedLen < fullText.length;
+        const fullText = texts[i];
+        const shownLen = Math.min(fullText.length, Math.max(0, revealed - offsets[i]));
+        // Not reached yet — a section the stream has not typed down to does not exist on the
+        // page yet, exactly as an unwritten one wouldn't.
+        if (shownLen <= 0 && typing) return null;
+        const shown = fullText.slice(0, shownLen);
+        const stillTyping = shownLen < fullText.length;
         return (
-          <div key={it.key} ref={setNodeRef(it.key)} className={isLatest ? undefined : "lx-live-anim"}>
+          <div key={it.key} ref={setNodeRef(it.key)}>
             <h2 style={{ fontSize: 16, fontWeight: 600, margin: "16px 0 6px", color: "var(--lx-text)" }}>
               {p.h2 || `Section ${i + 1}`}
             </h2>
@@ -1543,11 +1648,96 @@ const WriterDocScreen = ({ items, running, color, label }: { items: CanvasItem[]
           </div>
         );
       })}
-      {/* While a section is being written the cursor rides the caret itself, so it moves with
-          the words the way the reference design does; the moment typing stops it falls back to
-          the section block (useFollowLatest's own target) and rests there, because nothing new
-          has happened. Re-pointed on every typedLen tick — that is what makes it travel. */}
-      <AgentCursor target={typing ? caretRef.current : target} host={hostRef.current} color={color} label={label} follow={typedLen} />
+      {/* While the article is being typed the cursor rides the caret itself, so it moves with the
+          words the way the reference design does; the moment typing stops it falls back to the
+          latest section block (useFollowLatest's own target) and rests there, because nothing new
+          has happened. Re-pointed on every reveal tick — that is what makes it travel. */}
+      <AgentCursor target={typing ? caretRef.current : target} host={hostRef.current} color={color} label={label} follow={revealed} />
+    </div>
+  );
+};
+
+/** THE DEBUG LOG (owner, 2026-09-12: "iske liye tum debug log banao taki hame pata chale, and
+ *  phir tum isko 100% fix karo"). Not decoration and not a second live screen — a diagnostic
+ *  read-out of the ONLY three things that decide whether the Live Visual is telling the truth:
+ *
+ *   1. the connection (live / polling / connecting / offline) — a "polling" here explains a lag
+ *      that looks like a freeze;
+ *   2. every step's real status, and HOW LONG AGO that agent last sent anything. A step reading
+ *      "running" with a silence of 90s is the exact shape of the stuck-panel bug this was built
+ *      to find: it says which agent went quiet and for how long, instead of leaving the owner to
+ *      guess from a spinner;
+ *   3. the last real events, newest first, with the gap between them.
+ *
+ *  Every number here is measured from event arrival times already in state — nothing is polled,
+ *  estimated or invented. */
+const DebugLog = ({
+  task,
+  connected,
+  now,
+}: {
+  task: TaskState;
+  connected: string;
+  now: number;
+}) => {
+  const ago = (t: number | null | undefined) => {
+    if (!t) return "—";
+    const s = Math.max(0, Math.round((now - t) / 1000));
+    return s < 60 ? `${s}s ago` : `${Math.floor(s / 60)}m ${s % 60}s ago`;
+  };
+  const lastFor = (agentId: string) => task.agents.find((p) => p.agent_id === agentId)?.lastEventAt ?? null;
+  const recent = task.items.slice(-14).reverse();
+  const connColorDbg =
+    connected === "live" ? "#22c55e" : connected === "polling" ? "#fbbf24" : connected === "connecting" ? "#8b8ba0" : "#ef4444";
+
+  return (
+    <div className="lx-card2 mt-2 p-3" style={{ fontFamily: "ui-monospace, monospace" }}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 lx-10">
+        <span className="font-bold" style={{ letterSpacing: ".04em" }}>DEBUG</span>
+        <span>
+          socket <span style={{ color: connColorDbg }}>{connected}</span>
+        </span>
+        <span className="lx-mut">task {task.status}</span>
+        <span className="lx-mut">last event {ago(task.lastEventAt)}</span>
+        <span className="lx-mut">{task.items.length} events</span>
+      </div>
+
+      <div className="mt-2 lx-10">
+        {task.steps.map((st) => {
+          const silence = lastFor(st.agent_id);
+          // The one number that matters: a running step whose agent has been silent for a while.
+          const stuck = st.status === "running" && silence != null && now - silence > 20000;
+          return (
+            <div key={st.key} className="flex items-center gap-2" style={{ padding: "2px 0" }}>
+              <span style={{ width: 64, flexShrink: 0, color: stuck ? "#f87171" : "var(--lx-mut)" }}>{st.status}</span>
+              <span style={{ width: 78, flexShrink: 0 }}>{st.agent_id}</span>
+              <span className="min-w-0 flex-1 truncate lx-dim">{st.progressLabel || st.label || st.action || ""}</span>
+              <span className="shrink-0" style={{ color: stuck ? "#f87171" : "var(--lx-dim)" }}>
+                {st.status === "running" ? `silent ${ago(silence)}` : st.finishedAt ? ago(st.finishedAt) : ""}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-2 lx-10 lx-dim" style={{ borderTop: "1px solid var(--lx-border)", paddingTop: 6 }}>
+        {recent.length === 0 ? (
+          <span>no data events yet</span>
+        ) : (
+          recent.map((it, i) => {
+            const prev = recent[i + 1];
+            const gap = prev ? Math.max(0, Math.round((it.at - prev.at) / 1000)) : null;
+            return (
+              <div key={it.key} className="flex items-center gap-2" style={{ padding: "1px 0" }}>
+                <span style={{ width: 78, flexShrink: 0 }}>{it.agent_id}</span>
+                <span className="min-w-0 flex-1 truncate" style={{ color: "var(--lx-mut)" }}>{it.kind}</span>
+                <span className="shrink-0">{gap != null ? `+${gap}s` : ""}</span>
+                <span className="shrink-0" style={{ width: 70, textAlign: "right" }}>{ago(it.at)}</span>
+              </div>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 };
@@ -2092,8 +2282,23 @@ export default function MrLxwaDashboard({
   // Mr Lxwa checked first: when a plan starts with his own pick_topic step, he is the one
   // actually running before anyone else even has a step to run — the panel should open on him,
   // not sit closed until Mr. Keyword picks up afterward.
+  // FOLLOW THE NEWEST WORK, NOT THE ROSTER ORDER. This used to be `allAgents.find(a => a.status
+  // === "Working")`, which returns whichever agent sits earliest in the hardcoded roster array —
+  // so the instant two steps both read "Working" (a hand-off overlap, a genuinely parallel pair
+  // of steps, or — until the fix in agent-server/src/workers.ts — a step that never closed at
+  // all) the panel stayed pinned to the earlier-listed one. Mr. Keyword sits before Mr. Writer,
+  // and Mr. Writer before Mr. Image and Mr. SEO, which is exactly the order the owner watched it
+  // get stuck in on 2026-09-12. The running step's own `startedAt` is real data and says which
+  // work is newest; the old roster-order scan stays as the fallback for the case where no step
+  // carries a start time yet.
+  const newestRunningAgentId = task
+    ? [...task.steps]
+        .filter((s) => s.status === "running")
+        .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))[0]?.agent_id ?? null
+    : null;
   const workingAgent =
-    bossAgent.status === "Working" ? bossAgent : allAgents.find((a) => a.status === "Working") ?? (publishAgent.status === "Working" ? publishAgent : null);
+    (newestRunningAgentId ? [...allAgents, bossAgent, publishAgent].find((a) => a.id === newestRunningAgentId) ?? null : null) ??
+    (bossAgent.status === "Working" ? bossAgent : allAgents.find((a) => a.status === "Working") ?? (publishAgent.status === "Working" ? publishAgent : null));
   // The compact agent strip (below, only visible once a panel is open) auto-scrolls so whoever
   // is actually working is always the one centered — a full-automation feel where the camera
   // follows the work, not a manual "you scroll to find them" (owner 2026-09-09: "jo agent us
@@ -2108,6 +2313,7 @@ export default function MrLxwaDashboard({
   // the owner never saw either (found live 2026-09-11: "cursor hand-moving animation... ispe
   // nahi ha" — it WAS there, 1,700px below the visible window).
   const canvasScrollRef = useRef<HTMLDivElement>(null);
+  const [showDebug, setShowDebug] = useState(false);
   useEffect(() => {
     if (!workingAgent) return;
     const el = compactStripRef.current?.querySelector<HTMLElement>(`[data-agent-id="${workingAgent.id}"]`);
@@ -2960,6 +3166,9 @@ export default function MrLxwaDashboard({
   // Mr. Keyword's own rows for this order, and the topic it was searching — used by the live
   // keyword screen below.
   const keywordItems = producedItems.filter((it) => it.kind === "keyword");
+  // Which keyword actually won (agents/keyword.ts's `keyword_picked`) — the last one wins, so a
+  // run that revises its choice shows the choice it ended on, never the first guess.
+  const keywordPicked = producedItems.filter((it) => it.kind === "keyword_picked").slice(-1)[0] ?? null;
 
   /** A brief hold on Mr. Keyword's own screen once it hands off to Mr. Writer — owner,
    *  2026-09-12: "research ke baad 1-2 sec tak jo keyword mila wo show hoga ok, uske baad new mr
@@ -3104,6 +3313,19 @@ export default function MrLxwaDashboard({
         <span className="lx-pill red shrink-0">
           <span className="lx-pulse h-1.5 w-1.5 rounded-full" style={{ background: "#ef4444" }} /> LIVE
         </span>
+        {/* The debug read-out's own switch — off by default (it is a diagnostic, not part of the
+            product's face) and remembered for the session so a hunt for a stall does not mean
+            re-opening it on every hand-off. */}
+        <button
+          className="lx-icobtn shrink-0"
+          aria-label={showDebug ? "Hide debug log" : "Show debug log"}
+          title={showDebug ? "Hide debug log" : "Show debug log"}
+          aria-pressed={showDebug}
+          style={showDebug ? { color: "var(--lx-cyan)", borderColor: "var(--lx-cyan)" } : undefined}
+          onClick={() => setShowDebug((v) => !v)}
+        >
+          <Bug size={14} />
+        </button>
         <button className="lx-icobtn shrink-0" aria-label="Close" onClick={closeAgentPanel}>
           <X size={14} />
         </button>
@@ -3147,12 +3369,13 @@ export default function MrLxwaDashboard({
                     items={keywordItems}
                     topic={taskTopic}
                     running={holdKeywordCanvas ? false : !!runningStep}
+                    picked={keywordPicked}
                     onWriteArticle={orderArticleFor}
                   />
                 ) : panelAgent?.id === "writer" && !researchDone && (researchProgressItems.length > 0 || !!runningStep) ? (
                   <ResearchScreen items={researchProgressItems} running={!!runningStep} />
                 ) : panelAgent?.id === "writer" ? (
-                  <WriterDocScreen items={producedItems} running={!!runningStep} color={panelAgent.color} label={panelAgent.name} />
+                  <WriterDocScreen items={producedItems} running={!!runningStep} color={panelAgent.color} label={panelAgent.name} scrollRef={canvasScrollRef} />
                 ) : panelAgent?.id === "seo" ? (
                   <SeoScreen items={producedItems} running={!!runningStep} color={panelAgent.color} label={panelAgent.name} />
                 ) : panelAgent?.id === "image" ? (
@@ -3206,6 +3429,8 @@ export default function MrLxwaDashboard({
               </div>
             </div>
           </div>
+
+          {showDebug && task && <DebugLog task={task} connected={live.connected} now={now} />}
 
           {/* The "wire" — the single freshest real sentence for whichever agent's screen is open
               above, the same one-line ticker the reference mockup keeps under its canvas.

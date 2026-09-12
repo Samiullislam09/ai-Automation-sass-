@@ -60,23 +60,32 @@ export interface EventBase {
   at: string;
 }
 
+/** Which pg-boss attempt this run is (1-based). NOT cosmetic: pg-boss retries reuse the SAME job
+ *  id, so `run_id` alone does not identify a run — two attempts of one job share it. Without this
+ *  in the de-duplication identity (see `idOf`), a retry's `run_started` is discarded as a
+ *  duplicate of the first attempt's, the failed step is never re-opened, and a step that failed
+ *  once and then SUCCEEDED reads "failed" on the dashboard for the rest of the task. Found
+ *  2026-09-12 while writing the first test of the real production stream. */
+type Attempted = { attempt?: number };
+
 export type AgentEvent =
-  | (EventBase & { type: "run_started"; action: string })
+  | (EventBase & Attempted & { type: "run_started"; action: string })
   | (EventBase & { type: "step_started"; step_id: string; label: string })
   | (EventBase & { type: "step_finished"; step_id: string; ms: number })
   | (EventBase & { type: "progress"; step_id?: string; fraction: number; label?: string })
   | (EventBase & { type: "data"; step_id?: string; kind: string; payload: unknown })
   | (EventBase & { type: "log"; step_id?: string; level: LogLevel; message_dev: string })
-  | (EventBase & {
-      type: "run_finished";
-      output: unknown;
-      ms: number;
-      cost_units: number;
-      llm_calls: number;
-      tokens_in: number;
-      tokens_out: number;
-    })
-  | (EventBase & { type: "run_error"; message: string; retryable: boolean; ms: number });
+  | (EventBase &
+      Attempted & {
+        type: "run_finished";
+        output: unknown;
+        ms: number;
+        cost_units: number;
+        llm_calls: number;
+        tokens_in: number | null;
+        tokens_out: number | null;
+      })
+  | (EventBase & Attempted & { type: "run_error"; message: string; retryable: boolean; ms: number });
 
 export type TaskEvent =
   | { type: "task_created"; task_id: string; tenant_id: string; at: string; echo: string; outline: string[] }
@@ -334,12 +343,15 @@ function identityOf(e: IncomingEvent): string {
       return `step_started|${e.run_id}|${e.step_id}`;
     case "step_finished":
       return `step_finished|${e.run_id}|${e.step_id}`;
+    // `attempt` is part of the identity — see the Attempted type's own comment: a pg-boss retry
+    // reuses the job id, so without it the second attempt's events are dropped as duplicates of
+    // the first's and a step that failed then succeeded stays red forever.
     case "run_started":
-      return `run_started|${e.run_id}`;
+      return `run_started|${e.run_id}|${e.attempt ?? 0}`;
     case "run_finished":
-      return `run_finished|${e.run_id}`;
+      return `run_finished|${e.run_id}|${e.attempt ?? 0}`;
     case "run_error":
-      return `run_error|${e.run_id}|${e.message}`;
+      return `run_error|${e.run_id}|${e.attempt ?? 0}|${e.message}`;
     case "log":
       return `log|${e.run_id}|${e.level}|${e.message_dev}|${e.at}`;
     case "step_skipped":
@@ -528,7 +540,16 @@ export function foldEvents(state: LiveState, incoming: IncomingEvent): LiveState
 
   const at = ms(e.at) || base.lastEventAt || Date.now();
   const agentId = "agent_id" in e && typeof (e as any).agent_id === "string" ? (e as any).agent_id : null;
-  const runId = "run_id" in e && typeof (e as any).run_id === "string" ? (e as any).run_id : null;
+  // The run's identity is the job id AND which attempt this is. pg-boss retries reuse the job
+  // id, so the id alone cannot tell attempt 1 from attempt 2 — and `advanceStep` recognises a
+  // retry (the one legitimate way a failed step may re-open) only when the run identity CHANGES.
+  // Without the attempt in here, a step that failed once stayed red for the rest of the task
+  // even after the retry ran and succeeded. The existing retry test passed only because it was
+  // written against the agent-contract path, which mints a fresh run id per attempt; the real
+  // queue does not.
+  const rawRunId = "run_id" in e && typeof (e as any).run_id === "string" ? (e as any).run_id : null;
+  const attemptOf = typeof (e as any).attempt === "number" ? (e as any).attempt : null;
+  const runId = rawRunId && attemptOf != null ? `${rawRunId}#${attemptOf}` : rawRunId;
   const stepId = "step_id" in e && typeof (e as any).step_id === "string" ? (e as any).step_id : null;
 
   let t: TaskState = {
