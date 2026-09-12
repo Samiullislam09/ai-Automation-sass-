@@ -1,7 +1,8 @@
 import type { Job } from "pg-boss";
 import { Agent, type AgentContext, type AgentJobData } from "./base.js";
 import type { WriterContext } from "../lib/writer.js";
-import { writeArticlePipeline, reviseArticle, auditHumanization, nimComplete, type HumanizeAudit } from "../lib/writerPipeline.js";
+import { writeArticlePipeline, nimComplete } from "../lib/writerPipeline.js";
+import { runArticleReview, checkLinkLive, type LinkRef } from "../lib/articleReview.js";
 import { researchTopic } from "../lib/research/gptResearcher.js";
 import { gateArticle, summarizeGate } from "../lib/qualityGate.js";
 import { supabase } from "../supabase.js";
@@ -117,6 +118,8 @@ export class WriterAgent extends Agent {
     // Outline → sections in parallel → polish → meta (MASTER_PLAN §16.3 Upgrade E). Sections
     // arrive at the live workspace (§24.4b) AS THEY FINISH, not split out of an already-done
     // draft — ctx.data below fires from writeArticlePipeline's onSection, mid-generation.
+    // The real sources gpt-researcher opened: the only outside URLs a review rewrite may link to.
+    let researchSources: { url: string; title: string }[] = [];
     const pipeline = await writeArticlePipeline(topic.trim(), blueprint, context, nimComplete, {
       // `text` added (2026-08-31, live Writing-tab preview) alongside the h2/words this already
       // carried — the section's own real prose, exactly as written, nothing summarised.
@@ -129,7 +132,10 @@ export class WriterAgent extends Agent {
       // `result.sources` is already {url,title}[] from gpt-researcher's own crawl, capped at
       // 10 there (conduct_research.py). Never invented: `used:false` (or a thrown/skipped
       // researcher) means this array is simply empty, and the tabs say so honestly.
-      onResearch: (result) => ctx.data("research", { used: !!result, sources: result?.sources ?? [] }),
+      onResearch: (result) => {
+        researchSources = result?.sources ?? [];
+        ctx.data("research", { used: !!result, sources: result?.sources ?? [] });
+      },
     });
     let body = pipeline.body;
     const title = pipeline.title;
@@ -141,75 +147,49 @@ export class WriterAgent extends Agent {
     // and the writer is told to answer it in the first 100 words. metaTitle/metaDescription
     // now come from the pipeline's own meta step — the checks in qualityGate.ts that scored
     // them have existed since Phase 2 planning began and had nothing to score until today.
-    let gate = gateArticle(body, { primaryKeyword: topic.trim(), metaTitle: pipeline.meta.metaTitle, metaDescription: pipeline.meta.metaDescription });
-    console.log(`[writer] "${title}" — ${summarizeGate(gate)}`);
-
-    // Hard-follow retry (documnet/Article_Writing_Rules.md Part 3): a gate failure used to just
-    // mark the row 'failed' and stop — nothing ever asked the model to fix what the gate found.
-    // The exact block-level failures (never warnings — those are a human's glance, not a retry)
-    // go back to the model for a targeted fix, then the draft is re-gated. Capped at
-    // MAX_REVISE_ATTEMPTS: Part 2 section 16 found diminishing returns past two passes, and an
-    // uncapped loop against an LLM call has no guaranteed exit condition.
-    const MAX_REVISE_ATTEMPTS = 2;
-    let reviseAttempts = 0;
-    while (!gate.passed && reviseAttempts < MAX_REVISE_ATTEMPTS) {
-      reviseAttempts++;
-      ctx.onProgress({ label: `Fixing ${gate.reasons.length} issue(s) the quality gate found (attempt ${reviseAttempts}/${MAX_REVISE_ATTEMPTS})` });
+    // documnet/Article_Writing_Rules.md, every section of it, enforced hard (owner, 2026-09-13:
+    // "sab ko all section ko hard yani forcefully add karo... koi rule follow na ho to dobara wo
+    // section rewrite hoga"). lib/articleReview.ts checks every rule, rewrites only the sections
+    // that broke one, checks again, and reports each round live. It replaces the old gate retry
+    // loop and the advisory humanize pass: both now live inside the review, and both can block.
+    const siteHost = (() => {
       try {
-        body = await reviseArticle(title, topic.trim(), body, gate.reasons, nimComplete);
-      } catch (e: any) {
-        // A failed revise call must not lose the last-known-good draft — keep it and stop
-        // retrying rather than throw the whole job away over one bad NVIDIA call.
-        console.error(`[writer] revise attempt ${reviseAttempts} failed, keeping the previous draft:`, e?.message);
-        break;
+        return context.websiteUrl ? new URL(context.websiteUrl).hostname.replace(/^www\./, "") : null;
+      } catch {
+        return null;
       }
-      gate = gateArticle(body, { primaryKeyword: topic.trim(), metaTitle: pipeline.meta.metaTitle, metaDescription: pipeline.meta.metaDescription });
-      console.log(`[writer] "${title}" revise ${reviseAttempts}/${MAX_REVISE_ATTEMPTS} — ${summarizeGate(gate)}`);
-    }
-    if (reviseAttempts > 0) ctx.data("draft", { title, body });
+    })();
+    const review = await runArticleReview(
+      body,
+      {
+        title,
+        topic: topic.trim(),
+        primaryKeyword: topic.trim(),
+        siteUrl: context.websiteUrl ?? null,
+        author: context.businessName ?? siteHost,
+        allowedLinks: collectAllowedLinks(context, researchSources),
+        metaTitle: pipeline.meta.metaTitle,
+        metaDescription: pipeline.meta.metaDescription,
+      },
+      {
+        complete: nimComplete,
+        checkLink: checkLinkLive,
+        onEvent: (kind, payload) => ctx.data(kind, payload),
+        onProgress: (label) => ctx.onProgress({ label }),
+      },
+    );
+    body = review.body;
+    ctx.data("draft", { title, body });
 
-    // Humanization audit (documnet/Article_Writing_Rules.md Part 2, sections 14-18) — the
-    // judgment-needed half qualityGate.ts cannot check by regex. Only runs on a draft that
-    // already cleared the mechanical gate: auditing a draft that is already headed to
-    // needs_attention/failed spends an NVIDIA call on a subjective opinion nobody asked for yet.
-    // Advisory only (see auditHumanization's own comment for why it never sets gate.passed):
-    // one bounded fix attempt, and the mechanical gate re-runs afterward so a humanize-motivated
-    // rewrite can never silently reintroduce an em dash or shrink a snippet paragraph.
-    let humanize: HumanizeAudit | null = null;
-    let humanizeFixed = false;
-    if (gate.passed) {
-      try {
-        humanize = await auditHumanization(body, topic.trim(), nimComplete);
-      } catch (e: any) {
-        console.error(`[writer] humanization audit failed to run, publishing without it:`, e?.message);
-      }
-      if (humanize && !humanize.passed && humanize.issues.length) {
-        ctx.onProgress({ label: `Fixing ${humanize.issues.length} humanization issue(s) found by the audit` });
-        try {
-          const fixedBody = await reviseArticle(
-            title,
-            topic.trim(),
-            body,
-            humanize.issues.map((i) => `${i.rule}: "${i.quote}" — ${i.fix}`),
-            nimComplete
-          );
-          // The fix must not cost the draft its mechanical pass — a humanize-motivated rewrite
-          // that reintroduces an em dash or drops a snippet paragraph out of range is reverted,
-          // not adopted, and the pre-fix body (already gate.passed) ships instead.
-          const gateAfterHumanize = gateArticle(fixedBody, { primaryKeyword: topic.trim(), metaTitle: pipeline.meta.metaTitle, metaDescription: pipeline.meta.metaDescription });
-          if (gateAfterHumanize.passed) {
-            body = fixedBody;
-            humanizeFixed = true;
-            ctx.data("draft", { title, body });
-            console.log(`[writer] "${title}" humanize-fix applied and still clears the mechanical gate`);
-          } else {
-            console.error(`[writer] humanize-fix broke the mechanical gate (${gateAfterHumanize.reasons.join("; ")}) — keeping the pre-fix draft`);
-          }
-        } catch (e: any) {
-          console.error(`[writer] humanize-fix attempt failed, keeping the pre-fix draft:`, e?.message);
-        }
-      }
-    }
+    // One verdict, kept in the gate's own shape so the dashboard and Approvals read it unchanged:
+    // the gate's own score and checks, but `passed` only when the hard review passed too, with
+    // the review's exact failures as the reasons.
+    const baseGate = gateArticle(body, { primaryKeyword: topic.trim(), metaTitle: pipeline.meta.metaTitle, metaDescription: pipeline.meta.metaDescription });
+    const gate =
+      review.passed && baseGate.passed
+        ? baseGate
+        : { ...baseGate, passed: false, reasons: [...new Set([...baseGate.reasons, ...review.failures])] };
+    console.log(`[writer] "${title}" review ${review.passed ? "passed" : "FAILED"} in ${review.rounds} round(s) · ${summarizeGate(gate)}`);
 
     ctx.data("score", { quality: gate.score, passed: gate.passed, words: gate.wordCount, sections: gate.sections });
     // The real links the article actually contains — for the live "References" tab. Same
@@ -221,14 +201,18 @@ export class WriterAgent extends Agent {
       wordCount: gate.wordCount,
       sections: gate.sections,
       links: gate.links,
-      // How many targeted-fix passes it took to (try to) clear the gate, 0 when it passed on
-      // the first draft. Visible rather than silent, so "why did this take longer" and "did the
-      // retry loop even do anything" are both answerable from the row, not just the logs.
-      reviseAttempts,
-      // The advisory humanization pass (Part 2 of the writing rules doc) — null when the
-      // mechanical gate never passed (audit skipped), otherwise the model's own findings and
-      // whether the one bounded fix attempt actually landed. Never affects `status` below.
-      humanizeAudit: humanize ? { passed: humanize.passed, issues: humanize.issues, fixed: humanizeFixed } : null,
+      // The hard review (lib/articleReview.ts): how many rounds it took, how many sections were
+      // rewritten, and exactly what still failed when it did not pass.
+      reviseAttempts: review.rounds - 1,
+      humanizeAudit: review.audit ? { passed: review.audit.passed, issues: review.audit.issues, fixed: review.passed } : null,
+      articleReview: {
+        passed: review.passed,
+        rounds: review.rounds,
+        sectionRewrites: review.sectionRewrites,
+        articleRevisions: review.articleRevisions,
+        failures: review.failures,
+        auditError: review.auditError,
+      },
       // Full v2 gate (score, checks[], warnings[]) lives here; describeJob reads
       // detail.qualityGate.{passed,reasons,wordCount,sections,links} exactly as before.
       qualityGate: gate,
@@ -485,3 +469,21 @@ export function duplicateSentence(verdict: DuplicateVerdict): string {
   return "";
 }
 
+/** Every URL a review rewrite may link to, and all of them real: this site's own crawled pages,
+ *  its trust page, its proof, its call to action, and the sources gpt-researcher actually opened.
+ *  A rewrite is shown only these, so fixing a link rule can never mean inventing a URL. */
+function collectAllowedLinks(context: WriterContext, research: { url: string; title: string }[]): LinkRef[] {
+  const out: LinkRef[] = [];
+  const seen = new Set<string>();
+  const push = (url: string | null | undefined, title: string | null | undefined) => {
+    if (!url || seen.has(url)) return;
+    seen.add(url);
+    out.push({ url, title: title || url });
+  };
+  for (const p of (context.pages ?? []).slice(0, 12)) push(p.url, p.title);
+  if (context.trustPage) push(context.trustPage.url, context.trustPage.title);
+  for (const p of context.proof ?? []) push(p.url, p.claim);
+  if (context.cta?.url) push(context.cta.url, context.cta.name);
+  for (const r of research) push(r.url, r.title);
+  return out;
+}

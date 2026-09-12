@@ -1521,7 +1521,20 @@ const WriterDocScreen = ({
   label: string;
   scrollRef?: React.RefObject<HTMLDivElement>;
 }) => {
-  const sections = items.filter((it) => it.kind === "section");
+  // A section the quality review rewrote (lib/articleReview.ts) shows its rewritten text under
+  // its possibly-new heading: each section_revised names the heading it replaces, and a chain of
+  // rewrites across rounds is followed in arrival order to the newest. Same item key, so nothing
+  // remounts and the cursor does not jump.
+  const revisions = items.filter((it) => it.kind === "section_revised");
+  const sections = items
+    .filter((it) => it.kind === "section")
+    .map((it) => {
+      let payload = it.payload ?? {};
+      for (const r of revisions) {
+        if (r.payload?.replaces === payload.h2) payload = { ...payload, h2: r.payload.h2, text: r.payload.text, words: r.payload.words };
+      }
+      return payload === it.payload ? it : { ...it, payload };
+    });
   const draftItem = items.filter((it) => it.kind === "draft").slice(-1)[0];
   const title = (draftItem?.payload?.title as string | undefined) ?? undefined;
   const hostRef = useRef<HTMLDivElement>(null);
@@ -1653,6 +1666,214 @@ const WriterDocScreen = ({
           latest section block (useFollowLatest's own target) and rests there, because nothing new
           has happened. Re-pointed on every reveal tick — that is what makes it travel. */}
       <AgentCursor target={typing ? caretRef.current : target} host={hostRef.current} color={color} label={label} follow={revealed} />
+    </div>
+  );
+};
+
+const REVIEW_KINDS = new Set(["review_round", "review_result", "section_rewrite", "article_revise", "review_final"]);
+const REVIEW_GROUPS = ["Structure", "Snippet answers", "Writing style", "Links and sources", "Trust", "Human voice"];
+type ReviewCheckView = { id: string; label: string; group: string; ok: boolean; detail: string; section: string | null; skipped?: boolean };
+
+/** Mr. Writer's quality review, live (owner, 2026-09-13: "dobara check karne pe live visual pe
+ *  uska UI/UX aaye review ka"). Every row is one of lib/articleReview.ts's own events: which
+ *  round it is, which rules failed and where, which sections are being rewritten right now and
+ *  when each one is done, and the final verdict with exactly what still failed. Nothing here is
+ *  a timer or a guess: a row appears, changes or turns green only when that event arrives. */
+const ReviewScreen = ({ items, running, color, label }: { items: CanvasItem[]; running: boolean; color: string; label: string }) => {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const events = items.filter((it) => REVIEW_KINDS.has(it.kind));
+  const final = events.filter((e) => e.kind === "review_final").slice(-1)[0] ?? null;
+  const roundEvents = events.filter((e) => e.kind === "review_round");
+  const latestRound = events.reduce((m, e) => Math.max(m, Number(e.payload?.round) || 0), 0);
+  const maxRounds = Number(final?.payload?.max ?? roundEvents[roundEvents.length - 1]?.payload?.max) || null;
+  const latestStage = roundEvents[roundEvents.length - 1]?.payload?.stage as string | undefined;
+
+  // One chip per round: did it pass, and how many rules failed in it.
+  const results = events.filter((e) => e.kind === "review_result");
+  const roundNumbers = Array.from(new Set(results.map((r) => Number(r.payload?.round) || 0))).sort((a, b) => a - b);
+  const chips = roundNumbers.map((r) => {
+    const mine = results.filter((x) => Number(x.payload?.round) === r);
+    return {
+      r,
+      ok: mine.length > 0 && mine.every((x) => x.payload?.passed === true),
+      failed: mine.reduce((n, x) => n + (Number(x.payload?.failed) || 0), 0),
+    };
+  });
+
+  // The latest rules check, plus the human-voice review that followed it in the same round.
+  const lastRules = results.filter((x) => x.payload?.stage === "rules").slice(-1)[0] ?? null;
+  const lastVoice =
+    results.filter((x) => x.payload?.stage === "humanize" && Number(x.payload?.round) >= Number(lastRules?.payload?.round ?? 0)).slice(-1)[0] ?? null;
+  const checks: ReviewCheckView[] = [
+    ...(Array.isArray(lastRules?.payload?.checks) ? lastRules!.payload.checks : []),
+    ...(Array.isArray(lastVoice?.payload?.checks) ? lastVoice!.payload.checks : []),
+  ];
+  const checksKey = `${lastRules?.key ?? "r"}-${lastVoice?.key ?? "v"}`;
+
+  // What is being rewritten in the most recent round that rewrote anything.
+  const rewriteEvents = events.filter((e) => e.kind === "section_rewrite" || e.kind === "article_revise");
+  const rewriteRound = rewriteEvents.reduce((m, e) => Math.max(m, Number(e.payload?.round) || 0), 0);
+  const rowMap = new Map<string, { key: string; name: string; status: string; reasons: string[]; words?: number; newSection?: string; error?: string }>();
+  for (const e of rewriteEvents.filter((x) => Number(x.payload?.round) === rewriteRound)) {
+    const name = e.kind === "article_revise" ? "Whole article" : String(e.payload?.section ?? "Section");
+    const prev = rowMap.get(name);
+    rowMap.set(name, {
+      key: prev?.key ?? e.key,
+      name,
+      status: String(e.payload?.status ?? ""),
+      reasons: Array.isArray(e.payload?.reasons) ? e.payload.reasons : prev?.reasons ?? [],
+      words: typeof e.payload?.words === "number" ? e.payload.words : prev?.words,
+      newSection: e.payload?.newSection ?? prev?.newSection,
+      error: e.payload?.error,
+    });
+  }
+  const rewriteRows = Array.from(rowMap.values());
+  const rewritingNow = rewriteRows.filter((r) => r.status === "rewriting" || r.status === "revising").length;
+
+  const groups = REVIEW_GROUPS.map((g) => {
+    const mine = checks.filter((c) => c.group === g);
+    return {
+      g,
+      total: mine.length,
+      failed: mine.filter((c) => !c.ok).map((c, i) => ({ c, key: `${checksKey}-${g}-${i}` })),
+      skipped: mine.filter((c) => c.ok && c.skipped),
+    };
+  }).filter((x) => x.total > 0);
+
+  // The cursor rests on the newest real thing: a rewrite row, a failing rule, or the verdict.
+  const followRows = [
+    ...rewriteRows.map((r) => ({ key: r.key })),
+    ...groups.flatMap((x) => x.failed.map((f) => ({ key: f.key }))),
+    ...(final ? [{ key: final.key }] : []),
+  ];
+  const { setNodeRef, target } = useFollowLatest(followRows);
+
+  const lastEvent = events[events.length - 1];
+  const statusText = final
+    ? final.payload?.passed
+      ? "Passed every rule"
+      : "Did not pass, needs a human"
+    : rewritingNow > 0
+      ? `Rewriting ${rewritingNow} part${rewritingNow === 1 ? "" : "s"}…`
+      : lastEvent?.kind === "review_round"
+        ? latestStage === "humanize"
+          ? "Independent human-voice review…"
+          : "Checking every rule…"
+        : running
+          ? "Reviewing…"
+          : "Review stopped";
+  const pillTone = final ? (final.payload?.passed ? "green" : "red") : "blue";
+
+  return (
+    <div ref={hostRef} style={{ position: "relative" }}>
+      <div className="flex flex-wrap items-center gap-2">
+        <ShieldCheck size={16} style={{ color }} />
+        <span className="lx-12 font-semibold">Quality review</span>
+        {latestRound > 0 && maxRounds && (
+          <span className="lx-10 lx-mut">
+            Round {latestRound} of {maxRounds}
+          </span>
+        )}
+        <span className={`lx-pill ${pillTone} ml-auto`}>
+          {!final && <Loader2 size={10} className="animate-spin" />} {statusText}
+        </span>
+      </div>
+
+      {chips.length > 0 && (
+        <div className="lx-rv-rounds mt-2">
+          {chips.map((c) => (
+            <span key={c.r} className={`lx-rv-chip ${c.ok ? "ok" : "bad"}`}>
+              Round {c.r}: {c.ok ? "passed" : `${c.failed} failed`}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {rewriteRows.length > 0 && (
+        <div className="mt-3">
+          <div className="lx-10 lx-mut mb-1.5">Rewriting only what broke a rule, round {rewriteRound}</div>
+          {rewriteRows.map((r) => (
+            <div key={r.key} ref={setNodeRef(r.key)} className={`lx-live-anim lx-rv-row ${r.status}`}>
+              <span className="lx-rv-dot" />
+              <div className="min-w-0 flex-1">
+                <div className="lx-11 truncate font-semibold">
+                  {r.newSection && r.newSection !== r.name ? `${r.name} → ${r.newSection}` : r.name}
+                </div>
+                {r.status === "rewriting" || r.status === "revising" ? (
+                  <div className="lx-10 lx-shimmer">
+                    Rewriting against {r.reasons.length} rule{r.reasons.length === 1 ? "" : "s"}…
+                  </div>
+                ) : r.status === "done" ? (
+                  <div className="lx-10" style={{ color: "var(--lx-green)" }}>
+                    Rewritten{typeof r.words === "number" ? `, ${r.words} words` : ""}
+                  </div>
+                ) : (
+                  <div className="lx-10" style={{ color: "var(--lx-red)" }}>
+                    Rewrite failed{r.error ? `: ${r.error}` : ""}
+                  </div>
+                )}
+                {r.reasons.slice(0, 3).map((x, i) => (
+                  <div key={i} className="lx-10 lx-mut truncate">
+                    • {x}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {groups.length > 0 && (
+        <div className="mt-3">
+          {groups.map((x) => (
+            <div key={x.g} className="lx-rv-group">
+              <div className="flex items-center gap-2">
+                <span className="lx-11 font-semibold">{x.g}</span>
+                <span className={`lx-pill ${x.failed.length ? "red" : "green"} ml-auto`}>
+                  {x.total - x.failed.length}/{x.total}
+                </span>
+              </div>
+              {x.failed.map(({ c, key }) => (
+                <div key={key} ref={setNodeRef(key)} className="lx-live-anim lx-rv-fail">
+                  <XCircle size={12} style={{ flexShrink: 0, marginTop: 2 }} />
+                  <span className="min-w-0">
+                    <span className="lx-10 font-semibold">{c.label}</span>
+                    {c.section && <span className="lx-10 lx-mut"> · {c.section}</span>}
+                    <span className="lx-10 lx-mut block">{c.detail}</span>
+                  </span>
+                </div>
+              ))}
+              {x.skipped.map((c, i) => (
+                <div key={`skip-${i}`} className="lx-10 lx-dim mt-1">
+                  Skipped: {c.label}, {c.detail}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {final && (
+        <div ref={setNodeRef(final.key)} className="lx-live-anim lx-in mt-3 rounded-lg px-3.5 py-3">
+          <div className="flex items-center gap-1.5 lx-11 font-semibold" style={{ color: final.payload?.passed ? "var(--lx-green)" : "var(--lx-red)" }}>
+            {final.payload?.passed ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
+            {final.payload?.passed
+              ? `Passed in ${final.payload?.rounds} round${final.payload?.rounds === 1 ? "" : "s"}`
+              : `Stopped after ${final.payload?.rounds} rounds without passing`}
+          </div>
+          <div className="lx-10 lx-mut mt-1">
+            {Number(final.payload?.sectionRewrites) || 0} section rewrite(s), {Number(final.payload?.articleRevisions) || 0} whole-article revision(s)
+          </div>
+          {!final.payload?.passed &&
+            (Array.isArray(final.payload?.failures) ? final.payload.failures : []).slice(0, 8).map((f: string, i: number) => (
+              <div key={i} className="lx-10 mt-1" style={{ color: "var(--lx-red)" }}>
+                • {f}
+              </div>
+            ))}
+        </div>
+      )}
+
+      <AgentCursor target={target} host={hostRef.current} color={color} label={label} />
     </div>
   );
 };
@@ -2314,6 +2535,10 @@ export default function MrLxwaDashboard({
   // nahi ha" — it WAS there, 1,700px below the visible window).
   const canvasScrollRef = useRef<HTMLDivElement>(null);
   const [showDebug, setShowDebug] = useState(false);
+  const [writerView, setWriterView] = useState<"auto" | "review" | "article">("auto");
+  useEffect(() => {
+    setWriterView("auto");
+  }, [task?.task_id]);
   useEffect(() => {
     if (!workingAgent) return;
     const el = compactStripRef.current?.querySelector<HTMLElement>(`[data-agent-id="${workingAgent.id}"]`);
@@ -3375,7 +3600,31 @@ export default function MrLxwaDashboard({
                 ) : panelAgent?.id === "writer" && !researchDone && (researchProgressItems.length > 0 || !!runningStep) ? (
                   <ResearchScreen items={researchProgressItems} running={!!runningStep} />
                 ) : panelAgent?.id === "writer" ? (
-                  <WriterDocScreen items={producedItems} running={!!runningStep} color={panelAgent.color} label={panelAgent.name} scrollRef={canvasScrollRef} />
+                  (() => {
+                    const hasReview = producedItems.some((it) => REVIEW_KINDS.has(it.kind));
+                    const view = writerView === "auto" ? (hasReview ? "review" : "article") : writerView;
+                    return (
+                      <div>
+                        {hasReview && (
+                          <div className="lx-rv-tabs mb-3">
+                            {(["review", "article"] as const).map((v) => (
+                              <button key={v} className={view === v ? "on" : undefined} onClick={() => setWriterView(v)}>
+                                {v === "review" ? "Quality review" : "Article"}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {hasReview && (
+                          <div hidden={view !== "review"}>
+                            <ReviewScreen items={producedItems} running={!!runningStep} color={panelAgent.color} label={panelAgent.name} />
+                          </div>
+                        )}
+                        <div hidden={hasReview && view !== "article"}>
+                          <WriterDocScreen items={producedItems} running={!!runningStep} color={panelAgent.color} label={panelAgent.name} scrollRef={canvasScrollRef} />
+                        </div>
+                      </div>
+                    );
+                  })()
                 ) : panelAgent?.id === "seo" ? (
                   <SeoScreen items={producedItems} running={!!runningStep} color={panelAgent.color} label={panelAgent.name} />
                 ) : panelAgent?.id === "image" ? (

@@ -68,4 +68,10 @@ export const WRITING_RULES = [
   // qualityGate.ts's "em-dash" (block) and "snippet-paragraphs" (warn) checks.
   "Never use an em dash (—). Use a period, comma, or colon instead.",
   "The paragraph immediately after each H2 answers that heading directly in 40-58 words, number or yes/no first — this is the length Google most often lifts into a featured snippet.",
+  // The rest of documnet/Article_Writing_Rules.md, all enforced hard by lib/articleReview.ts
+  // (2026-09-13): a failing section is rewritten and re-checked, never published as it is.
+  "Every H2 and H3 is the real question a searcher types, ending with '?'; the first H2 contains the primary keyword; one section states a clear verdict.",
+  "At least one sentence of 6 words or fewer per 150 words, never three sentences in a row of about the same length, no semicolons.",
+  "No 'the best', 'guaranteed' or '#1', and no 'studies show' or 'experts say', without a linked source; a how-to or steps heading gets a 5-8 item list.",
+  "3-5 internal links and 2+ real outside sources, every one of which must load; a last-updated date and author line is added under the title.",
 ];

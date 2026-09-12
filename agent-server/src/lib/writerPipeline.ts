@@ -160,6 +160,9 @@ export async function buildOutline(
     researchLines,
     `Produce ${MIN_SECTIONS}-${MAX_SECTIONS} sections (H2s). For each: the heading, what it must accomplish (goal), the exact phrase it should place naturally (keyword — from the blueprint's related queries when there are enough, otherwise a natural variation of the topic), and the single reader question it answers.`,
     `The article title is separate from the topic — write a real title a reader would click, not the raw keyword.`,
+    // documnet/Article_Writing_Rules.md sections 1, 2, 9 and 13, checked hard by lib/articleReview.ts:
+    // asking for them at the outline is what lets most drafts clear the review on its first round.
+    `Every heading must be the real question a searcher would type, ending with "?". The FIRST heading must contain "${topic}". One heading must ask for a verdict (for example "What is our verdict on ...?"), and that section's job is to make a clear recommendation.`,
     `Reply with ONLY JSON: {"title":"...","sections":[{"h2":"...","goal":"...","keyword":"...","readerQuestion":"..."}]}`,
   ].filter(Boolean).join("\n\n");
 
@@ -215,6 +218,7 @@ export async function writeSection(
     `LENGTH: at least 300 words for this section — this is a hard minimum, not a target. Do not stop early; if you run short, go deeper on the reader's question with specifics rather than padding.`,
     `Start with "## ${section.h2}" then the prose. The very next paragraph after the heading must answer "${section.readerQuestion}" directly in its first sentence (the number, the yes/no, or the name first), in 40-58 words total — this is the length Google most often lifts into a featured snippet, so do not open with throat-clearing.`,
     `Short paragraphs (2-4 sentences) for everything after that first one. No filler, no "in today's fast-paced world" openings. Never use an em dash (—); use a period, comma, or colon instead. Use only facts present in the context above — never invent a statistic, price, award, client name or date.`,
+    `Rhythm: at least one sentence of 6 words or fewer for every 150 words, and never three sentences in a row within 5 words of each other in length. No semicolons. Never write "the best", "guaranteed", "#1" or "number one", and never "studies show" or "experts say" unless that sentence links the real source. If the heading asks how to do something, or for steps, types, ways or tips, include a list of 5-8 items of 3-8 words each.`,
     `Output markdown only — no preamble, no explanation.`,
   ].filter(Boolean).join("\n\n");
 
@@ -310,12 +314,14 @@ export async function reviseArticle(
   topic: string,
   body: string,
   failures: string[],
-  complete: Completer
+  complete: Completer,
+  notes?: string
 ): Promise<string> {
   const prompt = [
     `This article on "${topic}" failed its pre-publish quality gate. Fix ONLY the specific problems listed below. Do not shorten it, do not remove or reorder any section, do not touch anything that was not flagged — every "##" heading must still be present, in the same order, and the word count must not drop.`,
     `PROBLEMS TO FIX:`,
     ...failures.map((f, i) => `${i + 1}. ${f}`),
+    ...(notes ? [notes] : []),
     ``,
     `DRAFT:`,
     body,
@@ -358,9 +364,11 @@ export async function auditHumanization(body: string, topic: string, complete: C
     `3. Perpetual hedging: does the article ever actually commit to a direct answer or a real recommendation, or does every claim get hedged into vagueness ("results may vary", "it depends on many factors" with no factors named)?`,
     `4. Uniform sentence rhythm: are most sentences roughly the same length with the same clause structure, rather than a genuine mix of short and long?`,
     `5. Repeated identical opening patterns: do 3 or more sentences or list items in a row start with the exact same grammatical construction?`,
+    `6. Unsupported authority: a claim presented as established fact, a statistic, or a superlative with no named, linked source behind it ("studies show", "experts agree", "the most trusted").`,
+    `7. Smoothed-over disagreement: where the article cites two sources or numbers that do not agree, did it silently pick one or blend them instead of stating both and why they differ?`,
     ``,
-    `Reply with ONLY JSON, no preamble: {"passed": true or false, "issues": [{"rule": "which of the 5 checks above", "quote": "the exact offending sentence or phrase from the article", "fix": "a one-sentence instruction for how to rewrite just that part"}]}`,
-    `"passed" is true only if you found nothing worth flagging under any of the 5 checks. An empty "issues" array must accompany passed:true.`,
+    `Reply with ONLY JSON, no preamble: {"passed": true or false, "issues": [{"rule": "which of the checks above", "quote": "the exact offending sentence or phrase from the article", "fix": "a one-sentence instruction for how to rewrite just that part"}]}`,
+    `"passed" is true only if you found nothing worth flagging under any of the checks above. An empty "issues" array must accompany passed:true.`,
     ``,
     `ARTICLE:`,
     body,

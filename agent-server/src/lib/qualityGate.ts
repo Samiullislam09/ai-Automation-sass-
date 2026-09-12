@@ -155,7 +155,7 @@ const PLACEHOLDER_PATTERNS: { re: RegExp; label: string }[] = [
 const CTA_VERB = /\b(contact|call|book|get|start|try|visit|reach|schedule|download|sign up|learn more)\b/i;
 
 /** "45%", "$1,200", "₹5000", "€3.5k", "£20" — figures the model may have invented. */
-const FIGURE = /\d+(?:[.,]\d+)?\s?%|[$€£₹¥]\s?\d[\d,]*(?:\.\d+)?/;
+export const FIGURE = /\d+(?:[.,]\d+)?\s?%|[$€£₹¥]\s?\d[\d,]*(?:\.\d+)?/;
 
 /* ---------------------------------------------------------------- helpers --------------- */
 
@@ -169,13 +169,13 @@ function phraseRe(phrase: string): RegExp {
   return new RegExp(`(?<![\\w])${body}(?![\\w])`, "gi");
 }
 
-function words(text: string): string[] {
+export function words(text: string): string[] {
   return text.trim().split(/\s+/).filter(Boolean);
 }
 
 /** Markdown stripped down to prose: no headings, links reduced to their text, no emphasis
  *  markers. Used for keyword / sentence / figure checks so syntax doesn't skew them. */
-function prose(body: string): string {
+export function prose(body: string): string {
   return body
     .replace(/^#{1,6}\s+.*$/gm, "")
     .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
@@ -183,7 +183,7 @@ function prose(body: string): string {
     .replace(/\r/g, "");
 }
 
-function paragraphs(body: string): string[] {
+export function paragraphs(body: string): string[] {
   return body
     .replace(/\r/g, "")
     .split(/\n\s*\n/)
@@ -191,7 +191,7 @@ function paragraphs(body: string): string[] {
     .filter(Boolean);
 }
 
-function sentences(text: string): string[] {
+export function sentences(text: string): string[] {
   return text
     .replace(/\n+/g, " ")
     .split(/(?<=[.!?])\s+(?=[A-Z0-9"'(])/)

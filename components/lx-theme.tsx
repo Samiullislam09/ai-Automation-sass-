@@ -387,6 +387,22 @@ export const LX_CSS = `
 .lx-paper .lx-shimmer{background:linear-gradient(90deg,#8a8f86 0%,#20241f 50%,#8a8f86 100%);
   background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent}
 /* SEO — the overall score, then one bar per real category (agents/seo.ts's score_category). */
+/* Quality review (MrLxwaDashboard.tsx ReviewScreen): each round, each section being rewritten,
+   and every rule that failed, all drawn from lib/articleReview.ts's own events. */
+.lx-rv-tabs{display:inline-flex;gap:2px;padding:2px;border:1px solid var(--lx-border);border-radius:999px;background:var(--lx-in)}
+.lx-rv-tabs button{border:0;background:transparent;color:var(--lx-mut);font-size:11.5px;font-weight:600;padding:4px 12px;border-radius:999px;cursor:pointer}
+.lx-rv-tabs button.on{background:var(--lx-text);color:var(--lx-in)}
+.lx-rv-rounds{display:flex;flex-wrap:wrap;gap:6px}
+.lx-rv-chip{font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:999px;border:1px solid currentColor}
+.lx-rv-chip.ok{color:var(--lx-green)}
+.lx-rv-chip.bad{color:var(--lx-red)}
+.lx-rv-row{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;margin-bottom:6px;border:1px solid var(--lx-border);border-radius:10px;background:var(--lx-in)}
+.lx-rv-dot{width:8px;height:8px;border-radius:50%;margin-top:5px;flex:none;background:var(--lx-dim)}
+.lx-rv-row.rewriting .lx-rv-dot,.lx-rv-row.revising .lx-rv-dot{background:var(--lx-violet);animation:lxPulse 1.4s ease-in-out infinite}
+.lx-rv-row.done .lx-rv-dot{background:var(--lx-green)}
+.lx-rv-row.failed .lx-rv-dot{background:var(--lx-red)}
+.lx-rv-group{padding:8px 0;border-top:1px solid var(--lx-border)}
+.lx-rv-fail{display:flex;gap:6px;align-items:flex-start;margin-top:6px;color:var(--lx-red)}
 .lx-srow{display:flex;align-items:center;gap:12px;padding:7px 0}
 .lx-srow .lb{width:132px;flex:none;font-size:12.5px;color:var(--lx-text)}
 .lx-sbar{flex:1;height:7px;border-radius:99px;background:rgba(255,255,255,.07);overflow:hidden}

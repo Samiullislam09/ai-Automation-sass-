@@ -42,6 +42,17 @@ const SHAPE_FOR: Record<string, Shape> = { thumb: "thumb", og: "og", hero: "hero
 
 export type ImageResultRow = StoredImage & { kind: string; note?: string; fellBackTo?: string };
 
+/** documnet/Article_Writing_Rules.md section 5: "every image needs its license/source recorded
+ *  (even if not shown on the page) so a copyright question can be answered later." Derived from
+ *  where the picture really came from, never guessed: a stock photo carries its site's licence
+ *  and the photographer credit the provider returned; a generated picture is said to be generated. */
+export function licenseFor(provider: string, attribution: string | null | undefined): string {
+  if (provider === "unsplash") return `Unsplash License${attribution ? ` (${attribution})` : ""}`;
+  if (provider === "pexels") return `Pexels License${attribution ? ` (${attribution})` : ""}`;
+  if (provider === "template") return "Generated card, no third-party licence";
+  return `AI-generated for this article (${provider}), no third-party licence`;
+}
+
 export class ImageAgent extends Agent {
   type = "image";
 
@@ -136,7 +147,7 @@ export class ImageAgent extends Agent {
         fallbacks++;
       }
       out.push(row);
-      ctx.data("image", { slot: row.slot, url: row.url, alt: row.alt, anchor: row.anchor, provider: row.provider });
+      ctx.data("image", { slot: row.slot, url: row.url, alt: row.alt, anchor: row.anchor, provider: row.provider, license: licenseFor(row.provider, (row as any).attribution) });
     }
 
     // The images are their own reviewable thing (§19.4.7) — approved, regenerated or rejected
@@ -477,7 +488,7 @@ async function fileForReview(tenantId: string, article: LoadedArticle, images: I
       body: images.map((i) => `${i.slot}${i.anchor ? ` (${i.anchor})` : ""}: ${i.alt}`).join("\n"),
       blueprint: { parent_article_id: article.id },
       meta: {
-        images: images.map((i) => ({ slot: i.slot, url: i.url, alt: i.alt, anchor: i.anchor, provider: i.provider, kind: i.kind, note: i.note, width: i.width, height: i.height })),
+        images: images.map((i) => ({ slot: i.slot, url: i.url, alt: i.alt, anchor: i.anchor, provider: i.provider, license: licenseFor(i.provider, (i as any).attribution), kind: i.kind, note: i.note, width: i.width, height: i.height })),
       },
     })
     .select("id")
@@ -509,7 +520,7 @@ async function updateReview(tenantId: string, article: LoadedArticle, redone: Im
   const existing: any[] = Array.isArray(meta.images) ? meta.images : [];
   const bySlot = new Map(existing.map((i: any) => [String(i.slot), i]));
   for (const r of redone) {
-    bySlot.set(r.slot, { slot: r.slot, url: r.url, alt: r.alt, anchor: r.anchor, provider: r.provider, kind: r.kind, note: r.note, width: r.width, height: r.height });
+    bySlot.set(r.slot, { slot: r.slot, url: r.url, alt: r.alt, anchor: r.anchor, provider: r.provider, license: licenseFor(r.provider, (r as any).attribution), kind: r.kind, note: r.note, width: r.width, height: r.height });
   }
   const images = [...bySlot.values()];
   const { error } = await supabase
