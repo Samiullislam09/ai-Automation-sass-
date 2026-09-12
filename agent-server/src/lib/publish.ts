@@ -135,21 +135,42 @@ async function uploadToMediaLibrary(siteUrl: string, auth: string, images: Publi
 
 /** Puts the hero above the first paragraph and each inline picture directly under the heading
  *  it was made for. An image whose heading is not in the HTML is left out rather than dropped
- *  somewhere arbitrary — a picture in the wrong place is worse than no picture (§19.4.3). */
+ *  somewhere arbitrary — a picture in the wrong place is worse than no picture (§19.4.3).
+ *
+ *  agents/image.ts now embeds each picture into the article's OWN body as it is made (real
+ *  markdown `![alt](url)`, using our storage URL), so by the time a customer's post reaches
+ *  this function the HTML already has an `<img>` for that URL almost every time —
+ *  markdownToHtml above turns that markdown into the same figure markup this function used to
+ *  insert from scratch. Inserting a second, fresh figure here would duplicate the picture. So
+ *  this function's real job now is usually a SWAP: replace our storage URL with the URL the
+ *  image now has in the customer's own WordPress media library, in place. The from-scratch
+ *  insert below only fires as a fallback, for an article written before this embedding existed
+ *  (its body never had the image in it at all) — the exact case this function was originally
+ *  built for, kept rather than removed. */
 export function withImages(html: string, images: UploadedImage[]): string {
   const figure = (i: UploadedImage) =>
     `<figure class="wp-block-image size-large"><img src="${escapeAttr(i.wpUrl)}" alt="${escapeAttr(i.alt ?? "")}" loading="lazy"/></figure>`;
 
   let out = html;
   for (const image of images) {
+    // Our own storage URL, as markdownToHtml would have rendered it straight from the body's
+    // own embedded markdown — src only, so this matches regardless of alt text or attribute order.
+    const ourSrc = new RegExp(`(<img src="${escapeRegExp(escapeAttr(image.url))}")`, "i");
+    if (ourSrc.test(out)) {
+      out = out.replace(ourSrc, `<img src="${escapeAttr(image.wpUrl)}"`);
+      continue;
+    }
+    // Fallback: this image was never embedded into the body (an older article, or a caller that
+    // skipped agents/image.ts's own embedding step). Insert it the old way.
     if (!image.anchor) continue;
-    // Match the heading WordPress will render, whatever level markdownToHtml gave it.
     const heading = new RegExp(`(<h[23][^>]*>\\s*${escapeRegExp(image.anchor.trim())}\\s*</h[23]>)`, "i");
     if (heading.test(out)) out = out.replace(heading, `$1\n${figure(image)}`);
   }
 
+  // Same fallback reasoning for the hero: only prepend a fresh one if the swap above found
+  // nothing to swap (checked by absence, since the hero has no anchor to key a heading match on).
   const hero = images.find((i) => i.slot === "hero");
-  if (hero) out = `${figure(hero)}\n${out}`;
+  if (hero && !out.includes(escapeAttr(hero.wpUrl))) out = `${figure(hero)}\n${out}`;
   return out;
 }
 
@@ -241,6 +262,22 @@ export function markdownToHtml(md: string): string {
     const line = raw.trimEnd();
 
     if (!line.trim()) { flushAll(); continue; }
+
+    // Mr. Image's own embed markers (agents/image.ts's embedImagesInBody) — pass through
+    // silently rather than falling into the paragraph branch below and printing a literal
+    // "<!-- image:hero -->" line into the post. The image line between them is handled by the
+    // next branch.
+    if (/^<!--\s*\/?image:[\w-]+\s*-->\s*$/.test(line)) { flushAll(); continue; }
+
+    // A line that is ONLY an image — agents/media/embed.ts always emits one on its own line,
+    // never inline with other text, so a whole-line match is enough and safer than a general
+    // inline image rule would be (no risk of matching `![` inside a code span or similar).
+    const image = /^!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)\s*$/.exec(line);
+    if (image) {
+      flushAll();
+      out.push(`<figure class="wp-block-image size-large"><img src="${escapeAttr(image[2]!)}" alt="${escapeAttr(image[1]!)}" loading="lazy"/></figure>`);
+      continue;
+    }
 
     const heading = /^(#{1,6})\s+(.*)$/.exec(line);
     if (heading) {

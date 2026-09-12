@@ -1,7 +1,7 @@
 import type { Job } from "pg-boss";
 import { Agent, type AgentContext, type AgentJobData } from "./base.js";
 import type { WriterContext } from "../lib/writer.js";
-import { writeArticlePipeline, nimComplete } from "../lib/writerPipeline.js";
+import { writeArticlePipeline, reviseArticle, auditHumanization, nimComplete, type HumanizeAudit } from "../lib/writerPipeline.js";
 import { researchTopic } from "../lib/research/gptResearcher.js";
 import { gateArticle, summarizeGate } from "../lib/qualityGate.js";
 import { supabase } from "../supabase.js";
@@ -131,7 +131,7 @@ export class WriterAgent extends Agent {
       // researcher) means this array is simply empty, and the tabs say so honestly.
       onResearch: (result) => ctx.data("research", { used: !!result, sources: result?.sources ?? [] }),
     });
-    const body = pipeline.body;
+    let body = pipeline.body;
     const title = pipeline.title;
     // The finished article, for the live "Output Preview" tab — fires here, once polish/meta
     // are both done, never before: an in-progress assembly of raw sections is not "the output".
@@ -141,8 +141,75 @@ export class WriterAgent extends Agent {
     // and the writer is told to answer it in the first 100 words. metaTitle/metaDescription
     // now come from the pipeline's own meta step — the checks in qualityGate.ts that scored
     // them have existed since Phase 2 planning began and had nothing to score until today.
-    const gate = gateArticle(body, { primaryKeyword: topic.trim(), metaTitle: pipeline.meta.metaTitle, metaDescription: pipeline.meta.metaDescription });
+    let gate = gateArticle(body, { primaryKeyword: topic.trim(), metaTitle: pipeline.meta.metaTitle, metaDescription: pipeline.meta.metaDescription });
     console.log(`[writer] "${title}" — ${summarizeGate(gate)}`);
+
+    // Hard-follow retry (documnet/Article_Writing_Rules.md Part 3): a gate failure used to just
+    // mark the row 'failed' and stop — nothing ever asked the model to fix what the gate found.
+    // The exact block-level failures (never warnings — those are a human's glance, not a retry)
+    // go back to the model for a targeted fix, then the draft is re-gated. Capped at
+    // MAX_REVISE_ATTEMPTS: Part 2 section 16 found diminishing returns past two passes, and an
+    // uncapped loop against an LLM call has no guaranteed exit condition.
+    const MAX_REVISE_ATTEMPTS = 2;
+    let reviseAttempts = 0;
+    while (!gate.passed && reviseAttempts < MAX_REVISE_ATTEMPTS) {
+      reviseAttempts++;
+      ctx.onProgress({ label: `Fixing ${gate.reasons.length} issue(s) the quality gate found (attempt ${reviseAttempts}/${MAX_REVISE_ATTEMPTS})` });
+      try {
+        body = await reviseArticle(title, topic.trim(), body, gate.reasons, nimComplete);
+      } catch (e: any) {
+        // A failed revise call must not lose the last-known-good draft — keep it and stop
+        // retrying rather than throw the whole job away over one bad NVIDIA call.
+        console.error(`[writer] revise attempt ${reviseAttempts} failed, keeping the previous draft:`, e?.message);
+        break;
+      }
+      gate = gateArticle(body, { primaryKeyword: topic.trim(), metaTitle: pipeline.meta.metaTitle, metaDescription: pipeline.meta.metaDescription });
+      console.log(`[writer] "${title}" revise ${reviseAttempts}/${MAX_REVISE_ATTEMPTS} — ${summarizeGate(gate)}`);
+    }
+    if (reviseAttempts > 0) ctx.data("draft", { title, body });
+
+    // Humanization audit (documnet/Article_Writing_Rules.md Part 2, sections 14-18) — the
+    // judgment-needed half qualityGate.ts cannot check by regex. Only runs on a draft that
+    // already cleared the mechanical gate: auditing a draft that is already headed to
+    // needs_attention/failed spends an NVIDIA call on a subjective opinion nobody asked for yet.
+    // Advisory only (see auditHumanization's own comment for why it never sets gate.passed):
+    // one bounded fix attempt, and the mechanical gate re-runs afterward so a humanize-motivated
+    // rewrite can never silently reintroduce an em dash or shrink a snippet paragraph.
+    let humanize: HumanizeAudit | null = null;
+    let humanizeFixed = false;
+    if (gate.passed) {
+      try {
+        humanize = await auditHumanization(body, topic.trim(), nimComplete);
+      } catch (e: any) {
+        console.error(`[writer] humanization audit failed to run, publishing without it:`, e?.message);
+      }
+      if (humanize && !humanize.passed && humanize.issues.length) {
+        ctx.onProgress({ label: `Fixing ${humanize.issues.length} humanization issue(s) found by the audit` });
+        try {
+          const fixedBody = await reviseArticle(
+            title,
+            topic.trim(),
+            body,
+            humanize.issues.map((i) => `${i.rule}: "${i.quote}" — ${i.fix}`),
+            nimComplete
+          );
+          // The fix must not cost the draft its mechanical pass — a humanize-motivated rewrite
+          // that reintroduces an em dash or drops a snippet paragraph out of range is reverted,
+          // not adopted, and the pre-fix body (already gate.passed) ships instead.
+          const gateAfterHumanize = gateArticle(fixedBody, { primaryKeyword: topic.trim(), metaTitle: pipeline.meta.metaTitle, metaDescription: pipeline.meta.metaDescription });
+          if (gateAfterHumanize.passed) {
+            body = fixedBody;
+            humanizeFixed = true;
+            ctx.data("draft", { title, body });
+            console.log(`[writer] "${title}" humanize-fix applied and still clears the mechanical gate`);
+          } else {
+            console.error(`[writer] humanize-fix broke the mechanical gate (${gateAfterHumanize.reasons.join("; ")}) — keeping the pre-fix draft`);
+          }
+        } catch (e: any) {
+          console.error(`[writer] humanize-fix attempt failed, keeping the pre-fix draft:`, e?.message);
+        }
+      }
+    }
 
     ctx.data("score", { quality: gate.score, passed: gate.passed, words: gate.wordCount, sections: gate.sections });
     // The real links the article actually contains — for the live "References" tab. Same
@@ -154,6 +221,14 @@ export class WriterAgent extends Agent {
       wordCount: gate.wordCount,
       sections: gate.sections,
       links: gate.links,
+      // How many targeted-fix passes it took to (try to) clear the gate, 0 when it passed on
+      // the first draft. Visible rather than silent, so "why did this take longer" and "did the
+      // retry loop even do anything" are both answerable from the row, not just the logs.
+      reviseAttempts,
+      // The advisory humanization pass (Part 2 of the writing rules doc) — null when the
+      // mechanical gate never passed (audit skipped), otherwise the model's own findings and
+      // whether the one bounded fix attempt actually landed. Never affects `status` below.
+      humanizeAudit: humanize ? { passed: humanize.passed, issues: humanize.issues, fixed: humanizeFixed } : null,
       // Full v2 gate (score, checks[], warnings[]) lives here; describeJob reads
       // detail.qualityGate.{passed,reasons,wordCount,sections,links} exactly as before.
       qualityGate: gate,

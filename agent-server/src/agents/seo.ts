@@ -1,8 +1,14 @@
 import type { Job } from "pg-boss";
 import { Agent, type AgentContext, type AgentJobData } from "./base.js";
 import { runSeoChecks, summarizeSeo, SEO_PASS_SCORE, type SeoResult, type CrawledPage } from "../lib/seoChecks.js";
+import { reviseArticle, nimComplete, type Completer } from "../lib/writerPipeline.js";
 import { loadActiveProfile, normalizeProfile, type SiteProfile } from "../lib/siteProfile.js";
 import { supabase } from "../supabase.js";
+
+/** Plan §5.5 / §17.2: "re-runs the writer at most twice". Until this file's own rewrite loop
+ *  existed, that line described an intention, not a behaviour — see the long comment above
+ *  SeoAgent for the exact history (found 2026-08-31, still true as of this comment). */
+const MAX_SEO_REVISE_ATTEMPTS = 2;
 
 /** Mr. SEO — the draft's last measured opinion before anyone is asked to approve it.
  *
@@ -21,13 +27,25 @@ import { supabase } from "../supabase.js";
  *       happening rather than a spinner (§24);
  *    5. returns `{score, passed, issues}` — exactly the manifest's output shape.
  *
- *  WHAT IT DELIBERATELY DOES NOT DO: it does not send the draft back to the writer. A failing
- *  score means `passed:false` plus the issues, and the ORCHESTRATOR decides what happens next —
- *  §5.5/§17.2 cap that at two writer loops, and a cap only works if one place counts. An agent
- *  that re-queued its own upstream could loop forever and bill for every turn.
+ *  THE REWRITE LOOP (built 2026-09-12 — until now this section described an intention, not a
+ *  behaviour; see the same-dated note in documnet/Article_Writing_Rules.md Part 3 for why a
+ *  gate with no way to ask for a fix is not actually an enforcement mechanism):
+ *    6. IF the checks failed on at least one block-level ("blockers"), this agent calls
+ *       Mr. Writer's own `reviseArticle` (lib/writerPipeline.ts — the exact function
+ *       qualityGate.ts's retry loop uses) with those blocker sentences, capped at
+ *       MAX_SEO_REVISE_ATTEMPTS (2, matching plan §5.5/§17.2's own number), re-running the SEO
+ *       checks after each attempt;
+ *    7. the FINAL result (after however many rewrite attempts) is what gets returned, saved to
+ *       `content_items`, and reported — `sendBackToWriter` now means "still failing after the
+ *       loop ran out", not "nobody tried". The loop lives here, in this one agent, rather than
+ *       as a job re-enqueue through the orchestrator: it never left this process, so a cap of 2
+ *       is trivially real (a local `while`, not a job counter that could be bypassed by two
+ *       different callers), and there is no queue-hop latency between "SEO found a problem" and
+ *       "the writer is already fixing it".
  *
- *  It also never publishes and never edits the draft. It measures, and it says what it
- *  measured. Mr. Publish has its own pre-flight (§7.5) and does not trust this one blindly.
+ *  It still never publishes. It measures, tries a bounded self-fix when the measurement fails,
+ *  and reports the outcome either way. Mr. Publish has its own pre-flight (§7.5) and does not
+ *  trust this one blindly.
  */
 /** The buckets the live SEO screen draws one bar each for. `lib/seoChecks.ts` has no category
  *  field on its checks — only comment bands grouping them — so the grouping lives here, keyed on
@@ -45,6 +63,14 @@ const SEO_CATEGORIES: { label: string; match: RegExp }[] = [
 
 export class SeoAgent extends Agent {
   type = "seo";
+
+  // Injectable the same way writerPipeline.ts's own steps take a `Completer` — defaults to the
+  // real NVIDIA call in production, and lets seo.test.ts's "no network, no database" contract
+  // (this file's own header comment) hold even for the rewrite-loop tests, by passing a fake
+  // one instead of hitting a real 20-30s API call on every test run.
+  constructor(private reviser: Completer = nimComplete) {
+    super();
+  }
 
   async run(job: Job<AgentJobData>, ctx: AgentContext) {
     const { tenantId } = job.data;
@@ -64,9 +90,10 @@ export class SeoAgent extends Agent {
 
     const site = await loadSiteContext(tenantId, d);
 
-    const result: SeoResult = await runSeoChecks(
+    let body = draft.body;
+    let result: SeoResult = await runSeoChecks(
       {
-        body: draft.body,
+        body,
         title: draft.title,
         metaTitle: draft.metaTitle,
         metaDescription: draft.metaDescription,
@@ -75,9 +102,49 @@ export class SeoAgent extends Agent {
       },
       { keywords, profile: site.profile, pages: site.pages, siteUrl: site.siteUrl },
     );
+    console.log(`[seo] "${draft.title ?? "(untitled)"}" first pass — ${summarizeSeo(result)}`);
+
+    // The rewrite loop — see the class comment above for why it lives here rather than as an
+    // orchestrator-level job re-enqueue. Only block-level failures are worth a rewrite attempt
+    // (the same "warnings are a human's glance, not a retry" rule qualityGate.ts's loop uses);
+    // a draft with only warnings is already `passed` and never enters this loop at all.
+    let seoReviseAttempts = 0;
+    while (!result.passed && result.blockers.length && seoReviseAttempts < MAX_SEO_REVISE_ATTEMPTS) {
+      seoReviseAttempts++;
+      ctx.onProgress({
+        phase: "revising",
+        label: `Sending ${result.blockers.length} SEO issue(s) back to the writer (attempt ${seoReviseAttempts}/${MAX_SEO_REVISE_ATTEMPTS})…`,
+      });
+      ctx.progress(0.5, `Fixing ${result.blockers.length} SEO issue(s)…`);
+
+      try {
+        body = await reviseArticle(draft.title ?? keywords[0] ?? "this article", keywords[0] ?? draft.title ?? "the topic", body, result.blockers, this.reviser);
+      } catch (e: any) {
+        // Same rule as qualityGate.ts's loop: a failed rewrite call keeps the last-known-good
+        // body and stops trying, rather than losing the draft or throwing the whole SEO check
+        // away over one bad NVIDIA call.
+        console.error(`[seo] revise attempt ${seoReviseAttempts} failed, keeping the previous draft:`, e?.message);
+        break;
+      }
+
+      result = await runSeoChecks(
+        { body, title: draft.title, metaTitle: draft.metaTitle, metaDescription: draft.metaDescription, slug: draft.slug, jsonLd: draft.jsonLd },
+        { keywords, profile: site.profile, pages: site.pages, siteUrl: site.siteUrl },
+      );
+      console.log(`[seo] "${draft.title ?? "(untitled)"}" revise ${seoReviseAttempts}/${MAX_SEO_REVISE_ATTEMPTS} — ${summarizeSeo(result)}`);
+    }
+
+    // The rewritten body has to actually reach the reader: content_items.body is what Mr.
+    // Publish reads, and a chat/queue caller reads it straight off this job's own return value
+    // (below). Saving it here, not only in `meta.seo`, is what makes a passed-after-revise
+    // draft anything more than a report nobody applied.
+    if (seoReviseAttempts > 0 && draft.contentItemId) {
+      const { error } = await supabase.from("content_items").update({ body }).eq("id", draft.contentItemId).eq("tenant_id", tenantId);
+      if (error) console.error("[seo] revised body could not be saved to content_items:", error.message);
+    }
 
     ctx.progress(0.9, `SEO ${result.score}/100`);
-    console.log(`[seo] "${draft.title ?? "(untitled)"}" — ${summarizeSeo(result)}`);
+    console.log(`[seo] "${draft.title ?? "(untitled)"}" final — ${summarizeSeo(result)}`);
 
     // ── what the workspace renders ────────────────────────────────────────────────────────
     // The score first (it is the headline the Approvals card shows), then one event per issue
@@ -119,7 +186,7 @@ export class SeoAgent extends Agent {
     }
     for (const issue of result.issues) ctx.data("issue", issue);
 
-    if (draft.contentItemId) await saveToContentItem(tenantId, draft.contentItemId, result);
+    if (draft.contentItemId) await saveToContentItem(tenantId, draft.contentItemId, result, seoReviseAttempts);
 
     ctx.progress(1, result.passed ? `SEO ${result.score}/100 — clear` : `SEO ${result.score}/100 — ${result.issues.length} issue(s) to fix`);
 
@@ -136,8 +203,15 @@ export class SeoAgent extends Agent {
       wordCount: result.wordCount,
       contentItemId: draft.contentItemId,
       summary: summarizeSeo(result),
-      /** The decision, not the loop: whoever owns the plan re-runs the writer at most twice
-       *  (plan §5.5). This agent only ever reports. */
+      // The revised body, when this run's own loop changed it — a chat/queue caller with no
+      // content_items row (loadDraft's inline-body path) has nowhere else to get it back from.
+      body: seoReviseAttempts > 0 ? body : undefined,
+      // How many of MAX_SEO_REVISE_ATTEMPTS actually ran, 0 when the first pass already passed
+      // or nothing failed at block level. Visible rather than silent, same reasoning as
+      // agents/writer.ts's own `reviseAttempts` field.
+      seoReviseAttempts,
+      /** True now means "still failing after the rewrite loop ran its course", not "nobody
+       *  tried" — see the class comment's REWRITE LOOP section for what changed 2026-09-12. */
       sendBackToWriter: !result.passed,
     };
   }
@@ -282,7 +356,7 @@ function normalizePages(rows: unknown[]): CrawledPage[] {
 
 /** The score belongs on the row the Approvals card reads, so "SEO 82/100" survives the job
  *  log rolling over. Best-effort: a failed write must not fail a check that already ran. */
-async function saveToContentItem(tenantId: string, itemId: string, result: SeoResult): Promise<void> {
+async function saveToContentItem(tenantId: string, itemId: string, result: SeoResult, seoReviseAttempts = 0): Promise<void> {
   try {
     const { data: row } = await supabase.from("content_items").select("meta").eq("id", itemId).eq("tenant_id", tenantId).maybeSingle();
     const meta = isRecord(row?.meta) ? (row!.meta as Record<string, unknown>) : {};
@@ -301,6 +375,10 @@ async function saveToContentItem(tenantId: string, itemId: string, result: SeoRe
             checks: result.checks,
             serpCompared: result.serpCompared,
             checkedAt: new Date().toISOString(),
+            // How many rewrite attempts it took to reach this result, 0 when the first pass
+            // already cleared or nothing failed at block level. Same visibility rule as
+            // agents/writer.ts's own reviseAttempts field on the writer's own gate.
+            seoReviseAttempts,
           },
           seoScore: result.score,
           seoPassed: result.passed,

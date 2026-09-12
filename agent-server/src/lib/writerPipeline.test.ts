@@ -12,7 +12,7 @@ process.env.DATABASE_URL ||= "postgres://unit-test/none";
 process.env.SUPABASE_URL ||= "http://unit-test.invalid";
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= "unit-test";
 
-const { buildOutline, writeSection, polishArticle, writeMeta, writeArticlePipeline } = await import("./writerPipeline.js");
+const { buildOutline, writeSection, polishArticle, writeMeta, writeArticlePipeline, reviseArticle, auditHumanization } = await import("./writerPipeline.js");
 
 const TOPIC = "emergency plumber in Leeds";
 const OUTLINE = {
@@ -180,6 +180,47 @@ test("with no proof or trust page on file, polishArticle's prompt has no E-E-A-T
   const { fn, seen } = fakeComplete({ "writer.polish": () => `# ${OUTLINE.title}\n\nIntro.` });
   await polishArticle(OUTLINE, TOPIC, sections, undefined, fn);
   assert.doesNotMatch(seen[0].prompt, /does not already link to real evidence/i);
+});
+
+test("a draft with no table, list, or Q&A block gets all three forced-structure instructions", async () => {
+  const sections = OUTLINE.sections.map((s) => ({ h2: s.h2, text: `## ${s.h2}\n\nPlain prose, no table, no list, no questions.`, words: 40 }));
+  const { fn, seen } = fakeComplete({ "writer.polish": () => `# ${OUTLINE.title}\n\nIntro.` });
+  await polishArticle(OUTLINE, TOPIC, sections, undefined, fn);
+  assert.match(seen[0].prompt, /Add ONE real markdown table/);
+  assert.match(seen[0].prompt, /Add a bullet or numbered list/);
+  assert.match(seen[0].prompt, /Quick answers about/);
+  assert.match(seen[0].prompt, /Never title this section "FAQ"/);
+});
+
+test("a draft that already has a table, list, and Q&A block asks for none of the three again", async () => {
+  const sections = [
+    {
+      h2: OUTLINE.sections[0].h2,
+      text: [
+        `## ${OUTLINE.sections[0].h2}`,
+        ``,
+        `| Time | Fee |`,
+        `| --- | --- |`,
+        `| Day | 60 |`,
+        `| Night | 90 |`,
+        ``,
+        `- step one`,
+        `- step two`,
+        `- step three`,
+        ``,
+        `- **Does A work?** Yes.`,
+        `- **Does B work?** No.`,
+        `- **Does C work?** Sometimes.`,
+      ].join("\n"),
+      words: 40,
+    },
+    ...OUTLINE.sections.slice(1).map((s) => ({ h2: s.h2, text: `## ${s.h2}\n\nBody for ${s.h2}.`, words: 40 })),
+  ];
+  const { fn, seen } = fakeComplete({ "writer.polish": () => `# ${OUTLINE.title}\n\nIntro.` });
+  await polishArticle(OUTLINE, TOPIC, sections, undefined, fn);
+  assert.doesNotMatch(seen[0].prompt, /Add ONE real markdown table/);
+  assert.doesNotMatch(seen[0].prompt, /Add a bullet or numbered list/);
+  assert.doesNotMatch(seen[0].prompt, /Quick answers about/);
 });
 
 /* ---------------------------------------------------------------- meta ------------------- */
@@ -351,4 +392,75 @@ test("a researcher that resolves null (skipped) does not stop the pipeline or th
   });
   assert.equal(reported, null);
   assert.equal(result.title, OUTLINE.title);
+});
+
+/* ---------------------------------------------------------------- revise ----------------- */
+
+test("reviseArticle lists every failure by number and asks for a full corrected article back", async () => {
+  const { fn, seen } = fakeComplete({
+    "writer.revise": () => `# ${OUTLINE.title}\n\nfixed body`,
+  });
+  const failures = ["2 em dash character(s) found — rewrite around them", "only 400 words (need 600+)"];
+  const result = await reviseArticle(OUTLINE.title, TOPIC, "# Old Title\n\nold body — with a dash", failures, fn);
+
+  assert.equal(result, `# ${OUTLINE.title}\n\nfixed body`);
+  const prompt = seen.find((s) => s.label === "writer.revise")!.prompt;
+  assert.match(prompt, /1\. 2 em dash character\(s\) found/);
+  assert.match(prompt, /2\. only 400 words \(need 600\+\)/);
+  assert.match(prompt, /old body — with a dash/);
+  assert.match(prompt, new RegExp(`starting with "# ${OUTLINE.title}"`));
+});
+
+/* ---------------------------------------------------------------- humanize audit ---------- */
+
+test("auditHumanization parses a clean JSON reply and reports passed with no issues", async () => {
+  const { fn } = fakeComplete({
+    "writer.humanize-audit": () => JSON.stringify({ passed: true, issues: [] }),
+  });
+  const result = await auditHumanization("# Some article\n\nReal prose.", TOPIC, fn);
+  assert.equal(result.passed, true);
+  assert.deepEqual(result.issues, []);
+});
+
+test("auditHumanization surfaces issues with rule, quote, and fix, and forces passed:false when any exist", async () => {
+  const { fn, seen } = fakeComplete({
+    "writer.humanize-audit": () =>
+      JSON.stringify({
+        passed: true, // deliberately inconsistent with a non-empty issues array
+        issues: [{ rule: "RLHF voice", quote: "That's a great question!", fix: "Delete the opener and start with the answer." }],
+      }),
+  });
+  const result = await auditHumanization("# Some article\n\nThat's a great question! Here is the answer.", TOPIC, fn);
+  // passed is derived from whether real issues survived filtering, not trusted verbatim from
+  // the model's own (here self-contradictory) "passed" field — a model that lists a real issue
+  // but also claims passed:true should not have that claim taken at face value.
+  assert.equal(result.passed, false);
+  assert.equal(result.issues.length, 1);
+  assert.equal(result.issues[0].rule, "RLHF voice");
+  assert.match(seen[0].prompt, /reads as genuinely human-written/);
+});
+
+test("auditHumanization drops any issue missing a rule or a fix, rather than passing through a half-shaped one", async () => {
+  const { fn } = fakeComplete({
+    "writer.humanize-audit": () =>
+      JSON.stringify({
+        passed: false,
+        issues: [
+          { rule: "", quote: "x", fix: "y" },
+          { rule: "Real rule", quote: "z", fix: "" },
+          { rule: "Complete", quote: "w", fix: "fix it" },
+        ],
+      }),
+  });
+  const result = await auditHumanization("body", TOPIC, fn);
+  assert.equal(result.issues.length, 1);
+  assert.equal(result.issues[0].rule, "Complete");
+});
+
+test("auditHumanization surviving a code-fenced reply, the same tolerance reviseArticle and buildOutline already rely on", async () => {
+  const { fn } = fakeComplete({
+    "writer.humanize-audit": () => "```json\n" + JSON.stringify({ passed: true, issues: [] }) + "\n```",
+  });
+  const result = await auditHumanization("body", TOPIC, fn);
+  assert.equal(result.passed, true);
 });

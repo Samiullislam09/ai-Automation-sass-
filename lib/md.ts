@@ -69,6 +69,18 @@ export function renderMarkdown(md: string): string {
 
     if (!line.trim()) { flushAll(); continue; }
 
+    // Mr. Image's own embed markers (agent-server/src/lib/media/embed.ts) — invisible in the
+    // reading view, same as they are meant to be. Checked against the ESCAPED line, since `src`
+    // is escaped above with everything else; the marker itself has no characters that change
+    // under escaping.
+    if (/^&lt;!--\s*\/?image:[\w-]+\s*--&gt;\s*$/.test(line)) { flushAll(); continue; }
+
+    // A line that is only an image. Checked against the escaped text the same way links are —
+    // this file escapes first, so the raw `![...](url)` syntax survives as literal text and is
+    // matched here before `inline()` ever sees it.
+    const image = line.match(/^!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)\s*$/);
+    if (image) { flushAll(); out.push(`<img src="${image[2]}" alt="${image[1]}" loading="lazy" style="max-width:100%;border-radius:8px" />`); continue; }
+
     const heading = line.match(/^(#{1,6})\s+(.*)$/);
     if (heading) {
       flushAll();

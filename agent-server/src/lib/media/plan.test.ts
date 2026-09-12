@@ -87,13 +87,14 @@ test("a brief that shares no word with its section is not describing it", () => 
 
 test("the prompt is assembled by us: the model contributes the subject and nothing else", () => {
   const p = buildPrompt("a gutter full of wet leaves", "photo", PROFILE);
-  assert.match(p, /^a gutter full of wet leaves, editorial photograph/);
+  assert.match(p, /^a gutter full of wet leaves, ultra-detailed professional editorial photograph/);
+  assert.match(p, /8k resolution, photorealistic/, "the quality-boosting clauses that replaced the old bare 'realistic'");
   assert.match(p, /context: A roofing contractor serving homeowners/, "the setting comes from Site Brain, not the model");
   assert.match(p, /set in Springfield, Illinois/);
   assert.match(p, /no text, no words, no letters, no numbers, no watermark, no logo, no signage, no people, no faces$/);
 
   const noProfile = buildPrompt("a gutter", "illustration", null);
-  assert.match(noProfile, /clean flat vector illustration/);
+  assert.match(noProfile, /high-detail modern vector illustration/);
   assert.doesNotMatch(noProfile, /context:/, "no Site Brain, no invented setting");
 });
 

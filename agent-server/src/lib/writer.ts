@@ -64,4 +64,8 @@ export const WRITING_RULES = [
   "Short paragraphs (2-4 sentences), no filler, no 'in today's fast-paced world' openings.",
   "End with one concrete next step the reader can take.",
   "1200-1800 words, starting with a single '# Title' line.",
+  // documnet/Article_Writing_Rules.md, sections 1 and 11 (2026-09-12) — checked by
+  // qualityGate.ts's "em-dash" (block) and "snippet-paragraphs" (warn) checks.
+  "Never use an em dash (—). Use a period, comma, or colon instead.",
+  "The paragraph immediately after each H2 answers that heading directly in 40-58 words, number or yes/no first — this is the length Google most often lifts into a featured snippet.",
 ];

@@ -61,6 +61,13 @@ const MIN_H2 = 3;
 const CLICHE_WARN_AT = 3;
 const CLICHE_BLOCK_AT = 6;
 
+/** documnet/Article_Writing_Rules.md sections 4 and 6, forced on every article (2026-09-12
+ *  instruction) rather than only when a topic looks comparative or FAQ-shaped. Exported so
+ *  writerPipeline.ts's polish step can check "is it already there?" against the exact same
+ *  floor this gate enforces, instead of a second, possibly-drifting copy of the number. */
+export const MIN_LIST_ITEMS = 3;
+export const MIN_QA_PAIRS = 3;
+
 const META_TITLE_RANGE: [number, number] = [30, 65];
 const META_DESC_RANGE: [number, number] = [80, 165];
 
@@ -108,6 +115,29 @@ export const AI_CLICHES: readonly string[] = [
   "buckle up",
   "without further ado",
   "hope this helps",
+  // Merged from documnet/Article_Writing_Rules.md section 11 (2026-09-12) — the same banned
+  // list this org's other properties gate on. Some of these (overall, additionally) are
+  // ordinary words in isolation; CLICHE_BLOCK_AT (6) is what keeps one incidental use from
+  // failing an otherwise-good draft, the same safety margin the original list already relied on.
+  "nestled",
+  "boasts",
+  "moreover",
+  "furthermore",
+  "it's worth noting",
+  "it is worth noting",
+  "hidden gem",
+  "picturesque",
+  "when it comes to",
+  "rest assured",
+  "overall,",
+  "ultimately,",
+  "that said,",
+  "additionally,",
+  "in addition,",
+  "as a result,",
+  "needless to say",
+  "keep in mind",
+  "as mentioned earlier",
 ];
 
 /** Text that should never survive into a blog post: unfilled template slots, the model
@@ -167,6 +197,82 @@ function sentences(text: string): string[] {
     .split(/(?<=[.!?])\s+(?=[A-Z0-9"'(])/)
     .map((s) => s.trim())
     .filter((s) => words(s).length >= 2);
+}
+
+const SNIPPET_MIN_WORDS = 40;
+const SNIPPET_MAX_WORDS = 58;
+
+/** A real markdown table: a header row, then a separator row of dashes/colons — the same shape
+ *  every markdown renderer (and the CMS this feeds) requires to actually render as a table
+ *  rather than as literal pipe characters in a paragraph. */
+export function hasMarkdownTable(markdown: string): boolean {
+  const lines = markdown.replace(/\r/g, "").split("\n");
+  for (let i = 0; i < lines.length - 1; i++) {
+    const header = lines[i].trim();
+    const sep = lines[i + 1].trim();
+    if (/^\|.*\|$/.test(header) && /^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?$/.test(sep)) return true;
+  }
+  return false;
+}
+
+/** 3+ consecutive-ish bullet ("-"/"*") or numbered ("1.") list items — documnet/Article_Writing_
+ *  Rules.md section 4: a genuine list, not a single stray "-" inside a sentence. Consecutive is
+ *  not required line-for-line (a short note between items is still one list), only that at least
+ *  3 list-item lines exist somewhere in the body. */
+export function markdownListItemCount(markdown: string): number {
+  const lines = markdown.replace(/\r/g, "").split("\n");
+  return lines.filter((l) => /^\s*([-*]|\d+\.)\s+\S/.test(l)).length;
+}
+
+/** A Q&A / "quick answers" block, section 6's rule: short, direct question-and-answer pairs,
+ *  usually list items with the question bolded ("- **Does X?** Yes, because..."), sometimes a
+ *  "## Question?" sub-heading with a one-line answer. Either shape counts; 3+ is the same floor
+ *  section 6 sets for a real Q&A block rather than one stray rhetorical question in the prose. */
+export function questionAnswerPairCount(markdown: string): number {
+  const lines = markdown.replace(/\r/g, "").split("\n");
+  let count = 0;
+  for (const line of lines) {
+    const isListQA = /^\s*[-*]\s+.*\?.+\S/.test(line); // "- **Q?** A..." on one line
+    const isHeadingQ = /^#{2,4}\s+.*\?\s*$/.test(line); // "## Does X work?" as its own heading
+    if (isListQA || isHeadingQ) count++;
+  }
+  return count;
+}
+
+/** For every "## Heading" line, the plain-text word count of the paragraph immediately
+ *  following it (skipping blank lines, stopping at the next heading or end of doc). Returns one
+ *  human-readable issue string per heading whose answer paragraph falls outside the snippet
+ *  window, or is missing entirely (a heading with no paragraph right after it, e.g. followed
+ *  straight by a list or a sub-heading, cannot win a paragraph snippet and is flagged the same
+ *  way). Heading text itself is not counted as part of the paragraph. */
+function snippetParagraphIssues(markdown: string): string[] {
+  const lines = markdown.replace(/\r/g, "").split("\n");
+  const issues: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const h2 = lines[i].match(/^##\s+(\S.*)$/);
+    if (!h2) continue;
+
+    let j = i + 1;
+    while (j < lines.length && lines[j].trim() === "") j++;
+
+    if (j >= lines.length || /^#{1,6}\s/.test(lines[j]) || /^[-*]\s|^\d+\.\s/.test(lines[j])) {
+      issues.push(`"${h2[1].trim()}" has no direct-answer paragraph right after it`);
+      continue;
+    }
+
+    const paraLines: string[] = [];
+    while (j < lines.length && lines[j].trim() !== "" && !/^#{1,6}\s/.test(lines[j])) {
+      paraLines.push(lines[j]);
+      j++;
+    }
+    const wc = words(prose(paraLines.join(" "))).length;
+    if (wc < SNIPPET_MIN_WORDS || wc > SNIPPET_MAX_WORDS) {
+      issues.push(`"${h2[1].trim()}" — ${wc} words (want ${SNIPPET_MIN_WORDS}-${SNIPPET_MAX_WORDS})`);
+    }
+  }
+
+  return issues;
 }
 
 function stddev(nums: number[]): number {
@@ -330,6 +436,53 @@ export function gateArticle(body: string, opts: GateOptions = {}): QualityGate {
   const last = paras[paras.length - 1] ?? "";
   const hasCta = CTA_VERB.test(last);
   add("call-to-action", "warn", hasCta, hasCta ? "ends with a next step" : "last paragraph has no call to action");
+
+  // 13. Em dash — documnet/Article_Writing_Rules.md section 11: one of the most statistically
+  // over-represented characters in AI-generated English, and this org's own sibling sites
+  // (triptravelingguide.com's gate.mjs) refuse a draft outright over a single one. Block, not
+  // warn, to match that standard rather than a softer one for this pipeline alone.
+  const emDashCount = (bodyProse.match(/—/g) || []).length;
+  add("em-dash", "block", emDashCount === 0, emDashCount ? `${emDashCount} em dash character(s) found — rewrite around them` : "no em dashes");
+
+  // 14. Snippet-paragraph length — documnet/Article_Writing_Rules.md section 1: the paragraph
+  // immediately after each H2 should answer it directly in 40-58 words, the window Google most
+  // often lifts into a featured snippet. "warn" for now, not "block": writeSection's prompt
+  // (writerPipeline.ts) does not yet ask for this explicitly, so most existing drafts will miss
+  // it by construction, not by a real defect — promote to "block" once that prompt change has
+  // been live long enough to see it consistently hit in practice.
+  const snippetMisses = snippetParagraphIssues(text);
+  add(
+    "snippet-paragraphs",
+    "warn",
+    snippetMisses.length === 0,
+    snippetMisses.length ? `${snippetMisses.length} H2 answer paragraph(s) outside the 40-58 word snippet window: ${snippetMisses.slice(0, 3).join("; ")}` : "every H2's opening paragraph is in the 40-58 word snippet window"
+  );
+
+  // 15. A real table — documnet/Article_Writing_Rules.md section 4. Forced on every article per
+  // the owner's own instruction (2026-09-12: "ye sab artical pe chaye... hard coed karo force
+  // fully apply ho"), not only when a comparison is detected — detecting "is this topic
+  // comparative" reliably from text alone is not something a regex can do, and a required-but-
+  // sometimes-skippable rule is not a forced one.
+  const hasTable = hasMarkdownTable(text);
+  add("has-table", "block", hasTable, hasTable ? "contains a real markdown table" : "no markdown table found (a header row + a --- separator row)");
+
+  // 16. A real list — section 4. Same "forced on every article" reading as the table check.
+  const listItems = markdownListItemCount(text);
+  add("has-list", "block", listItems >= MIN_LIST_ITEMS, listItems >= MIN_LIST_ITEMS ? `${listItems} list item(s)` : `only ${listItems} list item(s) (need ${MIN_LIST_ITEMS}+)`);
+
+  // 17. A Q&A / quick-answers block — section 6. Forced the same way; see questionAnswerPairCount
+  // for what counts as one pair.
+  const qaPairs = questionAnswerPairCount(text);
+  add("has-qa-block", "block", qaPairs >= MIN_QA_PAIRS, qaPairs >= MIN_QA_PAIRS ? `${qaPairs} question/answer pair(s)` : `only ${qaPairs} question/answer pair(s) found (need ${MIN_QA_PAIRS}+, e.g. a "Quick answers" list)`);
+
+  // 18. The literal words "FAQ" / "Frequently Asked Questions" — section 6: banned in visible
+  // text unless real FAQPage schema is implemented alongside it (this pipeline's writeMeta only
+  // emits Article schema — see writerPipeline.ts — so the literal heading would be a mismatch
+  // signal here, not a benefit, until that changes). Checked against `text` itself, not
+  // `bodyProse`: prose() strips heading lines entirely (by design, for the sentence/figure
+  // checks above), but a literal "## FAQ" heading is exactly the case this rule exists to catch.
+  const faqTextHit = /frequently asked questions|\bfaqs?\b/i.test(text.replace(/^#{1,6}\s+/gm, ""));
+  add("no-literal-faq-text", "block", !faqTextHit, faqTextHit ? `contains the literal word "FAQ" / "Frequently Asked Questions" with no FAQPage schema behind it — title the section functionally instead (e.g. "Quick answers about X")` : "no literal FAQ heading text");
 
   /* ---- roll up ---- */
   const reasons = checks.filter((c) => !c.ok && c.severity === "block").map((c) => c.detail);

@@ -140,26 +140,53 @@ test("a good draft passes; the score is emitted once and every issue separately"
   assert.equal(progress[progress.length - 1].fraction, 1);
 });
 
-test("a bad draft fails, names the blockers, and asks for the writer — without re-queueing one", async () => {
+test("a bad draft that a fake writer cannot actually fix: two rewrite attempts, still fails, still reports it needs the writer", async () => {
   const { ctx, data } = fakeCtx();
-  const out: any = await new SeoAgent().run(job({ article: { body: body(false) }, keywords: [KW] }), ctx as any);
+  // A reviser that "tries" but returns the exact same broken draft every time — proves the loop
+  // really calls it (twice, MAX_SEO_REVISE_ATTEMPTS) and really re-checks after each call,
+  // rather than trusting the reviser's own say-so.
+  let reviseCalls = 0;
+  const stubbornReviser = async () => {
+    reviseCalls++;
+    return body(false);
+  };
+  const out: any = await new SeoAgent(stubbornReviser).run(job({ article: { body: body(false) }, keywords: [KW] }), ctx as any);
 
+  assert.equal(reviseCalls, 2, "should try exactly MAX_SEO_REVISE_ATTEMPTS times, no more, no less");
   assert.equal(out.passed, false, out.summary);
   assert.equal(out.sendBackToWriter, true);
+  assert.equal(out.seoReviseAttempts, 2);
   const blocking = out.issues.filter((i: any) => i.severity === "block");
   assert.ok(blocking.length >= 2, out.summary);
-  // Every blocker arrives with an instruction, because the next hop is a writer, not a human.
+  // Every blocker arrives with an instruction, because the next hop (in or out of this loop) is
+  // a writer, not a human reading raw check ids.
   for (const i of blocking) assert.ok(i.fix.length > 10, `${i.id} has no fix`);
-  // The agent reports; it does not restart the pipeline. Nothing but what the live screen
-  // reads is emitted — the overall score, its per-category breakdown, and the issues.
+  // Still nothing but the live-screen events — the loop's own console logging is not a `data()` call.
   assert.deepEqual([...new Set(data.map((d) => d.kind))].sort(), ["issue", "score", "score_category"]);
-  // Each bar is real: a 0-100 value over that bucket's OWN checks, with the count it came from.
   for (const c of data.filter((d) => d.kind === "score_category")) {
     const p = c.payload as any;
     assert.ok(typeof p.label === "string" && p.label.length > 0, "a bar with no name");
     assert.ok(p.value >= 0 && p.value <= 100, `${p.label} scored ${p.value}`);
     assert.ok(p.total > 0 && p.passed <= p.total, `${p.label}: ${p.passed}/${p.total}`);
   }
+});
+
+test("a bad draft that a fake writer CAN fix: one rewrite attempt, then passes, and the revised body is what's returned", async () => {
+  const { ctx } = fakeCtx();
+  // A reviser that actually does its job on the first try — proves the loop stops re-calling
+  // it once the redone draft clears runSeoChecks, rather than always spending both attempts.
+  let reviseCalls = 0;
+  const goodReviser = async () => {
+    reviseCalls++;
+    return body(true);
+  };
+  const out: any = await new SeoAgent(goodReviser).run(job({ article: { body: body(false) }, keywords: [KW] }), ctx as any);
+
+  assert.equal(reviseCalls, 1, "should stop after the first successful revise, not spend both attempts");
+  assert.equal(out.passed, true, out.summary);
+  assert.equal(out.sendBackToWriter, false);
+  assert.equal(out.seoReviseAttempts, 1);
+  assert.equal(out.body, body(true), "the fixed body should be handed back, not the original broken one");
 });
 
 test("the SERP comparison is absent and said to be absent when DataForSEO is unconfigured", async () => {

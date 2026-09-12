@@ -1,5 +1,6 @@
 import { nvidiaFetch } from "./nvidia.js";
 import type { WriterContext } from "./writer.js";
+import { hasMarkdownTable, markdownListItemCount, questionAnswerPairCount, MIN_LIST_ITEMS, MIN_QA_PAIRS } from "./qualityGate.js";
 
 /** Section-by-section writing — MASTER_PLAN §16.3 Upgrade E, and the self-audit's own words
  *  for why the old one-shot writer had to go: "ek shot me 1800 words hamesha flat hote hain".
@@ -212,7 +213,8 @@ export async function writeSection(
     // written about the right thing, thrown away for length alone. A floor plus an explicit
     // "do not stop early" reads as a requirement rather than a suggestion.
     `LENGTH: at least 300 words for this section — this is a hard minimum, not a target. Do not stop early; if you run short, go deeper on the reader's question with specifics rather than padding.`,
-    `Start with "## ${section.h2}" then the prose. Short paragraphs (2-4 sentences). No filler, no "in today's fast-paced world" openings. Use only facts present in the context above — never invent a statistic, price, award, client name or date.`,
+    `Start with "## ${section.h2}" then the prose. The very next paragraph after the heading must answer "${section.readerQuestion}" directly in its first sentence (the number, the yes/no, or the name first), in 40-58 words total — this is the length Google most often lifts into a featured snippet, so do not open with throat-clearing.`,
+    `Short paragraphs (2-4 sentences) for everything after that first one. No filler, no "in today's fast-paced world" openings. Never use an em dash (—); use a period, comma, or colon instead. Use only facts present in the context above — never invent a statistic, price, award, client name or date.`,
     `Output markdown only — no preamble, no explanation.`,
   ].filter(Boolean).join("\n\n");
 
@@ -246,8 +248,25 @@ export async function polishArticle(
   const trustLine = context?.trustPage ? `The site's own About/Contact page: ${context.trustPage.url}.` : "";
   const eeatFixLine =
     proofLine || trustLine
-      ? `6. If the draft does not already link to real evidence anywhere, add ONE natural sentence that does. ${proofLine} ${trustLine} Link whichever genuinely fits what the article already says — never force an awkward mention, and never link anything not listed here. Skip this if the draft already links one of them.`
+      ? `7. If the draft does not already link to real evidence anywhere, add ONE natural sentence that does. ${proofLine} ${trustLine} Link whichever genuinely fits what the article already says — never force an awkward mention, and never link anything not listed here. Skip this if the draft already links one of them.`
       : "";
+
+  // Forced-structure backstops (documnet/Article_Writing_Rules.md sections 4 and 6, owner
+  // instruction 2026-09-12: every article, not just comparative or FAQ-shaped ones) — same "is
+  // it already there?" pattern as eeatFixLine above, and for the same reason: this is the one
+  // point in the pipeline that sees the whole draft, so it is the only place that can check
+  // before asking for something rather than asking unconditionally and risking a duplicate.
+  const tableFixLine = hasMarkdownTable(draft)
+    ? ""
+    : `8. Add ONE real markdown table (a header row, then a --- separator row) summarizing numbers already stated in the draft above (prices, timeframes, options) — never invent a figure to fill a cell.`;
+  const listFixLine =
+    markdownListItemCount(draft) >= MIN_LIST_ITEMS
+      ? ""
+      : `9. Add a bullet or numbered list of at least ${MIN_LIST_ITEMS} items somewhere it fits naturally — steps, a short set of parallel facts, or options already discussed in the draft.`;
+  const qaFixLine =
+    questionAnswerPairCount(draft) >= MIN_QA_PAIRS
+      ? ""
+      : `10. Add a "Quick answers about ${topic}" section near the end: ${MIN_QA_PAIRS}-4 short list items, each "- **Question?** One-sentence answer," covering things not already answered by an H2 above. Never title this section "FAQ" or "Frequently Asked Questions" — that heading text is banned regardless of how the section is formatted.`;
 
   const prompt = [
     `Polish this article draft on "${topic}". Do not shorten it or remove any section — every H2 below must still be present, in the same order.`,
@@ -258,7 +277,11 @@ export async function polishArticle(
     `3. Remove repeated phrases and any AI-cliché wording (delve, tapestry, in today's fast-paced world, game-changer, unlock, unleash, and similar).`,
     `4. End with one concrete next step the reader can take.`,
     `5. Do NOT add facts that are not already in the draft or the context above.`,
+    `6. Replace every em dash (—) with a period, comma, or colon. Check that the paragraph right after each ## heading still answers it directly in 40-58 words after your edits; a rewrite that pushes it outside that range needs a further trim, not a new fact added to pad it back out.`,
     eeatFixLine,
+    tableFixLine,
+    listFixLine,
+    qaFixLine,
     ``,
     `DRAFT:`,
     draft,
@@ -268,6 +291,88 @@ export async function polishArticle(
 
   const text = await complete(prompt, { maxTokens: 4096, label: "writer.polish" });
   return text.trim();
+}
+
+/* ---------------------------------------------------------------- 3b · revise ------------ */
+
+/** The hard-follow step (documnet/Article_Writing_Rules.md Part 3): qualityGate.ts is a real
+ *  check, but until this function existed a gate failure just marked the row `status: 'failed'`
+ *  and stopped (agents/writer.ts) — nothing ever asked the model to fix what the gate found.
+ *  A prompt telling the model to "follow the rules" is a request; this is the enforcement.
+ *
+ *  Deliberately narrow: it is handed the EXACT block-level failures (never the warnings, which
+ *  are worth a human's glance but not worth spending a retry on) and told to fix only those,
+ *  leaving everything else in the draft untouched. A full regeneration would re-roll every rule
+ *  that was already passing along with the ones that were not — this targets just the failures,
+ *  the same "targeted rewrite, not full regeneration" rule Part 3 section 21 gives a reason for. */
+export async function reviseArticle(
+  title: string,
+  topic: string,
+  body: string,
+  failures: string[],
+  complete: Completer
+): Promise<string> {
+  const prompt = [
+    `This article on "${topic}" failed its pre-publish quality gate. Fix ONLY the specific problems listed below. Do not shorten it, do not remove or reorder any section, do not touch anything that was not flagged — every "##" heading must still be present, in the same order, and the word count must not drop.`,
+    `PROBLEMS TO FIX:`,
+    ...failures.map((f, i) => `${i + 1}. ${f}`),
+    ``,
+    `DRAFT:`,
+    body,
+    ``,
+    `Output the complete corrected article as markdown, starting with "# ${title}" — no preamble, no explanation, no note about what you changed.`,
+  ].join("\n\n");
+
+  const text = await complete(prompt, { maxTokens: 4096, label: "writer.revise" });
+  return text.trim();
+}
+
+/* ---------------------------------------------------------------- 3c · humanize audit ---- */
+
+export type HumanizeIssue = { rule: string; quote: string; fix: string };
+export type HumanizeAudit = { passed: boolean; issues: HumanizeIssue[] };
+
+/** The judgment-needed half of documnet/Article_Writing_Rules.md Part 2 (sections 14-18) and
+ *  the judgment items in Part 1 that qualityGate.ts cannot check by regex: RLHF-voice tells
+ *  (acknowledgment openers, unprompted on-the-other-hand balancing, hedged closers), whether a
+ *  first-hand-sounding experience detail is genuinely present rather than just present in form,
+ *  whether the article commits to a real verdict instead of hedging perpetually, and whether
+ *  sentence rhythm reads as genuinely varied rather than uniform.
+ *
+ *  This is a SEPARATE model call from the one that wrote the article (Part 3 section 21's own
+ *  reasoning: a model grading its own homework in the same context tends to rate it favourably),
+ *  given only the finished draft and this rubric, with no memory of having written it.
+ *
+ *  Deliberately NOT wired into qualityGate.ts's pass/fail: these are subjective judgment calls,
+ *  not measurable facts, and treating an LLM's own opinion about "does this read human" as a
+ *  hard publish-blocking gate would fail exactly the "never let one code path invent false
+ *  confidence" principle this whole file otherwise follows. It is advisory — see agents/writer.ts
+ *  for the one bounded fix attempt this feeds, same "try once, then accept the result and move
+ *  on" shape as the SEO rewrite loop in agents/seo.ts. */
+export async function auditHumanization(body: string, topic: string, complete: Completer): Promise<HumanizeAudit> {
+  const prompt = [
+    `You are a strict, independent editor reviewing a finished article on "${topic}" for whether it reads as genuinely human-written, not for factual accuracy or SEO structure (those are checked elsewhere).`,
+    `Check specifically for:`,
+    `1. RLHF/instruction-tuning voice: acknowledgment-style openers ("That's a great question", "Certainly!"), unprompted on-the-other-hand balancing where the article was not asked to weigh two sides, hedged closers ("I hope this helps", "let me know if you have questions"), or generic assistant-register phrasing anywhere in the body.`,
+    `2. Missing experience signal: does the article read as pure explanation with zero first-hand-sounding detail (a specific number, a concrete scenario, a "in practice, X happens" line), or does it have at least one such detail?`,
+    `3. Perpetual hedging: does the article ever actually commit to a direct answer or a real recommendation, or does every claim get hedged into vagueness ("results may vary", "it depends on many factors" with no factors named)?`,
+    `4. Uniform sentence rhythm: are most sentences roughly the same length with the same clause structure, rather than a genuine mix of short and long?`,
+    `5. Repeated identical opening patterns: do 3 or more sentences or list items in a row start with the exact same grammatical construction?`,
+    ``,
+    `Reply with ONLY JSON, no preamble: {"passed": true or false, "issues": [{"rule": "which of the 5 checks above", "quote": "the exact offending sentence or phrase from the article", "fix": "a one-sentence instruction for how to rewrite just that part"}]}`,
+    `"passed" is true only if you found nothing worth flagging under any of the 5 checks. An empty "issues" array must accompany passed:true.`,
+    ``,
+    `ARTICLE:`,
+    body,
+  ].join("\n\n");
+
+  const raw = await complete(prompt, { maxTokens: 1200, label: "writer.humanize-audit" });
+  const parsed = parseJsonReply<{ passed?: boolean; issues?: Partial<HumanizeIssue>[] }>(raw, "humanize-audit");
+  const issues = (Array.isArray(parsed.issues) ? parsed.issues : [])
+    .map((i) => ({ rule: String(i.rule ?? "").trim(), quote: String(i.quote ?? "").trim(), fix: String(i.fix ?? "").trim() }))
+    .filter((i) => i.rule && i.fix);
+
+  return { passed: parsed.passed !== false && issues.length === 0, issues };
 }
 
 /* ---------------------------------------------------------------- 4 · meta --------------- */

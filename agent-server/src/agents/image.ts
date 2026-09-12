@@ -6,6 +6,7 @@ import { planImages, buildPrompt, seedFor, type ImageSlot, type ArticleSection }
 import { generateImage, NoProviderAnswered } from "../lib/media/providers.js";
 import { toShape, templateCard, contentCard, type Shape } from "../lib/media/render.js";
 import { saveImage, generatedToday, type StoredImage } from "../lib/media/store.js";
+import { embedImagesInBody, type EmbeddableImage } from "../lib/media/embed.js";
 import { capFor } from "../config/caps.js";
 import { supabase } from "../supabase.js";
 
@@ -143,6 +144,17 @@ export class ImageAgent extends Agent {
     // rather than filing a second one next to it.
     const setId = onlySlot ? await updateReview(tenantId, article, out) : await fileForReview(tenantId, article, out);
 
+    // Into the article's own body, not just the review card (see embed.ts's own header for why
+    // this step exists). `out` is exactly the slots this run made — a redo of one slot embeds
+    // only that one, leaving every other already-embedded picture in the body untouched.
+    const embedded = await embedIntoArticle(tenantId, articleId, article.rawBody, out);
+    if (embedded) {
+      // Live workspace: the same "draft" event agents/writer.ts fires when its own body
+      // changes, so an open article view updates the instant the pictures land instead of only
+      // showing them after a manual refresh.
+      ctx.data("draft", { title: article.title, body: embedded.body });
+    }
+
     ctx.progress(1, `${out.length} image(s) ready`);
     return {
       made: true,
@@ -152,6 +164,7 @@ export class ImageAgent extends Agent {
       generated,
       fallbacks,
       budgetLeft: Number.isFinite(budget) ? budget : null,
+      embeddedIntoBody: !!embedded,
     };
   }
 
@@ -373,10 +386,14 @@ export class ImageAgent extends Agent {
 
 /* ---------------------------------------------------------------- the article ----------- */
 
-type LoadedArticle = { id: string; title: string; intro: string; sections: ArticleSection[]; wordCount: number };
+type LoadedArticle = { id: string; title: string; intro: string; sections: ArticleSection[]; wordCount: number; rawBody: string };
 
 /** The article as the image planner needs it: its title, its opening, and its sections split
- *  on the markdown headings the writer actually produced. */
+ *  on the markdown headings the writer actually produced. `rawBody` is kept alongside the split
+ *  view because embedImagesInBody() needs the real, unsplit markdown to insert into — the
+ *  planner's `intro`/`sections` shape is a read-only view built for gate-checking a brief, not a
+ *  document to reassemble and write back (that would risk losing whitespace or a stray line the
+ *  split/join round-trip does not preserve exactly). */
 async function loadArticle(tenantId: string, articleId: string): Promise<LoadedArticle | null> {
   const { data } = await supabase.from("content_items").select("id, title, body, meta").eq("id", articleId).eq("tenant_id", tenantId).maybeSingle();
   if (!data || !String(data.body ?? "").trim()) return null;
@@ -389,7 +406,36 @@ async function loadArticle(tenantId: string, articleId: string): Promise<LoadedA
     intro,
     sections,
     wordCount: Number(meta.wordCount) || body.split(/\s+/).filter(Boolean).length,
+    rawBody: body,
   };
+}
+
+/** Writes the now-generated pictures into the article's own body (see embed.ts's own header for
+ *  why this exists at all), and records the thumbnail URL alongside the fields Mr. Writer's own
+ *  meta already carries. Best-effort: a failed write here must not undo the pictures that were
+ *  already made and filed in `media` — the review card (fileForReview/updateReview) still has
+ *  them either way, this is additive convenience, not the only record of the images. */
+async function embedIntoArticle(tenantId: string, articleId: string, rawBody: string, images: ImageResultRow[]): Promise<{ body: string } | null> {
+  const embeddable: EmbeddableImage[] = images
+    .filter((i) => (i.slot === "hero" || i.slot.startsWith("inline") || i.slot === "thumb") && i.url)
+    .map((i) => ({ slot: i.slot, anchor: i.anchor, url: i.url, alt: i.alt }));
+  if (!embeddable.length) return null;
+
+  const { body, thumbnailUrl } = embedImagesInBody(rawBody, embeddable);
+  if (body === rawBody && !thumbnailUrl) return null;
+
+  const { data: row } = await supabase.from("content_items").select("meta").eq("id", articleId).eq("tenant_id", tenantId).maybeSingle();
+  const meta = (row?.meta as Record<string, unknown>) ?? {};
+  const { error } = await supabase
+    .from("content_items")
+    .update({ body, meta: thumbnailUrl ? { ...meta, thumbnailUrl } : meta })
+    .eq("id", articleId)
+    .eq("tenant_id", tenantId);
+  if (error) {
+    console.error("[image] pictures were made, but could not be embedded into the article body:", error.message);
+    return null;
+  }
+  return { body };
 }
 
 /** Markdown H2/H3 → sections. Everything before the first heading is the intro. Exported for

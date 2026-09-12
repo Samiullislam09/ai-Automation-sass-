@@ -170,9 +170,22 @@ export function describesSection(depicts: string, subject: string, section: Arti
 
 /* ---------------------------------------------------------------- the prompt ------------ */
 
+// Owner, 2026-09-12: the pictures this pipeline made looked "normal" — flat, generic AI-image
+// texture — and asked for "high quality deep detail... modern realistic image" instead. A
+// diffusion model's output quality is driven far more by how specific and technical the style
+// clause is than by the subject clause alone; a bare "realistic" reads as a request for the
+// model's own default, which is exactly the generic look being complained about. These phrases
+// name the actual photographic/rendering vocabulary a detailed, high-fidelity result responds
+// to, not just a stronger adjective.
 const STYLE_PHRASE: Record<"photo" | "illustration", string> = {
-  photo: "editorial photograph, realistic, natural light, shallow depth of field",
-  illustration: "clean flat vector illustration, simple shapes, generous whitespace",
+  photo:
+    "ultra-detailed professional editorial photograph, shot on a full-frame DSLR with an 85mm lens, " +
+    "sharp focus with fine texture detail, natural cinematic lighting, shallow depth of field, " +
+    "high dynamic range, realistic skin and material textures, 8k resolution, photorealistic, modern",
+  illustration:
+    "high-detail modern vector illustration, rich gradients and depth, clean confident linework, " +
+    "polished contemporary design-studio quality, subtle lighting and shadow for depth, crisp edges, " +
+    "professional editorial illustration, generous whitespace",
 };
 
 /** Never negotiable, and the reason is in each clause: no text (a diffusion model writes
@@ -234,7 +247,7 @@ function prompt(article: ArticleForImages, profile: SiteProfile | null, wantInli
     "- thumb and hero are about the WHOLE article, and must show two different things — not the same scene twice.",
     `- inline: exactly ${wantInline} entr${wantInline === 1 ? "y" : "ies"}, each for ONE of the sections above. "anchor" must be that section's heading, copied exactly.`,
     '- "depicts": what that section actually explains, in your own words, using the section\'s own vocabulary.',
-    '- "subject": the picture, as a scene. A camera could photograph it. No text, no logos, no people.',
+    '- "subject": the picture, as a fully staged scene, specific enough that two different people describing it would draw the same thing. Name the concrete objects, materials, setting and framing that section\'s own words actually describe — not a generic stand-in for the topic. Bad: "a home repair". Good: "a close-up of a cracked ceramic roof tile with a gloved hand lifting it to show the exposed felt underlay beneath, afternoon light raking across the roof surface". A camera could photograph exactly this. No text, no logos, no people.',
     '- "alt": one sentence describing the picture for someone who cannot see it.',
     "",
     'Reply with ONLY JSON: {"style":"photo","thumb":{"depicts":"","subject":"","alt":""},"hero":{"depicts":"","subject":"","alt":""},"inline":[{"anchor":"","depicts":"","subject":"","alt":""}]}',

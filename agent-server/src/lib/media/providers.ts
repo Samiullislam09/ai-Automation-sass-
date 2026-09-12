@@ -45,6 +45,11 @@ export type GenerateOptions = {
   /** What to search stock for, if it comes to that: the plan's `depicts`, which is in the
    *  article's own words, rather than the full prompt (which is full of negative terms). */
   stockQuery?: string;
+  /** Diffusion steps, 1-8 on both the Cloudflare and NVIDIA flux.1-schnell rungs. Owner,
+   *  2026-09-12: the default (4) looked "normal" / generic. Defaults to 8, the ceiling
+   *  cloudflare.ts's own request body already clamps to (`Math.min(8, ...)`) — this was already
+   *  a value the account accepts, just never asked for; not a new, unverified endpoint or model. */
+  steps?: number;
   fetchImpl?: typeof fetch;
 };
 
@@ -61,8 +66,11 @@ const NVIDIA_IMAGE_URL = "https://ai.api.nvidia.com/v1/genai/black-forest-labs/f
 const NVIDIA_TIMEOUT_MS = 120_000;
 const STOCK_TIMEOUT_MS = 15_000;
 
+const DEFAULT_STEPS = 8;
+
 export async function generateImage(prompt: string, seed: number, opts: GenerateOptions = {}): Promise<GeneratedImage> {
   const tried: string[] = [];
+  const steps = Math.min(8, Math.max(1, opts.steps ?? DEFAULT_STEPS));
 
   // ── 1 · Cloudflare ────────────────────────────────────────────────────────────────────
   const pool = cloudflarePool();
@@ -70,7 +78,7 @@ export async function generateImage(prompt: string, seed: number, opts: Generate
     tried.push("Cloudflare: no account configured");
   } else {
     try {
-      const r = await pool.image(prompt, seed, { fetchImpl: opts.fetchImpl });
+      const r = await pool.image(prompt, seed, { steps, fetchImpl: opts.fetchImpl });
       return { bytes: r.jpeg, provider: "cloudflare", account: r.account, neurons: r.neurons, attribution: null, ms: r.ms };
     } catch (e: any) {
       tried.push(e instanceof AllAccountsBusy ? `Cloudflare: ${e.message}` : `Cloudflare: ${e?.message ?? e}`);
@@ -90,6 +98,11 @@ export async function generateImage(prompt: string, seed: number, opts: Generate
         method: "POST",
         retries: 1,
         headers: { "Content-Type": "application/json", Accept: "application/json" },
+        // Left at 4 here, not bumped to `steps` like the Cloudflare rung above: that bump is
+        // safe because cloudflare.ts's own request body already clamped to 8, proving Workers
+        // AI's binding accepts it. NVIDIA's flux.1-schnell endpoint is a different API surface
+        // and its accepted range has not been checked live — raising it here would be a guess,
+        // not a verified change, and this rung is rarely hit anyway (only when allowSlow).
         body: JSON.stringify({ prompt: prompt.slice(0, 1000), seed: seed % 4_294_967_295, steps: 4 }),
         signal: AbortSignal.timeout(NVIDIA_TIMEOUT_MS),
       });
