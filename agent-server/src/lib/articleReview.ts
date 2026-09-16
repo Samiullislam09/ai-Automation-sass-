@@ -1,4 +1,4 @@
-import { gateArticle, BANNED_PHRASES, words, prose, paragraphs, sentences, FIGURE } from "./qualityGate.js";
+import { gateArticle, BANNED_PHRASES, MIN_QA_PAIRS, words, prose, paragraphs, sentences, FIGURE } from "./qualityGate.js";
 export { BANNED_PHRASES };
 import { reviseArticle, auditHumanization, type Completer, type HumanizeAudit } from "./writerPipeline.js";
 
@@ -23,9 +23,10 @@ import { reviseArticle, auditHumanization, type Completer, type HumanizeAudit } 
  *      judgment-needed rules (human voice, experience, verdict, unnamed claims). Its flagged
  *      lines are mapped back to their section and rewritten the same way, and the mechanical
  *      check always runs again after, because a rewrite for voice can break a word count.
- *   4. Bounded. REVIEW_MAX_ROUNDS rounds and REVIEW_MAX_AUDIT_FIXES voice fixes, then it stops
- *      and says it did not pass. The doc's own rule: stop and flag for a human, never publish a
- *      failing draft "close enough".
+ *   4. Bounded. REVIEW_MAX_ROUNDS rounds, mechanical and voice checked together every round
+ *      (2026-09-16 — voice used to wait behind mechanical passing, which could mean it never
+ *      ran at all), then it stops and says it did not pass. The doc's own rule: stop and flag
+ *      for a human, never publish a failing draft "close enough".
  *
  *  Every step reports through `onEvent`, so the live canvas can show each round, each failing
  *  rule, and each section being rewritten, as it actually happens.
@@ -36,7 +37,6 @@ import { reviseArticle, auditHumanization, type Completer, type HumanizeAudit } 
  *  skipped, not silently waived and not satisfied with a fake. */
 
 export const REVIEW_MAX_ROUNDS = 5;
-export const REVIEW_MAX_AUDIT_FIXES = 2;
 
 // Every number below is the doc's own, in one place, so calibrating against the real model is a
 // one-line change rather than a hunt.
@@ -53,7 +53,9 @@ const LIST_ITEM_MAX_WORDS = 8;
 const INTERNAL_LINKS_MIN = 3; // sections 7 and 12
 const INTERNAL_LINKS_MAX = 5;
 const EXTERNAL_LINKS_MIN = 2; // section 12
-const ARTICLE_MIN_WORDS = 700; // section 10
+const ARTICLE_MIN_WORDS = 1000; // section 10 (owner, 2026-09-16: "1000+ ho", up from 700 — the
+// same day MIN_SECTIONS went 4 → 5 in writerPipeline.ts so the outline's own floor clears this
+// without relying on any one section overshooting
 const MAX_SEMICOLONS = 1; // section 15, lever 8: "cut almost entirely"
 const SAME_OPENING_RUN = 3; // section 11: no more than two answers in a row open the same way
 
@@ -286,6 +288,51 @@ export function assembleArticle(split: SplitArticle): string {
   return [split.head, ...split.parts.map((p) => p.markdown)].filter((s) => s.trim()).join("\n\n");
 }
 
+/** Section 3, forced by code, not just asked for (owner, 2026-09-16: robotic drafts kept landing
+ *  as one giant wall-of-text paragraph even though the prompt already says "2-4 sentences" —
+ *  a re-prompt asking the same weak model to fix its own paragraphing was the old plan, and it
+ *  is exactly the kind of instruction this class of model does not reliably keep, live-tested
+ *  2026-09-14 (an 18-sentence single paragraph survived two full rewrite rounds).
+ *
+ *  This makes the rule true by code instead of by request: every prose paragraph in every part
+ *  gets cut to `maxSentences`-sentence chunks, deterministically, no model call involved. The
+ *  FIRST prose block of each section is left alone — that is the required single-paragraph
+ *  40-58 word snippet answer (section 1/13), and splitting it would break that rule instead of
+ *  fixing this one. Headings, tables, lists and the byline stamp are never touched, and the
+ *  Quick-answers block is skipped whole (its lines are answer-per-item, not prose paragraphs). */
+export function capLongParagraphs(body: string, maxSentences: number = MAX_PARAGRAPH_SENTENCES): string {
+  const split = splitArticle(body);
+  const parts = split.parts.map((part) => {
+    if (part.h2 !== null && isQuickAnswers(part.h2)) return part;
+    const blocks = part.markdown.split(/\n{2,}/);
+    let seenAnswerParagraph = false;
+    const out: string[] = [];
+    for (const block of blocks) {
+      const trimmed = block.trim();
+      if (!trimmed) continue;
+      if (HEADING_LINE.test(trimmed) || TABLE_LINE.test(trimmed) || LIST_LINE.test(trimmed) || STAMP_RE.test(trimmed)) {
+        out.push(block);
+        continue;
+      }
+      if (!seenAnswerParagraph) {
+        seenAnswerParagraph = true;
+        out.push(block);
+        continue;
+      }
+      const sents = sentences(block);
+      if (sents.length <= maxSentences) {
+        out.push(block);
+        continue;
+      }
+      for (let i = 0; i < sents.length; i += maxSentences) {
+        out.push(sents.slice(i, i + maxSentences).join(" "));
+      }
+    }
+    return { ...part, markdown: out.join("\n\n") };
+  });
+  return assembleArticle({ head: split.head, parts });
+}
+
 /** Section 12's "last updated" date and author attribution, written by code, never by the model:
  *  a date or a name a model makes up looks exactly as confident as a real one. Idempotent. */
 export function stampByline(body: string, date: Date, author: string | null): string {
@@ -464,6 +511,33 @@ function sectionChecks(split: SplitArticle): ReviewCheck[] {
   return out;
 }
 
+/** Which real section a structural add-on (table/list/limits-note) belongs in, so fixing it can
+ *  go through the ordinary targeted `rewriteSection` path — one part, one model call, everything
+ *  else in the article untouched — instead of the whole-article `reviseArticle` these three used
+ *  to fall back to. Live-tested 2026-09-14: routing "add a table" through a full-article revise
+ *  is exactly what made an already-added table vanish two rounds later, and dropped the article
+ *  below its own word floor in the same pass it was supposed to only be adding to. `rewriteSection`
+ *  already tells the model to "keep every fact, link, table and list already in this part that is
+ *  not itself flagged" — that guarantee only holds if the blast radius really is one part. */
+function candidateParts(split: SplitArticle): number[] {
+  return split.parts.map((_, i) => i).filter((i) => split.parts[i].h2 !== null && !isQuickAnswers(split.parts[i].h2 ?? ""));
+}
+function bestSectionForTable(split: SplitArticle): number {
+  const cands = candidateParts(split);
+  if (!cands.length) return 0;
+  return cands.reduce((best, i) => ((split.parts[i].markdown.match(FIGURE) || []).length > (split.parts[best].markdown.match(FIGURE) || []).length ? i : best), cands[0]);
+}
+function bestSectionForList(split: SplitArticle): number {
+  const cands = candidateParts(split);
+  if (!cands.length) return 0;
+  return cands.find((i) => LIST_HEADING.test(split.parts[i].h2 ?? "")) ?? cands[cands.length - 1];
+}
+function bestSectionForLimits(split: SplitArticle): number {
+  const cands = candidateParts(split);
+  if (!cands.length) return 0;
+  return cands.find((i) => FIGURE.test(split.parts[i].markdown)) ?? cands[0];
+}
+
 function articleChecks(body: string, split: SplitArticle, input: ReviewInput): ReviewCheck[] {
   const out: ReviewCheck[] = [];
   const add = (id: string, label: string, group: ReviewGroup, ok: boolean, detail: string, skipped = false) =>
@@ -476,7 +550,9 @@ function articleChecks(body: string, split: SplitArticle, input: ReviewInput): R
   for (const c of gate.checks) {
     if (c.severity !== "block" || GATE_REPLACED.has(c.id)) continue;
     const meta = GATE_LABELS[c.id] ?? { label: c.id, group: "Structure" as ReviewGroup };
-    add(`gate-${c.id}`, meta.label, meta.group, c.ok, c.detail);
+    if (!c.ok && c.id === "has-table") addSection(`gate-${c.id}`, meta.label, meta.group, bestSectionForTable(split), c.detail);
+    else if (!c.ok && c.id === "has-list") addSection(`gate-${c.id}`, meta.label, meta.group, bestSectionForList(split), c.detail);
+    else add(`gate-${c.id}`, meta.label, meta.group, c.ok, c.detail);
   }
 
   // Section 10: a floor, counted on prose only.
@@ -501,7 +577,8 @@ function articleChecks(body: string, split: SplitArticle, input: ReviewInput): R
   // Section 8: data claims come with their limits.
   if (FIGURE.test(prose(body))) {
     const hasLimits = split.parts.some((p) => (p.h2 !== null && LIMITS_TEXT.test(p.h2)) || LIMITS_TEXT.test(prose(p.markdown)));
-    add("limits-note", "A note on the limits of the numbers", "Trust", hasLimits, hasLimits ? "says what the numbers do not cover" : "the article states figures but never says what they do not cover");
+    if (hasLimits) add("limits-note", "A note on the limits of the numbers", "Trust", true, "says what the numbers do not cover");
+    else addSection("limits-note", "A note on the limits of the numbers", "Trust", bestSectionForLimits(split), "the article states figures but never says what they do not cover");
   }
 
   // Section 11: no more than two answers in a row open the same way.
@@ -713,6 +790,26 @@ export async function rewriteSection(
   return text;
 }
 
+/** The "Quick answers" block (section 6) is the one structural rule that is never an edit to an
+ *  existing part — when it is missing, there is nothing to target with `rewriteSection`, only
+ *  something to ADD. Routing it through the whole-article `reviseArticle` (as every other
+ *  article-level check does) would still risk exactly the regression this whole change exists to
+ *  avoid, for a fix that never needed to touch existing text at all. So this asks for ONLY the
+ *  new block, in its own isolated call — same shape as `writeSection` — and `applyFixes` appends
+ *  the result as a brand new part. Every other part of the article is never even sent to the model. */
+async function generateQaSection(input: ReviewInput, complete: Completer): Promise<ArticlePart> {
+  const prompt = [
+    `Write ONLY a short "Quick answers" section for an article titled "${input.title}" on "${input.topic}". Do not write any other part of the article, and do not repeat questions another heading in a normal article on this topic would already answer.`,
+    `Format: start with "## Quick answers about ${input.topic}", then ${MIN_QA_PAIRS}-4 list items, each one line: "- **Question?** One-sentence answer."`,
+    `Never title this section "FAQ" or "Frequently Asked Questions" — that exact wording is banned regardless of formatting. Never invent a fact, number, name or date.`,
+    `Output only the section as markdown, no preamble, no note about what you changed.`,
+  ].join("\n\n");
+  let text = (await complete(prompt, { maxTokens: 500, label: "writer.qa-section" })).trim();
+  text = text.replace(/^```(?:markdown|md)?\s*/i, "").replace(/```\s*$/i, "").trim();
+  if (!/^##\s+\S/.test(text)) text = `## Quick answers about ${input.topic}\n\n${text}`;
+  return { h2: headingOf(text) ?? `Quick answers about ${input.topic}`, markdown: text };
+}
+
 /* ---------------------------------------------------------------- the loop ---------------- */
 
 function failureLine(c: ReviewCheck): string {
@@ -755,7 +852,6 @@ export async function runArticleReview(initialBody: string, input: ReviewInput, 
   let body = initialBody;
   let audit: HumanizeAudit | null = null;
   let auditError: string | null = null;
-  let auditFixes = 0;
   let auditErrors = 0;
   let lastChecks: ReviewCheck[] = [];
   let passed = false;
@@ -768,34 +864,56 @@ export async function runArticleReview(initialBody: string, input: ReviewInput, 
     const firstIdx = split.parts.findIndex((p) => p.h2 !== null && !isQuickAnswers(p.h2));
     const byPart = new Map<number, string[]>();
     const articleLevel: string[] = [];
+    // The quick-answers block is an ADD, not an edit to any existing part — see
+    // generateQaSection's own comment for why it never goes through reviseArticle.
+    let needsQaSection = false;
     for (const c of failing) {
-      if (c.fix === "section" && c.part !== null && split.parts[c.part]) {
+      if (c.id === "gate-has-qa-block") {
+        needsQaSection = true;
+      } else if (c.fix === "section" && c.part !== null && split.parts[c.part]) {
         byPart.set(c.part, [...(byPart.get(c.part) ?? []), failureLine(c)]);
       } else {
         articleLevel.push(failureLine(c));
       }
     }
 
-    progress(`Rewriting ${byPart.size} section(s) that broke the writing rules (round ${round})`);
-    await Promise.all(
-      [...byPart].map(async ([idx, failures]) => {
-        const part = split.parts[idx];
-        const name = part.h2 ?? "Introduction";
-        emit("section_rewrite", { round, section: name, reasons: failures, status: "rewriting" });
-        try {
-          const md = await rewriteSection(input, part, failures, idx === firstIdx, deps.complete);
-          const newH2 = part.h2 === null ? null : headingOf(md) ?? part.h2;
-          split.parts[idx] = { h2: newH2, markdown: md };
-          sectionRewrites++;
-          const wordsNow = words(proseText(md)).length;
-          emit("section_rewrite", { round, section: name, status: "done", newSection: newH2 ?? "Introduction", words: wordsNow });
-          if (part.h2 !== null && newH2) emit("section_revised", { replaces: part.h2, h2: newH2, text: md, words: wordsNow });
-        } catch (e: any) {
-          emit("section_rewrite", { round, section: name, status: "failed", error: String(e?.message ?? e) });
-        }
-      }),
-    );
-    body = assembleArticle(split);
+    if (byPart.size) {
+      progress(`Rewriting ${byPart.size} section(s) that broke the writing rules (round ${round})`);
+      await Promise.all(
+        [...byPart].map(async ([idx, failures]) => {
+          const part = split.parts[idx];
+          const name = part.h2 ?? "Introduction";
+          emit("section_rewrite", { round, section: name, reasons: failures, status: "rewriting" });
+          try {
+            const md = await rewriteSection(input, part, failures, idx === firstIdx, deps.complete);
+            const newH2 = part.h2 === null ? null : headingOf(md) ?? part.h2;
+            split.parts[idx] = { h2: newH2, markdown: md };
+            sectionRewrites++;
+            const wordsNow = words(proseText(md)).length;
+            emit("section_rewrite", { round, section: name, status: "done", newSection: newH2 ?? "Introduction", words: wordsNow });
+            if (part.h2 !== null && newH2) emit("section_revised", { replaces: part.h2, h2: newH2, text: md, words: wordsNow });
+          } catch (e: any) {
+            emit("section_rewrite", { round, section: name, status: "failed", error: String(e?.message ?? e) });
+          }
+        }),
+      );
+      body = assembleArticle(split);
+    }
+
+    if (needsQaSection) {
+      progress(`Adding the missing quick-answers block (round ${round})`);
+      emit("section_rewrite", { round, section: "Quick answers", reasons: ["Quick answers block: missing"], status: "rewriting" });
+      try {
+        const qa = await generateQaSection(input, deps.complete);
+        const rebuilt = splitArticle(body);
+        rebuilt.parts.push(qa);
+        body = assembleArticle(rebuilt);
+        sectionRewrites++;
+        emit("section_rewrite", { round, section: "Quick answers", status: "done", newSection: qa.h2, words: words(proseText(qa.markdown)).length });
+      } catch (e: any) {
+        emit("section_rewrite", { round, section: "Quick answers", status: "failed", error: String(e?.message ?? e) });
+      }
+    }
 
     if (articleLevel.length) {
       progress(`Fixing ${articleLevel.length} article-wide rule(s) (round ${round})`);
@@ -815,14 +933,26 @@ export async function runArticleReview(initialBody: string, input: ReviewInput, 
     }
   };
 
+  // Owner, 2026-09-16: the mechanical checks and the human-voice audit used to run in strict
+  // sequence — voice was only even attempted once every mechanical rule already passed. Live
+  // testing 2026-09-14 showed the mechanical checks routinely do NOT all pass within
+  // REVIEW_MAX_ROUNDS against the real model, which meant the voice audit — the one check aimed
+  // straight at "this reads robotic" — never ran at all, and a robotic draft published exactly
+  // as written. Both checks now run every round and feed one combined fix pass, so a section
+  // can be corrected for a mechanical rule and a voice rule together instead of the voice rule
+  // waiting its turn behind a gate it may never clear.
   for (let round = 1; round <= REVIEW_MAX_ROUNDS; round++) {
     rounds = round;
-    body = stampByline(body, now(), input.author);
+    // Section 3, forced by code (capLongParagraphs), not just by request — see its own comment.
+    // ORDER MATTERS: capLongParagraphs round-trips through splitArticle/assembleArticle, and
+    // splitArticle deliberately drops any stamp-shaped line ahead of the first heading (so a
+    // repeated stampByline call never duplicates it) — stamping first and capping second would
+    // silently erase the byline this same line just wrote. Cap, then stamp, always in that order.
+    body = stampByline(capLongParagraphs(body), now(), input.author);
 
     progress(`Checking every writing rule (round ${round} of ${REVIEW_MAX_ROUNDS})`);
     emit("review_round", { round, max: REVIEW_MAX_ROUNDS, stage: "rules" });
     const mech = await checkArticle(body, input, cachedCheck);
-    lastChecks = mech.checks;
     emit("review_result", {
       round,
       max: REVIEW_MAX_ROUNDS,
@@ -832,13 +962,6 @@ export async function runArticleReview(initialBody: string, input: ReviewInput, 
       total: mech.checks.length,
       checks: mech.checks,
     });
-
-    if (!mech.passed) {
-      audit = null;
-      if (round === REVIEW_MAX_ROUNDS) break;
-      await applyFixes(mech.checks.filter((c) => !c.ok), round);
-      continue;
-    }
 
     progress(`Independent human-voice review (round ${round})`);
     emit("review_round", { round, max: REVIEW_MAX_ROUNDS, stage: "humanize" });
@@ -862,18 +985,17 @@ export async function runArticleReview(initialBody: string, input: ReviewInput, 
       checks: voice,
     });
 
-    if (!auditError && audit?.passed) {
+    const failing = lastChecks.filter((c) => !c.ok);
+    if (!failing.length) {
       passed = true;
       break;
     }
     if (round === REVIEW_MAX_ROUNDS) break;
-    if (auditError) {
-      if (auditErrors >= 2) break;
-      continue;
-    }
-    if (auditFixes >= REVIEW_MAX_AUDIT_FIXES) break;
-    auditFixes++;
-    await applyFixes(voice.filter((c) => !c.ok), round);
+    // Two strikes on the audit call itself (not a real voice finding — the model call errored)
+    // and nothing mechanical left broken either: stop burning rounds on a check that will not
+    // answer, rather than retrying it blind for the rest of the budget.
+    if (auditError && auditErrors >= 2 && mech.passed) break;
+    await applyFixes(failing, round);
   }
 
   const failures = passed

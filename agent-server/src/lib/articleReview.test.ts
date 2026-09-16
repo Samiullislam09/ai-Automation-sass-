@@ -14,7 +14,7 @@ process.env.DATABASE_URL ||= "postgres://unit-test/none";
 process.env.SUPABASE_URL ||= "http://unit-test.invalid";
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= "unit-test";
 
-const { checkArticle, runArticleReview, splitArticle, assembleArticle, stampByline, REVIEW_MAX_ROUNDS } = await import("./articleReview.js");
+const { checkArticle, runArticleReview, splitArticle, assembleArticle, stampByline, capLongParagraphs, REVIEW_MAX_ROUNDS } = await import("./articleReview.js");
 
 const KW = "emergency plumber in Leeds";
 const SITE = "https://example.com";
@@ -85,6 +85,13 @@ function goodArticle(): string {
     ]),
     ``,
     section("What does a call-out cost in Leeds?", "Prices", ["| Time of call | Call-out fee |", "| --- | --- |", "| Weekday daytime | 65 pounds |", "| Evenings and weekends | 90 pounds |", ""], [LINKS[2].url]),
+    ``,
+    // Two more plain sections (2026-09-16, ARTICLE_MIN_WORDS 700 → 1000): prose() strips tables
+    // and lists entirely, so the list/table sections above contribute zero words to the floor —
+    // only these plain `section()` calls (158 prose words each) do.
+    section("Should I try to fix a leak myself first?", "Turning", []),
+    ``,
+    section("What should I ask before booking an emergency plumber?", "Confirm", []),
     ``,
     section(VERDICT_H2, "Call"),
     ``,
@@ -186,6 +193,45 @@ test("no real outside sources on file: the external-link rule is skipped, never 
   assert.equal(c.skipped, true);
 });
 
+/* ---------------------------------------------------------------- capLongParagraphs -------- */
+
+test("capLongParagraphs leaves the required single-paragraph snippet answer alone", () => {
+  const body = `# T\n\n## Is this a real question?\n\n${["one", "two", "three", "four", "five"].join(". ")}.`;
+  assert.equal(capLongParagraphs(body), body);
+});
+
+test("capLongParagraphs splits a paragraph after the answer into 4-sentence chunks", () => {
+  const answer = "First sentence here now. Second one follows soon. Third finishes the answer part today.";
+  const long = Array.from({ length: 9 }, (_, i) => `Sentence number ${i + 1} of nine total.`).join(" ");
+  const body = `# T\n\n## Is this a real question?\n\n${answer}\n\n${long}`;
+  const out = capLongParagraphs(body);
+  const blocks = out.split("## Is this a real question?")[1].trim().split(/\n\n+/);
+  assert.equal(blocks[0], answer, "the answer paragraph is untouched");
+  assert.equal(blocks.length, 4, "9 sentences at 4 per chunk is 1 answer + 3 chunks (4,4,1)");
+  assert.equal(sentenceCount(blocks[1]), 4);
+  assert.equal(sentenceCount(blocks[2]), 4);
+  assert.equal(sentenceCount(blocks[3]), 1);
+});
+
+test("capLongParagraphs never touches a table, a list, or the Quick answers block", () => {
+  const table = "| A | B |\n| --- | --- |\n| 1 | 2 |";
+  const list = "- one\n- two\n- three";
+  // No trailing space on the last generated word: splitArticle trims the whole document, and a
+  // trailing space that only ever lands at the very end of the body (an artifact of this
+  // fixture's own repeat(20), not of capLongParagraphs) would fail an exact-match include() for
+  // a reason that has nothing to do with what this test is actually checking.
+  const qa = "## Quick answers about x\n\n" + Array.from({ length: 10 }, (_, i) => `- **Q${i}?** ${"word ".repeat(20).trim()}`).join("\n");
+  const body = `# T\n\n## H?\n\nAnswer paragraph here for real.\n\n${table}\n\n${list}\n\n${qa}`;
+  const out = capLongParagraphs(body);
+  assert.ok(out.includes(table));
+  assert.ok(out.includes(list));
+  assert.ok(out.includes(qa));
+});
+
+function sentenceCount(text: string): number {
+  return (text.match(/[.!?]+(?:\s|$)/g) || []).length;
+}
+
 test("the byline is stamped by code, once, however many times it is stamped", () => {
   const once = stamped(goodArticle());
   const twice = stamped(once);
@@ -193,7 +239,7 @@ test("the byline is stamped by code, once, however many times it is stamped", ()
   assert.equal(twice.split("\n").filter((l) => l.startsWith("*Last updated:")).length, 1);
   assert.match(twice, /\*Last updated: 13 September 2026 · By Leeds Plumbing Co\*/);
   const split = splitArticle(twice);
-  assert.equal(split.parts.length, 7, "the introduction plus six sections");
+  assert.equal(split.parts.length, 9, "the introduction plus eight sections");
   assert.equal(assembleArticle(split), assembleArticle(splitArticle(goodArticle())));
 });
 
@@ -235,10 +281,15 @@ test("a failing section is rewritten on its own, re-checked, and the review pass
   assert.match(rewrites[0].prompt, /No em dashes: 1 em dash/);
   assert.ok(!out.body.includes("—"));
 
+  // 2026-09-16: mechanical and human-voice checks now run together every round (see
+  // runArticleReview's own comment on why) instead of humanize waiting behind an all-mechanical
+  // pass — so round 1 already carries its own rules+humanize pair, not just round 2.
   const kinds = events.map((e) => `${e.kind}${e.payload.status ? `:${e.payload.status}` : ""}${e.payload.stage ? `:${e.payload.stage}` : ""}`);
   assert.deepEqual(kinds, [
     "review_round:rules",
     "review_result:rules",
+    "review_round:humanize",
+    "review_result:humanize",
     "section_rewrite:rewriting",
     "section_rewrite:done",
     "section_revised",
@@ -249,8 +300,8 @@ test("a failing section is rewritten on its own, re-checked, and the review pass
     "review_final",
   ]);
   assert.equal(events[1].payload.passed, false);
-  assert.equal(events[2].payload.section, SECOND_H2);
-  assert.equal(events[4].payload.replaces, SECOND_H2);
+  assert.equal(events[4].payload.section, SECOND_H2);
+  assert.equal(events[6].payload.replaces, SECOND_H2);
   assert.equal(events[events.length - 1].payload.passed, true);
 });
 

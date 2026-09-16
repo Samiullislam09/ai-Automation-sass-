@@ -24,6 +24,8 @@ const OUTLINE = {
     // Four, not three, since MIN_SECTIONS rose to 4 on 2026-08-31 — see its comment in
     // writerPipeline.ts for the 362-word article that forced it.
     { h2: "When to call a professional", goal: "set the escalation line", keyword: "call an emergency plumber", readerQuestion: "can I wait until morning?" },
+    // Five, not four, since MIN_SECTIONS rose to 5 on 2026-09-16.
+    { h2: "What questions to ask before you agree to a callout", goal: "protect against surprise fees", keyword: "emergency plumber questions", readerQuestion: "what should I ask first?" },
   ],
 };
 
@@ -50,7 +52,7 @@ test("buildOutline parses a well-formed reply, code-fence and all", async () => 
   });
   const outline = await buildOutline(TOPIC, undefined, undefined, fn);
   assert.equal(outline.title, OUTLINE.title);
-  assert.equal(outline.sections.length, 4);
+  assert.equal(outline.sections.length, 5);
   assert.equal(outline.sections[0].h2, "What counts as a plumbing emergency");
 });
 
@@ -74,11 +76,11 @@ test("no title from the model falls back to the topic, never to an empty string"
   assert.equal(outline.title, TOPIC);
 });
 
-test("more than 6 sections from the model is capped, not passed through", async () => {
-  const many = Array.from({ length: 9 }, (_, i) => ({ h2: `Section ${i}`, goal: "g", keyword: "k", readerQuestion: "q" }));
+test("more than 8 sections from the model is capped, not passed through", async () => {
+  const many = Array.from({ length: 11 }, (_, i) => ({ h2: `Section ${i}`, goal: "g", keyword: "k", readerQuestion: "q" }));
   const { fn } = fakeComplete({ "writer.outline": () => JSON.stringify({ title: "T", sections: many }) });
   const outline = await buildOutline(TOPIC, undefined, undefined, fn);
-  assert.equal(outline.sections.length, 6);
+  assert.equal(outline.sections.length, 8);
 });
 
 test("research context reaches the outline prompt, with an explicit no-facts-from-here instruction", async () => {

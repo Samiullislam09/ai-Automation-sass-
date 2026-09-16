@@ -136,11 +136,14 @@ function contextLines(context?: WriterContext): string {
 
 /* ---------------------------------------------------------------- 1 · outline ------------ */
 
-// Raised 3 → 4 on 2026-08-31. Belt and braces with the per-section floor: even if the model
-// under-delivers on every section the way it did at 3×~120 words, four sections clear the
-// quality gate's 600-word block instead of landing at 362 and being thrown away.
-const MIN_SECTIONS = 4;
-const MAX_SECTIONS = 6;
+// Raised 4 → 5 / 6 → 8 on 2026-09-16 (owner: "sirf 4-6 section nahi, rules ke hisab se 1000+
+// ho"). A fixed 4-6 kept landing at its own floor — a thin, template-shaped article — because
+// nothing pushed the model past the minimum. articleReview.ts's own word floor (ARTICLE_MIN_WORDS)
+// went 700 → 1000 the same day; 5 sections at the 300-word-per-section floor already clears
+// that (1500 words), so this range is belt and braces the same way the old 4 was, just recalibrated
+// to the new floor instead of the old 600-word one.
+const MIN_SECTIONS = 5;
+const MAX_SECTIONS = 8;
 
 export async function buildOutline(
   topic: string,
@@ -158,11 +161,15 @@ export async function buildOutline(
     contextLines(context),
     blueprint ? `BLUEPRINT (from real keyword research — use these related queries as section subjects, most-searched first):\n${blueprint}` : "",
     researchLines,
-    `Produce ${MIN_SECTIONS}-${MAX_SECTIONS} sections (H2s). For each: the heading, what it must accomplish (goal), the exact phrase it should place naturally (keyword — from the blueprint's related queries when there are enough, otherwise a natural variation of the topic), and the single reader question it answers.`,
+    `Produce ${MIN_SECTIONS}-${MAX_SECTIONS} sections (H2s) — enough to cover the topic in real depth, at least 1000 words total once written, never a thin skeleton that only just clears the minimum. For each: the heading, what it must accomplish (goal), the exact phrase it should place naturally (keyword — from the blueprint's related queries when there are enough, otherwise a natural variation of the topic), and the single reader question it answers.`,
     `The article title is separate from the topic — write a real title a reader would click, not the raw keyword.`,
-    // documnet/Article_Writing_Rules.md sections 1, 2, 9 and 13, checked hard by lib/articleReview.ts:
-    // asking for them at the outline is what lets most drafts clear the review on its first round.
+    // documnet/Article_Writing_Rules.md sections 1, 2, 4, 6, 9 and 13, checked hard by
+    // lib/articleReview.ts: asking for them AT THE OUTLINE, before a word of the article is
+    // written, is what lets most drafts clear the review on its first round instead of needing
+    // has-table/has-list glued on as an afterthought during polish (owner, 2026-09-16: "jo rules
+    // hai article writing ka wo har baar article likhne se pehle hi jaye").
     `Every heading must be the real question a searcher would type, ending with "?". The FIRST heading must contain "${topic}". One heading must ask for a verdict (for example "What is our verdict on ...?"), and that section's job is to make a clear recommendation.`,
+    `Exactly one section's goal must say it will include a comparison table (prices, sizes, timeframes or options being compared) — write that requirement directly into that section's "goal" text. Exactly one section's goal (a different one, unless the same section naturally does both) must say it will include a 5-8 item list (steps, features or options) — write that into its "goal" text too. Do NOT create a section literally titled "FAQ" or "Frequently Asked Questions" — a separate quick-answers block is added after the outline, never as one of your headings.`,
     `Reply with ONLY JSON: {"title":"...","sections":[{"h2":"...","goal":"...","keyword":"...","readerQuestion":"..."}]}`,
   ].filter(Boolean).join("\n\n");
 
@@ -219,6 +226,17 @@ export async function writeSection(
     `Start with "## ${section.h2}" then the prose. The very next paragraph after the heading must answer "${section.readerQuestion}" directly in its first sentence (the number, the yes/no, or the name first), in 40-58 words total — this is the length Google most often lifts into a featured snippet, so do not open with throat-clearing.`,
     `Short paragraphs (2-4 sentences) for everything after that first one. No filler, no "in today's fast-paced world" openings. Never use an em dash (—); use a period, comma, or colon instead. Use only facts present in the context above — never invent a statistic, price, award, client name or date.`,
     `Rhythm: at least one sentence of 6 words or fewer for every 150 words, and never three sentences in a row within 5 words of each other in length. No semicolons. Never write "the best", "guaranteed", "#1" or "number one", and never "studies show" or "experts say" unless that sentence links the real source. If the heading asks how to do something, or for steps, types, ways or tips, include a list of 5-8 items of 3-8 words each.`,
+    // buildOutline now writes "include a table" / "include a list" straight into the goal text
+    // of the sections it picks for that job (2026-09-16) — this is what actually reads that
+    // instruction back out and turns it into a real markdown table/list at generation time,
+    // instead of leaving it to polishArticle's tableFixLine/listFixLine backstop to glue on
+    // after the fact, article-wide, with no section context.
+    /table|comparison|compare/i.test(section.goal)
+      ? `This section's job includes a comparison table: add ONE real markdown table (a header row, then a "---" separator row) laying out the actual numbers or options this section discusses. Never invent a figure to fill a cell — every number in it must come from the context above.`
+      : "",
+    /\blist\b/i.test(section.goal) && !/steps|types|ways|tips|options/i.test(section.h2)
+      ? `This section's job includes a list: add a bullet or numbered list of 5-8 items of 3-8 words each, of the real things this section discusses.`
+      : "",
     // documnet/Article_Writing_Rules.md Part 2 (sections 14-18, the humanization levers) — given
     // to the model BEFORE it writes a word (owner, 2026-09-13: "AI article likhne se pehle ye
     // rules usko diye jayenge, uske baad article write start hoga"), not left to a rewrite loop
