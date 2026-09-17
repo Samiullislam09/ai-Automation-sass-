@@ -37,10 +37,24 @@ export const NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
  *  that gets it right natively is worth 255ms.
  *
  *  550B total, 55B active (MoE) — which is why it is not slower than the 120B it replaces.
- *  gpt-oss stays as the fallback: it is on Groq as well as NIM, so it is a genuine availability
- *  hedge rather than a second opinion. */
+ *  Streamed first chunk, four messages in a row: 621ms, 944ms, 617ms, 1232ms.
+ *
+ *  **`openai/gpt-oss-120b` IS DEAD ON NIM AND CANNOT BE THE FALLBACK.** Every call to it returns
+ *  HTTP 410: "has reached its end of life on 2026-09-03T08:00:00Z and is no longer available."
+ *  It is still listed by GET /v1/models, so the catalogue does not tell you — only a real call
+ *  does. That end-of-life date is almost certainly the "I'm having trouble reaching my brain"
+ *  replies that make up 11% of this product's entire chat history, all of them after 2026-09-03:
+ *  the NIM path had been answering 410 for two weeks, and only lib/ai/fastChat.ts's Groq route
+ *  (a different provider, unaffected) kept the chat working at all. Never restore this model
+ *  here without calling it first.
+ *
+ *  The fallback is therefore nemotron-3-super-120b-a12b, which is alive and measurably faster to
+ *  first chunk. It is NOT as good: asked "isko publish mat karna" it calls write_article, which
+ *  ultra correctly refuses to do. That is acceptable for a fallback, because it is only reached
+ *  when ultra cannot open a stream at all, and `wantsAutoPublish` in lib/chat-intent.ts is the
+ *  code-side guard that stops a publish regardless of what any model decides. */
 export const CHAT_MODEL = process.env.CHAT_MODEL || "nvidia/nemotron-3-ultra-550b-a55b";
-export const CHAT_FALLBACK_MODEL = process.env.CHAT_FALLBACK_MODEL || "openai/gpt-oss-120b";
+export const CHAT_FALLBACK_MODEL = process.env.CHAT_FALLBACK_MODEL || "nvidia/nemotron-3-super-120b-a12b";
 
 /** The per-model request fields that keep the answer short and the reasoning off. */
 export function modelParams(model: string): Record<string, unknown> {
