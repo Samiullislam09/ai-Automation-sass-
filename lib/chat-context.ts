@@ -183,6 +183,119 @@ export async function loadRecentWork(supabase: SupabaseClient, tenantId: string 
   }
 }
 
+/** What the team is doing RIGHT NOW — the one thing Mr Lxwa could never see.
+ *
+ *  `loadRecentWork` above reads `jobs_log`, and a row only lands there once a job has finished.
+ *  So every "kya chal raha hai" was answered from history, and the FACTS block had to carry an
+ *  explicit warning not to describe finished rows as in-progress (see the WORK section in
+ *  app/api/chat/route.ts) — a warning that exists because the model kept doing it anyway. The
+ *  `tasks` table held the real answer the whole time and nothing in the chat ever read it.
+ *
+ *  Non-terminal statuses only, and TERMINAL_TASK in lib/live.ts is the definition of terminal —
+ *  including `awaiting_approval`, which reads like "not finished" but is that file's own success
+ *  state (the work is done, a human just has not looked yet). Getting that wrong in the other
+ *  direction would have Mr Lxwa reporting 50 finished articles as still being written. */
+const LIVE_TASK_LIMIT = 8;
+
+export async function loadLiveWork(supabase: SupabaseClient, tenantId: string | null): Promise<string | null> {
+  if (!tenantId) return null;
+  try {
+    const { data } = await supabase
+      .from("tasks")
+      .select("kind, status, params, run_at, created_at, updated_at, error")
+      .eq("tenant_id", tenantId)
+      .in("status", ["queued", "running", "scheduled", "awaiting_confirm"])
+      .order("created_at", { ascending: false })
+      .limit(LIVE_TASK_LIMIT);
+    if (!data?.length) return null;
+
+    return data
+      .map((t: any) => {
+        const subject = pickSubject(t.params);
+        const what = `${String(t.kind ?? "task")}${subject ? ` "${subject.slice(0, 70)}"` : ""}`;
+        const since = t.updated_at ?? t.created_at;
+        const detail =
+          t.status === "running" ? `running${since ? `, started ${agoPhrase(new Date(since))}` : ""}`
+          : t.status === "scheduled" ? `scheduled for ${t.run_at ? new Date(t.run_at).toISOString() : "an unspecified time"}`
+          : t.status === "awaiting_confirm" ? "waiting for the customer to say yes — NOT started"
+          : "queued, not started yet";
+        return `- ${what} — ${detail}${t.error ? ` (last error: ${String(t.error).slice(0, 80)})` : ""}`;
+      })
+      .join("\n");
+  } catch (e: any) {
+    // The `tasks` table arrives with migration 017. Say nothing rather than have the model guess.
+    console.error("[chat] live work failed:", e?.message);
+    return null;
+  }
+}
+
+/** Whatever the params call the thing being worked on. Every agent names it differently and a
+ *  task with no subject is normal (an audit has none), so this returns null rather than
+ *  inventing a label. */
+function pickSubject(params: unknown): string | null {
+  if (!params || typeof params !== "object") return null;
+  const p = params as Record<string, unknown>;
+  for (const k of ["topic", "title", "seed", "keyword", "query", "subject", "which"]) {
+    const v = p[k];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return null;
+}
+
+/** The site's real problems, from the last audit Mr. Audit actually ran.
+ *
+ *  "mere site pe kya issue hai" is one of the most common questions in the chat history, and
+ *  until now the brain answered it from the Site Brain profile — which describes what the site
+ *  IS, not what is wrong with it. `site_audits` has carried the findings (a score, block/warn
+ *  counts, and an issue list where every entry already has both a plain-English `what` and a
+ *  `fix`) and no chat path read the table.
+ *
+ *  The score's own history is included because "is it getting better" is the follow-up, and
+ *  `previous_score` is right there on the row. */
+const AUDIT_ISSUE_LIMIT = 10;
+
+export async function loadSiteIssues(supabase: SupabaseClient, tenantId: string | null): Promise<string | null> {
+  if (!tenantId) return null;
+  try {
+    const { data } = await supabase
+      .from("site_audits")
+      .select("score, previous_score, pages_checked, blocks, warns, issues, summary, created_at")
+      .eq("tenant_id", tenantId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!data) return null;
+
+    const when = data.created_at ? agoPhrase(new Date(data.created_at)) : "at an unknown time";
+    const head = [
+      `Last site audit ran ${when}: score ${data.score ?? "?"}/100`,
+      typeof data.previous_score === "number" ? `(previous score ${data.previous_score})` : null,
+      `across ${data.pages_checked ?? "?"} page(s)`,
+      `${data.blocks ?? 0} serious problem(s) and ${data.warns ?? 0} warning(s).`,
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    const list = Array.isArray(data.issues)
+      ? (data.issues as any[])
+          .slice(0, AUDIT_ISSUE_LIMIT)
+          .map((i) => {
+            const what = String(i?.what ?? i?.id ?? "").trim();
+            if (!what) return null;
+            const fix = i?.fix ? ` → fix: ${String(i.fix).slice(0, 160)}` : "";
+            return `- ${what.slice(0, 160)}${fix}`;
+          })
+          .filter(Boolean)
+          .join("\n")
+      : "";
+
+    return [head, list || "No individual issues were recorded on this run."].filter(Boolean).join("\n");
+  } catch (e: any) {
+    console.error("[chat] site issues failed:", e?.message);
+    return null;
+  }
+}
+
 /** The automation calendar, in the same words the Schedule page uses.
  *
  *  Mr Lxwa used to be blind to this: asked "kaunsa task schedule pe hai aur kitne baje?" he
@@ -375,6 +488,18 @@ export function humanTime(at: Date, timeZone: string): string {
 }
 
 /** "in 16 hours", "in 12 minutes" — the part people actually want when they ask "kab". */
+/** The past-tense counterpart. `untilPhrase` below reads a FUTURE instant and collapses
+ *  anything already past to "any moment now" — correct for a next-run time, actively wrong for
+ *  "when did this start", where it would describe a three-hour-old job as about to happen. */
+export function agoPhrase(at: Date, from: Date = new Date()): string {
+  const mins = Math.round((from.getTime() - at.getTime()) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 48) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  return `${Math.round(hours / 24)} days ago`;
+}
+
 export function untilPhrase(at: Date, from: Date = new Date()): string {
   const mins = Math.round((at.getTime() - from.getTime()) / 60000);
   if (mins < 1) return "any moment now";

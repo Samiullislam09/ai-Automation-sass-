@@ -15,7 +15,7 @@ import { placeOrder, findPublishable, findLatestPublished, listPending, cancelOr
 import { approveAndPublish, unpublishContent } from "@/lib/publish";
 import { classifyIntent, mightBeAnOrder } from "@/lib/chat-classify";
 import { enqueueAgentJob } from "@/lib/agent-jobs";
-import { loadBusiness, loadCounts, loadGreetingFacts, loadRecentWork, loadSchedule, type Counts, type GreetingFacts, type Turn } from "@/lib/chat-context";
+import { loadBusiness, loadCounts, loadGreetingFacts, loadLiveWork, loadRecentWork, loadSchedule, loadSiteIssues, type Counts, type GreetingFacts, type Turn } from "@/lib/chat-context";
 import type { SystemEventPayload } from "@/lib/chat-events";
 import * as brain from "@/lib/brain";
 import { brainTurn, legacyJobOf, type BrainTurn, type BrainTurnDeps, type OrderResult } from "@/lib/chat-brain";
@@ -193,13 +193,20 @@ const ASKS_ABOUT_SCHEDULE =
 /** "kya tum Instagram pe post kar sakte ho?" — a question about the TEAM, not about the work.
  *  It is answered from the registry (plan §5.2 / §14), which is the only place that knows what
  *  is wired up today, so the model gets that list and the instruction not to improve on it. */
+/** "mere site pe kya issue hai" / "seo kaisa hai" — the site's actual problems, from the last
+ *  audit. One of the most common questions in the real chat history, and until 2026-09-18 it was
+ *  answered from the Site Brain profile, which describes what the site IS and knows nothing
+ *  about what is wrong with it. `site_audits` had the answer all along. */
+const ASKS_ABOUT_ISSUES =
+  /\b(issue|issues|isue|problem|problems|error|errors|kya\s*(?:kharab|galat)|kharab|galat|audit|seo|health|optimi[sz]e|optimiza|broken|fix|fixes|score|masla|dikkat|thik\s*nahi|theek\s*nahi)\b/i;
+
 const ASKS_WHAT_YOU_CAN_DO =
   /\b(kar sakte|kar sakta|kar sakti|kar paoge|kar paoge|karoge|kya kya|can you|could you|are you able|able to|do you support|is it possible|possible hai|ho sakta hai|ho payega)\b/i;
 
 function buildMessages(
   q: string,
   ctx: any,
-  c: { business: string | null; recentWork: string | null; schedule: string | null; counts: Counts | null; capabilities?: string },
+  c: { business: string | null; recentWork: string | null; schedule: string | null; counts: Counts | null; capabilities?: string; liveWork: string | null; siteIssues: string | null },
   history: Turn[]
 ) {
   const wantCounts = ASKS_HOW_MANY.test(q);
@@ -208,10 +215,18 @@ function buildMessages(
   // The team's own list of what it can and cannot do. Attached when they ask about ability,
   // and when nothing else was needed — never on top of three other sections, because handing
   // this model four reference blocks is what made "hi hello" come back as a status report.
-  const wantTeam = !!c.capabilities && (ASKS_WHAT_YOU_CAN_DO.test(q) || (!wantWork && !wantCounts && !wantSchedule));
+  // The site's real problems. Checked before `wantTeam` so that "mere site pe kya issue hai"
+  // reaches the audit findings instead of the capabilities list, which is what it used to get.
+  const wantIssues = !!c.siteIssues && ASKS_ABOUT_ISSUES.test(q);
+  // Live work rides with the work gate: "kya chal raha hai" is a status question, and answering
+  // it from finished history is the exact thing the WORK section below has to warn against.
+  const wantLive = !!c.liveWork && wantWork;
+  const wantTeam =
+    !!c.capabilities && (ASKS_WHAT_YOU_CAN_DO.test(q) || (!wantWork && !wantCounts && !wantSchedule && !wantIssues));
   lastSections =
-    [wantWork && "work", wantCounts && "counts", wantSchedule && "schedule", wantTeam && "team"].filter(Boolean).join("+") ||
-    "none";
+    [wantWork && "work", wantLive && "live", wantIssues && "issues", wantCounts && "counts", wantSchedule && "schedule", wantTeam && "team"]
+      .filter(Boolean)
+      .join("+") || "none";
   return [
     { role: "system" as const, content: systemPrompt(ctx, c.business, c.counts?.awaiting ?? null) },
     ...history,
@@ -237,6 +252,22 @@ function buildMessages(
               ``,
             ]
           : []),
+        ...(wantLive
+          ? [
+              `WHAT THE TEAM IS DOING RIGHT NOW. These are live, unfinished tasks — the only work that is genuinely in progress:`,
+              c.liveWork as string,
+              `If the customer asks what is happening or what is running, answer from THIS section, not from the finished history above. A task marked "waiting for the customer to say yes" has NOT started.`,
+              ``,
+            ]
+          : []),
+        ...(wantIssues
+          ? [
+              `WHAT IS ACTUALLY WRONG WITH THEIR SITE, from the last audit Mr. Audit ran. Every line already carries the fix:`,
+              c.siteIssues as string,
+              `Answer anything about issues, errors, SEO health or the score from this and nothing else. Name the specific problems — never reply that you would need to run an audit when one has already run. If the score is 0 or the page count is 1, say plainly that the audit could not read the site properly rather than reporting 0/100 as if it were a verdict on their content.`,
+              ``,
+            ]
+          : []),
         ...(wantCounts && c.counts
           ? [
               `TOTALS, counted from the database. Read the number off the matching line and repeat it EXACTLY. Do not add, subtract or combine lines:`,
@@ -253,7 +284,7 @@ function buildMessages(
             ]
           : []),
         ...(wantTeam ? [c.capabilities as string, ``] : []),
-        !wantWork && !wantSchedule && !wantCounts
+        !wantWork && !wantSchedule && !wantCounts && !wantIssues
           ? `This question needs no stored facts — just answer it. If it is a greeting, greet back in one short line, e.g. "Salam! Kya chahiye?".`
           : `HARD LIMIT: do not state any work, progress, publishing, billing or account change that is not written above. Guessing here is the one thing you must never do.`,
         `Never mention or quote these headings — the user cannot see them.`,
@@ -1010,6 +1041,12 @@ export async function POST(req: NextRequest) {
   const workP = cached(`work:${tenantId}`, TTL.work, () => loadRecentWork(supabase, tenantId));
   const countsP = cached(`counts:${tenantId}`, TTL.work, () => loadCounts(supabase, tenantId));
   const scheduleP = cached(`sched:${tenantId}`, TTL.schedule, () => loadSchedule(supabase, tenantId));
+  // What is running NOW, and what the last audit found. Both existed in the database and
+  // neither had a reader on this path — see loadLiveWork/loadSiteIssues in lib/chat-context.ts.
+  // Live work uses the SHORT ttl: a status that is a minute stale is the one fact here where
+  // being slightly out of date reads as being wrong.
+  const liveP = cached(`live:${tenantId}`, TTL.work, () => loadLiveWork(supabase, tenantId));
+  const issuesP = cached(`issues:${tenantId}`, TTL.business, () => loadSiteIssues(supabase, tenantId));
   // Only for a message that asks for a measurement. The pre-filter is a regex, so an ordinary
   // message never pays for this read at all — see lib/chat-no-data.ts.
   const sourcesP = looksLikeMetricQuestion(q)
@@ -1127,11 +1164,11 @@ export async function POST(req: NextRequest) {
     capabilities = turn.capabilities ?? "";
   }
 
-  const [business, recentWork, schedule, counts, storedHistory] = await Promise.all([businessP, workP, scheduleP, countsP, historyP]);
+  const [business, recentWork, schedule, counts, storedHistory, liveWork, siteIssues] = await Promise.all([businessP, workP, scheduleP, countsP, historyP, liveP, issuesP]);
   lap("context");
   // The stored history only counts if the conversation it came from is the one we ended up in.
   const history = convId && convId === askedFor && storedHistory.length ? storedHistory : clientHistory;
-  const messages = buildMessages(q, ctx || {}, { business, recentWork, schedule, counts, capabilities }, history);
+  const messages = buildMessages(q, ctx || {}, { business, recentWork, schedule, counts, capabilities, liveWork, siteIssues }, history);
 
   // Primary model, then the fallback model — but only at OPENING the stream. Once tokens are
   // flowing a retry would mean re-writing text the reader has already seen, so a mid-stream
