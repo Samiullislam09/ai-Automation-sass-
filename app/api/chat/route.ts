@@ -5,7 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
 import { cached, invalidate, sessionKey, TTL } from "@/lib/chat-cache";
-import { NVIDIA_URL, chatModelsInOrder, modelParams } from "@/lib/chat-model";
+import { CHAT_MODEL, NVIDIA_URL, chatModelsInOrder, modelParams } from "@/lib/chat-model";
 import { openFastChatStream } from "@/lib/ai/fastChat";
 import { nvidiaKey } from "@/lib/ai/nvidiaKeys";
 import { detectChatIntent, wantsAutoPublish } from "@/lib/chat-intent";
@@ -270,7 +270,11 @@ async function openLightningStream(model: string, messages: any[], signal: Abort
   // NIM's shared free queue measured 0.5-19s on the identical request (§18.1). Tried first,
   // and only when one is actually configured (docs/MANUAL_STEPS.md) — inert otherwise, and
   // NIM below is unchanged either way.
-  const fast = await openFastChatStream(messages, { temperature: 0.2, max_tokens: 260, signal });
+  // `onlyModel` so a fast provider may serve this ONLY if it hosts the brain's own model. Groq
+  // does not host nemotron-3-ultra, and without this it answered every message with its own
+  // gpt-oss default no matter what CHAT_MODEL said — which would have made the 2026-09-18 brain
+  // switch a no-op on the one path the customer actually reads.
+  const fast = await openFastChatStream(messages, { temperature: 0.2, max_tokens: 260, signal, onlyModel: CHAT_MODEL });
   if (fast) return fast.stream;
 
   const key = nvidiaKey("chat");

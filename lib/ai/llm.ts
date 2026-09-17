@@ -3,8 +3,8 @@ import { nvidiaKey } from "@/lib/ai/nvidiaKeys";
 
 /** Provider-agnostic LLM adapter (Build Guide Step 5 niche-summary, and reused for
  *  Mr Lxwa in Step 7 — see the fetch call already documented in app/api/chat/route.ts).
- *  Default: NVIDIA NIM `nemotron-3.5-lightning` — same account/key as the embeddings
- *  adapter, one AI account for the whole "Lightning" tier instead of a separate one.
+ *  Default: NVIDIA NIM `nemotron-3-ultra-550b-a55b` since 2026-09-18 — the same model the brain
+ *  and every agent now run on, on the same account/key as the embeddings adapter.
  *  Swap providers by changing LLM_PROVIDER in .env — call sites never change. */
 
 export async function complete(prompt: string): Promise<string> {
@@ -28,7 +28,19 @@ async function completeNvidia(prompt: string): Promise<string> {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
     body: JSON.stringify({
-      model: "nvidia/nemotron-3.5-lightning-30b-a3b",
+      // Moved to ultra with the agents on 2026-09-18 (agent-server/src/lib/llm.ts carries the
+      // reasoning) — this is the onboarding half of the same niche/topics summary, and the two
+      // disagreeing about the model would mean a tenant's Site Brain differed depending on
+      // whether it was built during onboarding or by a later crawl.
+      model: "nvidia/nemotron-3-ultra-550b-a55b",
+      // REQUIRED, and absent here until now: every Nemotron needs this switch, and ultra is a
+      // Nemotron. Without it the family streams its own scratchpad as the answer (see
+      // lib/chat-model.ts's modelParams), which for a caller that then parses the reply as JSON
+      // is not a slow answer, it is a wrong one.
+      chat_template_kwargs: { thinking: false },
+      // No budget was set at all, so this inherited the endpoint's default. A niche summary over
+      // 40 crawled page titles is comfortably longer than that default is guaranteed to be.
+      max_tokens: 3000,
       messages: [{ role: "user", content: prompt }],
     }),
   });

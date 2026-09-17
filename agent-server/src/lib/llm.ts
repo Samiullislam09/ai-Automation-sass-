@@ -1,19 +1,34 @@
 import { nvidiaFetch } from "./nvidia.js";
 
-/** Ported from the main app's lib/ai/llm.ts, for the crawler's niche/topics summary.
- *  Includes chat_template_kwargs.thinking:false (the main app's lib didn't have this yet
- *  when this was ported) — see app/api/chat/route.ts's comment for why: without it this
- *  Nemotron model burns wildly variable, sometimes very large amounts of reasoning tokens
- *  even for a "reply with only JSON" instruction, live-tested to matter a lot for latency. */
+/** The JSON call every agent shares: Mr. Analyst, Mr. Boss, Mr. Crawler, Mr. Keyword, Mr. Lead,
+ *  Miss Social, Mr. Story and the keyword fallback all come through here.
+ *
+ *  MODEL, moved to nemotron-3-ultra-550b-a55b on 2026-09-18, with the brain (lib/chat-model.ts
+ *  carries that measurement). The agents were left on lightning for one commit and that was the
+ *  wrong place to stop: Mr. Boss picks the TOPIC every article is then written about, and
+ *  Mr. Keyword picks the phrases it targets, so a weak model here quietly caps the quality of
+ *  everything downstream of it no matter which model does the writing.
+ *
+ *  MAX_TOKENS, 1024 → 3000, for the reason the writer's three budgets went up the same day:
+ *  1024 was not a limit these calls respected, it was a truncation. jobs_log holds six
+ *  `boss/Choosing the best topic` and two `keyword/...` failures whose recorded cause is this
+ *  file's own "model did not return valid JSON", each one a topic list cut off mid-string — and
+ *  `parseModelJson` below cannot repair a JSON document that simply stops. A topic list of 5-8
+ *  entries with a rationale each does not fit in 1024 tokens, so it was never going to.
+ *
+ *  `chat_template_kwargs.thinking:false` still applies — ultra is a Nemotron too, and without it
+ *  this family burns wildly variable, sometimes very large amounts of reasoning tokens even for a
+ *  "reply with only JSON" instruction. 550B total, 55B active (MoE), and `nvidiaFetch`'s own 90s
+ *  request timeout covers it comfortably: the slowest ultra call measured was 23s. */
 export async function completeJson<T = any>(prompt: string): Promise<T> {
   const res = await nvidiaFetch("https://integrate.api.nvidia.com/v1/chat/completions", {
     label: "llm",
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "nvidia/nemotron-3.5-lightning-30b-a3b",
+      model: "nvidia/nemotron-3-ultra-550b-a55b",
       chat_template_kwargs: { thinking: false },
-      max_tokens: 1024,
+      max_tokens: 3000,
       messages: [{ role: "user", content: prompt }],
     }),
   });

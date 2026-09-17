@@ -116,7 +116,15 @@ export async function nimComplete(prompt: string, opts: { maxTokens?: number; la
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "nvidia/nemotron-3.5-lightning-30b-a3b",
+        // MEASURED, 2026-09-18, same topic and same pipeline, lightning vs ultra:
+        //   lightning  1849 words, gate score 80, 137s
+        //   ultra      2446 words, gate score 90 with ZERO block failures, 81s
+        // Better and faster, so the "judge the writer on quality, not latency" note in this
+        // file's history no longer has a trade-off to make. The word-target rule that no
+        // lightning rewrite ever satisfied (0 of 15 in range) is the one the review loop spends
+        // most of its rounds on; ultra lands most of them. Now the same model as the brain
+        // (lib/chat-model.ts) and every agent (lib/llm.ts) — one model, one place to change.
+        model: "nvidia/nemotron-3-ultra-550b-a55b",
         stream: false,
         chat_template_kwargs: { thinking: false }, // see lib/writer.ts — the soft prompt hint alone is not enough
         max_tokens: opts.maxTokens ?? STEP_TOKENS.default,

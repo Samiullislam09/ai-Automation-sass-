@@ -92,7 +92,10 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
       body: JSON.stringify({
-        model: "nvidia/nemotron-3.5-lightning-30b-a3b",
+        // Moved with Mr. Writer on 2026-09-18 (agent-server/src/lib/writerPipeline.ts carries
+        // the measurement). This is the same job — rewriting an article — so a customer asking
+        // for a revision must not get a weaker writer than the one that wrote the draft.
+        model: "nvidia/nemotron-3-ultra-550b-a55b",
         stream: false,
         chat_template_kwargs: { thinking: false },
         max_tokens: 6000,

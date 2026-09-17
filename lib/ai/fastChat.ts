@@ -21,9 +21,12 @@
  *  both now 404 "model not found" (checked live 2026-08-28). Groq's chat catalogue today is
  *  `openai/gpt-oss-120b`/`-20b`, Qwen 3, and their own `compound` models — no Llama chat model
  *  remains. Both providers now default to gpt-oss-120b (Groq: `openai/gpt-oss-120b`, Cerebras:
- *  `gpt-oss-120b` — no prefix, different naming convention on the same model), which happens to
- *  MATCH `lib/chat-model.ts`'s own NIM primary — one fewer thing to reason about when NIM and a
- *  fast provider disagree on tone. Reuses `modelParams()` from chat-model.ts for the same reason
+ *  `gpt-oss-120b` — no prefix, different naming convention on the same model). That USED to match
+ *  `lib/chat-model.ts`'s NIM primary; since the brain moved to nemotron-3-ultra on 2026-09-18 it
+ *  no longer does, and neither provider hosts that model. That mismatch is exactly what the
+ *  `onlyModel` option on both calls below exists to make safe: a caller that names its model is
+ *  served that model or falls through to NIM, instead of silently getting gpt-oss.
+ *  Reuses `modelParams()` from chat-model.ts for the same reason
  *  it exists there: gpt-oss without `reasoning_effort:"low"` spends the completion budget on
  *  hidden reasoning tokens and returns an EMPTY content string at low max_tokens (reproduced
  *  live against Groq 2026-08-28) — Nemotron's `thinking:false` switch would apply the same way
@@ -131,7 +134,8 @@ type KeyEntry = { key: string; model: string; envVar: string };
  *  providers, same key-then-provider fallback, same "returns null, never throws" contract either
  *  caller needs, so the fallback order can only drift once instead of twice. */
 async function tryFastProviders<T>(
-  attempt: (p: FastProvider, c: KeyEntry) => Promise<T | null>
+  attempt: (p: FastProvider, c: KeyEntry) => Promise<T | null>,
+  onlyModel?: string
 ): Promise<T | null> {
   for (const p of FAST_PROVIDERS) {
     // Every configured key on THIS provider first — a second Groq account is only worth having
@@ -139,6 +143,14 @@ async function tryFastProviders<T>(
     // (Cerebras) or much slower under load (NIM, §18.1). Only once every key on this provider
     // is exhausted does the next provider get a turn.
     for (const c of configuredKeys(p)) {
+      // A caller that named the model it needs gets that model or nothing. Without this, a
+      // fast provider silently answers with ITS OWN default instead: before 2026-09-18 both
+      // brain paths asked for `CHAT_MODEL` and were served Groq's gpt-oss-120b whatever
+      // `CHAT_MODEL` said, so switching the brain's model in lib/chat-model.ts changed
+      // nothing at all on the path that actually runs. Skipping the provider here is the
+      // right answer rather than asking it for a model it does not host — Groq has no
+      // nemotron-3-ultra, and a 404 per message is not a fallback strategy.
+      if (onlyModel && c.model !== onlyModel) continue;
       const result = await attempt(p, c);
       if (result !== null) return result;
     }
@@ -156,7 +168,7 @@ export type FastChatResult = { stream: ReadableStream<Uint8Array>; provider: str
  *  the same pattern as lib/leads/sources.ts's `fetchImpl`. */
 export async function openFastChatStream(
   messages: unknown[],
-  opts: { temperature?: number; max_tokens?: number; signal?: AbortSignal; fetchImpl?: typeof fetch } = {}
+  opts: { temperature?: number; max_tokens?: number; signal?: AbortSignal; fetchImpl?: typeof fetch; onlyModel?: string } = {}
 ): Promise<FastChatResult | null> {
   const fetchImpl = opts.fetchImpl ?? fetch;
 
@@ -193,7 +205,7 @@ export async function openFastChatStream(
       console.warn(`[fastChat] ${p.id} (${c.envVar}) unreachable — falling through:`, e?.message);
       return null;
     }
-  });
+  }, opts.onlyModel);
 }
 
 export type FastCompletionResult = { data: any; provider: string; model: string };
@@ -212,7 +224,7 @@ export type FastCompletionResult = { data: any; provider: string; model: string 
  *  followed by a 1ms reply is still a 12s answer. This is the piece that was still missing. */
 export async function openFastCompletion(
   body: Record<string, unknown>,
-  opts: { fetchImpl?: typeof fetch; signal?: AbortSignal } = {}
+  opts: { fetchImpl?: typeof fetch; signal?: AbortSignal; onlyModel?: string } = {}
 ): Promise<FastCompletionResult | null> {
   const fetchImpl = opts.fetchImpl ?? fetch;
 
@@ -238,5 +250,5 @@ export async function openFastCompletion(
       console.warn(`[fastChat] ${p.id} (${c.envVar}) unreachable — falling through:`, e?.message);
       return null;
     }
-  });
+  }, opts.onlyModel);
 }

@@ -215,3 +215,67 @@ test("openFastCompletion: a network error on every configured provider is null, 
     assert.equal(result, null);
   });
 });
+
+/* ── onlyModel: the guard the 2026-09-18 brain switch depends on ──────────────────────────── */
+
+test("onlyModel: a provider that does not host the named model is skipped entirely", async () => {
+  // The real case. Groq defaults to gpt-oss-120b and does not host nemotron-3-ultra, so the
+  // brain must fall through to NIM rather than be answered by a different model.
+  await withEnv({ ...ALL_KEYS, GROQ_API_KEY: "gk_test", CEREBRAS_API_KEY: "ck_test" }, async () => {
+    const result = await openFastChatStream([{ role: "user", content: "hi" }], {
+      onlyModel: "nvidia/nemotron-3-ultra-550b-a55b",
+      fetchImpl: (async () => {
+        throw new Error("must not be called — no fast provider hosts this model");
+      }) as any,
+    });
+    assert.equal(result, null, "null is what makes the caller fall through to NIM");
+  });
+});
+
+test("onlyModel: a provider IS used when its model matches", async () => {
+  await withEnv({ ...ALL_KEYS, GROQ_API_KEY: "gk_test" }, async () => {
+    let used: any = null;
+    const result = await openFastChatStream([{ role: "user", content: "hi" }], {
+      onlyModel: "openai/gpt-oss-120b",
+      fetchImpl: (async (url: string, init: any) => {
+        used = JSON.parse(init.body);
+        return new Response(fakeStream() as any, { status: 200 });
+      }) as any,
+    });
+    assert.ok(result, "the model matches, so the fast provider is allowed to answer");
+    assert.equal(used.model, "openai/gpt-oss-120b");
+  });
+});
+
+test("onlyModel: honours a GROQ_CHAT_MODEL override, so setting it re-enables the fast path", async () => {
+  const M = "nvidia/nemotron-3-ultra-550b-a55b";
+  await withEnv({ ...ALL_KEYS, GROQ_API_KEY: "gk_test", GROQ_CHAT_MODEL: M }, async () => {
+    let used: any = null;
+    const result = await openFastChatStream([{ role: "user", content: "hi" }], {
+      onlyModel: M,
+      fetchImpl: (async (url: string, init: any) => {
+        used = JSON.parse(init.body);
+        return new Response(fakeStream() as any, { status: 200 });
+      }) as any,
+    });
+    assert.ok(result, "the env override makes the provider eligible again");
+    assert.equal(used.model, M);
+  });
+});
+
+test("onlyModel: omitted means unchanged behaviour (narrate still gets its fast model)", async () => {
+  await withEnv({ ...ALL_KEYS, GROQ_API_KEY: "gk_test" }, async () => {
+    let used: any = null;
+    const result = await openFastCompletion(
+      { messages: [{ role: "user", content: "hi" }] },
+      {
+        fetchImpl: (async (url: string, init: any) => {
+          used = JSON.parse(init.body);
+          return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), { status: 200 });
+        }) as any,
+      },
+    );
+    assert.ok(result, "no onlyModel: any configured fast provider may answer");
+    assert.equal(used.model, "openai/gpt-oss-120b");
+  });
+});

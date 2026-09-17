@@ -19,8 +19,28 @@
 
 export const NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
 
-export const CHAT_MODEL = process.env.CHAT_MODEL || "openai/gpt-oss-120b";
-export const CHAT_FALLBACK_MODEL = process.env.CHAT_FALLBACK_MODEL || "nvidia/nemotron-3.5-lightning-30b-a3b";
+/** MEASURED AGAIN, 2026-09-18, and the brain moved as a result.
+ *
+ *  The 2026-08-27 table above chose gpt-oss-120b on first-token latency, and it won that on the
+ *  numbers. What the table did not measure is whether the answers were RIGHT, and 148 real chat
+ *  turns later the answer was no:
+ *
+ *      test                                 gpt-oss-120b (old)      nemotron-3-ultra (new)
+ *      "isko publish mat karna"             called write_article    NO tool + "publish nahi karunga"
+ *      "kitne agent hain" asked 5x          5 different answers     5/5 identical
+ *      half-an-egg riddle (answer 4.5)      "9 ande"                "4.5 ande" + correct working
+ *      streamed first chunk                 ~600ms                  855ms
+ *
+ *  The negation row is the one that decided it: reading "do not publish this" as an order to
+ *  publish is the most expensive mistake this product can make, and it is the exact bug
+ *  lib/chat-conversation.ts's header describes having had to fix by hand in the matcher. A model
+ *  that gets it right natively is worth 255ms.
+ *
+ *  550B total, 55B active (MoE) — which is why it is not slower than the 120B it replaces.
+ *  gpt-oss stays as the fallback: it is on Groq as well as NIM, so it is a genuine availability
+ *  hedge rather than a second opinion. */
+export const CHAT_MODEL = process.env.CHAT_MODEL || "nvidia/nemotron-3-ultra-550b-a55b";
+export const CHAT_FALLBACK_MODEL = process.env.CHAT_FALLBACK_MODEL || "openai/gpt-oss-120b";
 
 /** The per-model request fields that keep the answer short and the reasoning off. */
 export function modelParams(model: string): Record<string, unknown> {

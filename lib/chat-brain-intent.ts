@@ -26,8 +26,11 @@
  *     could declare its own order reversible is a caller that could skip the confirmation.
  *
  *  MODEL: whatever lib/chat-model.ts says, with that file's per-model reasoning-off switch —
- *  today gpt-oss-120b, which read all seven real Hinglish orders correctly including "isko
- *  publish mat karna" (commit f3503b8). No model name appears in this file.
+ *  since 2026-09-18 nemotron-3-ultra-550b-a55b, which is the first model measured here to
+ *  answer "isko publish mat karna" with NO tool call at all rather than relying on the code
+ *  half to catch it. gpt-oss-120b, which this replaced, called write_article on that sentence.
+ *  No model name appears in this file; `onlyModel` below keeps a fast provider from quietly
+ *  substituting its own.
  *
  *  WHY THIS CALL TRIES A FAST PROVIDER FIRST (2026-08-28). This is the call that decides
  *  "order or question" for EVERY message, before anything else can happen — including the
@@ -41,7 +44,7 @@
  */
 
 import "@/lib/dns-fix";
-import { NVIDIA_URL, chatModelsInOrder, modelParams } from "@/lib/chat-model";
+import { CHAT_MODEL, NVIDIA_URL, chatModelsInOrder, modelParams } from "@/lib/chat-model";
 import { openFastCompletion } from "@/lib/ai/fastChat";
 import { parseWhen, describeWhen, type When } from "@/lib/when";
 import { isRealTopic, wantsAutoPublish } from "@/lib/chat-intent";
@@ -438,7 +441,10 @@ export async function extractIntent(
   const tryFast = opts.fastCompletion ?? openFastCompletion;
   const fast = await tryFast(
     { temperature: 0, max_tokens: 300, tools, tool_choice: "auto", messages },
-    { fetchImpl: opts.fetchImpl, signal: AbortSignal.timeout(FAST_TIMEOUT_MS) }
+    // Same guard as the reply stream: a fast provider is only allowed to answer for the brain's
+    // own model. Routing is where a wrong model is most expensive — this is the call that
+    // decides whether "isko publish mat karna" spends money.
+    { fetchImpl: opts.fetchImpl, signal: AbortSignal.timeout(FAST_TIMEOUT_MS), onlyModel: CHAT_MODEL }
   ).catch((e: any) => {
     console.error(`[chat-brain-intent] fast provider errored, falling back to NIM:`, e?.message);
     return null;
