@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NVIDIA Chat</title>
+<style>
+  :root { color-scheme: dark; --bg:#0b0d10; --panel:#14181d; --line:#232a32; --text:#e7ecf2; --muted:#8b95a1; --accent:#76b900; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.6 ui-sans-serif,system-ui,Segoe UI,sans-serif; display:flex; flex-direction:column; height:100vh; }
+  header { padding:12px 16px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:10px; }
+  header b { font-weight:600; }
+  header span { color:var(--muted); font-size:12px; }
+  #log { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:12px; }
+  .msg { max-width:min(760px,92%); padding:10px 14px; border-radius:12px; white-space:pre-wrap; word-wrap:break-word; }
+  .user { align-self:flex-end; background:#1e2b16; border:1px solid #2f4423; }
+  .bot { align-self:flex-start; background:var(--panel); border:1px solid var(--line); }
+  .err { align-self:flex-start; background:#2a1416; border:1px solid #5a2129; color:#ffb4b4; }
+  form { display:flex; gap:8px; padding:12px 16px; border-top:1px solid var(--line); }
+  textarea { flex:1; resize:none; min-height:46px; max-height:160px; padding:12px; border-radius:10px; border:1px solid var(--line); background:var(--panel); color:var(--text); font:inherit; outline:none; }
+  textarea:focus { border-color:var(--accent); }
+  button { padding:0 20px; border-radius:10px; border:0; background:var(--accent); color:#0b0d10; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:default; }
+</style>
+</head>
+<body>
+  <header><b>NVIDIA Chat</b><span id="model">nemotron-3-ultra-550b</span></header>
+  <div id="log"></div>
+  <form id="f">
+    <textarea id="q" placeholder="Type a message… (Enter to send, Shift+Enter for newline)" autofocus></textarea>
+    <button id="send" type="submit">Send</button>
+  </form>
+
+<script>
+  const log = document.getElementById('log');
+  const q = document.getElementById('q');
+  const send = document.getElementById('send');
+  const history = [];
+
+  function add(text, cls) {
+    const d = document.createElement('div');
+    d.className = 'msg ' + cls;
+    d.textContent = text;
+    log.appendChild(d);
+    log.scrollTop = log.scrollHeight;
+    return d;
+  }
+
+  async function ask(text) {
+    add(text, 'user');
+    history.push({ role: 'user', content: text });
+    const pending = add('…', 'bot');
+    send.disabled = true;
+    try {
+      const r = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: history }),
+      });
+      const data = await r.json();
+      if (!r.ok || data.error) throw new Error(data.error || 'Request failed');
+      pending.textContent = data.reply;
+      history.push({ role: 'assistant', content: data.reply });
+      if (data.model) document.getElementById('model').textContent = data.model;
+    } catch (e) {
+      pending.remove();
+      add(String(e.message || e), 'err');
+      history.pop();
+    } finally {
+      send.disabled = false;
+      q.focus();
+    }
+  }
+
+  document.getElementById('f').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = q.value.trim();
+    if (!text || send.disabled) return;
+    q.value = '';
+    ask(text);
+  });
+
+  q.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      document.getElementById('f').requestSubmit();
+    }
+  });
+</script>
+</body>
+</html>

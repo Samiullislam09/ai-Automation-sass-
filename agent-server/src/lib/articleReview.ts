@@ -1,4 +1,4 @@
-import { gateArticle, BANNED_PHRASES, MIN_QA_PAIRS, words, prose, paragraphs, sentences, FIGURE } from "./qualityGate.js";
+import { gateArticle, BANNED_PHRASES, MIN_LIST_ITEMS, MIN_QA_PAIRS, words, prose, paragraphs, sentences, FIGURE } from "./qualityGate.js";
 export { BANNED_PHRASES };
 import { reviseArticle, auditHumanization, type Completer, type HumanizeAudit } from "./writerPipeline.js";
 
@@ -331,6 +331,246 @@ export function capLongParagraphs(body: string, maxSentences: number = MAX_PARAG
     return { ...part, markdown: out.join("\n\n") };
   });
   return assembleArticle({ head: split.head, parts });
+}
+
+/** A list the model wrote as bare lines becomes a real markdown list, by code.
+ *
+ *  Found in a real article (2026-09-18), at the end of a section, with no bullets at all:
+ *
+ *      Existing documentation quality
+ *      Employee count
+ *      Chosen certification body's accreditation level
+ *      Industry sector
+ *
+ *  The gate's `has-list` check passed anyway, because a properly formatted list existed
+ *  elsewhere in the same article — so nothing flagged this, and it would have published as four
+ *  orphan lines that render as one run-together paragraph. `has-list` asks "is there a list";
+ *  this asks "is anything shaped like a list but not marked up as one", which is a different
+ *  question and needs its own answer.
+ *
+ *  DELIBERATELY CONSERVATIVE, because the failure mode of guessing wrong is mangling real prose.
+ *  A block is only converted when EVERY line in it is short, none of them ends in sentence
+ *  punctuation, and there are at least three of them. A wrapped prose paragraph fails all three
+ *  tests; two stray short lines are left alone. No model call — same reasoning as
+ *  `capLongParagraphs`: asking this class of model to fix its own formatting is the thing that
+ *  already did not work. */
+export function bulletizeBareLists(body: string): string {
+  const split = splitArticle(body);
+  const parts = split.parts.map((part) => {
+    const blocks = part.markdown.split(/\n{2,}/);
+    const out = blocks.map((block) => {
+      const lines = block.split("\n").map((l) => l.trim()).filter(Boolean);
+      if (lines.length < 3) return block;
+      const alreadyMarkedUp = lines.some(
+        (l) => LIST_LINE.test(l) || TABLE_LINE.test(l) || HEADING_LINE.test(l) || STAMP_RE.test(l)
+      );
+      if (alreadyMarkedUp) return block;
+      const everyLineIsAnItem = lines.every((l) => l.length <= BARE_LIST_MAX_LINE && !/[.!?:;]$/.test(l));
+      if (!everyLineIsAnItem) return block;
+      return lines.map((l) => `- ${l}`).join("\n");
+    });
+    return { ...part, markdown: out.join("\n\n") };
+  });
+  return assembleArticle({ head: split.head, parts });
+}
+
+/** Longer than this and a line is a sentence someone wrapped, not a list item. */
+const BARE_LIST_MAX_LINE = 60;
+
+/** Rewrite ONLY the answer paragraph, not the section it sits in.
+ *
+ *  MEASURED, 2026-09-18: `snippet-answer` was the most common failure in a real review — five of
+ *  seven sections — and every one of them dragged its whole section through `rewriteSection`,
+ *  which is how an article lost two thirds of its words and its comparison table.
+ *
+ *  The mismatch is the point. "Answer this heading in 40-58 words" is a tiny, single-constraint
+ *  task; a weak model can do it. Handing that same model the paragraph AND the surrounding 300
+ *  words AND every house rule at once is what makes it thrash: it fixes the word count and
+ *  breaks the rhythm, or fixes the rhythm and drops the table. So this asks for the smallest
+ *  thing that is wrong, and nothing else — and a bad answer can only cost us the paragraph we
+ *  were already going to replace.
+ *
+ *  The result is verified before it is accepted, because the model cannot count its own words
+ *  (that is why this rule fails in the first place). Out of range, it is discarded and the
+ *  original paragraph stays, exactly as keepBetter does for a section. */
+export async function rewriteSnippetAnswer(
+  part: ArticlePart,
+  complete: Completer,
+): Promise<string | null> {
+  const current = answerParagraph(part.markdown);
+  if (!current) return null;
+  const heading = part.h2 ?? null;
+
+  const prompt = [
+    heading
+      ? `A blog section is headed: "${heading}"`
+      : `You are fixing the opening paragraph of a blog article, before its first heading.`,
+    `Rewrite the paragraph below so it answers that heading directly and is between ${SNIPPET_MIN_WORDS} and ${SNIPPET_MAX_WORDS} words long. Count the words.`,
+    `Lead with the actual answer — the number, the yes or no, or the name — in the very first sentence.`,
+    `Keep every fact exactly as it is. Do not add a fact, a number or a name that is not already in the paragraph, and do not drop one.`,
+    `Never open with "It depends", "When it comes to", "There are many", "There are several" or "Let's". Never use an em dash or a semicolon.`,
+    `PARAGRAPH:\n<<<\n${current}\n>>>`,
+    `Output only the rewritten paragraph. No heading, no preamble, no note about what you changed, no quotes around it.`,
+  ].join("\n\n");
+
+  let text = (await complete(prompt, { maxTokens: 400, label: "writer.snippet-answer" })).trim();
+  text = text
+    .replace(/^```(?:markdown|md)?\s*/i, "")
+    .replace(/```\s*$/i, "")
+    .replace(/^<<<\s*/, "")
+    .replace(/\s*>>>$/, "")
+    .split("\n")
+    .filter((l) => !HEADING_LINE.test(l))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const n = words(prose(text)).length;
+  if (!text || n < SNIPPET_MIN_WORDS || n > SNIPPET_MAX_WORDS) {
+    console.warn(`[articleReview] discarded a snippet-answer rewrite at ${n} words (needs ${SNIPPET_MIN_WORDS}-${SNIPPET_MAX_WORDS})`);
+    return null;
+  }
+  return replaceAnswerParagraph(part.markdown, text);
+}
+
+/** Swap the answer paragraph for a new one, walking the part exactly as `answerParagraph` does
+ *  so the paragraph replaced is always the paragraph that was measured. */
+function replaceAnswerParagraph(markdown: string, replacement: string): string | null {
+  const lines = markdown.split("\n");
+  let j = 1;
+  while (j < lines.length && !lines[j].trim()) j++;
+  if (j >= lines.length || HEADING_LINE.test(lines[j]) || LIST_LINE.test(lines[j]) || TABLE_LINE.test(lines[j])) return null;
+  const start = j;
+  while (j < lines.length && lines[j].trim() && !HEADING_LINE.test(lines[j]) && !TABLE_LINE.test(lines[j]) && !LIST_LINE.test(lines[j])) j++;
+  return [...lines.slice(0, start), replacement, ...lines.slice(j)].join("\n");
+}
+
+/** Semicolons past the budget become full stops, by code.
+ *
+ *  The section prompt has said "No semicolons." before the model writes a word since 2026-09-13,
+ *  and a real article still came back with two. That is not a prompting failure to be fixed with
+ *  firmer wording — a model generating token by token cannot keep a running count of a character
+ *  across 1800 words. Neither can a rewrite reliably, which is why asking for one cost a section
+ *  its table (see keepBetter).
+ *
+ *  A semicolon joins two independent clauses, so a full stop is almost always the correct
+ *  substitution; the following word is capitalised to match. The first `max` are left alone — the
+ *  rule is "cut almost entirely", not "never". Tables, lists, headings and the byline are
+ *  skipped, matching what the check itself measures (proseText). */
+export function cutSemicolons(body: string, max: number = MAX_SEMICOLONS): string {
+  let budget = max;
+  return body
+    .split("\n")
+    .map((line) => {
+      if (TABLE_LINE.test(line) || LIST_LINE.test(line) || HEADING_LINE.test(line) || STAMP_RE.test(line.trim())) return line;
+      return line.replace(/;(\s*)(\S?)/g, (whole, gap: string, next: string) => {
+        if (budget > 0) {
+          budget--;
+          return whole;
+        }
+        // No following word (semicolon ended the line): a bare full stop is still correct.
+        if (!next) return ".";
+        return `.${gap || " "}${next.toUpperCase()}`;
+      });
+    })
+    .join("\n");
+}
+
+/** The site's own pages, linked into prose that already mentions them — by code.
+ *
+ *  MEASURED, 2026-09-18: across a full 5-round review with twelve real crawled URLs offered to
+ *  every rewrite, the model inserted ZERO internal links. Not too few — none, in any round. The
+ *  rule ("3-5 internal links") has been in the prompt throughout.
+ *
+ *  So this stops asking. It never writes a sentence and never invents an anchor: it finds a
+ *  phrase the article ALREADY contains that matches a real page's title and wraps that phrase in
+ *  a link. Because `prose()` reduces `[text](url)` to `text`, wrapping changes no word counts —
+ *  which matters, because the 40-58 word snippet answers are measured on those same words and a
+ *  fix that broke a different rule would be no fix at all.
+ *
+ *  If no existing phrase matches a page, that page simply goes unlinked. A link needs somewhere
+ *  honest to sit; manufacturing a sentence to hold one is how "SEO content" starts reading like
+ *  SEO content. */
+export function addInternalLinks(
+  body: string,
+  allowedLinks: LinkRef[],
+  siteUrl: string | null,
+  min: number = INTERNAL_LINKS_MIN,
+  max: number = INTERNAL_LINKS_MAX,
+): string {
+  const siteHost = siteUrl ? hostOf(siteUrl, null) : null;
+  const isInternal = (u: string) => (siteHost ? hostOf(u, siteUrl) === siteHost : !/^https?:/i.test(u));
+
+  const already = new Set(linksIn(body).filter(isInternal));
+  if (already.size >= min) return body;
+
+  const candidates = allowedLinks.filter((l) => isInternal(l.url) && !already.has(l.url));
+  let out = body;
+  let count = already.size;
+
+  for (const link of candidates) {
+    if (count >= Math.min(min, max)) break;
+    const anchored = linkOnePhrase(out, link);
+    if (anchored) {
+      out = anchored;
+      count++;
+    }
+  }
+  return out;
+}
+
+/** Wrap the first safe occurrence of a phrase from this page's title, or return null. */
+function linkOnePhrase(body: string, link: LinkRef): string | null {
+  for (const phrase of anchorPhrases(link.title)) {
+    const at = findLinkableIndex(body, phrase);
+    if (at < 0) continue;
+    const found = body.slice(at, at + phrase.length);
+    return `${body.slice(0, at)}[${found}](${link.url})${body.slice(at + phrase.length)}`;
+  }
+  return null;
+}
+
+/** Phrases worth trying as anchor text, longest first: the title's own segments (page titles
+ *  carry " - Brand" and " | Brand" tails that the article will never contain), then shorter
+ *  word runs from each. Two words minimum — a single word is too weak to be a useful anchor and
+ *  too likely to match something unrelated. */
+function anchorPhrases(title: string): string[] {
+  const out: string[] = [];
+  for (const segment of title.split(/\s[-|–—]\s/)) {
+    const w = segment.trim().replace(/\s+/g, " ").split(" ").filter(Boolean);
+    for (let len = Math.min(w.length, 6); len >= 2; len--) {
+      for (let i = 0; i + len <= w.length; i++) out.push(w.slice(i, i + len).join(" "));
+    }
+  }
+  return [...new Set(out)];
+}
+
+/** Where this phrase occurs in text that may be linked: prose only, never inside an existing
+ *  link, a heading, a table row, a list item or the byline. Returns an index into `body` so the
+ *  caller splices the real string, not a normalised copy. */
+function findLinkableIndex(body: string, phrase: string): number {
+  // Mask everything a link must not land in, preserving offsets exactly.
+  const mask = (s: string) => " ".repeat(s.length);
+  let masked = body.replace(/\[[^\]]*\]\([^)]*\)/g, mask);
+  masked = masked
+    .split("\n")
+    .map((line) =>
+      TABLE_LINE.test(line) || LIST_LINE.test(line) || HEADING_LINE.test(line) || STAMP_RE.test(line.trim()) ? mask(line) : line,
+    )
+    .join("\n");
+
+  const needle = phrase.toLowerCase();
+  const hay = masked.toLowerCase();
+  let from = 0;
+  for (;;) {
+    const at = hay.indexOf(needle, from);
+    if (at < 0) return -1;
+    // Whole words only: "cost" must not match inside "costly".
+    const before = at === 0 ? " " : hay[at - 1];
+    const after = at + needle.length >= hay.length ? " " : hay[at + needle.length];
+    if (!/[a-z0-9]/i.test(before) && !/[a-z0-9]/i.test(after)) return at;
+    from = at + 1;
+  }
 }
 
 /** Section 12's "last updated" date and author attribution, written by code, never by the model:
@@ -774,7 +1014,11 @@ export async function rewriteSection(
       : `Output only the rewritten part as markdown, starting with "## " and its heading, with no preamble and no note about what you changed.`,
   ].join("\n\n");
 
-  let text = (await complete(prompt, { maxTokens: 1400, label: "writer.section-rewrite" })).trim();
+  // 1400 → 2200: a rewrite has to reproduce the WHOLE part, including any table or list it must
+  // not drop (keepBetter below throws away one that does). Real sections run past 2700
+  // characters, so the old ceiling could cut a rewrite off mid-table and get it discarded for
+  // losing content it was actually trying to keep. Matches writerPipeline's section budget.
+  let text = (await complete(prompt, { maxTokens: 2200, label: "writer.section-rewrite" })).trim();
   text = text.replace(/^```(?:markdown|md)?\s*/i, "").replace(/```\s*$/i, "").trim();
 
   if (isIntro) {
@@ -787,7 +1031,52 @@ export async function rewriteSection(
   // A reply that lost its heading keeps the original one rather than orphaning the section; the
   // next round's check still judges the heading on its own merits.
   if (!/^##\s+\S/.test(text)) text = `## ${part.h2}\n\n${text.replace(/^#{1,6}\s+.*\n?/, "").trim()}`;
-  return text;
+  return keepBetter(part.markdown, text);
+}
+
+/** How much of a part's prose a rewrite may drop before it is discarding content rather than
+ *  fixing sentences. A rewrite is asked to fix wording, so it should come back about the same
+ *  size; a third of the words gone means it summarised the section instead. */
+const REWRITE_MIN_PROSE_RATIO = 0.7;
+
+/** Take the rewrite only if it did not cost more than it fixed.
+ *
+ *  MEASURED, 2026-09-18: a real 1849-word article that passed the structural gate at score 80
+ *  went through this loop — 28 section rewrites over 5 rounds — and came out at 639 words and
+ *  score 35, having lost its comparison table and its list along the way. The loop was not
+ *  converging on the rules; it was eroding the article, and then failing it for being under the
+ *  1000-word floor the erosion caused.
+ *
+ *  The reason is in the prompt above: it says "fix every problem below" and never says what must
+ *  survive. Asked to bring a 74-word answer paragraph down to 58, the model trims the whole
+ *  section. Adding "keep the table" to the prompt is the fix this codebase does NOT make — the
+ *  same class of instruction already fails elsewhere (see capLongParagraphs' comment). So the
+ *  invariant is enforced here instead: a rewrite that drops a table or list the section had, or
+ *  most of its prose, is thrown away and the original is kept.
+ *
+ *  Keeping the original means that section's rule stays broken for another round, and possibly
+ *  at the end. That is the right trade: an article with one over-long answer paragraph is worth
+ *  more than a third of an article with none. */
+export function keepBetter(original: string, rewritten: string): string {
+  if (!rewritten.trim()) return original;
+
+  // Line by line: TABLE_LINE and LIST_LINE are anchored with ^ and carry no /m flag, because
+  // their other callers hand them a single block at a time. A whole part is many lines.
+  const countLines = (s: string, re: RegExp) => s.split("\n").filter((l) => re.test(l)).length;
+  const lostTable = countLines(original, TABLE_LINE) > 0 && countLines(rewritten, TABLE_LINE) === 0;
+  const lostList = countLines(original, LIST_LINE) >= MIN_LIST_ITEMS && countLines(rewritten, LIST_LINE) < MIN_LIST_ITEMS;
+
+  const originalProse = words(proseText(original)).length;
+  const rewrittenProse = words(proseText(rewritten)).length;
+  const lostProse = originalProse > 0 && rewrittenProse < originalProse * REWRITE_MIN_PROSE_RATIO;
+
+  if (!lostTable && !lostList && !lostProse) return rewritten;
+
+  const why = [lostTable && "dropped the table", lostList && "dropped the list", lostProse && `cut prose ${originalProse}→${rewrittenProse} words`]
+    .filter(Boolean)
+    .join(", ");
+  console.warn(`[articleReview] discarded a section rewrite that ${why} — keeping the original`);
+  return original;
 }
 
 /** The "Quick answers" block (section 6) is the one structural rule that is never an edit to an
@@ -867,14 +1156,49 @@ export async function runArticleReview(initialBody: string, input: ReviewInput, 
     // The quick-answers block is an ADD, not an edit to any existing part — see
     // generateQaSection's own comment for why it never goes through reviseArticle.
     let needsQaSection = false;
+    // Parts whose answer paragraph is the wrong length, fixed one paragraph at a time rather
+    // than by rewriting the section around it — see rewriteSnippetAnswer for why that
+    // distinction is the difference between fixing the rule and eroding the article.
+    const snippetParts = new Set<number>();
     for (const c of failing) {
       if (c.id === "gate-has-qa-block") {
         needsQaSection = true;
+      } else if (c.id === "snippet-answer" && c.part !== null && split.parts[c.part]) {
+        snippetParts.add(c.part);
       } else if (c.fix === "section" && c.part !== null && split.parts[c.part]) {
         byPart.set(c.part, [...(byPart.get(c.part) ?? []), failureLine(c)]);
       } else {
         articleLevel.push(failureLine(c));
       }
+    }
+
+    if (snippetParts.size) {
+      progress(`Fixing ${snippetParts.size} answer paragraph(s) (round ${round})`);
+      await Promise.all(
+        [...snippetParts].map(async (idx) => {
+          const part = split.parts[idx];
+          const name = part.h2 ?? "Introduction";
+          try {
+            const md = await rewriteSnippetAnswer(part, deps.complete);
+            if (md) {
+              split.parts[idx] = { ...part, markdown: md };
+              sectionRewrites++;
+              emit("section_rewrite", { round, section: name, status: "done", newSection: name, words: words(proseText(md)).length });
+            } else {
+              // Out of range or unparseable. The rule stays failed this round; the section is
+              // NOT dragged into a full rewrite as a consolation, because that is the trade
+              // that cost the article its table last time.
+              emit("section_rewrite", { round, section: name, status: "failed", error: "the rewritten answer was not 40-58 words, so the original was kept" });
+            }
+          } catch (e: any) {
+            emit("section_rewrite", { round, section: name, status: "failed", error: String(e?.message ?? e) });
+          }
+        }),
+      );
+      // `split.parts` was mutated in place, so the section-rewrite block below already sees the
+      // new paragraphs — same convention that block itself uses. No re-split: part indices are
+      // unchanged, and re-deriving them would only invite them to drift.
+      body = assembleArticle(split);
     }
 
     if (byPart.size) {
@@ -920,12 +1244,22 @@ export async function runArticleReview(initialBody: string, input: ReviewInput, 
       emit("article_revise", { round, reasons: articleLevel, status: "revising" });
       try {
         const revised = await reviseArticle(input.title, input.topic, body, articleLevel, deps.complete, `${houseRules(input, false)}\n\n${linkNotes(input)}`);
-        if (/^#\s+\S/m.test(revised)) {
-          body = revised;
+        // Title line, and then the same content-preserving guard the section rewrites get: a
+        // whole-article revision has the widest blast radius of anything in this loop, and an
+        // unguarded one is half of how a 1849-word article became 639 words (see keepBetter).
+        const kept = /^#\s+\S/m.test(revised) ? keepBetter(body, revised) : body;
+        if (kept !== body) {
+          body = kept;
           articleRevisions++;
-          emit("article_revise", { round, status: "done", words: words(proseText(revised)).length });
+          emit("article_revise", { round, status: "done", words: words(proseText(body)).length });
         } else {
-          emit("article_revise", { round, status: "failed", error: "the revision came back without the article's title line, so the previous draft was kept" });
+          emit("article_revise", {
+            round,
+            status: "failed",
+            error: /^#\s+\S/m.test(revised)
+              ? "the revision dropped content it was not asked to touch, so the previous draft was kept"
+              : "the revision came back without the article's title line, so the previous draft was kept",
+          });
         }
       } catch (e: any) {
         emit("article_revise", { round, status: "failed", error: String(e?.message ?? e) });
@@ -948,7 +1282,14 @@ export async function runArticleReview(initialBody: string, input: ReviewInput, 
     // splitArticle deliberately drops any stamp-shaped line ahead of the first heading (so a
     // repeated stampByline call never duplicates it) — stamping first and capping second would
     // silently erase the byline this same line just wrote. Cap, then stamp, always in that order.
-    body = stampByline(capLongParagraphs(body), now(), input.author);
+    // Everything code can make true, made true before the model is asked for anything. Each of
+    // these was a rule the prompt already stated and the model already broke; none of them needs
+    // a model call, so none of them gets one. Order: the three that reshape blocks run first and
+    // round-trip through splitArticle/assembleArticle, then links (which must see final prose to
+    // anchor into), then the stamp last — splitArticle drops a stamp-shaped line ahead of the
+    // first heading, so stamping earlier would erase it.
+    body = addInternalLinks(cutSemicolons(capLongParagraphs(bulletizeBareLists(body))), input.allowedLinks, input.siteUrl);
+    body = stampByline(body, now(), input.author);
 
     progress(`Checking every writing rule (round ${round} of ${REVIEW_MAX_ROUNDS})`);
     emit("review_round", { round, max: REVIEW_MAX_ROUNDS, stage: "rules" });

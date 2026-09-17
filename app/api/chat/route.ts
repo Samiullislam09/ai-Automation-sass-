@@ -21,6 +21,7 @@ import * as brain from "@/lib/brain";
 import { brainTurn, legacyJobOf, type BrainTurn, type BrainTurnDeps, type OrderResult } from "@/lib/chat-brain";
 import { extractIntent } from "@/lib/chat-brain-intent";
 import { clearState, loadState, savePending } from "@/lib/chat-conversation";
+import { answerWhatWeCannotKnow, loadDataSources, looksLikeMetricQuestion } from "@/lib/chat-no-data";
 import { lastSuccessfulRun } from "@/lib/reuse";
 
 export const runtime = "nodejs";
@@ -1005,6 +1006,11 @@ export async function POST(req: NextRequest) {
   const workP = cached(`work:${tenantId}`, TTL.work, () => loadRecentWork(supabase, tenantId));
   const countsP = cached(`counts:${tenantId}`, TTL.work, () => loadCounts(supabase, tenantId));
   const scheduleP = cached(`sched:${tenantId}`, TTL.schedule, () => loadSchedule(supabase, tenantId));
+  // Only for a message that asks for a measurement. The pre-filter is a regex, so an ordinary
+  // message never pays for this read at all — see lib/chat-no-data.ts.
+  const sourcesP = looksLikeMetricQuestion(q)
+    ? cached(`sources:${tenantId}`, TTL.business, () => loadDataSources(supabase, tenantId))
+    : null;
   const convP = tenantId
     ? cached(`conv:${tenantId}:${askedFor ?? "new"}`, askedFor ? TTL.conversation : 0, () =>
         ensureConversation(supabase, tenantId, askedFor, userId)
@@ -1017,6 +1023,29 @@ export async function POST(req: NextRequest) {
     clientHistory.length >= 2 || !tenantId || !askedFor
       ? Promise.resolve([] as Turn[])
       : loadHistoryFromDb(supabase, tenantId, askedFor);
+
+  // ---- A NUMBER WE CANNOT SEE IS REFUSED HERE, BEFORE ANYTHING ELSE RUNS ----
+  //
+  // Ahead of intent, the brain and the model on purpose. Asked "site pe kitne user active hain"
+  // with no Google connection, a model does not answer "I can't see that" — it answers with a
+  // number, and the customer has no way to tell that number from a real one. Nothing downstream
+  // can undo that, so nothing downstream gets the chance: no job is enqueued and no model call
+  // is made. lib/chat-no-data.ts documents which sources are live and which are not.
+  if (sourcesP) {
+    const noData = answerWhatWeCannotKnow(q, await sourcesP);
+    if (noData) {
+      const convId = await convP;
+      if (tenantId && convId) await saveTurn(tenantId, convId, q, noData.answer);
+      console.log(`[chat] refused a metric we have no source for: missing=${noData.missing} ms=${Date.now() - t0}`);
+      return new Response(once(noData.answer), {
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "X-Chat-Ms": String(Date.now() - t0),
+          ...(convId ? { "X-Conversation-Id": convId } : {}),
+        },
+      });
+    }
+  }
 
   // Which system decides what this message means. `legacyJobOf` in lib/chat-brain.ts lists
   // what the brain still cannot do, and lib/brain.ts `brainEnabled()` carries the flag's

@@ -71,7 +71,38 @@ export type Researcher = (topic: string) => Promise<ResearchResult | null>;
  *  fragile for no benefit over just reading `choices[0].message.content`. */
 export type Completer = (prompt: string, opts?: { maxTokens?: number; label?: string }) => Promise<string>;
 
-const WRITER_TIMEOUT_MS = Number(process.env.WRITER_TIMEOUT_MS) || 180_000;
+/** 180s → 300s on 2026-09-18. Measured over 263 jobs_log rows: 41 failed, and 7 of those (17%)
+ *  were this timeout. The step budgets below went up at the same time, so the old ceiling would
+ *  have converted truncations into timeouts rather than into finished articles. */
+const WRITER_TIMEOUT_MS = Number(process.env.WRITER_TIMEOUT_MS) || 300_000;
+
+/** Per-step output budgets, in one place because they were the single largest cause of failure.
+ *
+ *  MEASURED, 2026-09-18, over jobs_log (263 rows, 41 failures): 18 failures were "did not return
+ *  valid JSON" and 14 were the model's own length stop. Every one came from `outline`, `meta` or
+ *  `section` — the three steps below 1200 tokens. `polish` and `revise`, both already on 4096,
+ *  never failed once. The model was not producing garbage; it was being cut off mid-sentence and
+ *  the truncated text then failed to parse as JSON.
+ *
+ *  Sizing: outline emits 5-8 sections (MIN_SECTIONS/MAX_SECTIONS) each carrying h2 + goal +
+ *  keyword + question, so 900 could not hold 8 of them at all. meta emits title, description,
+ *  slug AND JSON-LD, where the schema block alone can pass 700. A section's own floor is 300
+ *  words (~400 tokens) and the prose ones run longer. */
+const STEP_TOKENS = {
+  outline: 2500,
+  section: 2000,
+  meta: 1500,
+  polish: 4096,
+  revise: 4096,
+  // 1200 → 3000 on 2026-09-18, a regression from raising the three budgets above: the audit
+  // reports one JSON issue per problem it finds across the WHOLE article, so a longer article
+  // means a longer audit, and a real 1694-word review run died with "writer.humanize-audit step
+  // was cut off by the model's token limit" — which fails the audit open and drops the one check
+  // that is not mechanical.
+  humanizeAudit: 3000,
+  /** Fallback for a caller that names no budget — never the old 800, which was a truncation. */
+  default: 2000,
+} as const;
 
 /** The real completer, NIM via nvidiaFetch — same model, same "thinking off" switch, same
  *  shared NVIDIA_API_KEYS_BG key-pool limiter every other agent-server call respects (§18.4's
@@ -88,7 +119,7 @@ export async function nimComplete(prompt: string, opts: { maxTokens?: number; la
         model: "nvidia/nemotron-3.5-lightning-30b-a3b",
         stream: false,
         chat_template_kwargs: { thinking: false }, // see lib/writer.ts — the soft prompt hint alone is not enough
-        max_tokens: opts.maxTokens ?? 800,
+        max_tokens: opts.maxTokens ?? STEP_TOKENS.default,
         messages: [
           { role: "system", content: "detailed thinking off\n\nYou write only from the context you are given. If a fact is not in it, you do not state it." },
           { role: "user", content: prompt },
@@ -153,7 +184,13 @@ export async function buildOutline(
   research?: ResearchResult | null
 ): Promise<Outline> {
   const researchLines = research?.context
-    ? `WHAT THE OPEN WEB COVERS ON THIS TOPIC (gpt-researcher, background only — use this only to decide which subtopics and reader questions are worth a section; do NOT copy any fact, number, name or claim from it into the outline or later into the article — every fact the article states must come from BUSINESS CONTEXT / BLUEPRINT above, not from here):\n${research.context.slice(0, 3000)}`
+    // "must come from BUSINESS CONTEXT / BLUEPRINT above" used to name those labels inline, and
+    // a real article came back saying "BUSINESS CONTEXT variables such as company size directly
+    // shape..." — handed a shouted label inside a sentence, the model read it as vocabulary and
+    // reused it that way. The instruction is identical; it just no longer supplies an all-caps
+    // token for the model to echo. qualityGate.ts blocks the leak too, but not leaking it in the
+    // first place is the actual fix.
+    ? `WHAT THE OPEN WEB COVERS ON THIS TOPIC (gpt-researcher, background only — use this only to decide which subtopics and reader questions are worth a section; do NOT copy any fact, number, name or claim from it into the outline or later into the article — every fact the article states must come from the business and blueprint details given above, not from here):\n${research.context.slice(0, 3000)}`
     : "";
 
   const prompt = [
@@ -173,7 +210,7 @@ export async function buildOutline(
     `Reply with ONLY JSON: {"title":"...","sections":[{"h2":"...","goal":"...","keyword":"...","readerQuestion":"..."}]}`,
   ].filter(Boolean).join("\n\n");
 
-  const raw = await complete(prompt, { maxTokens: 900, label: "writer.outline" });
+  const raw = await complete(prompt, { maxTokens: STEP_TOKENS.outline, label: "writer.outline" });
   const parsed = parseJsonReply<{ title?: string; sections?: Partial<OutlineSection>[] }>(raw, "outline");
 
   const sections = (Array.isArray(parsed.sections) ? parsed.sections : [])
@@ -250,7 +287,7 @@ export async function writeSection(
 
   // 700 tokens capped a 300-word section at roughly its own minimum, leaving the model no room
   // to satisfy the floor above — 1100 gives ~450 words of headroom.
-  const text = await complete(prompt, { maxTokens: 1100, label: "writer.section" });
+  const text = await complete(prompt, { maxTokens: STEP_TOKENS.section, label: "writer.section" });
   return text.trim();
 }
 
@@ -319,7 +356,7 @@ export async function polishArticle(
     `Output the complete polished article as markdown, starting with "# ${outline.title}" — no preamble, no explanation.`,
   ].filter(Boolean).join("\n\n");
 
-  const text = await complete(prompt, { maxTokens: 4096, label: "writer.polish" });
+  const text = await complete(prompt, { maxTokens: STEP_TOKENS.polish, label: "writer.polish" });
   return text.trim();
 }
 
@@ -355,7 +392,7 @@ export async function reviseArticle(
     `Output the complete corrected article as markdown, starting with "# ${title}" — no preamble, no explanation, no note about what you changed.`,
   ].join("\n\n");
 
-  const text = await complete(prompt, { maxTokens: 4096, label: "writer.revise" });
+  const text = await complete(prompt, { maxTokens: STEP_TOKENS.revise, label: "writer.revise" });
   return text.trim();
 }
 
@@ -400,7 +437,7 @@ export async function auditHumanization(body: string, topic: string, complete: C
     body,
   ].join("\n\n");
 
-  const raw = await complete(prompt, { maxTokens: 1200, label: "writer.humanize-audit" });
+  const raw = await complete(prompt, { maxTokens: STEP_TOKENS.humanizeAudit, label: "writer.humanize-audit" });
   const parsed = parseJsonReply<{ passed?: boolean; issues?: Partial<HumanizeIssue>[] }>(raw, "humanize-audit");
   const issues = (Array.isArray(parsed.issues) ? parsed.issues : [])
     .map((i) => ({ rule: String(i.rule ?? "").trim(), quote: String(i.quote ?? "").trim(), fix: String(i.fix ?? "").trim() }))
@@ -430,7 +467,7 @@ export async function writeMeta(
     `Reply with ONLY JSON: {"metaTitle":"...","metaDescription":"...","slug":"...","jsonLd":"..."}`,
   ].join("\n\n");
 
-  const raw = await complete(prompt, { maxTokens: 700, label: "writer.meta" });
+  const raw = await complete(prompt, { maxTokens: STEP_TOKENS.meta, label: "writer.meta" });
   const parsed = parseJsonReply<Partial<WriterMeta>>(raw, "meta");
 
   return {

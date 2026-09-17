@@ -14,7 +14,7 @@ process.env.DATABASE_URL ||= "postgres://unit-test/none";
 process.env.SUPABASE_URL ||= "http://unit-test.invalid";
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= "unit-test";
 
-const { checkArticle, runArticleReview, splitArticle, assembleArticle, stampByline, capLongParagraphs, REVIEW_MAX_ROUNDS } = await import("./articleReview.js");
+const { checkArticle, runArticleReview, splitArticle, assembleArticle, stampByline, capLongParagraphs, bulletizeBareLists, keepBetter, cutSemicolons, addInternalLinks, REVIEW_MAX_ROUNDS } = await import("./articleReview.js");
 
 const KW = "emergency plumber in Leeds";
 const SITE = "https://example.com";
@@ -357,4 +357,188 @@ test("if the independent reviewer cannot run, the article does not pass on its s
   assert.equal(out.passed, false);
   assert.equal(out.rounds, 2);
   assert.match(out.auditError ?? "", /NVIDIA timed out/);
+});
+
+/* ---------------------------------------------------------------- bulletizeBareLists ------- */
+
+test("bulletizeBareLists marks up a list the model wrote as bare lines", () => {
+  // The real case, from a live article on 2026-09-18: four orphan lines at the end of a
+  // section, which render as one run-together paragraph.
+  const body = [
+    "# Title",
+    "",
+    "## What factors influence the price?",
+    "",
+    "A short answer paragraph that ends properly.",
+    "",
+    "Existing documentation quality",
+    "Employee count",
+    "Chosen certification body's accreditation level",
+    "Industry sector",
+  ].join("\n");
+  const out = bulletizeBareLists(body);
+  assert.match(out, /^- Existing documentation quality$/m);
+  assert.match(out, /^- Employee count$/m);
+  assert.match(out, /^- Industry sector$/m);
+  assert.ok(!/^Employee count$/m.test(out), "the unmarked line must be gone");
+});
+
+test("bulletizeBareLists does not touch real prose", () => {
+  const prose = [
+    "# Title",
+    "",
+    "## Heading",
+    "",
+    "This is a real paragraph with sentences. It runs to a normal length and ends in a full stop.",
+    "It has a second sentence on its own line, which is still prose and must not become a bullet.",
+  ].join("\n");
+  assert.equal(bulletizeBareLists(prose), prose);
+});
+
+test("bulletizeBareLists leaves an already-marked-up list alone", () => {
+  const body = ["# Title", "", "## Heading", "", "- one", "- two", "- three"].join("\n");
+  assert.equal(bulletizeBareLists(body), body);
+});
+
+test("bulletizeBareLists needs three lines — two short lines are not a list", () => {
+  const body = ["# Title", "", "## Heading", "", "Short line one", "Short line two"].join("\n");
+  assert.equal(bulletizeBareLists(body), body);
+});
+
+test("bulletizeBareLists never touches a table", () => {
+  const body = ["# Title", "", "## Heading", "", "| a | b |", "|---|---|", "| 1 | 2 |"].join("\n");
+  assert.equal(bulletizeBareLists(body), body);
+});
+
+test("bulletizeBareLists is idempotent", () => {
+  const body = ["# Title", "", "## Heading", "", "Alpha item", "Beta item", "Gamma item"].join("\n");
+  const once = bulletizeBareLists(body);
+  assert.equal(bulletizeBareLists(once), once);
+});
+
+/* ---------------------------------------------------------------- keepBetter --------------- */
+
+const LONG_PROSE = Array.from({ length: 20 }, (_, i) => `Sentence number ${i} carries a few more words to give this part real length.`).join(" ");
+
+test("keepBetter accepts a rewrite that fixed wording without losing content", () => {
+  const original = `## Heading\n\n${LONG_PROSE}`;
+  const rewritten = `## Heading\n\n${LONG_PROSE} One more short line.`;
+  assert.equal(keepBetter(original, rewritten), rewritten);
+});
+
+test("keepBetter discards a rewrite that dropped the table", () => {
+  const original = `## Heading\n\n${LONG_PROSE}\n\n| a | b |\n| --- | --- |\n| 1 | 2 |`;
+  const rewritten = `## Heading\n\n${LONG_PROSE}`;
+  assert.equal(keepBetter(original, rewritten), original, "the table must not be lost to a wording fix");
+});
+
+test("keepBetter discards a rewrite that dropped the list", () => {
+  const original = `## Heading\n\n${LONG_PROSE}\n\n- one\n- two\n- three\n- four`;
+  const rewritten = `## Heading\n\n${LONG_PROSE}`;
+  assert.equal(keepBetter(original, rewritten), original);
+});
+
+test("keepBetter discards a rewrite that cut most of the prose", () => {
+  // The real failure: asked to shorten one answer paragraph, the model summarised the section.
+  const original = `## Heading\n\n${LONG_PROSE}`;
+  const rewritten = `## Heading\n\nA short summary sentence.`;
+  assert.equal(keepBetter(original, rewritten), original);
+});
+
+test("keepBetter allows a modest trim, which is what shortening an answer really is", () => {
+  const original = `## Heading\n\n${LONG_PROSE}`;
+  const keptWords = LONG_PROSE.split(" ").slice(0, Math.ceil(LONG_PROSE.split(" ").length * 0.85)).join(" ");
+  const rewritten = `## Heading\n\n${keptWords}`;
+  assert.equal(keepBetter(original, rewritten), rewritten, "a 15% trim is a fix, not erosion");
+});
+
+test("keepBetter keeps the original when the rewrite came back empty", () => {
+  const original = `## Heading\n\n${LONG_PROSE}`;
+  assert.equal(keepBetter(original, "   "), original);
+});
+
+/* ---------------------------------------------------------------- cutSemicolons ------------ */
+
+test("cutSemicolons keeps the first and turns the rest into full stops", () => {
+  const body = "# T\n\nOne clause; a second clause. Another line; and more; and yet more.";
+  const out = cutSemicolons(body, 1);
+  assert.equal((out.match(/;/g) || []).length, 1, "exactly the budget survives");
+  assert.match(out, /Another line\. And more\. And yet more\./, "the cut ones become sentences");
+});
+
+test("cutSemicolons never touches a table, list, heading or byline", () => {
+  const body = ["# A; B", "", "| x; y | z |", "| --- | --- |", "- item; two", "", "*Last updated: 1 Jan 2026*"].join("\n");
+  assert.equal(cutSemicolons(body, 0), body);
+});
+
+test("cutSemicolons handles a semicolon at the end of a line", () => {
+  const out = cutSemicolons("# T\n\nA trailing clause;", 0);
+  assert.match(out, /A trailing clause\.$/);
+});
+
+/* ---------------------------------------------------------------- addInternalLinks --------- */
+
+const LINK_SITE = "https://example.com";
+const PAGES = [
+  { url: "https://example.com/iso-9001", title: "ISO 9001 Certification - Example Co" },
+  { url: "https://example.com/audit", title: "Internal Audit Support | Example Co" },
+  { url: "https://example.com/training", title: "Staff Training Courses" },
+];
+
+test("addInternalLinks anchors real pages onto phrases the article already contains", () => {
+  const body = [
+    "# Guide",
+    "",
+    "Our ISO 9001 certification work begins with a review.",
+    "",
+    "## How does it run?",
+    "",
+    "Internal audit support follows, and staff training courses come last.",
+  ].join("\n");
+  const out = addInternalLinks(body, PAGES, LINK_SITE);
+  assert.match(out, /\[ISO 9001 Certification\]\(https:\/\/example\.com\/iso-9001\)/i);
+  assert.match(out, /\[Internal Audit Support\]\(https:\/\/example\.com\/audit\)/i);
+  assert.match(out, /\[Staff Training Courses\]\(https:\/\/example\.com\/training\)/i);
+});
+
+test("addInternalLinks does not change the word count", () => {
+  const body = "# Guide\n\nOur ISO 9001 certification work begins with a review of internal audit support and staff training courses here.";
+  const out = addInternalLinks(body, PAGES, LINK_SITE);
+  const count = (s: string) => s.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/^#{1,6}\s+.*$/gm, "").trim().split(/\s+/).filter(Boolean).length;
+  assert.equal(count(out), count(body), "link syntax must not shift the snippet-answer word counts");
+});
+
+test("addInternalLinks invents nothing when no phrase matches", () => {
+  const body = "# Guide\n\nThis article is about something else entirely and mentions none of it.";
+  assert.equal(addInternalLinks(body, PAGES, LINK_SITE), body);
+});
+
+test("addInternalLinks stops once the minimum is met", () => {
+  const body = "# Guide\n\nISO 9001 certification, internal audit support, staff training courses, and more.";
+  const out = addInternalLinks(body, PAGES, LINK_SITE, 2);
+  const internal = [...out.matchAll(/\]\((https:\/\/example\.com[^)]*)\)/g)].length;
+  assert.equal(internal, 2, "it links up to the minimum, not everything it could");
+});
+
+test("addInternalLinks leaves an article that already has enough links alone", () => {
+  const body = [
+    "# Guide",
+    "",
+    "See [one](https://example.com/a), [two](https://example.com/b) and [three](https://example.com/c).",
+    "",
+    "ISO 9001 certification is also discussed.",
+  ].join("\n");
+  assert.equal(addInternalLinks(body, PAGES, LINK_SITE), body);
+});
+
+test("addInternalLinks never nests a link inside an existing one", () => {
+  const body = "# Guide\n\nRead [ISO 9001 certification](https://example.com/old) and internal audit support and staff training courses.";
+  const out = addInternalLinks(body, PAGES, LINK_SITE);
+  assert.ok(!/\[\[/.test(out) && !/\]\([^)]*\]\(/.test(out), "no nested link syntax");
+});
+
+test("addInternalLinks matches whole words only", () => {
+  const body = "# Guide\n\nWe discuss staff training coursework at length, nothing else.";
+  const out = addInternalLinks(body, PAGES, LINK_SITE);
+  assert.ok(!/coursework\]/.test(out), "'staff training courses' must not match inside 'coursework'");
 });

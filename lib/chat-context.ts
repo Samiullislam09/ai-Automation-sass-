@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { resolveWebsiteUrl } from "./website-url";
 
 /** Everything the chat needs to know before it can answer, gathered in PARALLEL.
  *
@@ -34,7 +35,7 @@ export type ChatContext = {
 export async function loadBusiness(supabase: SupabaseClient, tenantId: string | null): Promise<string | null> {
   if (!tenantId) return null;
   try {
-    const [{ data: tenant }, { data: profileRow }, { data: samplePages }, { count: pageCount }] = await Promise.all([
+    const [{ data: tenant }, { data: profileRow }, { data: samplePages }, { count: pageCount }, resolvedUrl] = await Promise.all([
       supabase.from("tenants").select("website_url, name, niche, tone_profile, icp_profile, onboarded, memory_facts").eq("id", tenantId).single(),
       supabase.from("site_profiles").select("profile").eq("tenant_id", tenantId).eq("active", true).maybeSingle(),
       // 6 → 40. "Mera company ka details do" has to be answerable from what the crawler
@@ -43,6 +44,10 @@ export async function loadBusiness(supabase: SupabaseClient, tenantId: string | 
       // etc se usko answer dena hai".
       supabase.from("site_pages").select("title").eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(40),
       supabase.from("site_pages").select("*", { count: "exact", head: true }).eq("tenant_id", tenantId),
+      // Not `tenant.website_url` raw: a connected integration outranks whatever was typed into
+      // onboarding, and this self-heals the column the first time it disagrees. See
+      // lib/website-url.ts — chat answering questions about the wrong site is the bug it fixes.
+      resolveWebsiteUrl(supabase, tenantId),
     ]);
     if (!tenant) return null;
     const profile = (profileRow?.profile as Record<string, any> | undefined) ?? null;
@@ -56,8 +61,14 @@ export async function loadBusiness(supabase: SupabaseClient, tenantId: string | 
     if (!tenant.onboarded && !profile) return null;
 
     const facts: string[] = [];
-    if (tenant.name) facts.push(`business name=${tenant.name}`);
-    if (tenant.website_url) facts.push(`website=${tenant.website_url}`);
+    // `tenants.name` is whatever the account was signed up as — often a username ("heysamiul09"),
+    // not a business. Labelled `business name`, it got reported as one: "Site ka naam
+    // heysamiul09 hai" in a live conversation, contradicting the same chat's own correct answer
+    // a minute earlier. The field is unchanged; only the label is now honest about what it is,
+    // because the model can only be as accurate as the name it is given for a value.
+    if (tenant.name) facts.push(`account/login name (NOT necessarily the business or site name)=${tenant.name}`);
+    const website = resolvedUrl ?? (tenant.website_url as string | null);
+    if (website) facts.push(`website=${website}`);
 
     if (profile) {
       if (profile.what_they_do) facts.push(`what they do=${profile.what_they_do}`);

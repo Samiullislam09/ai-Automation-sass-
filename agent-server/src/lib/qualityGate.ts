@@ -187,6 +187,17 @@ const PLACEHOLDER_PATTERNS: { re: RegExp; label: string }[] = [
   { re: /```/, label: "code fence" },
   { re: /Here's a thinking process/i, label: "leaked reasoning" },
   { re: /<think>/i, label: "<think> tag" },
+  // Our own prompt's section labels, echoed back as prose. Found in a real article
+  // (2026-09-18): "BUSINESS CONTEXT variables such as company size directly shape..." — the
+  // writer prompt names the label mid-sentence when it tells the model where facts may come
+  // from, so the model treated it as vocabulary rather than as a header. Matched WITHOUT a
+  // trailing colon on purpose: the leak that prompted this had none, and a colon-anchored
+  // pattern would have passed it. Case-sensitive and all-caps only, so ordinary prose that
+  // happens to discuss a business context or a blueprint is untouched.
+  {
+    re: /\b(BUSINESS CONTEXT|SECTION HEADING|THIS SECTION'S JOB|THE READER'S QUESTION|WORD LENGTH|SECTION TO REWRITE|WHAT TO FIX)\b/,
+    label: "a prompt label leaked into the prose",
+  },
 ];
 
 const CTA_VERB = /\b(contact|call|book|get|start|try|visit|reach|schedule|download|sign up|learn more)\b/i;
