@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
-import { nextRunAt } from "@/lib/chat-context";
+import { nextRunAt } from "@/lib/schedule-time";
 
 /** Reads/writes the tenant's recurring automation (see supabase/migrations/006_schedules.sql).
  *  The row is only configuration — what actually fires it is the minute tick in

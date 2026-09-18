@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { startPolling } from "@/lib/poll";
-import { humanTime } from "@/lib/chat-context";
+import { humanTime } from "@/lib/schedule-time";
 
 /** /dashboard/schedule — rebuilt 2026-09-05 on the same look as Approvals / Content (owner:
  *  "schedule page ka ui bhi theme se match kare, har schedule ka option ho, user friendly"):

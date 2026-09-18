@@ -37,6 +37,7 @@
  */
 
 import React, { useEffect, useRef, useState } from "react";
+import { renderMarkdown } from "@/lib/md";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LxGlobalStyle } from "@/components/lx-theme";
@@ -87,6 +88,9 @@ import {
   Square,
   RotateCcw,
   Bug,
+  Monitor,
+  Pause,
+  Play,
 } from "lucide-react";
 
 /* ========================================================================== */
@@ -469,6 +473,78 @@ function summariseProduced(items: { kind: string; payload: any; agent_id: string
  *  (agent-server/src/agents/keyword.ts keeps volume / competition / fit as three separate
  *  fields on purpose, and the plan forbids blending them), plus a per-row button that orders
  *  the article for that keyword. */
+/** Reveal a list one item at a time, however fast the items actually arrived.
+ *
+ *  WHY THIS IS A UI CONCERN AND NOT THE AGENT'S. agents/keyword.ts emits one `keyword` event per
+ *  keyword, correctly — but it emits them in a tight loop AFTER the research finishes, so all of
+ *  them land in the same instant. The panel then went straight from "Searching…" to a full table
+ *  and on to the next step, which is exactly what the owner reported on 2026-09-18: "achanak
+ *  bina all keyword and select keyword show kiya artical write pe chala jata ha".
+ *
+ *  The fix belongs here rather than in the agent. Making a background job sleep so a screen looks
+ *  busier would be paying real seconds of the customer's time for an animation, and it still
+ *  would not help — the events can arrive in a burst for ordinary reasons (a reconnect, a cached
+ *  replay, a slow first paint). Pacing the REVEAL handles every one of those cases and costs the
+ *  job nothing.
+ *
+ *  `enabled` false means show everything at once: a finished run is history, and history does not
+ *  need to be animated before it can be read. */
+/** Type a string out, character by character.
+ *
+ *  The search box used to print the whole query at once and park a blinking caret after it,
+ *  which reads as "a screenshot of a search" rather than a search being made. A real query being
+ *  typed is the cheapest, most honest signal that something is actually happening — the text is
+ *  the agent's own topic either way, only its arrival is animated. */
+function useTypewriter(text: string, enabled: boolean, cps = 34): string {
+  const [n, setN] = useState(enabled ? 0 : text.length);
+  // A new topic restarts the typing; the same topic re-rendering must not.
+  useEffect(() => {
+    setN(enabled ? 0 : text.length);
+  }, [text, enabled]);
+  useEffect(() => {
+    if (!enabled || n >= text.length) return;
+    const t = setTimeout(() => setN((x) => Math.min(x + 1, text.length)), 1000 / cps);
+    return () => clearTimeout(t);
+  }, [enabled, n, text.length, cps]);
+  return text.slice(0, Math.min(n, text.length));
+}
+
+/** Seconds since this screen first saw the search start — a real measurement, so the "(0.42
+ *  seconds)" line a Google page carries can be shown without inventing a number. */
+function useElapsedSeconds(running: boolean): number {
+  const startRef = useRef<number | null>(null);
+  const [, tick] = useState(0);
+  if (running && startRef.current === null) startRef.current = Date.now();
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => tick((n) => n + 1), 100);
+    return () => clearInterval(id);
+  }, [running]);
+  return startRef.current === null ? 0 : (Date.now() - startRef.current) / 1000;
+}
+
+function useStaggeredReveal<T>(items: T[], enabled: boolean, stepMs = 140): T[] {
+  const [shown, setShown] = useState(enabled ? 0 : items.length);
+
+  useEffect(() => {
+    if (!enabled) {
+      setShown(items.length);
+      return;
+    }
+    // Never reveal more than exist — a list that shrinks (a fresh run reusing this component)
+    // must not leave the counter stranded past the end.
+    if (shown > items.length) {
+      setShown(items.length);
+      return;
+    }
+    if (shown >= items.length) return;
+    const t = setTimeout(() => setShown((n) => Math.min(n + 1, items.length)), stepMs);
+    return () => clearTimeout(t);
+  }, [enabled, items.length, shown, stepMs]);
+
+  return items.slice(0, shown);
+}
+
 const KeywordScreen = ({
   items,
   topic,
@@ -487,6 +563,16 @@ const KeywordScreen = ({
   onWriteArticle: (keyword: string) => void;
 }) => {
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+  // Rows appear one by one while the search is live. Once the agent has NAMED its pick, the
+  // trickle stops and the rest appear at once: at that moment the interesting fact is the
+  // selection and the list it was chosen from, and still dripping rows in underneath it would
+  // hide the decision behind an animation.
+  const revealed = useStaggeredReveal(items, running && !picked);
+  // The query types itself into the box while the search is live, and is simply there once it
+  // is over (a finished run is not being typed).
+  const typedTopic = useTypewriter(topic ?? "", running && !picked);
+  const elapsed = useElapsedSeconds(running);
 
   // Where each row's own number came from — real metadata agents/keyword.ts already tags
   // every item with (`source`), turned into words instead of a wire value nobody typed.
@@ -527,37 +613,63 @@ const KeywordScreen = ({
             actual results tabs Google itself shows — static chrome, same on every run, never
             claiming a number Google didn't give us. Owner, 2026-09-12: "iska ui real google
             search engine jaisa karo". */}
-        <div className="lx-serp-brand">
-          <span className="lx-g">
-            <span style={{ color: "#4285F4" }}>G</span>
-            <span style={{ color: "#EA4335" }}>o</span>
-            <span style={{ color: "#FBBC05" }}>o</span>
-            <span style={{ color: "#4285F4" }}>g</span>
-            <span style={{ color: "#34A853" }}>l</span>
-            <span style={{ color: "#EA4335" }}>e</span>
+        {/* A real results page puts the logo SMALL and to the LEFT of the search box, on one
+            row, with the tabs indented underneath to line up with the box — not a big centred
+            wordmark sitting on top of a full-width bar, which is the home page's layout and is
+            what this used to be (owner, 2026-09-18: "google logo chota sa same google logo
+            google page ui jaisa ho"). */}
+        <div className="lx-serp-head">
+          <span className="lx-serp-logo" aria-label="Google">
+            <b style={{ color: "#4285F4" }}>G</b>
+            <b style={{ color: "#EA4335" }}>o</b>
+            <b style={{ color: "#FBBC05" }}>o</b>
+            <b style={{ color: "#4285F4" }}>g</b>
+            <b style={{ color: "#34A853" }}>l</b>
+            <b style={{ color: "#EA4335" }}>e</b>
           </span>
-        </div>
-        {/* the search box — real topic, never a placeholder, with a typing caret so an idle
-            moment (before the first keyword lands) still reads as "searching" rather than
-            frozen. */}
-        <div className="lx-serp-bar">
-          <Search size={14} className="lx-mut shrink-0" />
-          <span className="lx-12 min-w-0 flex-1 truncate">
-            {topic || "…"}
-            <span className="lx-serp-caret" />
-          </span>
-          <Mic size={13} className="lx-dim shrink-0" />
-        </div>
-        <div className="lx-serp-tabs">
-          {["All", "Images", "News", "Shopping"].map((t, i) => (
-            <span key={t} className={i === 0 ? "on" : undefined}>{t}</span>
-          ))}
+          <div className="lx-serp-col">
+            {/* The search box — the agent's real topic, typed in. */}
+            <div className="lx-serp-bar">
+              <span className="lx-serp-q">
+                {typedTopic || (topic ? "" : "…")}
+                <span className="lx-serp-caret" />
+              </span>
+              <Mic size={14} className="shrink-0" style={{ color: "#4285F4" }} />
+              <Search size={15} className="shrink-0" style={{ color: "#4285F4" }} />
+            </div>
+            <div className="lx-serp-tabs">
+              {["All", "Images", "Videos", "News", "Shopping"].map((t, i) => (
+                <span key={t} className={i === 0 ? "on" : undefined}>{t}</span>
+              ))}
+            </div>
+          </div>
         </div>
         <div className="lx-serp-meta">
-          {items.length === 0 ? "Searching…" : `About ${items.length} keyword idea${items.length === 1 ? "" : "s"} found`}
+          {/* Counts what is ON SCREEN, not what has arrived — a count that jumps to its final
+              number while three rows are visible is the tell that the rest of this is theatre.
+              The seconds are a real measurement (useElapsedSeconds), which is the only reason
+              this can carry the "(0.42 seconds)" line a Google results page has. */}
+          {revealed.length === 0
+            ? "Searching…"
+            : `About ${revealed.length} keyword idea${revealed.length === 1 ? "" : "s"}${elapsed > 0 ? ` (${elapsed.toFixed(2)} seconds)` : ""}`}
         </div>
         <div>
-          {items.map((it) => {
+          {/* Placeholder rows while nothing has arrived yet. The panel used to be an empty white
+              sheet under the word "Searching…" for as long as the research took, which is what
+              read as frozen. These are obviously placeholders — no text, just shimmering bars —
+              so nothing here can be mistaken for a result that exists. */}
+          {revealed.length === 0 && running &&
+            [0, 1, 2, 3].map((i) => (
+              <div key={`sk-${i}`} className="lx-serp-row lx-serp-sk" style={{ animationDelay: `${i * 110}ms` }}>
+                <span className="lx-serp-fav" style={{ background: "rgba(139,139,160,.35)" }} />
+                <div className="min-w-0 flex-1">
+                  <span className="sk" style={{ width: "34%" }} />
+                  <span className="sk t" style={{ width: `${72 - i * 7}%` }} />
+                  <span className="sk" style={{ width: `${54 - i * 5}%` }} />
+                </div>
+              </div>
+            ))}
+          {revealed.map((it) => {
             const p = it.payload ?? {};
             const vol = num(p.searchVolume);
             const bits = [
@@ -567,27 +679,38 @@ const KeywordScreen = ({
             ].filter(Boolean);
             return (
               <div key={it.key} className="lx-live-anim lx-serp-row">
-                <span className="lx-serp-fav" style={{ background: dotColor(p.competitionLevel) }} />
-                <div className="min-w-0 flex-1">
-                  {/* Same visual slot a real SERP's URL breadcrumb sits in — but since there is no
-                      real URL for a keyword idea, honest content goes there instead: where the
-                      number itself came from (agents/keyword.ts's own `source` tag). */}
-                  <div className="lx-serp-crumb truncate">
-                    Keyword Research{p.source && SOURCE_LABEL[p.source] ? ` › ${SOURCE_LABEL[p.source]}` : ""}
+                {/* A real result's own stack: favicon + source on one line, the path under it,
+                    then the blue title, then the snippet. The favicon used to be a bare coloured
+                    dot in its own column, which is not a shape Google has.
+                    There is no URL for a keyword idea, so the slots that would hold one hold the
+                    honest equivalent instead — WHERE the number came from (agents/keyword.ts's
+                    own `source` tag). Nothing here is a made-up domain. */}
+                <div className="lx-serp-site">
+                  <span className="lx-serp-fav" style={{ background: dotColor(p.competitionLevel) }} />
+                  <div className="min-w-0">
+                    <div className="lx-serp-host truncate">
+                      {p.source && SOURCE_LABEL[p.source] ? SOURCE_LABEL[p.source] : "Keyword Research"}
+                    </div>
+                    <div className="lx-serp-crumb truncate">
+                      Keyword Research{p.source && SOURCE_LABEL[p.source] ? ` › ${SOURCE_LABEL[p.source]}` : ""}
+                    </div>
                   </div>
-                  <div className="lx-serp-title truncate">{p.keyword ?? "?"}</div>
-                  <div className="lx-serp-desc truncate">{bits.join(" · ")}</div>
                 </div>
+                <div className="lx-serp-title">{p.keyword ?? "?"}</div>
+                <div className="lx-serp-desc">{bits.join(" · ")}</div>
               </div>
             );
           })}
         </div>
-          {items.length > 0 && (
+          {revealed.length > 0 && (
             <div className="lx-serp-foot">
               <div className="lx-track" style={{ flex: 1 }}>
                 <div className="lx-serp-scan" />
               </div>
-              Scanning search data…
+              {/* Only claim to be scanning while rows are genuinely still arriving. Once the
+                  agent has picked, this panel is showing a finished result and a live-looking
+                  progress line under it would be describing work that is over. */}
+              {revealed.length < items.length ? "Scanning search data…" : picked ? "Keyword chosen — handing it to Mr. Writer" : "Checking which of these fit your site…"}
             </div>
           )}
         </div>
@@ -1078,6 +1201,17 @@ const ImageScreen = ({ items, running, color, label }: { items: CanvasItem[]; ru
   const images = items.filter((it) => it.kind === "image" && it.payload?.url);
   const hostRef = useRef<HTMLDivElement>(null);
   const { setNodeRef, target } = useFollowLatest(images);
+  // Click a tile to see the whole image. The tiles are `object-cover` thumbnails, so a wide
+  // diagram is cropped to a 16:9 slot and the parts that got cut off were simply unreachable
+  // (owner, 2026-09-18: "image pe click karu to image full dikhna chaye"). Escape closes it,
+  // because an overlay with no keyboard exit is a trap.
+  const [zoom, setZoom] = useState<{ url: string; alt: string } | null>(null);
+  useEffect(() => {
+    if (!zoom) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setZoom(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [zoom]);
   if (images.length === 0) {
     return <div className="lx-10 lx-mut px-1 py-2">{running ? "Generating images…" : "No images were produced for this order."}</div>;
   }
@@ -1097,7 +1231,13 @@ const ImageScreen = ({ items, running, color, label }: { items: CanvasItem[]; ru
     >
       {/* eslint-disable-next-line @next/next/no-img-element -- a real generated URL from an
           arbitrary provider (Cloudflare/NIM), not a static asset next/image can optimize. */}
-      <img src={it.payload.url} alt={it.payload?.alt ?? ""} className="aspect-video w-full object-cover" />
+      <img
+        src={it.payload.url}
+        alt={it.payload?.alt ?? ""}
+        className="aspect-video w-full object-cover"
+        style={{ cursor: "zoom-in" }}
+        onClick={() => setZoom({ url: String(it.payload.url), alt: String(it.payload?.alt ?? "") })}
+      />
       <div className="lx-10 lx-mut truncate px-2 py-1.5">{it.payload?.slot ?? "image"}</div>
     </div>
   );
@@ -1106,6 +1246,36 @@ const ImageScreen = ({ items, running, color, label }: { items: CanvasItem[]; ru
       {hero && <div className="mb-3"><Tile it={hero} /></div>}
       {rest.length > 0 && <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">{rest.map((it) => <Tile key={it.key} it={it} />)}</div>}
       <AgentCursor target={target} host={hostRef.current} color={color} label={label} />
+      {zoom && (
+        <div
+          onClick={() => setZoom(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label={zoom.alt || "Full size image"}
+          style={{
+            position: "fixed", inset: 0, zIndex: 120, display: "grid", placeItems: "center",
+            background: "rgba(8,8,12,.86)", backdropFilter: "blur(2px)", padding: 24, cursor: "zoom-out",
+            animation: "lxLiveFade .18s ease-out both",
+          }}
+        >
+          {/* object-contain, not cover: the whole point of opening this is to stop cropping. */}
+          {/* eslint-disable-next-line @next/next/no-img-element -- same generated URL as above. */}
+          <img
+            src={zoom.url}
+            alt={zoom.alt}
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: "min(96vw, 1400px)", maxHeight: "92vh", objectFit: "contain", borderRadius: 10, cursor: "default" }}
+          />
+          <button
+            className="lx-icobtn"
+            aria-label="Close full size image"
+            onClick={() => setZoom(null)}
+            style={{ position: "fixed", top: 16, right: 16 }}
+          >
+            <X size={15} />
+          </button>
+        </div>
+      )}
     </div>
   );
 };
@@ -1263,10 +1433,47 @@ const PublishScreen = ({ items, running, color, label }: { items: CanvasItem[]; 
  *  generated, since the event only fires once `pictureFor` has resolved a real, stored URL. A
  *  filmstrip of real 9:16 cards, not a bullet list — the "image editing" feel the reference
  *  design's own agents (Image, Publish) already have. */
+/** How long a page holds before the story moves on. Matches the dwell real web stories use —
+ *  long enough to read a headline, short enough that eight pages are not a commitment. */
+const STORY_PAGE_MS = 3800;
+
 const StoryScreen = ({ items, running, color, label }: { items: CanvasItem[]; running: boolean; color: string; label: string }) => {
   const pages = items.filter((it) => it.kind === "story_page" && it.payload?.image);
   const hostRef = useRef<HTMLDivElement>(null);
   const { setNodeRef, target } = useFollowLatest(pages);
+
+  // A REAL story player, not a filmstrip (owner, 2026-09-18: "webstory ko real webstory jaisa
+  // show karo, real text animaton real slide jaisa"). The strip showed eight cropped thumbnails
+  // side by side, which is a contact sheet — it tells you the pages exist without ever showing
+  // you the thing they were built to be.
+  const [idx, setIdx] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const count = pages.length;
+
+  // While the agent is still building, the player rides the newest page as it lands: that IS the
+  // live view. Once the run is over it plays from wherever the viewer left it.
+  const liveHeadRef = useRef(-1);
+  useEffect(() => {
+    if (!running || count === 0) return;
+    if (count - 1 !== liveHeadRef.current) {
+      liveHeadRef.current = count - 1;
+      setIdx(count - 1);
+    }
+  }, [running, count]);
+
+  // Auto-advance. Stops at the last page rather than looping — a story that silently restarts
+  // makes it impossible to tell whether you have seen the end.
+  useEffect(() => {
+    if (paused || running || count === 0 || idx >= count - 1) return;
+    const t = setTimeout(() => setIdx((i) => Math.min(i + 1, count - 1)), STORY_PAGE_MS);
+    return () => clearTimeout(t);
+  }, [idx, paused, running, count]);
+
+  // Clamp when the page list changes under us (a re-run with fewer pages).
+  useEffect(() => {
+    if (count > 0 && idx > count - 1) setIdx(count - 1);
+  }, [count, idx]);
+
   if (!pages.length) {
     return (
       <div className="flex items-center gap-2.5 px-1 py-2">
@@ -1282,24 +1489,81 @@ const StoryScreen = ({ items, running, color, label }: { items: CanvasItem[]; ru
     );
   }
   const total = typeof pages[pages.length - 1]?.payload?.total === "number" ? pages[pages.length - 1].payload.total : pages.length;
+  const current = pages[Math.min(idx, count - 1)];
+  const cp = current?.payload ?? {};
+  const atEnd = idx >= count - 1;
+
   return (
     <div ref={hostRef} style={{ position: "relative" }}>
-      <div className="lx-12 mb-3 font-semibold">Web story — {pages.length} of {total} page{total === 1 ? "" : "s"}</div>
-      <div className="lx-story-strip">
-        {pages.map((it) => {
-          const p = it.payload ?? {};
-          return (
-            <div key={it.key} ref={setNodeRef(it.key)} className="lx-live-anim lx-story-page">
-              {/* eslint-disable-next-line @next/next/no-img-element -- a real generated/stored
-                  URL, not a static asset next/image can optimize. */}
-              <img src={String(p.image)} alt={p.alt ?? ""} />
-              {typeof p.index === "number" && <span className="n">{p.index + 1}</span>}
-              {p.cta && <span className="cta">CTA</span>}
-              {p.headline && <span className="cap">{p.headline}</span>}
-            </div>
-          );
-        })}
+      <div className="lx-12 mb-3 flex items-center gap-2 font-semibold">
+        <span>Web story — {pages.length} of {total} page{total === 1 ? "" : "s"}</span>
+        {running && <span className="lx-10 lx-mut font-normal">building…</span>}
       </div>
+
+      <div className="lx-story-player" ref={setNodeRef(current?.key ?? "story")}>
+        {/* Segmented progress, one bar per page — the part that makes a story read as a story.
+            Past pages sit full, the current one fills over its own dwell, future ones stay empty.
+            The fill is a CSS animation keyed to `idx` so it restarts per page; while the agent is
+            still building there is nothing to count down to, so the current bar just sits full. */}
+        <div className="lx-story-bars">
+          {pages.map((p, i) => (
+            <span key={p.key} className={i < idx ? "on" : undefined}>
+              {i === idx && (
+                <i
+                  key={`${idx}-${paused}-${running}`}
+                  style={
+                    running || paused || atEnd
+                      ? { width: "100%", animation: "none" }
+                      : { animationDuration: `${STORY_PAGE_MS}ms` }
+                  }
+                />
+              )}
+            </span>
+          ))}
+        </div>
+
+        {/* eslint-disable-next-line @next/next/no-img-element -- a real generated/stored URL. */}
+        <img key={cp.image ? String(cp.image) : idx} src={String(cp.image)} alt={cp.alt ?? ""} className="lx-story-shot" />
+
+        {/* The headline animates up on every page change — `key` on idx is what re-triggers it,
+            so this is a real per-slide transition rather than text that silently swaps. */}
+        <div className="lx-story-caption">
+          {cp.cta && <span className="lx-story-cta">Call to action</span>}
+          {cp.headline && (
+            <div key={`h-${idx}`} className="lx-story-headline">
+              {String(cp.headline)}
+            </div>
+          )}
+          {cp.alt && String(cp.alt) !== String(cp.headline ?? "") && (
+            <div key={`s-${idx}`} className="lx-story-sub">
+              {String(cp.alt)}
+            </div>
+          )}
+        </div>
+
+        {/* Tap zones, the way a phone story works: left half back, right half forward. Buttons,
+            not divs, so a keyboard can page through it too. */}
+        <button className="lx-story-zone left" aria-label="Previous page" onClick={() => setIdx((i) => Math.max(0, i - 1))} />
+        <button className="lx-story-zone right" aria-label="Next page" onClick={() => setIdx((i) => Math.min(count - 1, i + 1))} />
+
+        <div className="lx-story-controls">
+          <button
+            className="lx-story-btn"
+            aria-label={paused ? "Play" : "Pause"}
+            title={paused ? "Play" : "Pause"}
+            onClick={() => setPaused((v) => !v)}
+          >
+            {paused ? <Play size={12} /> : <Pause size={12} />}
+          </button>
+          <span className="lx-story-num">{Math.min(idx + 1, count)} / {count}</span>
+          {atEnd && !running && (
+            <button className="lx-story-btn wide" onClick={() => { setIdx(0); setPaused(false); }}>
+              Replay
+            </button>
+          )}
+        </div>
+      </div>
+
       <AgentCursor target={target} host={hostRef.current} color={color} label={label} />
     </div>
   );
@@ -1649,15 +1913,33 @@ const WriterDocScreen = ({
         if (shownLen <= 0 && typing) return null;
         const shown = fullText.slice(0, shownLen);
         const stillTyping = shownLen < fullText.length;
+        // A section is real markdown — headings, a comparison table, a list, embedded images —
+        // and it used to be poured into ONE <p> through `boldText`, which understands `**bold**`
+        // and nothing else. So a table the quality gate REQUIRES arrived on screen as a paragraph
+        // of pipe characters (owner, 2026-09-18: "table data ha but table nahi ha list nahi ha").
+        //
+        // The typing animation is why this needs splitting rather than just rendering. `shown` is
+        // a character-sliced prefix, so its last block is usually half-written — and half a table
+        // row rendered as a table is worse than no table. Complete blocks (everything up to the
+        // last blank line) go through the real renderer; the unfinished tail stays plain text with
+        // the caret on it, and becomes markdown the moment the next blank line arrives.
+        const cut = stillTyping ? shown.lastIndexOf("\n\n") : -1;
+        const settled = stillTyping ? (cut > 0 ? shown.slice(0, cut) : "") : shown;
+        const pending = stillTyping ? (cut > 0 ? shown.slice(cut + 2) : shown) : "";
         return (
           <div key={it.key} ref={setNodeRef(it.key)}>
             <h2 style={{ fontSize: 16, fontWeight: 600, margin: "16px 0 6px", color: "var(--lx-text)" }}>
               {p.h2 || `Section ${i + 1}`}
             </h2>
-            <p style={{ fontSize: 14.5, lineHeight: 1.65, color: "var(--lx-text)", margin: "0 0 4px" }}>
-              {boldText(shown, it.key)}
-              {stillTyping && <span ref={caretRef} className="lx-caret" style={{ color }} />}
-            </p>
+            {settled.trim() && (
+              <div className="lx-doc-md" dangerouslySetInnerHTML={{ __html: renderMarkdown(settled) }} />
+            )}
+            {(pending.trim() || stillTyping) && (
+              <p style={{ fontSize: 14.5, lineHeight: 1.65, color: "var(--lx-text)", margin: "0 0 4px", whiteSpace: "pre-wrap" }}>
+                {boldText(pending, it.key)}
+                {stillTyping && <span ref={caretRef} className="lx-caret" style={{ color }} />}
+              </p>
+            )}
           </div>
         );
       })}
@@ -3350,6 +3632,17 @@ export default function MrLxwaDashboard({
         .flatMap((p) => p.items)
         .sort((a, b) => a.at - b.at)
     : [];
+  // agents/writer.ts's `saved` event: the content_items row id, so the header can offer a real
+  // link to the finished article. Read from every agent on the task rather than `producedItems`,
+  // which is filtered to whichever agent's panel is open — the link should still work while
+  // looking at Mr. SEO's or Mr. Image's step of the same order.
+  const savedContentId = task
+    ? (task.agents
+        .flatMap((p) => p.items)
+        .filter((it) => it.kind === "saved" && it.payload?.contentItemId)
+        .slice(-1)[0]?.payload?.contentItemId as string | undefined) ?? null
+    : null;
+
   // Follow the work down the canvas. Every screen below grows downward as real items land, and
   // the 460px scroll box shows only its top — so the newest row, the paragraph being written and
   // the agent cursor pinned to it were all below the fold, invisible, unless the owner scrolled
@@ -3538,6 +3831,22 @@ export default function MrLxwaDashboard({
         <span className="lx-pill red shrink-0">
           <span className="lx-pulse h-1.5 w-1.5 rounded-full" style={{ background: "#ef4444" }} /> LIVE
         </span>
+        {/* Open the finished article as a real page — the same action the Approvals list has,
+            here at the moment it is actually wanted (owner, 2026-09-18: "jab artical hojaye to
+            upar ek icon dedo jisse artical browser pe open ho jaise hamne pehle banaya tha").
+            Shown only once agents/writer.ts has reported a SAVED row (`contentItemId`), because
+            before that there is no page to open and an icon that navigates nowhere is worse than
+            no icon. */}
+        {savedContentId && (
+          <Link
+            href={`/dashboard/content/${savedContentId}`}
+            className="lx-icobtn shrink-0"
+            aria-label="Open the article in the browser"
+            title="Browser View — open the full article page"
+          >
+            <Monitor size={14} />
+          </Link>
+        )}
         {/* The debug read-out's own switch — off by default (it is a diagnostic, not part of the
             product's face) and remembered for the session so a hunt for a stall does not mean
             re-opening it on every hand-off. */}
@@ -3558,12 +3867,20 @@ export default function MrLxwaDashboard({
 
       <div className="mt-3 flex flex-col gap-4">
         <div className="min-w-0">
-          {/* Fixed height + its own scrollbar: a 20-row keyword table used to push the panel
-              (and the page) far past the fold — "content box se bahar nahi jayega". */}
+          {/* ONE height, not a range, and its own scrollbar.
+              This was `minHeight:360, maxHeight:460`, which is a range — so the box grew and
+              shrank with whatever the current step happened to be showing, and every step change
+              nudged the whole page (owner, 2026-09-18: "iska kabhi height badh jata ha kabhi kam
+              jata ha jo sahi nahi ha, ek fix height ho but responsive ho").
+              `clamp` gives both halves of that: for any given window the height is a single
+              fixed number that content cannot move, and it still scales with the viewport
+              instead of being a magic pixel count that is too tall on a laptop and too short on
+              a monitor. The floor keeps it usable on a short screen; the ceiling stops it
+              swallowing a tall one. */}
           <div
             ref={canvasScrollRef}
             className="lx-card2 lx-scroll p-3 flex flex-col"
-            style={{ minHeight: 360, maxHeight: 460, overflowY: "auto" }}
+            style={{ height: "clamp(440px, 68vh, 860px)", overflowY: "auto" }}
           >
             <div className="flex flex-1 flex-col" style={{ minHeight: 0 }}>
               {/* NOT keyed to `runningStep?.key` any more (owner, 2026-09-12: "cursor kahi bhi

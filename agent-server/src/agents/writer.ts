@@ -274,6 +274,13 @@ export class WriterAgent extends Agent {
       .single();
     if (error) console.error("[writer] failed to save content_items row:", error.message);
 
+    // The row's own id, on the live channel. The `draft` event above carries the title and body
+    // but no id, so the Live Visual could show a finished article and still had nothing to link
+    // to — the owner asked for the same "open it in the browser" action the Approvals list
+    // already has (2026-09-18), and that action is just this id in a URL. Emitted only when the
+    // insert actually returned one: a link to a row that failed to save is worse than no link.
+    if (item?.id) ctx.data("saved", { contentItemId: String(item.id), title, passed: gate.passed });
+
     let publishing: PublishOutcome = { attempted: false };
     if (autoPublish && gate.passed && item?.id) {
       publishing = await autoPublishItem(tenantId, { id: String(item.id), title, body, type: "article" }, meta);

@@ -1,5 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { resolveWebsiteUrl } from "./website-url";
+import { DAYS, agoPhrase, humanTime, localParts, nextRunAt, untilPhrase } from "./schedule-time";
+// Re-exported, not redefined: lib/schedule-time.ts is the copy a client component can
+// safely import (see its header). Server callers of this module are unaffected.
+export { DAYS, agoPhrase, humanTime, localParts, nextRunAt, untilPhrase };
 
 /** Everything the chat needs to know before it can answer, gathered in PARALLEL.
  *
@@ -472,42 +476,14 @@ export async function loadGreetingFacts(supabase: SupabaseClient, tenantId: stri
   }
 }
 
-export const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 /** "Wednesday 26 August, 09:00 Asia/Calcutta" — a time a person can repeat out loud. */
-export function humanTime(at: Date, timeZone: string): string {
-  try {
-    const s = new Intl.DateTimeFormat("en-GB", {
-      timeZone, weekday: "long", day: "numeric", month: "long",
-      hour: "2-digit", minute: "2-digit", hourCycle: "h23",
-    }).format(at);
-    return `${s} ${timeZone}`;
-  } catch {
-    return at.toISOString();
-  }
-}
 
 /** "in 16 hours", "in 12 minutes" — the part people actually want when they ask "kab". */
 /** The past-tense counterpart. `untilPhrase` below reads a FUTURE instant and collapses
  *  anything already past to "any moment now" — correct for a next-run time, actively wrong for
  *  "when did this start", where it would describe a three-hour-old job as about to happen. */
-export function agoPhrase(at: Date, from: Date = new Date()): string {
-  const mins = Math.round((from.getTime() - at.getTime()) / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
-  const hours = Math.round(mins / 60);
-  if (hours < 48) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
-  return `${Math.round(hours / 24)} days ago`;
-}
 
-export function untilPhrase(at: Date, from: Date = new Date()): string {
-  const mins = Math.round((at.getTime() - from.getTime()) / 60000);
-  if (mins < 1) return "any moment now";
-  if (mins < 60) return `in ${mins} minute${mins === 1 ? "" : "s"}`;
-  const hours = Math.round(mins / 60);
-  if (hours < 48) return `in ${hours} hour${hours === 1 ? "" : "s"}`;
-  return `in ${Math.round(hours / 24)} days`;
-}
 
 /** How much has actually been produced, counted rather than estimated.
  *
@@ -559,49 +535,4 @@ export async function loadCounts(supabase: SupabaseClient, tenantId: string | nu
  *  disagree. The API now serves this to the page, and the agent-server's isDue() checks the
  *  same fields.
  */
-export function nextRunAt(
-  s: { frequency: string; day_of_week: number; time_of_day: string; timezone: string },
-  from: Date = new Date()
-): Date | null {
-  const [hh, mm] = String(s.time_of_day ?? "09:00").split(":").map(Number);
-  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
 
-  for (let dayOffset = 0; dayOffset <= 14; dayOffset++) {
-    // Walk forward in real time, then ask what the wall clock says in the tenant's zone —
-    // the only way to land on "09:00 in Asia/Dubai" without a date library.
-    const probe = new Date(from.getTime() + dayOffset * 86400000);
-    let parts;
-    try {
-      parts = localParts(probe, s.timezone);
-    } catch {
-      return null; // invalid IANA name; the API rejects these on save
-    }
-    if (s.frequency === "weekdays" && (parts.dow === 0 || parts.dow === 6)) continue;
-    if (s.frequency === "weekly" && parts.dow !== Number(s.day_of_week)) continue;
-
-    // Offset between UTC and the tenant's zone at this moment, so the slot can be expressed
-    // as a real instant rather than a wall-clock string.
-    const asUtc = Date.UTC(parts.year, parts.month - 1, parts.day, hh, mm, 0);
-    const zoneOffsetMs = probe.getTime() - Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
-    const instant = new Date(asUtc + zoneOffsetMs);
-    if (instant.getTime() > from.getTime()) return instant;
-  }
-  return null;
-}
-
-export function localParts(at: Date, timeZone: string) {
-  const fmt = new Intl.DateTimeFormat("en-GB", {
-    timeZone,
-    year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", second: "2-digit",
-    weekday: "short", hourCycle: "h23",
-  });
-  const p: Record<string, string> = {};
-  for (const part of fmt.formatToParts(at)) p[part.type] = part.value;
-  const DOW: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-  return {
-    year: Number(p.year), month: Number(p.month), day: Number(p.day),
-    hour: Number(p.hour), minute: Number(p.minute), second: Number(p.second),
-    dow: DOW[p.weekday] ?? 0,
-  };
-}

@@ -38,6 +38,8 @@ export function renderMarkdown(md: string): string {
   let list: { type: "ul" | "ol"; items: string[] } | null = null;
   let quote: string[] = [];
   let fence: string[] | null = null;
+  /** Rows of a GitHub-style pipe table, header first. */
+  let table: string[][] | null = null;
 
   const flushParagraph = () => {
     if (!paragraph.length) return;
@@ -54,9 +56,48 @@ export function renderMarkdown(md: string): string {
     out.push(`<blockquote>${inline(quote.join(" "))}</blockquote>`);
     quote = [];
   };
-  const flushAll = () => { flushParagraph(); flushList(); flushQuote(); };
+  /** A pipe table becomes a real <table>.
+   *
+   *  Added 2026-09-18. Without it, `| Business Size | Fee |` fell through to the paragraph
+   *  branch below and every row was concatenated into one run of prose full of pipe characters
+   *  — which is exactly how it looked on the live writer canvas and on the reading view, even
+   *  though qualityGate.ts REQUIRES every article to contain a real markdown table. The rule was
+   *  enforced on the way in and then thrown away on the way out.
+   *
+   *  Styled inline for the same reason the <img> above is: this HTML is dropped into several
+   *  different surfaces (the reading view, the live canvas, the editor) and cannot rely on any
+   *  one of them having a stylesheet rule for it. */
+  const flushTable = () => {
+    if (!table || !table.length) { table = null; return; }
+    const [head, ...body] = table;
+    const cell = (c: string, tag: "th" | "td") =>
+      `<${tag} style="border:1px solid rgba(128,128,140,.35);padding:6px 9px;text-align:left;vertical-align:top">${inline(c)}</${tag}>`;
+    const rows = body.map((r) => `<tr>${r.map((c) => cell(c, "td")).join("")}</tr>`).join("");
+    out.push(
+      `<table style="border-collapse:collapse;width:100%;margin:12px 0;font-size:.95em">` +
+        `<thead><tr>${head.map((c) => cell(c, "th")).join("")}</tr></thead>` +
+        `<tbody>${rows}</tbody></table>`,
+    );
+    table = null;
+  };
+  const flushAll = () => { flushParagraph(); flushList(); flushQuote(); flushTable(); };
 
-  for (const raw of lines) {
+  /** `| a | b |` → ["a","b"]. The outer pipes are optional in the wild, so they are trimmed
+   *  rather than required, and an escaped `\|` inside a cell stays a literal pipe. */
+  const splitRow = (line: string): string[] =>
+    line
+      .trim()
+      .replace(/^\|/, "")
+      .replace(/\|$/, "")
+      .split(/(?<!\\)\|/)
+      .map((c) => c.replace(/\\\|/g, "|").trim());
+
+  /** The `|---|:--:|` line directly under a header is what makes the block a table rather than
+   *  prose that happens to contain pipes. */
+  const isDivider = (line: string) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(line);
+
+  for (let li = 0; li < lines.length; li++) {
+    const raw = lines[li];
     const line = raw.trimEnd();
 
     // Fenced code — held verbatim, never re-interpreted.
@@ -80,6 +121,20 @@ export function renderMarkdown(md: string): string {
     // matched here before `inline()` ever sees it.
     const image = line.match(/^!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)\s*$/);
     if (image) { flushAll(); out.push(`<img src="${image[2]}" alt="${image[1]}" loading="lazy" style="max-width:100%;border-radius:8px" />`); continue; }
+
+    // A pipe table. Recognised by its DIVIDER, not by the pipes: a header row alone is
+    // indistinguishable from a sentence containing "|", and guessing wrong would swallow prose
+    // into a table. Once open, every following pipe row joins it; the first line that is not a
+    // pipe row closes it (flushAll below, and the blank-line branch above).
+    const looksLikeRow = /\|/.test(line);
+    if (table && looksLikeRow) { table.push(splitRow(line)); continue; }
+    if (!table && looksLikeRow && li + 1 < lines.length && isDivider(lines[li + 1])) {
+      flushAll();
+      table = [splitRow(line)];
+      li++; // the divider itself is structure, never content
+      continue;
+    }
+    if (table) flushTable();
 
     const heading = line.match(/^(#{1,6})\s+(.*)$/);
     if (heading) {

@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
-import { humanTime } from "@/lib/chat-context";
+import { humanTime } from "@/lib/schedule-time";
 
 /** /app/schedule — "har roz X baje apne aap kaam ho jaye".
  *

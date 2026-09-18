@@ -373,13 +373,20 @@ export const LX_CSS = `
    Mr. Keyword's Google-style search box, Mr. Writer's browser-chrome "reading" frame, and the
    shimmer used for "working…". On paper they need their own light values. */
 .lx-paper .lx-serp,.lx-paper .lx-read-frame{background:#fff;border-color:#e9e4da}
-.lx-paper .lx-serp-bar{background:rgba(255,255,255,.55);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
-  border-color:#e9e4da;box-shadow:0 1px 0 #fff inset,0 4px 14px rgba(32,36,31,.06)}
-.lx-paper .lx-serp-caret{background:#8a8f86}
-.lx-paper .lx-serp-row{border-bottom-color:#f2efe8}
-.lx-paper .lx-serp-title{color:#3d7ea6}
-.lx-paper .lx-serp-tabs{border-bottom-color:#e9e4da}
-.lx-paper .lx-serp-tabs span.on{color:#3d7ea6;border-bottom-color:#3d7ea6}
+/* Google's own light-mode values. Layout lives on the base .lx-serp-* rules further down —
+   these are colours only, which is what a theme override should be. */
+.lx-paper .lx-serp-bar{background:#fff;border-color:#dfe1e5;
+  box-shadow:0 1px 6px rgba(32,33,36,.18);animation:none}
+.lx-paper .lx-serp-caret{background:#5f6368}
+.lx-paper .lx-serp-q{color:#202124}
+.lx-paper .lx-serp-title{color:#1a0dab}
+.lx-paper .lx-serp-host{color:#202124}
+.lx-paper .lx-serp-crumb{color:#4d5156}
+.lx-paper .lx-serp-desc{color:#4d5156}
+.lx-paper .lx-serp-meta{color:#70757a;border-top-color:#ebebeb}
+.lx-paper .lx-serp-fav{border-color:#e4e4e7}
+.lx-paper .lx-serp-tabs{color:#5f6368}
+.lx-paper .lx-serp-tabs span.on{color:#1a73e8;border-bottom-color:#1a73e8}
 .lx-paper .lx-read-frame{background:#fff}
 .lx-paper .lx-read-host{color:#20241f}
 .lx-paper .lx-read-skel{background:linear-gradient(90deg,#efece4,#f7f5ef,#efece4)}
@@ -441,6 +448,57 @@ export const LX_CSS = `
 /* Mr. Story — a filmstrip of real 9:16 story pages, each the real image this page ended up
    with plus its real headline as an overlay (the "image editing" vibe owner, 2026-09-12, asked
    for): a phone-shaped frame, not a bare list row. */
+/* The web-story PLAYER (MrLxwaDashboard.tsx StoryScreen, 2026-09-18). Replaces the filmstrip
+   as the main view: one 9:16 page at a time, segmented progress on top, the headline sliding up
+   on every page change, tap-left/tap-right zones. The strip's own rules stay below — nothing
+   else uses them today, but they are what a "show me all pages at once" view would rebuild on. */
+.lx-story-player{position:relative;margin:0 auto;width:100%;max-width:300px;aspect-ratio:9/16;
+  border-radius:18px;overflow:hidden;background:#0b0b10;
+  border:1px solid rgba(255,255,255,.10);box-shadow:0 10px 34px rgba(0,0,0,.45)}
+.lx-story-shot{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;
+  animation:lxStoryIn .5s ease-out both}
+@keyframes lxStoryIn{from{opacity:0;transform:scale(1.04)}to{opacity:1;transform:scale(1)}}
+
+/* progress segments */
+.lx-story-bars{position:absolute;top:0;left:0;right:0;z-index:3;display:flex;gap:3px;padding:9px 9px 0}
+.lx-story-bars > span{position:relative;flex:1;height:2.5px;border-radius:2px;
+  background:rgba(255,255,255,.28);overflow:hidden}
+.lx-story-bars > span.on{background:#fff}
+.lx-story-bars > span > i{position:absolute;inset:0 auto 0 0;display:block;width:0;
+  background:#fff;animation:lxStoryFill linear both}
+@keyframes lxStoryFill{from{width:0}to{width:100%}}
+
+/* caption: a real gradient scrim, so white text stays readable on any generated image */
+.lx-story-caption{position:absolute;left:0;right:0;bottom:0;z-index:2;padding:34px 13px 15px;
+  background:linear-gradient(to top,rgba(0,0,0,.90) 0%,rgba(0,0,0,.62) 45%,transparent 100%);
+  pointer-events:none}
+.lx-story-headline{font-size:16px;font-weight:700;line-height:1.28;color:#fff;
+  text-shadow:0 1px 10px rgba(0,0,0,.5);animation:lxStoryUp .46s cubic-bezier(.2,.7,.3,1) both}
+.lx-story-sub{margin-top:5px;font-size:11.5px;line-height:1.4;color:rgba(255,255,255,.80);
+  animation:lxStoryUp .46s cubic-bezier(.2,.7,.3,1) .07s both}
+@keyframes lxStoryUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+.lx-story-cta{display:inline-block;margin-bottom:7px;font-size:9.5px;font-weight:700;
+  letter-spacing:.06em;text-transform:uppercase;color:#0b0b10;background:#ffd45e;
+  border-radius:999px;padding:3px 8px}
+
+/* tap zones — invisible, but real buttons so the keyboard works */
+.lx-story-zone{position:absolute;top:0;bottom:56px;width:38%;z-index:4;border:0;background:transparent;
+  cursor:pointer;-webkit-tap-highlight-color:transparent}
+.lx-story-zone.left{left:0}
+.lx-story-zone.right{right:0}
+.lx-story-zone:focus-visible{outline:2px solid var(--lx-cyan);outline-offset:-3px}
+
+.lx-story-controls{position:absolute;left:0;right:0;bottom:0;z-index:5;display:flex;
+  align-items:center;gap:8px;padding:9px 11px}
+.lx-story-btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;
+  height:24px;min-width:24px;padding:0 6px;border-radius:999px;color:#fff;
+  background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.22);cursor:pointer}
+.lx-story-btn.wide{padding:0 10px;font-size:10.5px;font-weight:600}
+.lx-story-btn:hover{background:rgba(0,0,0,.62)}
+.lx-story-num{margin-left:auto;font-size:10px;font-weight:600;color:rgba(255,255,255,.78);
+  font-family:ui-monospace,monospace}
+@media (max-width:420px){.lx-story-player{max-width:100%}}
+
 .lx-story-strip{display:flex;gap:12px;overflow-x:auto;padding:4px 2px 10px}
 .lx-story-page{position:relative;flex:none;width:120px;aspect-ratio:9/16;border-radius:14px;overflow:hidden;
   background:#111 linear-gradient(160deg,#2a2f38,#14171c);border:1px solid var(--lx-border);
@@ -467,33 +525,106 @@ export const LX_CSS = `
    agents/keyword.ts actually returned. The chrome (search bar, caret, scanning bar) is what
    sells "searching, right now" — the words inside it are honest. */
 .lx-serp-top{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--lx-mut);text-transform:uppercase;letter-spacing:.02em}
+/* --- Google results-page chrome (rebuilt 2026-09-18 to match the real page) --------------
+   Real layout: SMALL logo on the left, search pill beside it, tabs indented under the pill,
+   hairline under the whole header. Arial is what Google actually renders in, and using it here
+   is most of why this reads as Google rather than as our app wearing Google's colours. */
+.lx-serp{font-family:Arial,Helvetica,sans-serif}
+.lx-serp-head{display:flex;align-items:flex-start;gap:14px}
+.lx-serp-logo{flex:none;font-size:19px;line-height:1;letter-spacing:-.6px;
+  font-family:Arial,Helvetica,sans-serif;margin-top:7px;user-select:none}
+.lx-serp-logo b{font-weight:500}
+.lx-serp-col{min-width:0;flex:1}
 .lx-serp-brand{display:flex}
 .lx-g{font-family:arial,sans-serif;font-size:22px;font-weight:700;letter-spacing:-.5px}
 /* Owner, 2026-09-12: "real search animation ho, glass effect wala" — a frosted pill (translucent
    fill + backdrop blur + a soft ring that breathes while searching), not a flat solid bar. */
-.lx-serp-bar{display:flex;align-items:center;gap:8px;margin-top:8px;background:rgba(255,255,255,.06);
+.lx-serp-bar{display:flex;align-items:center;gap:12px;height:44px;padding:0 17px;
+  background:rgba(255,255,255,.06);
   backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
-  border:1px solid rgba(255,255,255,.14);border-radius:999px;padding:8px 14px;
+  border:1px solid rgba(255,255,255,.14);border-radius:999px;
   box-shadow:0 1px 0 rgba(255,255,255,.05) inset, 0 6px 18px rgba(0,0,0,.18);
   animation:lxSerpGlow 2.4s ease-in-out infinite}
+.lx-serp-q{min-width:0;flex:1;font-size:15px;color:var(--lx-text);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;font-family:Arial,Helvetica,sans-serif}
 @keyframes lxSerpGlow{0%,100%{box-shadow:0 1px 0 rgba(255,255,255,.05) inset,0 6px 18px rgba(0,0,0,.18),0 0 0 0 rgba(66,133,244,0)}
   50%{box-shadow:0 1px 0 rgba(255,255,255,.05) inset,0 6px 18px rgba(0,0,0,.18),0 0 0 3px rgba(66,133,244,.14)}}
 .lx-serp-caret{display:inline-block;width:1px;height:12px;margin-left:2px;vertical-align:-2px;background:#8b8ba0;animation:lxCaret 1s step-end infinite}
 @keyframes lxCaret{0%,49%{opacity:1}50%,100%{opacity:0}}
-.lx-serp-tabs{display:flex;gap:16px;margin-top:10px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,.08);font-size:11.5px;color:var(--lx-dim)}
+.lx-serp-tabs{display:flex;gap:26px;margin-top:12px;padding-bottom:0;
+  font-size:13px;color:var(--lx-dim);font-family:Arial,Helvetica,sans-serif}
 .lx-serp-tabs span{padding-bottom:8px}
-.lx-serp-tabs span.on{color:#8ab4f8;border-bottom:2.5px solid #8ab4f8;font-weight:600}
-.lx-serp-meta{font-size:11px;color:var(--lx-dim);margin:10px 2px 2px}
-.lx-serp-row{display:flex;gap:10px;padding:8px 2px;border-bottom:1px solid rgba(255,255,255,.05)}
+.lx-serp-tabs span.on{color:#8ab4f8;border-bottom:3px solid #8ab4f8;font-weight:400}
+.lx-serp-meta{font-size:12px;color:var(--lx-dim);margin:13px 2px 16px;
+  padding-top:11px;border-top:1px solid rgba(255,255,255,.08);font-family:Arial,Helvetica,sans-serif}
+.lx-serp-row{display:block;padding:0 2px 26px;border-bottom:none}
+/* Placeholder result rows, shown only while the first real keyword is still on its way
+   (2026-09-18). Deliberately textless: a skeleton that contained words would be a fabricated
+   result, and this panel's whole rule is that nothing on it is invented. */
+.lx-serp-sk{animation:lxLiveFade .3s ease-out both}
+.lx-serp-sk .sk{display:block;height:8px;border-radius:4px;margin:3px 0;
+  background:linear-gradient(90deg,rgba(139,139,160,.16) 25%,rgba(139,139,160,.30) 37%,rgba(139,139,160,.16) 63%);
+  background-size:400% 100%;animation:lxSkShimmer 1.3s ease-in-out infinite}
+.lx-serp-sk .sk.t{height:11px;margin:5px 0 4px}
+@keyframes lxSkShimmer{0%{background-position:100% 50%}100%{background-position:0 50%}}
+.lx-paper .lx-serp-sk .sk{
+  background:linear-gradient(90deg,#efece5 25%,#e3dfd6 37%,#efece5 63%);background-size:400% 100%}
 .lx-serp-row:last-child{border-bottom:none}
-.lx-serp-fav{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:6px}
-.lx-serp-crumb{font-size:10.5px;color:var(--lx-dim);display:flex;align-items:center;gap:3px}
-.lx-serp-title{font-size:13px;font-weight:600;color:#8ab4f8;margin-top:1px}
-.lx-serp-desc{font-size:11px;color:var(--lx-mut);margin-top:2px;line-height:1.4}
+.lx-serp-site{display:flex;align-items:center;gap:11px;margin-bottom:4px}
+.lx-serp-fav{width:26px;height:26px;border-radius:50%;flex:none;
+  border:1px solid rgba(255,255,255,.14)}
+.lx-serp-host{font-size:13px;line-height:1.2;color:var(--lx-text)}
+.lx-serp-crumb{font-size:11.5px;line-height:1.3;color:var(--lx-dim)}
+.lx-serp-title{font-size:19px;line-height:1.3;font-weight:400;color:#8ab4f8;margin:3px 0 3px;
+  font-family:Arial,Helvetica,sans-serif}
+.lx-serp-title:hover{text-decoration:underline}
+.lx-serp-desc{font-size:14px;color:var(--lx-mut);margin-top:1px;line-height:1.58;
+  font-family:Arial,Helvetica,sans-serif;display:-webkit-box;-webkit-line-clamp:2;
+  -webkit-box-orient:vertical;overflow:hidden}
 .lx-serp-foot{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:10.5px;color:var(--lx-dim)}
 .lx-serp-scan{height:100%;width:32%;border-radius:999px;background:linear-gradient(90deg,#16a34a,#4ade80 55%,#86efac);
   animation:lxScan .9s ease-in-out infinite}
 @keyframes lxScan{0%{margin-left:0%}50%{margin-left:68%}100%{margin-left:0%}}
+
+/* The live writer canvas's rendered article (WriterDocScreen → lib/md.ts).
+   Added 2026-09-18: section text used to go into one <p> with only **bold** understood, so the
+   comparison table every article is required to contain arrived as a paragraph of pipes, and the
+   embedded images never appeared at all. Now the real renderer runs, and this is what makes its
+   output sit on the paper page instead of inheriting the dark panel's defaults. */
+.lx-doc-md{font-size:14.5px;line-height:1.65;color:var(--lx-text)}
+.lx-doc-md > :first-child{margin-top:0}
+.lx-doc-md p{margin:0 0 10px}
+.lx-doc-md h1,.lx-doc-md h2,.lx-doc-md h3,.lx-doc-md h4{
+  margin:14px 0 6px;font-weight:650;line-height:1.3;color:var(--lx-text)}
+.lx-doc-md h1{font-size:18px}
+.lx-doc-md h2{font-size:16px}
+.lx-doc-md h3{font-size:15px}
+.lx-doc-md h4{font-size:14.5px}
+.lx-doc-md ul,.lx-doc-md ol{margin:0 0 10px;padding-left:20px}
+.lx-doc-md li{margin:3px 0}
+.lx-doc-md li::marker{color:#8b8ba0}
+.lx-doc-md a{color:#6aa7ff;text-decoration:underline;text-underline-offset:2px}
+.lx-doc-md strong{font-weight:680}
+.lx-doc-md code{font-family:ui-monospace,monospace;font-size:.92em;
+  background:rgba(128,128,140,.16);border-radius:4px;padding:1px 4px}
+.lx-doc-md blockquote{margin:0 0 10px;padding:2px 0 2px 12px;
+  border-left:3px solid rgba(128,128,140,.35);color:#8b8ba0}
+.lx-doc-md hr{border:0;border-top:1px solid rgba(128,128,140,.3);margin:14px 0}
+/* The table arrives with inline borders/padding from lib/md.ts (it renders into several
+   surfaces and cannot assume a stylesheet). Only the things that are genuinely per-surface are
+   set here: it must scroll rather than burst the canvas on a narrow panel. */
+.lx-doc-md table{display:block;overflow-x:auto;max-width:100%}
+.lx-doc-md thead th{background:rgba(128,128,140,.12);font-weight:650}
+.lx-doc-md img{display:block;max-width:100%;height:auto;margin:12px 0;border-radius:8px}
+/* Same content on the light "paper" variant of the canvas. */
+.lx-paper .lx-doc-md,.lx-paper .lx-doc-md h1,.lx-paper .lx-doc-md h2,
+.lx-paper .lx-doc-md h3,.lx-paper .lx-doc-md h4{color:#20241f}
+.lx-paper .lx-doc-md li::marker{color:#8a8f86}
+.lx-paper .lx-doc-md a{color:#1f6feb}
+.lx-paper .lx-doc-md blockquote{border-left-color:#e0dbd0;color:#6b7066}
+.lx-paper .lx-doc-md code{background:#f2efe8}
+.lx-paper .lx-doc-md thead th{background:#f4f1ea}
+.lx-paper .lx-doc-md hr{border-top-color:#e9e4da}
 
 /* "Keyword opportunities" — components/MrLxwaDashboard.tsx's KeywordScreen, finished state
    (owner's reference mockup, 2026-09-10). A card of rows, not a bare <table>: keyword left,

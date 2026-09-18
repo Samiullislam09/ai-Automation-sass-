@@ -51,7 +51,14 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
   const body = await request.json().catch(() => ({} as any));
   const nextBody = typeof body?.body === "string" ? body.body : null;
   const nextTitle = typeof body?.title === "string" ? body.title.trim() : null;
-  if (nextBody === null && nextTitle === null) {
+  // The reviewer can rename the URL before it publishes (owner, 2026-09-18). Whatever the box
+  // was typed into, what lands is a real slug — the same shape Mr. Writer's meta step produces.
+  const rawSlug = typeof body?.slug === "string" ? body.slug : null;
+  const nextSlug = rawSlug === null ? null : slugify(rawSlug);
+  if (rawSlug !== null && !nextSlug) {
+    return NextResponse.json({ ok: false, error: "That slug has no usable characters in it." }, { status: 400 });
+  }
+  if (nextBody === null && nextTitle === null && nextSlug === null) {
     return NextResponse.json({ ok: false, error: "Nothing to save." }, { status: 400 });
   }
 
@@ -66,22 +73,52 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     meta.editedByHuman = true;
     meta.editedAt = new Date().toISOString();
   }
+  // The slug is stored twice on purpose and the two must never drift: the `slug` COLUMN is
+  // what migration 019's unique index and lib/dedupe.ts findExistingBySlug read, `meta.slug`
+  // is what Mr. SEO and the reviewer read. Writing one without the other is how a row ends up
+  // claiming two different URLs.
+  if (nextSlug) meta.slug = nextSlug;
 
   const { error } = await supabase
     .from("content_items")
     .update({
       ...(nextBody !== null ? { body: nextBody } : {}),
       ...(nextTitle ? { title: nextTitle } : {}),
+      ...(nextSlug ? { slug: nextSlug } : {}),
       meta,
       updated_at: new Date().toISOString(),
     })
     .eq("id", params.id)
     .eq("tenant_id", tenantId);
 
-  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true, meta });
+  if (error) {
+    // 23505 = the unique slug index. Two articles on one site cannot own the same URL, and
+    // saying so beats a raw Postgres constraint name in a toast.
+    if ((error as any).code === "23505") {
+      return NextResponse.json(
+        { ok: false, error: `Another article in this workspace already uses /${nextSlug}.` },
+        { status: 409 },
+      );
+    }
+    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  }
+  return NextResponse.json({ ok: true, meta, slug: nextSlug ?? undefined });
 }
 
 function countWords(md: string): number {
   return md.replace(/[#*_`>[\]()-]/g, " ").split(/\s+/).filter(Boolean).length;
+}
+
+/** Same shape Mr. Writer's meta step produces (agent-server writerPipeline.ts): lowercase,
+ *  hyphen-separated, nothing a URL would have to escape. */
+function slugify(s: string): string {
+  return s
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/^\/+|\/+$/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 96)
+    .replace(/-+$/g, "");
 }
