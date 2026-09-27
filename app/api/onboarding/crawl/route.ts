@@ -42,13 +42,28 @@ export async function POST() {
 
     try {
       const vector = await embed(`${page.title}\n\n${page.text}`);
-      await supabase.from("site_pages").insert({
-        tenant_id: tenantId,
-        url,
-        title: page.title,
-        content_text: page.text,
-        embedding: vector,
-      });
+      // UPSERT, not insert. site_pages has a unique (tenant_id, url) since migration 005, so a
+      // plain insert threw on every page this tenant had already seen — and the catch below
+      // swallowed it as "one bad page". Re-running onboarding therefore refreshed nothing.
+      await supabase.from("site_pages").upsert(
+        {
+          tenant_id: tenantId,
+          url,
+          title: page.title,
+          content_text: page.text,
+          embedding: vector,
+          // Migration 025 — captured here too, so the quick onboarding sample and the deep
+          // background crawl store pages of the same shape rather than two different shapes.
+          meta_description: page.metaDescription,
+          headings: page.headings,
+          canonical: page.canonical,
+          word_count: page.wordCount,
+          status_code: page.statusCode,
+          last_seen: new Date().toISOString(),
+          fetched_at: new Date().toISOString(),
+        },
+        { onConflict: "tenant_id,url" }
+      );
       pages.push({ url, title: page.title });
     } catch (e: any) {
       // one bad page (or a missing/invalid embeddings key) shouldn't kill the whole crawl

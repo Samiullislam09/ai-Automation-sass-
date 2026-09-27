@@ -1,6 +1,6 @@
 import type { Job } from "pg-boss";
 import { Agent, type AgentContext, type AgentJobData } from "./base.js";
-import { discoverUrls, extractPage, normalizeSiteUrl } from "../lib/crawl.js";
+import { discover, extractPage, normalizeSiteUrl } from "../lib/crawl.js";
 import { embed } from "../lib/embeddings.js";
 import { completeJson } from "../lib/llm.js";
 import { supabase } from "../supabase.js";
@@ -44,7 +44,13 @@ export class CrawlerAgent extends Agent {
     }
 
     ctx.onProgress({ phase: "discovering", label: "Finding pages on your site…" });
-    const urls = await discoverUrls(site, PAGE_LIMIT);
+    // Every page from the sitemap AND from the link graph, each carrying how far from the
+    // homepage it was found. See lib/crawl.ts for why picking one source lost the other's
+    // pages permanently.
+    const urls = await discover(site, PAGE_LIMIT);
+    // Stamped once and written onto every page this run touches, so the prune below can ask
+    // "which pages did THIS crawl not see" without racing its own clock.
+    const runStartedAt = new Date().toISOString();
     ctx.onProgress({ phase: "reading", done: 0, total: urls.length, label: `Found ${urls.length} page(s) to read` });
     let pagesCrawled = 0;
     let unreadable = 0;
@@ -54,7 +60,7 @@ export class CrawlerAgent extends Agent {
     const failures: { url: string; error: string }[] = [];
 
     let seen = 0;
-    for (const url of urls) {
+    for (const { url, depth } of urls) {
       seen++;
       // Reported BEFORE the page is fetched, so the URL on screen is the one being worked on
       // rather than the one that just finished.
@@ -66,7 +72,24 @@ export class CrawlerAgent extends Agent {
         const { error } = await supabase
           .from("site_pages")
           .upsert(
-            { tenant_id: tenantId, url, title: page.title, content_text: page.text, embedding: vector },
+            {
+              tenant_id: tenantId,
+              url,
+              title: page.title,
+              content_text: page.text,
+              embedding: vector,
+              // Migration 025. The page's own summary of itself and its outline — never
+              // captured before, which is why the brain could list a site's pages but could
+              // not say what any of them was about.
+              meta_description: page.metaDescription,
+              headings: page.headings,
+              canonical: page.canonical,
+              word_count: page.wordCount,
+              status_code: page.statusCode,
+              depth,
+              last_seen: runStartedAt,
+              fetched_at: runStartedAt,
+            },
             { onConflict: "tenant_id,url" }
           );
         if (error) throw new Error(error.message);
@@ -76,6 +99,28 @@ export class CrawlerAgent extends Agent {
         console.error("[crawler] embed/store failed for", url, e.message);
         if (failures.length < 20) failures.push({ url, error: String(e?.message ?? e).slice(0, 200) });
       }
+    }
+
+    // ── Prune what this crawl could not find ────────────────────────────────────────────
+    //
+    // The crawler has only ever upserted, so a page that was wrong the first time stayed wrong
+    // forever. On the live workspace that meant /cart, /payment-failed and empty mega-menu
+    // fragments were still being served to every agent twelve days later, while the real
+    // service pages had never been added at all. A row this run did not see is a row we can no
+    // longer stand behind.
+    //
+    // ONLY AFTER A CRAWL THAT CLEARLY WORKED. If discovery half-failed (a site down for
+    // maintenance, a network blip) the right answer is to keep the old pages and try again;
+    // emptying the knowledge base because one run went badly is the more expensive mistake.
+    if (pagesCrawled >= Math.max(5, Math.floor(urls.length * 0.5))) {
+      const { data: gone, error: pruneErr } = await supabase
+        .from("site_pages")
+        .delete()
+        .eq("tenant_id", tenantId)
+        .lt("last_seen", runStartedAt)
+        .select("url");
+      if (pruneErr) console.error("[crawler] prune failed:", pruneErr.message);
+      else if (gone?.length) console.log(`[crawler] pruned ${gone.length} page(s) this crawl no longer finds`);
     }
 
     if (!pagesCrawled) {
