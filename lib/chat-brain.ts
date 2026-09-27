@@ -160,8 +160,12 @@ export type BrainTurn = {
   order?: OrderResult;
   /** For the conversation model when nothing was ordered: what the team can honestly claim. */
   capabilities?: string;
-  /** For the timing log. */
+  /** For the timing log — and, when the model called a lookup_* tool, the name of that tool. */
   action?: string;
+  /** The arguments the model passed to that lookup. Carried out of the brain because the read
+   *  itself belongs to the route (it owns the Supabase client and the streamed reply), while
+   *  deciding WHICH read belongs here. */
+  lookupArgs?: Record<string, unknown>;
 };
 
 const conversation = (capabilities: string, action = ANSWER_QUESTION): BrainTurn => ({
@@ -330,7 +334,10 @@ export async function brainTurn(input: BrainTurnInput, deps: BrainTurnDeps): Pro
   const routed = intent;
   const known = enabledActions(registry);
   if (routed.action === ANSWER_QUESTION || !known.has(routed.action)) {
-    return conversation(capabilities, routed.action);
+    // A lookup_* action lands here too — it is not an agent, so `known` will never hold it.
+    // It leaves with its arguments so the route can run the read and hand the result to the
+    // same conversational model call that would otherwise have had to guess.
+    return { ...conversation(capabilities, routed.action), lookupArgs: routed.params };
   }
 
   /* 6 ─ Sure enough to spend money? ---------------------------------------------------- */

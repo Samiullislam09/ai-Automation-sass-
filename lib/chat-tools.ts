@@ -23,6 +23,7 @@
  */
 
 import type { BrainAction, BrainAgent, BrainRegistry } from "@/lib/brain";
+import { READ_TOOLS } from "@/lib/chat-data-tools";
 
 /** The tool the model calls when the user is not ordering work: a question, a greeting, small
  *  talk, a status check. It is not an agent and it starts nothing — it exists so that "none of
@@ -227,14 +228,21 @@ export function toolsFromRegistry(registry: BrainRegistry | null | undefined): C
     });
   }
 
+  // The lookups come before the catch-all on purpose: a model scanning the list for something
+  // that fits "kitne post ha" should meet `lookup_content` before it meets the tool that
+  // answers everything and reads nothing. Until 2026-09-19 only the catch-all existed, so a
+  // question could not do anything BUT fall through to a guess — see lib/chat-data-tools.ts.
+  tools.push(...READ_TOOLS);
+
   tools.push({
     type: "function",
     function: {
       name: ANSWER_QUESTION,
       description:
-        "Use this for anything that is NOT an instruction to do work: greetings, questions, status checks " +
-        '("kya update hai", "mera schedule kya hai"), thanks, small talk, and anything you are not sure about. ' +
-        "It starts nothing and costs nothing, so it is always the safe answer.",
+        "Use this ONLY for messages that need no data at all: greetings, thanks, small talk, chit-chat, and " +
+        "questions about how you work. If the customer is asking about THEIR articles, site, traffic, schedule or " +
+        "business, call the matching lookup_* tool instead — this one reads nothing, so answering a factual " +
+        "question with it means guessing.",
       parameters: {
         type: "object",
         properties: {

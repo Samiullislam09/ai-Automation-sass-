@@ -22,6 +22,7 @@ import { brainTurn, legacyJobOf, type BrainTurn, type BrainTurnDeps, type OrderR
 import { extractIntent } from "@/lib/chat-brain-intent";
 import { clearState, loadState, savePending } from "@/lib/chat-conversation";
 import { answerWhatWeCannotKnow, loadDataSources, looksLikeMetricQuestion } from "@/lib/chat-no-data";
+import { isReadTool, runReadTool, toolResultBlock } from "@/lib/chat-data-tools";
 import { lastSuccessfulRun } from "@/lib/reuse";
 
 export const runtime = "nodejs";
@@ -206,25 +207,34 @@ const ASKS_WHAT_YOU_CAN_DO =
 function buildMessages(
   q: string,
   ctx: any,
-  c: { business: string | null; recentWork: string | null; schedule: string | null; counts: Counts | null; capabilities?: string; liveWork: string | null; siteIssues: string | null },
+  c: { business: string | null; recentWork: string | null; schedule: string | null; counts: Counts | null; capabilities?: string; liveWork: string | null; siteIssues: string | null; toolResult?: string | null },
   history: Turn[]
 ) {
-  const wantCounts = ASKS_HOW_MANY.test(q);
-  const wantWork = !wantCounts && ASKS_ABOUT_WORK.test(q);
-  const wantSchedule = ASKS_ABOUT_SCHEDULE.test(q);
+  // A LOOKUP RESULT REPLACES THE GUESSING BLOCKS, IT DOES NOT JOIN THEM.
+  //
+  // The regex gates below (wantCounts, wantWork, wantSchedule, wantIssues) are the old way of
+  // deciding what a message needs, and they are wrong in both directions — they missed "pura
+  // details do yar" and they fired on messages that needed nothing. When the model has already
+  // said what it needed by calling a tool, that answer beats every guess here. Attaching both
+  // would also re-create the failure this file's own comment warns about: handed four
+  // reference blocks, this model answered a greeting with a status report.
+  const hasTool = !!c.toolResult;
+  const wantCounts = !hasTool && ASKS_HOW_MANY.test(q);
+  const wantWork = !hasTool && !wantCounts && ASKS_ABOUT_WORK.test(q);
+  const wantSchedule = !hasTool && ASKS_ABOUT_SCHEDULE.test(q);
   // The team's own list of what it can and cannot do. Attached when they ask about ability,
   // and when nothing else was needed — never on top of three other sections, because handing
   // this model four reference blocks is what made "hi hello" come back as a status report.
   // The site's real problems. Checked before `wantTeam` so that "mere site pe kya issue hai"
   // reaches the audit findings instead of the capabilities list, which is what it used to get.
-  const wantIssues = !!c.siteIssues && ASKS_ABOUT_ISSUES.test(q);
+  const wantIssues = !hasTool && !!c.siteIssues && ASKS_ABOUT_ISSUES.test(q);
   // Live work rides with the work gate: "kya chal raha hai" is a status question, and answering
   // it from finished history is the exact thing the WORK section below has to warn against.
   const wantLive = !!c.liveWork && wantWork;
   const wantTeam =
-    !!c.capabilities && (ASKS_WHAT_YOU_CAN_DO.test(q) || (!wantWork && !wantCounts && !wantSchedule && !wantIssues));
+    !hasTool && !!c.capabilities && (ASKS_WHAT_YOU_CAN_DO.test(q) || (!wantWork && !wantCounts && !wantSchedule && !wantIssues));
   lastSections =
-    [wantWork && "work", wantLive && "live", wantIssues && "issues", wantCounts && "counts", wantSchedule && "schedule", wantTeam && "team"]
+    [hasTool && "tool", wantWork && "work", wantLive && "live", wantIssues && "issues", wantCounts && "counts", wantSchedule && "schedule", wantTeam && "team"]
       .filter(Boolean)
       .join("+") || "none";
   return [
@@ -284,7 +294,10 @@ function buildMessages(
             ]
           : []),
         ...(wantTeam ? [c.capabilities as string, ``] : []),
-        !wantWork && !wantSchedule && !wantCounts && !wantIssues
+        ...(hasTool ? [c.toolResult as string, ``] : []),
+        hasTool
+          ? `HARD LIMIT: the tool result above is the only source for this answer. Every number, title and date you state must appear in it. If it does not answer what they asked, say you checked and it is not there — do not fill the gap.`
+          : !wantWork && !wantSchedule && !wantCounts && !wantIssues
           ? // NO EXAMPLE GREETING HERE, ON PURPOSE. This line used to end with `e.g. "Salam! Kya
             // chahiye?"`, and the model copied that string verbatim — it is the identical reply
             // to eleven separate "hi"s in this product's own chat history. Same failure as the
@@ -300,6 +313,78 @@ function buildMessages(
   ];
 }
 
+/** Waits for the model's FIRST REAL TOKEN before this model is committed to.
+ *
+ *  THE BUG THIS FIXES. The reply loop used to open a stream, hand it straight to relay() and
+ *  return the Response. Everything after that point was unrecoverable: if the stream then
+ *  broke before producing a single token, relay's catch wrote "I lost my connection
+ *  mid-sentence — ask me again" into a reply that had not started, the turn was saved empty,
+ *  and the fallback model — already configured, measured at 472-580ms to first token — was
+ *  never asked, because the loop had already exited. Live on 2026-09-19: 9.1% of the last 187
+ *  assistant messages were "I'm having trouble reaching my brain", and 4.3% were saved blank.
+ *
+ *  An HTTP 200 from a model provider means "your request was accepted", not "an answer is
+ *  coming". Only a token means that. So the commitment moves to the token.
+ *
+ *  Returns the bytes already read (so nothing is lost) plus the live reader, or null if the
+ *  stream ended or failed before saying anything — in which case the caller tries the next
+ *  model, exactly as it does for a stream that never opened at all.
+ */
+async function primeFirstToken(
+  stream: ReadableStream<Uint8Array>,
+  signal: AbortSignal
+): Promise<{ prefix: Uint8Array[]; reader: ReadableStreamDefaultReader<Uint8Array> } | null> {
+  const reader = stream.getReader();
+  const prefix: Uint8Array[] = [];
+  const dec = new TextDecoder();
+  let sse = "";
+  try {
+    for (;;) {
+      if (signal.aborted) throw new Error("aborted before first token");
+      const { done, value } = await reader.read();
+      if (done) return null;              // closed without ever saying anything
+      prefix.push(value);
+      sse += dec.decode(value, { stream: true });
+      // A frame carrying non-empty content. Empty deltas and role-only frames do not count:
+      // gpt-oss with the wrong params streams a dozen of those and then stops, which is the
+      // "answered instantly with nothing" failure in lib/chat-model.ts's header.
+      for (const line of sse.split("\n")) {
+        if (!line.startsWith("data:")) continue;
+        const payload = line.slice(5).trim();
+        if (!payload || payload === "[DONE]") continue;
+        try {
+          if (JSON.parse(payload)?.choices?.[0]?.delta?.content) return { prefix, reader };
+        } catch { /* a partial frame; the next chunk completes it */ }
+      }
+    }
+  } catch {
+    reader.cancel().catch(() => {});
+    return null;
+  }
+}
+
+/** The primed stream, replayed from the start: the bytes primeFirstToken had to read in order
+ *  to see that first token, then everything still to come. relay() downstream cannot tell the
+ *  difference. */
+function replay(prefix: Uint8Array[], reader: ReadableStreamDefaultReader<Uint8Array>): ReadableStream<Uint8Array> {
+  let i = 0;
+  return new ReadableStream({
+    async pull(controller) {
+      if (i < prefix.length) { controller.enqueue(prefix[i++]); return; }
+      try {
+        const { done, value } = await reader.read();
+        if (done) controller.close();
+        else controller.enqueue(value);
+      } catch (e) {
+        // Broken AFTER tokens were delivered. Not recoverable — re-running the model would
+        // rewrite text the reader has already seen — so it ends here and relay reports it.
+        controller.error(e);
+      }
+    },
+    cancel(reason) { reader.cancel(reason).catch(() => {}); },
+  });
+}
+
 /** Opens the NVIDIA stream and hands back the raw byte stream plus the response, so the
  *  caller can start writing to the browser the moment the first token exists. */
 async function openLightningStream(model: string, messages: any[], signal: AbortSignal): Promise<ReadableStream<Uint8Array>> {
@@ -307,11 +392,30 @@ async function openLightningStream(model: string, messages: any[], signal: Abort
   // NIM's shared free queue measured 0.5-19s on the identical request (§18.1). Tried first,
   // and only when one is actually configured (docs/MANUAL_STEPS.md) — inert otherwise, and
   // NIM below is unchanged either way.
-  // `onlyModel` so a fast provider may serve this ONLY if it hosts the brain's own model. Groq
-  // does not host nemotron-3-ultra, and without this it answered every message with its own
-  // gpt-oss default no matter what CHAT_MODEL said — which would have made the 2026-09-18 brain
-  // switch a no-op on the one path the customer actually reads.
-  const fast = await openFastChatStream(messages, { temperature: 0.2, max_tokens: 260, signal, onlyModel: CHAT_MODEL });
+  // NO `onlyModel` HERE ANY MORE — and that is the single biggest speed change this file has
+  // had. It was added on 2026-09-18 so that switching the brain's model in lib/chat-model.ts
+  // could not be silently ignored by a provider serving its own default instead. Correct
+  // reasoning, wrong call site: CHAT_MODEL is nemotron-3-ultra, Groq and Cerebras host
+  // gpt-oss, the names never match, so EVERY reply fell through to NIM's shared free queue
+  // and the dedicated-hardware providers sat unused.
+  //
+  // MEASURED 2026-09-19, same prompt ("kitne post ha" with a lookup_content result attached),
+  // three rounds each, first streamed token:
+  //
+  //      Groq gpt-oss-120b     758ms   995ms   1952ms     (total 789ms / 1195ms / 1993ms)
+  //      NIM nemotron-ultra    887ms  9279ms  10915ms     (total 2194ms / 14703ms / 14691ms)
+  //
+  // Both answered correctly — which is the point. By the time this call runs, the decision
+  // has already been made and the facts are already fixed: the tool call was chosen by
+  // CHAT_MODEL in lib/chat-brain-intent.ts (still pinned, still nemotron, because reading
+  // "isko publish mat karna" correctly is worth 255ms), and a lookup_* result is sitting in
+  // the prompt. All that is left here is phrasing a sentence out of numbers it has been
+  // handed. There is no negation to misread and no number to invent, so paying NIM's queue
+  // for it buys nothing and costs up to fourteen seconds.
+  //
+  // CHAT_REPLY_MODEL pins this back to one model if a provider's phrasing ever regresses.
+  const pin = process.env.CHAT_REPLY_MODEL;
+  const fast = await openFastChatStream(messages, { temperature: 0.2, max_tokens: 260, signal, ...(pin ? { onlyModel: pin } : {}) });
   if (fast) return fast.stream;
 
   const key = nvidiaKey("chat");
@@ -1058,6 +1162,7 @@ export async function POST(req: NextRequest) {
   const sourcesP = looksLikeMetricQuestion(q)
     ? cached(`sources:${tenantId}`, TTL.business, () => loadDataSources(supabase, tenantId))
     : null;
+
   const convP = tenantId
     ? cached(`conv:${tenantId}:${askedFor ?? "new"}`, askedFor ? TTL.conversation : 0, () =>
         ensureConversation(supabase, tenantId, askedFor, userId)
@@ -1160,6 +1265,9 @@ export async function POST(req: NextRequest) {
   //      of what it can and cannot do, so "kya tum Instagram pe post kar sakte ho?" is
   //      answered from the registry instead of from the model's imagination. ----
   let capabilities = "";
+  // The JSON a lookup_* tool returned this turn, if the model called one. Null on every other
+  // message, which is most of them.
+  let toolResult: string | null = null;
   if (useBrain) {
     const turn = await runBrainTurn(q, tenantId, userId, convId, clientHistory, supabase);
     lap("brain");
@@ -1168,13 +1276,31 @@ export async function POST(req: NextRequest) {
       return reply(turn.order.text, turn.order);
     }
     capabilities = turn.capabilities ?? "";
+
+    // ---- THE MODEL ASKED TO LOOK SOMETHING UP ----
+    //
+    // This is the whole point of the read tools. The same model that read the question chose
+    // which fact it needed; we fetch it and hand the result straight back to the reply call, so
+    // the answer is written from a row that exists instead of from a pre-baked blob the model
+    // has to search. It replaced two failures at once: a question routed as an ORDER ("abhi koi
+    // issue ha site pe" was classified audit_site and answered "the audit is recent"), and a
+    // question answered from context ("kitne post ha" came back as the literal line
+    // "PUBLISHED = 0"). Both live, both 2026-09-19.
+    if (isReadTool(turn.action)) {
+      const result = await runReadTool(turn.action as string, turn.lookupArgs ?? {}, supabase, tenantId);
+      toolResult = toolResultBlock(result);
+      // `mark` is the millisecond timing log, so the tool's NAME goes to the console line
+      // instead — which of the six lookups ran is the thing worth reading back later.
+      console.log(`[chat] lookup ${turn.action} ok=${result.ok}`);
+      lap("lookup");
+    }
   }
 
   const [business, recentWork, schedule, counts, storedHistory, liveWork, siteIssues] = await Promise.all([businessP, workP, scheduleP, countsP, historyP, liveP, issuesP]);
   lap("context");
   // The stored history only counts if the conversation it came from is the one we ended up in.
   const history = convId && convId === askedFor && storedHistory.length ? storedHistory : clientHistory;
-  const messages = buildMessages(q, ctx || {}, { business, recentWork, schedule, counts, capabilities, liveWork, siteIssues }, history);
+  const messages = buildMessages(q, ctx || {}, { business, recentWork, schedule, counts, capabilities, liveWork, siteIssues, toolResult }, history);
 
   // Primary model, then the fallback model — but only at OPENING the stream. Once tokens are
   // flowing a retry would mean re-writing text the reader has already seen, so a mid-stream
@@ -1193,12 +1319,20 @@ export async function POST(req: NextRequest) {
   for (const model of order) {
     const isLast = model === order[order.length - 1];
     try {
-      const upstream = await openLightningStream(model, messages, AbortSignal.timeout(isLast ? 25_000 : 12_000));
-      mark.model = order.indexOf(model);
+      const signal = AbortSignal.timeout(isLast ? 25_000 : 12_000);
+      const upstream = await openLightningStream(model, messages, signal);
       lap("streamOpen");
+      // Committed to this model only once it has actually said a word — see primeFirstToken.
+      const primed = await primeFirstToken(upstream, signal);
+      if (!primed) {
+        console.error(`[chat] ${model} opened but produced no token; trying next`);
+        continue;
+      }
+      mark.model = order.indexOf(model);
+      lap("firstToken");
       const sections = lastSections;
       const body = relay(
-        upstream,
+        replay(primed.prefix, primed.reader),
         async (full) => {
           if (tenantId && convId && full) await saveTurn(tenantId, convId, q, full);
           lap("lastWord");

@@ -61,6 +61,7 @@ import {
   toolsFromRegistry,
   type EnabledAction,
 } from "@/lib/chat-tools";
+import { isReadTool } from "@/lib/chat-data-tools";
 
 /** Plan §5.1's shape, exactly. `agent` and `irreversible` are the brain's to fill in. */
 export type IntentPlan = {
@@ -307,6 +308,14 @@ export function planFromToolCall(
   const now = ctx.now ?? new Date();
   const actions = enabledActions(ctx.registry);
   const found = actions.get(String(name ?? ""));
+
+  // A LOOKUP. Nothing is ordered and nothing is spent, but this is not "nothing happened"
+  // either: the model asked to read something before answering, and the name plus its
+  // arguments have to survive back to the route so the read can actually be run. Before
+  // 2026-09-19 there was no such branch because there were no read tools — every question
+  // collapsed into nothingOrdered() and was then answered from a pre-baked blob, which is the
+  // failure lib/chat-data-tools.ts documents.
+  if (isReadTool(name)) return { ...nothingOrdered(), action: String(name), params: { ...(args ?? {}) } };
 
   // Not a tool, or a tool the registry does not have (a hallucinated name, or an agent that
   // went disabled between the prompt and the answer). Either way nothing is ordered.

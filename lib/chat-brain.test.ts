@@ -30,6 +30,7 @@ import {
   schemaFromInput,
   toolsFromRegistry,
 } from "@/lib/chat-tools";
+import { READ_TOOLS } from "@/lib/chat-data-tools";
 import { planFromToolCall, nothingOrdered, resolveDelivery, resolveWhen, type IntentPlan } from "@/lib/chat-brain-intent";
 import { resolveFollowUp, CONFIRM_SLOT, type ConversationState, type PendingIntent } from "@/lib/chat-conversation";
 import { brainTurn, legacyJobOf, type BrainTurn, type BrainTurnDeps, type LegacyJob, type OrderResult } from "@/lib/chat-brain";
@@ -625,13 +626,25 @@ test("an irreversible task with nowhere to remember the yes is taken back", asyn
 
 /* ══ §5.1 · the tool list is built, never written ════════════════════════════════════ */
 
-test("one tool per ENABLED action, plus the question tool — and nothing else", () => {
+test("one tool per ENABLED action, then the lookups, then the question tool — and nothing else", () => {
   const tools = toolsFromRegistry(REGISTRY);
   const names = tools.map((t) => t.function.name);
 
-  assert.deepEqual(names, ["find_keywords", "write_article", "research_brief", "plan_topics", "audit_site", ANSWER_QUESTION]);
+  // The read tools (lib/chat-data-tools.ts, added 2026-09-19) sit between the agents and the
+  // catch-all. Order is asserted, not just membership: a model scanning this list for
+  // something that fits "kitne post ha" must meet lookup_content before it meets the tool that
+  // answers everything and reads nothing.
+  const lookups = READ_TOOLS.map((t) => t.function.name);
+  assert.deepEqual(names, [
+    "find_keywords", "write_article", "research_brief", "plan_topics", "audit_site",
+    ...lookups,
+    ANSWER_QUESTION,
+  ]);
   assert.equal(names.includes("publish_article"), false, "no worker behind it → no tool");
   assert.equal(names.includes("draft_social"), false, "a stub → no tool");
+  // Every lookup is a read. If one ever stops being one, it belongs in the registry with the
+  // confirmation machinery, not here where nothing asks the customer first.
+  for (const name of lookups) assert.ok(name.startsWith("lookup_"), `${name} is offered as a read but is not named like one`);
 });
 
 test("lib/chat-tools.ts does not know a single action by name", () => {
