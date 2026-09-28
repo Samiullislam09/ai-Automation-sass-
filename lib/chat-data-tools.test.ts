@@ -19,6 +19,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  lookupContentShape,
   READ_TOOLS,
   READ_PREFIX,
   isReadTool,
@@ -109,4 +110,52 @@ test("the analytics tool tells the model that no rows means not connected, not z
   const d = READ_TOOLS.find((t) => t.function.name === LOOKUP_ANALYTICS)!.function.description;
   assert.match(d, /If Google is not connected the tool says so/i);
   assert.match(d, /never a number/i);
+});
+
+/* ── the zero that is true and useless ──────────────────────────────────────────────────── */
+
+/** The live numbers from the wca-global workspace on 2026-09-28, the day this was reported:
+ *  55 awaiting_approval, 41 failed, nothing published, nothing in the literal `draft` bucket. */
+const LIVE_2026_09_28 = [
+  ...Array.from({ length: 55 }, () => ({ type: "article", status: "awaiting_approval" })),
+  ...Array.from({ length: 41 }, () => ({ type: "article", status: "failed" })),
+];
+
+test("a zero bucket with unpublished work behind it comes back flagged, not bare", () => {
+  const d = lookupContentShape(LIVE_2026_09_28 as any) as any;
+
+  // The literal figures stay literal — this is not about softening them.
+  assert.equal(d.articles.draft, 0);
+  assert.equal(d.articles.published, 0);
+  assert.equal(d.articles.awaiting_approval, 55);
+  assert.equal(d.articles.failed_quality_gate, 41);
+  assert.equal(d.unpublished_total, 96);
+
+  // …but the model is told, in the result itself, that the zero is not the whole story.
+  assert.ok(d.read_before_answering, "no read_before_answering on the exact data that misfired");
+  assert.match(d.read_before_answering, /55 awaiting/);
+  assert.match(d.read_before_answering, /41 failed/);
+  assert.match(d.read_before_answering, /`draft` is 0/);
+});
+
+test("a genuinely empty account gets no flag — there is no bigger number to hide", () => {
+  const d = lookupContentShape([]) as any;
+  assert.equal(d.articles.total, 0);
+  assert.equal(d.unpublished_total, 0);
+  assert.equal(d.read_before_answering, undefined);
+});
+
+test("a healthy account with everything published gets no flag either", () => {
+  const d = lookupContentShape(
+    Array.from({ length: 12 }, () => ({ type: "article", status: "published" })) as any
+  ) as any;
+  assert.equal(d.articles.published, 12);
+  assert.equal(d.unpublished_total, 0);
+  assert.equal(d.read_before_answering, undefined);
+});
+
+test("the result block states the zero rule on every call, not only for content", () => {
+  const block = toolResultBlock({ ok: true, tool: LOOKUP_AUDIT, data: { issues: 0, blocks: 7 } });
+  assert.match(block, /ZERO IS ONLY AN ANSWER IF IT IS THE WHOLE ANSWER/);
+  assert.match(block, /read_before_answering/);
 });

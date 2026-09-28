@@ -232,7 +232,16 @@ async function lookupContent(supabase: SupabaseClient, tenantId: string, status:
     .order("updated_at", { ascending: false });
   if (error) throw new Error(error.message);
 
-  const rows = data ?? [];
+  return { ok: true, tool: LOOKUP_CONTENT, data: lookupContentShape(data ?? [], status) };
+}
+
+/** The row-to-answer half of `lookup_content`, split out so the shape can be tested against the
+ *  exact counts that have misfired in production without standing up a database. Pure: rows in,
+ *  the object the model will read out. */
+export function lookupContentShape(
+  rows: { type?: string | null; status?: string | null; title?: string | null }[],
+  status = "all"
+) {
   const articles = rows.filter((r) => r.type === "article");
   const count = (s: string) => articles.filter((r) => r.status === s).length;
 
@@ -241,7 +250,7 @@ async function lookupContent(supabase: SupabaseClient, tenantId: string, status:
   const others: Record<string, number> = {};
   for (const r of rows) {
     if (r.type === "article" || r.status !== "awaiting_approval") continue;
-    others[r.type] = (others[r.type] ?? 0) + 1;
+    others[String(r.type)] = (others[String(r.type)] ?? 0) + 1;
   }
 
   const wanted = status === "all" ? null : status;
@@ -250,21 +259,50 @@ async function lookupContent(supabase: SupabaseClient, tenantId: string, status:
     .slice(0, CONTENT_TITLES)
     .map((r) => ({ title: r.title, status: r.status }));
 
+  const published = count("published");
+  const unpublished = articles.length - published;
+
+  // THE ZERO THAT IS TRUE AND USELESS. Reported live 2026-09-28: "kitna draft ha?" was answered
+  // "Aapke articles ka draft count 0 hai" while 55 articles sat in awaiting_approval and the
+  // dashboard's own Approvals badge read 55. Nothing lied — `draft` is a real status (001_init's
+  // default, written in a dozen places) and it genuinely held no rows — but a customer saying
+  // "draft" means "written and not live yet", and this product moves an article straight from
+  // the writer to awaiting_approval, so the literal bucket is usually the empty one.
+  //
+  // The fix belongs here rather than in the prompt for the reason the top of this file gives:
+  // the model owns the phrasing, the tool owns the numbers, and "which number answers this" is a
+  // property of the data. So the result now SAYS when a zero is hiding a bigger number, using the
+  // counts themselves. No question text is matched and no answer is written here — the model
+  // still decides what to say, it just can no longer read `draft: 0` as the whole story.
+  const emptyButNotNothing = (["draft", "published", "approved"] as const).filter(
+    (bucket) => count(bucket) === 0 && unpublished > 0
+  );
+  const where = [
+    count("awaiting_approval") ? `${count("awaiting_approval")} awaiting the customer's approval` : "",
+    count("failed") ? `${count("failed")} failed the quality gate` : "",
+    count("draft") ? `${count("draft")} still drafting` : "",
+  ].filter(Boolean);
+
+  const misleadingZero = emptyButNotNothing.length
+    ? `${emptyButNotNothing.map((b) => `\`${b}\` is 0`).join(", ")} — but ${articles.length} articles exist and ` +
+      `${unpublished} of them are not live: ${where.join(", ")}. In everyday language "draft" means any article ` +
+      `that is not published yet, so answering with the literal zero alone would be accurate and still wrong. ` +
+      `Give the figure they named AND where the rest actually are, in one sentence.`
+    : null;
+
   return {
-    ok: true,
-    tool: LOOKUP_CONTENT,
-    data: {
-      articles: {
-        total: articles.length,
-        published: count("published"),
-        awaiting_approval: count("awaiting_approval"),
-        failed_quality_gate: count("failed"),
-        draft: count("draft"),
-      },
-      titles_shown: titles,
-      also_awaiting_approval_not_articles: others,
-      nothing_is_live: count("published") === 0,
+    articles: {
+      total: articles.length,
+      published,
+      awaiting_approval: count("awaiting_approval"),
+      failed_quality_gate: count("failed"),
+      draft: count("draft"),
     },
+    unpublished_total: unpublished,
+    titles_shown: titles,
+    also_awaiting_approval_not_articles: others,
+    nothing_is_live: published === 0,
+    ...(misleadingZero ? { read_before_answering: misleadingZero } : {}),
   };
 }
 
@@ -460,6 +498,14 @@ export function toolResultBlock(result: ReadResult): string {
     "Answer the question that was actually asked using these values. Quote only figures that appear above — if the " +
       "customer asked for something not in here, say you looked and it is not there. Never print a raw key = value " +
       "line as your reply; write a sentence a person would say.",
+    // Added 2026-09-28 after "kitna draft ha?" was answered "draft count 0 hai" with 55 articles
+    // sitting in awaiting_approval. The zero was real; the answer was still wrong, because the
+    // customer's word and the column's name are not the same vocabulary. The rule is general on
+    // purpose — the same trap exists for "kitne lead", "kitne issue", any count with siblings.
+    "A ZERO IS ONLY AN ANSWER IF IT IS THE WHOLE ANSWER. If a figure the customer named is zero while a related " +
+      "figure above is not, give both in one sentence. A bare zero that hides a larger number is a wrong answer " +
+      "even when the zero itself is accurate. If a `read_before_answering` field is present above, it is telling " +
+      "you exactly that — follow it.",
     // THIS LINE IS NOT OPTIONAL. Caught in testing 2026-09-19: handed a stored audit, the model
     // opened with "Site audit dobara chala diya" — it announced running work that had not run.
     // A lookup is a READ; claiming it was an action is the most expensive lie this product can
