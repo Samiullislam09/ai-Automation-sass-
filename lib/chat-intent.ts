@@ -1,4 +1,3 @@
-import { parseScheduleCommand, type SchedulePatch } from "@/lib/chat-schedule";
 
 /** Chat -> real work. Mr Lxwa is a manager, not a ghostwriter: when the user says
  *  "write me an article", the chat must START THE TEAM (boss/keyword -> writer -> approvals),
@@ -23,10 +22,11 @@ export type ChatIntent =
   // for it in the chat and got a fabricated confirmation instead of either the action or an
   // honest refusal.
   | { kind: "publish" }
-  // Change the RECURRING timetable — "roz subah 9 baje 3 article banao", "automation band kar
-  // do". The patch is parsed by lib/chat-schedule.ts and applied ON TOP of the saved row, so a
-  // message that changes one field cannot silently reset the other four.
-  | { kind: "schedule"; patch: SchedulePatch }
+  // NO "schedule" VARIANT. It was removed 2026-09-28 along with the pattern that produced it:
+  // the timetable is changed by the `manage_schedule` tool now (lib/chat-schedule-tools.ts),
+  // which cannot be called without naming WHICH timetable. Deleting the variant rather than
+  // leaving it unreachable is deliberate — it makes "no regex writes a schedule" something the
+  // compiler enforces instead of something a future edit can quietly undo.
   // Call off something already booked. `which` is "all" only when they said so — cancelling
   // more than was asked for is the same class of mistake as publishing more than was asked for.
   | { kind: "cancel"; which: "next" | "all" }
@@ -122,8 +122,13 @@ export function detectChatIntent(raw: string): ChatIntent {
   // question about the same subject still falls through: parseScheduleCommand needs an on/off
   // word or a setting verb and returns null for "mera schedule kya hai", and the two below
   // need an explicit cancel/reject verb.
-  const schedulePatch = parseScheduleCommand(q);
-  if (schedulePatch) return { kind: "schedule", patch: schedulePatch };
+  // THE SCHEDULE REGEX NO LONGER WRITES ANYTHING. Removed 2026-09-28: it read WHEN out of a
+  // sentence and was structurally blind to WHAT, so "har roz mere site ka audit report batana"
+  // rewrote the customer's weekly ARTICLE timetable to daily and reported it as saved. The
+  // timetable is now changed by `manage_schedule` (lib/chat-schedule-tools.ts), a tool the model
+  // cannot call without naming the kind. parseScheduleCommand is kept and still tested — it is
+  // the record of every phrasing this product has promised to understand, and the tool's own
+  // tests reuse that corpus — but nothing routes a write through it any more.
 
   // Checked before cancel/reject: "site se hata do" would otherwise satisfy CANCEL_VERB's or
   // REJECT_VERB's bare "hata do" and get answered as the wrong one of the three. An unambiguous

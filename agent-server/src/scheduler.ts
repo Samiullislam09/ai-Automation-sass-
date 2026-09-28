@@ -277,10 +277,29 @@ export async function tick() {
     try {
       if (!isDue(row, now)) continue;
 
-      // Only the boss chain is scheduled today. 'social' rows are rejected by the API for
-      // now (the social agent is a stub) — this guard means a hand-inserted row can't
-      // quietly start burning jobs either.
-      if (row.kind !== "article") continue;
+      // 'social' rows still do nothing: that agent is a stub, and a hand-inserted row must not
+      // quietly start burning jobs. 'audit' became schedulable with migration 027 — before that,
+      // a customer asking for a daily audit report had nowhere for the request to go, which is
+      // how "har roz mere site ka audit report batana" ended up rewriting their ARTICLE
+      // timetable to daily instead (lib/chat-schedule-tools.ts has the full account).
+      if (row.kind !== "article" && row.kind !== "audit") continue;
+
+      // Written before anything else can tick again, so a slow enqueue can't double-fire.
+      const stamp = () => supabase.from("schedules").update({ last_run_at: now.toISOString() }).eq("id", row.id);
+
+      if (row.kind === "audit") {
+        // No count and no auto_publish: an audit produces one report and publishes nothing. The
+        // weekly sweep below still exists for tenants who have never set a schedule at all — this
+        // is the one they asked for, and `isDue` keeps the two from firing on the same minute.
+        const auditJobId = await enqueue("audit", {
+          tenantId: row.tenant_id,
+          taskLabel: "Scheduled site audit",
+          source: "schedule",
+        } as any);
+        await stamp();
+        console.log(`[scheduler] tenant ${row.tenant_id}: enqueued audit job ${auditJobId} (scheduled)`);
+        continue;
+      }
 
       // The customer approved this run when they saved the schedule; auto_publish says they
       // also approved what comes out of it. false whenever the column is missing or unset —
@@ -297,8 +316,7 @@ export async function tick() {
         autoPublish,
       } as any);
 
-      // Written before anything else can tick again, so a slow enqueue can't double-fire.
-      await supabase.from("schedules").update({ last_run_at: now.toISOString() }).eq("id", row.id);
+      await stamp();
       console.log(
         `[scheduler] tenant ${row.tenant_id}: enqueued boss job ${jobId} (${row.count} topics,` +
           ` run ${scheduleRunId}, ${autoPublish ? "auto-publish" : "approvals"})`

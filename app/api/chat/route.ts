@@ -10,7 +10,6 @@ import { openFastChatStream } from "@/lib/ai/fastChat";
 import { nvidiaKey } from "@/lib/ai/nvidiaKeys";
 import { detectChatIntent, wantsAutoPublish } from "@/lib/chat-intent";
 import { parseWhen, describeWhen } from "@/lib/when";
-import { applySchedule, describeSchedule } from "@/lib/chat-schedule";
 import { placeOrder, findPublishable, findLatestPublished, listPending, cancelOrder, MIGRATION_HINT, type OrderKind } from "@/lib/scheduled-orders";
 import { approveAndPublish, unpublishContent } from "@/lib/publish";
 import { classifyIntent, mightBeAnOrder } from "@/lib/chat-classify";
@@ -23,6 +22,7 @@ import { extractIntent } from "@/lib/chat-brain-intent";
 import { clearState, loadState, savePending } from "@/lib/chat-conversation";
 import { answerWhatWeCannotKnow, loadDataSources, looksLikeMetricQuestion } from "@/lib/chat-no-data";
 import { isReadTool, runReadTool, toolResultBlock } from "@/lib/chat-data-tools";
+import { isWriteTool, runWriteTool, writeResultBlock } from "@/lib/chat-schedule-tools";
 import { lastSuccessfulRun } from "@/lib/reuse";
 
 export const runtime = "nodejs";
@@ -676,7 +676,6 @@ async function startWork(
   supabase: SupabaseClient
 ): Promise<OrderResult> {
   // ---- Settings, not work. None of these enqueue anything, so none of them animate a room ----
-  if (intent.kind === "schedule") return changeSchedule(supabase, tenantId, intent.patch);
   if (intent.kind === "cancel") return cancelBooked(supabase, tenantId, intent.which);
   if (intent.kind === "reject") return rejectDraft(supabase, tenantId);
   if (intent.kind === "unpublish") return unpublishOrder(supabase, tenantId);
@@ -752,34 +751,11 @@ async function startWork(
 
 /* ── Settings the chat can change ─────────────────────────────────────────────────────── */
 
-/** "roz subah 9 baje 3 article banao", "automation band kar do".
- *
- *  The confirmation is built from the row that was SAVED, not from the patch that was asked
- *  for — so a count clamped to five, or an auto-publish flag that could not be stored because
- *  migration 014 is missing, shows up here instead of being discovered next week. */
-async function changeSchedule(
-  supabase: SupabaseClient,
-  tenantId: string,
-  patch: import("@/lib/chat-schedule").SchedulePatch
-): Promise<OrderResult> {
-  const res = await applySchedule(supabase, tenantId, patch);
-  if (!res.ok || !res.row) {
-    return nothingStarted(`I couldn't save that: **${res.error}**. Your schedule is unchanged — check it on the **Schedule** page.`);
-  }
-
-  // The cached copies are now wrong, and Mr Lxwa reads them to answer "kab chalta hai".
-  // Answering the very next message with the old timetable is how a change that worked gets
-  // reported as a change that did not.
-  invalidate(`sched:${tenantId}`);
-  invalidate(`tz:${tenantId}`);
-
-  const note =
-    res.autoPublishAvailable === false && patch.autoPublish === true
-      ? `\n\nAuto-publish did **not** save — that column isn't in your database yet (run \`supabase/migrations/014_schedule_auto_publish.sql\`). Everything else did.`
-      : "";
-
-  return nothingStarted(`Saved — ${describeSchedule(res.row)}.${note}`);
-}
+/* The schedule used to be changed from here, by a regex in lib/chat-intent.ts. It is changed by
+   the `manage_schedule` tool now — dispatched further down this file, next to the lookups — for
+   the reason written up in lib/chat-schedule-tools.ts: the pattern could read WHEN and was
+   structurally unable to read WHAT, so a request for a daily AUDIT rewrote the ARTICLE
+   timetable. `applySchedule` still does the writing; what changed is who decides. */
 
 /** "wo booking cancel kar do."
  *
@@ -1150,7 +1126,7 @@ export async function POST(req: NextRequest) {
   const businessP = cached(`biz:${tenantId}`, TTL.business, () => loadBusiness(supabase, tenantId));
   const workP = cached(`work:${tenantId}`, TTL.work, () => loadRecentWork(supabase, tenantId));
   const countsP = cached(`counts:${tenantId}`, TTL.work, () => loadCounts(supabase, tenantId));
-  const scheduleP = cached(`sched:${tenantId}`, TTL.schedule, () => loadSchedule(supabase, tenantId));
+  let scheduleP = cached(`sched:${tenantId}`, TTL.schedule, () => loadSchedule(supabase, tenantId));
   // What is running NOW, and what the last audit found. Both existed in the database and
   // neither had a reader on this path — see loadLiveWork/loadSiteIssues in lib/chat-context.ts.
   // Live work uses the SHORT ttl: a status that is a minute stale is the one fact here where
@@ -1293,6 +1269,32 @@ export async function POST(req: NextRequest) {
       // instead — which of the six lookups ran is the thing worth reading back later.
       console.log(`[chat] lookup ${turn.action} ok=${result.ok}`);
       lap("lookup");
+    }
+
+    // ---- THE MODEL ASKED TO CHANGE A SETTING ----
+    //
+    // Same shape as the read above and the same reason, one step more dangerous: the model that
+    // understood the sentence says which timetable and what to set, the tool writes it, and the
+    // result — including what it was BEFORE — is handed to the reply call so the confirmation
+    // names what actually moved. Until 2026-09-28 a regex owned this and could only ever write
+    // the article row; see lib/chat-schedule-tools.ts for the sentence that cost.
+    if (isWriteTool(turn.action)) {
+      const result = await runWriteTool(turn.action as string, turn.lookupArgs ?? {}, supabase, tenantId);
+      toolResult = writeResultBlock(result);
+      // The cached copies are now wrong, and Mr Lxwa reads them to answer "kab chalta hai".
+      // Answering the very next message with the old timetable is how a change that worked gets
+      // reported as a change that did not. Invalidated on failure too: a partial write is
+      // exactly when a stale read is most convincing.
+      invalidate(`sched:${tenantId}`);
+      invalidate(`tz:${tenantId}`);
+      // AND RE-READ IT. Invalidating the cache is not enough on its own: `scheduleP` was started
+      // near the top of this handler, long before the model decided to change anything, so the
+      // promise already in flight resolves to the timetable as it was. Left alone, the prompt
+      // built below would carry a context block saying "runs every Monday" next to a tool result
+      // saying "Monday -> daily" — and the model would have to guess which of the two to believe.
+      scheduleP = cached(`sched:${tenantId}`, TTL.schedule, () => loadSchedule(supabase, tenantId));
+      console.log(`[chat] write ${turn.action} ok=${result.ok}`);
+      lap("write");
     }
   }
 

@@ -24,6 +24,7 @@
 
 import type { BrainAction, BrainAgent, BrainRegistry } from "@/lib/brain";
 import { READ_TOOLS } from "@/lib/chat-data-tools";
+import { WRITE_TOOLS } from "@/lib/chat-schedule-tools";
 
 /** The tool the model calls when the user is not ordering work: a question, a greeting, small
  *  talk, a status check. It is not an agent and it starts nothing — it exists so that "none of
@@ -233,6 +234,12 @@ export function toolsFromRegistry(registry: BrainRegistry | null | undefined): C
   // answers everything and reads nothing. Until 2026-09-19 only the catch-all existed, so a
   // question could not do anything BUT fall through to a guess — see lib/chat-data-tools.ts.
   tools.push(...READ_TOOLS);
+
+  // The settings writes. Offered alongside the lookups and before the catch-all for the same
+  // reason: "roz 9 baje audit karo" has to meet a tool that can ask WHICH schedule before it
+  // meets anything that will answer in prose. Until 2026-09-28 there was no such tool at all and
+  // a regex owned this — see lib/chat-schedule-tools.ts for what that cost.
+  tools.push(...WRITE_TOOLS);
 
   tools.push({
     type: "function",

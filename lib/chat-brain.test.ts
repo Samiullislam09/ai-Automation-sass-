@@ -30,6 +30,7 @@ import {
   schemaFromInput,
   toolsFromRegistry,
 } from "@/lib/chat-tools";
+import { WRITE_TOOLS } from "./chat-schedule-tools";
 import { READ_TOOLS } from "@/lib/chat-data-tools";
 import { planFromToolCall, nothingOrdered, resolveDelivery, resolveWhen, type IntentPlan } from "@/lib/chat-brain-intent";
 import { resolveFollowUp, CONFIRM_SLOT, type ConversationState, type PendingIntent } from "@/lib/chat-conversation";
@@ -635,9 +636,14 @@ test("one tool per ENABLED action, then the lookups, then the question tool — 
   // something that fits "kitne post ha" must meet lookup_content before it meets the tool that
   // answers everything and reads nothing.
   const lookups = READ_TOOLS.map((t) => t.function.name);
+  // The settings writes (lib/chat-schedule-tools.ts, added 2026-09-28) come after the lookups
+  // and still before the catch-all, for the same reason the lookups do: "roz 9 baje audit karo"
+  // has to meet a tool that can ask WHICH schedule before it meets one that answers in prose.
+  const writes = WRITE_TOOLS.map((t) => t.function.name);
   assert.deepEqual(names, [
     "find_keywords", "write_article", "research_brief", "plan_topics", "audit_site",
     ...lookups,
+    ...writes,
     ANSWER_QUESTION,
   ]);
   assert.equal(names.includes("publish_article"), false, "no worker behind it → no tool");
@@ -645,6 +651,10 @@ test("one tool per ENABLED action, then the lookups, then the question tool — 
   // Every lookup is a read. If one ever stops being one, it belongs in the registry with the
   // confirmation machinery, not here where nothing asks the customer first.
   for (const name of lookups) assert.ok(name.startsWith("lookup_"), `${name} is offered as a read but is not named like one`);
+  // And every write is named like one. A write that looked like a lookup would be dispatched as
+  // a read by the route and silently do nothing; one that looked like an agent action would go
+  // through the confirmation machinery it does not have.
+  for (const name of writes) assert.ok(name.startsWith("manage_"), `${name} is offered as a write but is not named like one`);
 });
 
 test("lib/chat-tools.ts does not know a single action by name", () => {

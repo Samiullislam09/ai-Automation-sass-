@@ -48,7 +48,7 @@ const nothingStarted = (text: string, event?: SystemEventPayload): OrderResult =
 
 /** The five things the brain still cannot carry out, which the old code path does today.
  *  Every one of these is a gap with a name, not a design: see the notes on `legacyKind`. */
-export type LegacyKind = "schedule" | "cancel" | "reject" | "publish" | "unpublish";
+export type LegacyKind = "cancel" | "reject" | "publish" | "unpublish";
 export type LegacyJob = {
   kind: LegacyKind;
   which?: "next" | "all";
@@ -63,8 +63,12 @@ export type LegacyJob = {
  *  WHAT THE BRAIN STILL CANNOT DO. This function is the whole list, and every entry is a gap
  *  with a reason rather than a preference:
  *
- *   · the recurring timetable — "roz subah 9 baje 3 article". There is no manifest action for
- *     changing a schedule; it is a settings write, not work an agent does.
+ *   · the recurring timetable LEFT THIS LIST on 2026-09-28. It is not a manifest action even now
+ *     — it is still a settings write, not work an agent does — but it is a TOOL the model calls
+ *     (`manage_schedule`, lib/chat-schedule-tools.ts), which is the part that was missing. While
+ *     it lived here, the regex behind it read WHEN out of a sentence and was blind to WHAT, so
+ *     "har roz mere site ka audit report batana" rewrote the customer's weekly ARTICLE timetable
+ *     to daily and called it saved.
  *   · cancelling a booking — the brain cancels a task BY ID, but "wo booking cancel kar do"
  *     means working out which one, and today's bookings live in `scheduled_orders`, not in
  *     `tasks`.
@@ -95,7 +99,7 @@ export type LegacyJob = {
 export function legacyJobOf(message: string, tz: string): LegacyJob | null {
   const i = detectChatIntent(message);
   if (!i) return null;
-  if (i.kind === "schedule" || i.kind === "reject" || i.kind === "unpublish") return { kind: i.kind, message };
+  if (i.kind === "reject" || i.kind === "unpublish") return { kind: i.kind, message };
   if (i.kind === "cancel") return { kind: "cancel", which: i.which, message };
   if (i.kind === "publish") return { kind: "publish", message, scheduled: !!parseWhen(message, tz) };
   return null;

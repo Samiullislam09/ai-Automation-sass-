@@ -123,6 +123,24 @@ export function parseScheduleCommand(raw: string): SchedulePatch | null {
 
 /* ── Applying it ──────────────────────────────────────────────────────────────────────── */
 
+/** The kinds a timetable row can have, and what each one means to the scheduler.
+ *
+ *  ONE LIST, NOT THREE. Before this existed the answer to "can I schedule an audit?" was spread
+ *  across a check constraint in 006, an `if (row.kind !== "article") continue` in the agent
+ *  server, and nothing at all in the chat — which is how a request to schedule an audit ended up
+ *  rewriting the article timetable and calling it saved (see migration 027). A tool that offers
+ *  the model a choice has to be able to say which choices are real, so that answer lives here. */
+export const SCHEDULE_KINDS = {
+  article: { runs: "the writing team plans topics and writes `count` articles", takesCount: true },
+  audit: { runs: "Mr. Audit checks the site and files a report", takesCount: false },
+} as const;
+
+export type ScheduleKind = keyof typeof SCHEDULE_KINDS;
+
+export function isScheduleKind(v: unknown): v is ScheduleKind {
+  return typeof v === "string" && Object.prototype.hasOwnProperty.call(SCHEDULE_KINDS, v);
+}
+
 export type ScheduleRow = {
   enabled: boolean; frequency: string; day_of_week: number; time_of_day: string;
   timezone: string; count: number; auto_publish: boolean;
@@ -136,8 +154,12 @@ const DEFAULTS: ScheduleRow = {
 /** The row as it stands, or the same defaults the Schedule page shows for a tenant with none.
  *  select("*") for the reason every other reader of this table uses it: auto_publish arrives
  *  with migration 014, and naming it breaks the whole read on a database one file behind. */
-export async function currentSchedule(supabase: SupabaseClient, tenantId: string): Promise<ScheduleRow> {
-  const { data } = await supabase.from("schedules").select("*").eq("tenant_id", tenantId).eq("kind", "article").limit(1);
+export async function currentSchedule(
+  supabase: SupabaseClient,
+  tenantId: string,
+  kind: ScheduleKind = "article"
+): Promise<ScheduleRow> {
+  const { data } = await supabase.from("schedules").select("*").eq("tenant_id", tenantId).eq("kind", kind).limit(1);
   const r = data?.[0] as any;
   if (!r) return { ...DEFAULTS };
   return {
@@ -161,9 +183,10 @@ export type ApplyResult = { ok: boolean; row?: ScheduleRow; error?: string; auto
 export async function applySchedule(
   supabase: SupabaseClient,
   tenantId: string,
-  patch: SchedulePatch
+  patch: SchedulePatch,
+  kind: ScheduleKind = "article"
 ): Promise<ApplyResult> {
-  const now = await currentSchedule(supabase, tenantId);
+  const now = await currentSchedule(supabase, tenantId, kind);
 
   const enabled =
     patch.enabled != null ? patch.enabled
@@ -172,7 +195,7 @@ export async function applySchedule(
 
   const row = {
     tenant_id: tenantId,
-    kind: "article",
+    kind,
     enabled,
     frequency: patch.frequency ?? now.frequency,
     day_of_week: patch.dayOfWeek ?? now.day_of_week,
