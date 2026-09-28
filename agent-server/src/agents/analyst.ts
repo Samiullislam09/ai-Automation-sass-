@@ -56,16 +56,42 @@ export class AnalystAgent extends Agent {
 
     ctx.onProgress({ phase: "loading", label: "Opening everything we know about this site..." });
 
-    const [{ data: tenant }, { data: pageRows }, insights, previous] = await Promise.all([
+    // `embedding` is deliberately NOT in this select. It is vector(2048) since migration 022 and
+    // PostgREST sends a vector as its text form: measured on the live database 2026-09-27, that
+    // was 3366 KB of float characters per run against 810 KB of actual page text — four fifths of
+    // everything this query pulled down, every single run, and ~7.4 MB at the 300-page ceiling.
+    // Both things that needed those vectors now run inside Postgres instead (migration 026):
+    // content gaps via analyst_nearest_page(), and the clustering vectors via
+    // analyst_page_vectors(), fetched only when the crawl has actually moved.
+    //
+    // The ordering is new too, and it is a fix rather than a tidy-up: .limit(MAX_PAGES) with no
+    // order by let Postgres return a different arbitrary 300 pages each run on a site with more
+    // than 300, so the profile diff shown to the user could churn without the site changing.
+    // Biggest pages first is migration 025's own rule (it added idx_site_pages_words for exactly
+    // this query) so an empty mega-menu fragment cannot displace a service page; url breaks ties.
+    const [{ data: tenant }, { data: pageRows }, { data: statRows, error: statsError }, insights, previous] = await Promise.all([
       supabase.from("tenants").select("name, website_url, niche, tone_profile, icp_profile").eq("id", tenantId).single(),
       supabase
         .from("site_pages")
-        .select("id, url, title, content_text, embedding")
+        .select("id, url, title, content_text")
         .eq("tenant_id", tenantId)
+        .order("word_count", { ascending: false, nullsFirst: false })
+        .order("url")
         .limit(MAX_PAGES),
+      supabase.rpc("analyst_page_stats", { p_tenant: tenantId }),
       loadInsights(tenantId),
       loadActiveProfile(tenantId),
     ]);
+
+    // Three integers: how many pages exist, how many carry a vector, and when the crawler last
+    // saw any of them. The gap pass needs the second to know whether there is anything to
+    // compare against, and the clustering uses all three as its "has the crawl moved?" check.
+    const stats = (Array.isArray(statRows) ? statRows[0] : statRows) as
+      | { pages: number | null; embedded: number | null; newest: string | null }
+      | null
+      | undefined;
+    const embeddedCount = Number(stats?.embedded ?? 0);
+    const crawlFingerprint = `${Number(stats?.pages ?? 0)}:${embeddedCount}:${stats?.newest ?? ""}`;
 
     const pages: Page[] = (pageRows ?? [])
       .map((r: any) => ({
@@ -73,7 +99,6 @@ export class AnalystAgent extends Agent {
         url: String(r.url ?? ""),
         title: String(r.title ?? "").trim(),
         text: String(r.content_text ?? "").trim(),
-        embedding: parseEmbedding(r.embedding),
         path: pathOf(String(r.url ?? "")),
       }))
       .filter((p) => p.url);
@@ -93,6 +118,14 @@ export class AnalystAgent extends Agent {
     // Every field group that failed, so a half-built profile says which half and why instead
     // of looking like a complete one with holes in it.
     const failures: { field: string; error: string }[] = [];
+    // Migration 026 not applied yet: every RPC below this line is missing, which would otherwise
+    // read as "this site has no embedded pages at all" — no gaps, no new clusters, the previous
+    // version's carried forward, and a Site Brain that looks merely stale rather than broken.
+    // Named as a failure so it reaches the user's own failures list instead of only a log line.
+    if (statsError) {
+      console.error("[analyst] analyst_page_stats failed (is migration 026 applied?):", statsError.message);
+      failures.push({ field: "topic_clusters", error: `page stats unavailable: ${statsError.message}`.slice(0, 200) });
+    }
 
     const ranked = [...pages].sort((a, b) => keyPageScore(b) - keyPageScore(a));
     const keyPages = ranked.filter((p) => p.text).slice(0, KEY_PAGES_FOR_LLM);
@@ -464,25 +497,55 @@ export class AnalystAgent extends Agent {
 
     // ── 7 · topic clusters, from the embeddings the crawler already paid for ──────────────
     ctx.onProgress({ phase: "clustering", label: "Grouping the site into topics..." });
-    const embedded = pages.filter((p) => p.embedding && p.embedding.length);
+
+    // Has the crawler run since the profile we are about to replace was built? If not, every
+    // vector is byte-identical to last time and buildClusters() is deterministic, so recomputing
+    // is guaranteed to produce the clusters already sitting in `previous` — at the price of
+    // fetching 300 vectors (~10 MB even rounded) and one LLM call to re-name groups that already
+    // have names. Reusing them is not an approximation of the old behaviour, it IS the old
+    // behaviour, arrived at without the bandwidth.
+    const canReuseClusters =
+      !!previous &&
+      previous.built_from.crawl_fingerprint === crawlFingerprint &&
+      Array.isArray(previous.profile.topic_clusters) &&
+      previous.profile.topic_clusters.length > 0;
+
     let clusters: TopicCluster[] = [];
+    // How many vectors this run's clusters were actually built from. Recorded in built_from and
+    // carried forward on a reuse run, because "clustered 84 pages" must not become 0 just
+    // because this run did not need to re-read them.
+    let clusteredPages = canReuseClusters ? Number(previous!.built_from.clustered_pages ?? 0) : 0;
     try {
-      clusters = buildClusters(embedded);
-      if (clusters.length) {
-        clusters = await labelClusters(clusters, failures, new Map(pages.map((p) => [p.url, p.title])));
+      if (canReuseClusters) {
+        clusters = previous!.profile.topic_clusters;
         profile.topic_clusters = clusters;
-        sources.topic_clusters = uniqStrings(clusters.flatMap((c) => c.page_urls.slice(0, 3)), 40, 500);
-        // Derived from measured vectors, but the LABEL is a model's word for the group, so
-        // never "high": it is a name we would happily let the user correct.
-        confidence.topic_clusters = embedded.length >= CLUSTER_MIN_PAGES * 2 ? "medium" : "low";
-        // Site Brain's own live presence (owner, 2026-09-11 — LIVE_CANVAS_SPEC.md §4): before
-        // this, analyst.ts sent zero `ctx.data(...)` events, so a Site Brain run had nothing to
-        // show on the live dashboard, ever — only `ctx.onProgress` phase labels. One real event
-        // per cluster this run actually formed, as it's labeled — no invented (x,y) scatter
-        // position (that needs a real 2D projection job the plan itself defers to a later
-        // phase); `page_urls` is capped the same way `sources.topic_clusters` above already is,
-        // so this never ships an unbounded list for a site with hundreds of pages in one topic.
+        // Same provenance as the version that computed them — re-deriving the source list from
+        // the reused clusters would be the same answer, but carrying it is the honest one.
+        sources.topic_clusters =
+          previous!.sources.topic_clusters ?? uniqStrings(clusters.flatMap((c) => c.page_urls.slice(0, 3)), 40, 500);
+        confidence.topic_clusters = previous!.profile.confidence?.topic_clusters ?? "medium";
         for (const c of clusters) ctx.data("cluster", { name: c.name, size: c.size, page_urls: c.page_urls.slice(0, 8) });
+        console.log(`[analyst] clusters unchanged (${crawlFingerprint}) — reused ${clusters.length}, no vectors fetched`);
+      } else {
+        const vectored = await loadPageVectors(tenantId);
+        clusteredPages = vectored.length;
+        clusters = buildClusters(vectored);
+        if (clusters.length) {
+          clusters = await labelClusters(clusters, failures, new Map(pages.map((p) => [p.url, p.title])));
+          profile.topic_clusters = clusters;
+          sources.topic_clusters = uniqStrings(clusters.flatMap((c) => c.page_urls.slice(0, 3)), 40, 500);
+          // Derived from measured vectors, but the LABEL is a model's word for the group, so
+          // never "high": it is a name we would happily let the user correct.
+          confidence.topic_clusters = clusteredPages >= CLUSTER_MIN_PAGES * 2 ? "medium" : "low";
+          // Site Brain's own live presence (owner, 2026-09-11 — LIVE_CANVAS_SPEC.md §4): before
+          // this, analyst.ts sent zero `ctx.data(...)` events, so a Site Brain run had nothing to
+          // show on the live dashboard, ever — only `ctx.onProgress` phase labels. One real event
+          // per cluster this run actually formed, as it's labeled — no invented (x,y) scatter
+          // position (that needs a real 2D projection job the plan itself defers to a later
+          // phase); `page_urls` is capped the same way `sources.topic_clusters` above already is,
+          // so this never ships an unbounded list for a site with hundreds of pages in one topic.
+          for (const c of clusters) ctx.data("cluster", { name: c.name, size: c.size, page_urls: c.page_urls.slice(0, 8) });
+        }
       }
     } catch (e: any) {
       console.error("[analyst] clustering failed:", e?.message);
@@ -493,7 +556,7 @@ export class AnalystAgent extends Agent {
     ctx.onProgress({ phase: "gaps", label: "Comparing Search Console against the pages we have..." });
     let gapsChecked = 0;
     try {
-      if (insights.connected && embedded.length) {
+      if (insights.connected && embeddedCount) {
         // Candidates come from the two buckets that mean "real people saw us for this and did
         // not get what they wanted": striking distance (position 5-25) and missed (lots of
         // impressions, near-zero clicks). insights.winning is deliberately excluded — a query
@@ -504,10 +567,14 @@ export class AnalystAgent extends Agent {
           .sort((a, b) => b.impressions - a.impressions)
           .slice(0, GAP_MAX_QUERIES);
 
-        // Normalised once, not once per query: 40 queries against 300 pages would otherwise
-        // re-normalise twelve thousand 1024-dimension vectors for no reason.
-        const unitPages = embedded.map((p) => ({ page: p, vec: normalize(p.embedding!) }));
-
+        // The nearest-page search happens in Postgres now (analyst_nearest_page, migration 026),
+        // one index-free scan over this tenant's few hundred rows per query. It replaces pulling
+        // every page vector into this process to do the same dot products here — which is what
+        // made this the single most expensive thing the product did to its own egress bill.
+        //
+        // Same arithmetic, not a substitute for it: pgvector's `<=>` is cosine distance, so
+        // 1 - distance is the cosine similarity the old `dot(normalize(a), normalize(b))`
+        // computed, and GAP_MAX_SIMILARITY keeps its meaning to the digit.
         const gaps: ContentGap[] = [];
         for (const q of candidates) {
           gapsChecked++;
@@ -521,12 +588,26 @@ export class AnalystAgent extends Agent {
             continue;
           }
 
-          let best = -1;
-          let bestPage: Page | null = null;
-          for (const { page, vec } of unitPages) {
-            const sim = dot(vector, vec);
-            if (sim > best) { best = sim; bestPage = page; }
+          const { data: nearRows, error: nearError } = await supabase.rpc("analyst_nearest_page", {
+            p_tenant: tenantId,
+            // pgvector's own literal form. Sent as text because PostgREST cannot type a vector
+            // argument; migration 026 casts it back on arrival.
+            p_query: `[${vector.join(",")}]`,
+            p_limit: MAX_PAGES,
+          });
+          if (nearError) {
+            // Same rule as a failed embed above: one query's lookup failing is not a reason to
+            // throw away the gaps already found, but it must not be silent either.
+            console.error("[analyst] nearest-page lookup failed for", q.query, nearError.message);
+            continue;
           }
+
+          const near = (Array.isArray(nearRows) ? nearRows[0] : nearRows) as
+            | { url: string | null; similarity: number | null }
+            | undefined;
+          if (!near || near.similarity === null || !Number.isFinite(Number(near.similarity))) continue;
+          const best = Number(near.similarity);
+          const bestUrl = near.url ?? null;
 
           if (best >= GAP_MAX_SIMILARITY) continue; // a page already answers this
           gaps.push({
@@ -534,8 +615,8 @@ export class AnalystAgent extends Agent {
             impressions: q.impressions,
             position: Number.isFinite(q.position) ? q.position : null,
             nearest_similarity: Number(best.toFixed(4)),
-            nearest_url: bestPage?.url ?? null,
-            nearest_cluster: bestPage ? (clusters.find((c) => c.page_urls.includes(bestPage!.url))?.name ?? null) : null,
+            nearest_url: bestUrl,
+            nearest_cluster: bestUrl ? (clusters.find((c) => c.page_urls.includes(bestUrl))?.name ?? null) : null,
           });
         }
 
@@ -606,7 +687,10 @@ export class AnalystAgent extends Agent {
         page_urls: pages.slice(0, 50).map((p) => p.url),
         gsc_period: insights.connected ? insights.period : null,
         gsc_queries: gapsChecked,
-        clustered_pages: embedded.length,
+        clustered_pages: clusteredPages,
+        // What the next run compares against to decide whether the clusters can be reused
+        // instead of re-fetching every page vector (migration 026, analyst_page_stats).
+        crawl_fingerprint: crawlFingerprint,
       },
       createdBy: "agent:analyst",
     });
@@ -619,7 +703,7 @@ export class AnalystAgent extends Agent {
       built: true,
       version: saved.version,
       pages: pages.length,
-      clustered: embedded.length,
+      clustered: clusteredPages,
       clusters: profile.topic_clusters.map((c) => ({ name: c.name, pages: c.size })),
       carriedForward: carried,
       offerings: profile.offerings.length,
@@ -635,7 +719,11 @@ export class AnalystAgent extends Agent {
 
 // ── tuning, all in one place and all justified ──────────────────────────────────────────────
 
-// The crawler's own ceiling is 300 pages; reading them all back is one query and a few MB.
+// The crawler's own ceiling is 300 pages. It used to say "one query and a few MB" here, which
+// stopped being true when 022 widened the vectors to 2048 dims: measured on a 134-page tenant the
+// one query was ~4.2 MB, 3.4 of it float characters, and it scaled linearly from there. The
+// vectors are gone from it now (migration 026) and this is also the pool size both RPCs work
+// over, so the gap check and the clustering agree on which pages "the site" means.
 const MAX_PAGES = 300;
 
 // The pool of "pages that describe the business" (home/about/services/contact, never the
@@ -693,8 +781,16 @@ type Page = {
   url: string;
   title: string;
   text: string;
-  embedding: number[] | null;
   path: string;
+};
+
+/** A page reduced to the only three things clustering needs. Separate from `Page` because the
+ *  vectors no longer arrive with the page rows — they come from analyst_page_vectors() and only
+ *  on the runs that actually have to recompute the clusters (migration 026). */
+export type Vectored = {
+  url: string;
+  title: string;
+  embedding: number[];
 };
 
 /** How much this page is likely to say about the business itself. The homepage first, then
@@ -720,6 +816,34 @@ function pageDigest(pages: Page[], perPage: number): string {
 
 // ── clustering: spherical k-means over the embeddings the crawler already stored ────────────
 
+/** The page vectors, and nothing else — no page text, no ids, and only on the runs that have to
+ *  recompute the clusters (the caller checks the crawl fingerprint first).
+ *
+ *  analyst_page_vectors (migration 026) rounds every component to 5 decimals before it leaves
+ *  Postgres — 16.8 KB per page instead of 25.1 KB, measured, for an error four orders of
+ *  magnitude below anything k-means can distinguish. It also returns the same 300-page pool, in
+ *  the same order, as the main page select — so a clustered url always has a title. */
+async function loadPageVectors(tenantId: string): Promise<Vectored[]> {
+  const { data, error } = await supabase.rpc("analyst_page_vectors", {
+    p_tenant: tenantId,
+    p_limit: MAX_PAGES,
+  });
+  if (error) {
+    // Thrown rather than returned empty: the caller's try/catch records it as a
+    // `topic_clusters` failure and the previous version's clusters are carried forward by the
+    // §25.9 carry-forward pass. Silently clustering zero pages would instead look like a site
+    // that suddenly has no topics.
+    throw new Error(`analyst_page_vectors failed: ${error.message}`);
+  }
+  return ((data ?? []) as any[])
+    .map((r) => ({
+      url: String(r.url ?? ""),
+      title: String(r.title ?? "").trim(),
+      embedding: parseEmbedding(r.embedding),
+    }))
+    .filter((p): p is Vectored => !!p.url && !!p.embedding && p.embedding.length > 0);
+}
+
 /** Topic clusters (plan §25.2) in plain TypeScript, no new dependency.
  *
  *  Spherical k-means: every vector is unit length, so cosine similarity IS the dot product and
@@ -737,10 +861,10 @@ function pageDigest(pages: Page[], perPage: number): string {
  *  Seeding is deterministic (farthest-point, starting from the page nearest the site's overall
  *  mean), not random. Two runs over an unchanged site must produce the same clusters, or every
  *  weekly re-crawl would show the user a diff full of renamed topics that did not change. */
-function buildClusters(pages: Page[]): TopicCluster[] {
+export function buildClusters(pages: Vectored[]): TopicCluster[] {
   if (pages.length < CLUSTER_MIN_PAGES) return [];
 
-  const vectors = pages.map((p) => normalize(p.embedding!));
+  const vectors = pages.map((p) => normalize(p.embedding));
   const n = vectors.length;
   const k = Math.max(2, Math.min(8, Math.round(Math.sqrt(n / 2))));
 
@@ -825,7 +949,7 @@ async function labelClusters(clusters: TopicCluster[], failures: { field: string
 
 /** The most common meaningful words across a cluster's titles — a name derived from the data,
  *  used when the model is unavailable. */
-function fallbackLabel(pages: Page[]): string {
+function fallbackLabel(pages: Vectored[]): string {
   const counts = new Map<string, number>();
   for (const p of pages) {
     for (const w of `${p.title} ${lastSegmentWords(p.url)}`.toLowerCase().split(/[^a-z0-9]+/)) {

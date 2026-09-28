@@ -187,6 +187,13 @@ export type BuiltFrom = {
   page_urls?: string[];
   gsc_period?: { start: string | null; end: string | null } | null;
   gsc_queries?: number;
+  /** How many page vectors the topic clusters in this version were built from. */
+  clustered_pages?: number;
+  /** "<page count>:<pages with a vector>:<newest site_pages.last_seen>" at the moment this
+   *  version was written — analyst.ts's test for "has the crawler run since?". When the next run
+   *  computes the same string, every vector is unchanged, so it reuses this version's clusters
+   *  instead of re-reading 300 of them out of the database (migration 026). */
+  crawl_fingerprint?: string;
   [key: string]: unknown;
 };
 
