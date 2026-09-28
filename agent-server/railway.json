@@ -1,8 +1,9 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
-    "builder": "NIXPACKS",
-    "buildCommand": "npm install && npm run build"
+    "//": "DOCKERFILE, not NIXPACKS. This file said NIXPACKS until 2026-09-28 and Railway ignored it: a Dockerfile in the service's root directory wins over the builder named here, so the build silently switched the moment Dockerfile landed. Said out loud now, because a config file that disagrees with what actually runs is worse than no config file. nixpacks.toml stays in the repo as the record of why chromium/python3/nodejs_22 are needed -- it is no longer what builds this service.",
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "Dockerfile"
   },
   "deploy": {
     "startCommand": "npm run start",

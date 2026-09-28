@@ -14,21 +14,19 @@ The background worker behind MrLxwa: the agent queues (pg-boss), the scheduler, 
 orchestrator and the Socket.IO event stream. The Next.js app on Vercel talks to it over HTTP with
 an `x-agent-token` header; nothing here is meant to be opened in a browser.
 
-**The YAML header above is not decoration.** A Hugging Face Space with no `sdk:` line does not
-build at all, and `app_port` has to match the `PORT` the Dockerfile sets, or every request to the
-Space times out against a server listening on the wrong port.
+The YAML header above is only meaningful to Hugging Face Spaces, which was evaluated as a
+Railway replacement and dropped (Docker Spaces need a PRO subscription as of 2026-09-28). It is
+harmless everywhere else and kept so the move is a one-step one if it ever happens.
 
 ## Deploying
 
-This directory is the root of the Space. From the repository root:
+Railway builds this directory with `Dockerfile` (service Root Directory is `agent-server`, with
+**no leading slash** — `/agent-server` is read as an absolute container path and fails with
+"Failed to read app source directory"). A Dockerfile in the root directory takes precedence over
+whatever builder `railway.json` names, which is why that file now says `DOCKERFILE` out loud.
 
-```bash
-git remote add hf https://huggingface.co/spaces/<user>/<space>
-git subtree push --prefix=agent-server hf main
-```
-
-Push asks for a username and a password: the password is a Hugging Face **access token with
-write permission** (Settings -> Access Tokens), not the account password.
+The same image runs anywhere else that takes a Dockerfile — `docker build -t agent-server .` and
+a `--env-file` is the whole story on a VM.
 
 ## Configuration
 
@@ -40,24 +38,23 @@ because a Space's build layers are downloadable and a public one would hand them
 TLS applies here as it did on Railway: the `rediss://`-style requirement is written up in
 `docs/` alongside the other deploy gotchas.
 
-## Staying awake
+## Health
 
-A free Space sleeps after 48 hours without a request. That would stop the scheduler, so something
-has to knock on it: point any free cron service (cron-job.org and friends) at
+`GET /health` returns `ok` and `GET /version` reports the running commit, uptime, which agents
+registered and whether the brain came up — the fastest way to tell a live deploy from a stale one
+after a push. Both are defined in `src/index.ts`.
 
-```
-GET https://<user>-<space>.hf.space/health
-```
+Railway does not idle this service out, so nothing has to ping it. A host that does sleep idle
+containers is not usable here at all: the scheduler ticks once a minute and pg-boss holds a
+Postgres LISTEN/NOTIFY connection, so a sleeping container is a stopped product, not a slow one.
 
-every ten minutes. The route is defined in `src/index.ts` and returns `ok`.
+## Why a Dockerfile and not nixpacks.toml
 
-## What is different from Railway
+`nixpacks.toml` built this service on Railway until 2026-09-28 and is kept because its comments
+are the record of *why* each piece is needed. The Dockerfile installs the same three things for
+the same reasons — Chromium for Lighthouse, a Python venv for gpt-researcher, Node 22 — and is
+portable to any host that takes a container, which nixpacks.toml is not.
 
-The container is described by `Dockerfile` here rather than by `nixpacks.toml`. Both install the
-same three things for the same reasons — Chromium for Lighthouse, a Python venv for
-gpt-researcher, Node 22 — and `nixpacks.toml` is kept in the repository because its comments
-record why each one is needed.
-
-The disk is **ephemeral**: a Space restart or rebuild wipes it. That is survivable only because
-no state lives here — everything is in Supabase — so nothing in this server should ever start
-writing files it expects to find later. `/tmp` is writable for scratch work.
+The disk is **ephemeral** on most of these hosts: a restart or rebuild wipes it. That is
+survivable only because no state lives here — everything is in Supabase — so nothing in this
+server should start writing files it expects to find later. `/tmp` is writable for scratch work.

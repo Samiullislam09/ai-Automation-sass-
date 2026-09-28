@@ -8,10 +8,21 @@
 # not an option. A free HF Space on CPU basic is 2 vCPU / 16 GB RAM and does not sleep until 48
 # hours without traffic, which an external ping keeps away.
 #
-# node:22 AND NOT python:3.11 (which is what a generic HF Docker guide will hand you): this is a
+# node:22 AND NOT python:3.11 (which is what a generic Docker guide will hand you): this is a
 # TypeScript/Express/socket.io server that spawns Python for exactly one step. Node is the base;
 # Python is a venv bolted on beside it, not the other way round.
-FROM node:22-bookworm-slim
+#
+# TRIXIE (Debian 13), NOT BOOKWORM (Debian 12), AND THAT IS NOT A STYLE CHOICE. bookworm's
+# `python3` is 3.11, and requirements.txt's gpt-researcher 0.16.0 declares Requires-Python
+# >=3.12 -- so the pip step below failed the build outright on bookworm (Railway, 2026-09-28):
+#
+#   ERROR: Ignored the following versions that require a different python version:
+#          0.16.0 Requires-Python >=3.12
+#   ERROR: No matching distribution found for gpt-researcher==0.16.0
+#
+# This never showed up under Nixpacks because nixpkgs' python3 is already new enough. trixie
+# ships python3 3.13.5 and chromium 154, both verified on packages.debian.org before this change.
+FROM node:22-trixie-slim
 
 # chromium -> lib/audit/performance.ts runs real Lighthouse. Without a browser the audit still
 #             works (the deterministic catalogue in lib/audit/checks.ts needs none) but the
@@ -36,9 +47,16 @@ ENV CHROME_PATH=/usr/bin/chromium
 ENV PYTHON_BIN=/opt/venv/bin/python3
 RUN python3 -m venv /opt/venv && /opt/venv/bin/pip install --no-cache-dir --upgrade pip
 
-# HF Spaces runs the container as uid 1000. The node image ALREADY has a user at uid 1000 called
-# `node`, so creating an `app` user here would fail with "UID 1000 already exists" — use the one
-# that is there.
+# Fail HERE, with a sentence, rather than thirty lines later inside pip's "no matching
+# distribution found" wall of every version it considered. A base image whose python drifts back
+# under 3.12 is the single most likely way this file breaks again, and the error pip gives for it
+# names the package rather than the cause.
+RUN /opt/venv/bin/python3 -c "import sys; assert sys.version_info >= (3, 12), f'requirements.txt needs Python >= 3.12, this base image has {sys.version.split()[0]} - change the FROM line, not the pin'"
+
+# Run as a non-root user. The node image ALREADY has one at uid 1000 called `node`, so the
+# `useradd -m -u 1000 app` a generic guide tells you to add would fail with "UID 1000 already
+# exists" — use the user that is there. (uid 1000 is also what hosts like Hugging Face Spaces
+# require, so this stays correct if this image ever moves.)
 WORKDIR /app
 RUN chown node:node /app
 
