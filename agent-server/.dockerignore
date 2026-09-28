@@ -1,0 +1,13 @@
+# Never let a local .env near the image: on a public Space the built layers are downloadable,
+# and every secret belongs in the Space's own Settings -> Repository secrets instead.
+.env
+.env.*
+!.env.example
+
+node_modules
+dist
+npm-debug.log*
+
+# Railway's build config. Kept in the repo for reference but meaningless to this image.
+railway.json
+nixpacks.toml
