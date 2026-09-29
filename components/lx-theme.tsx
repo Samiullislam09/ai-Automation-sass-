@@ -171,6 +171,47 @@ export const LX_CSS = `
 .lx-typing span:nth-child(3){animation-delay:.3s}
 @keyframes lxTypingBounce{0%,60%,100%{transform:translateY(0);opacity:.4}30%{transform:translateY(-4px);opacity:1}}
 
+/* The same bubble once the reply is taking a while. Was the sentence "Just a moment, still
+   thinking…" (owner 2026-09-30: "usko sirf thinking karo, and thinking.. ko animated karo").
+   An apology that has to be read is worse than a word that is visibly alive: a band of light
+   sweeps left-to-right across "thinking…", which says working without saying anything.
+
+   Inherits the bubble's own font-size and weight rather than setting them, so it can never
+   drift out of step with the text it stands in for.
+
+   THE @supports IS NOT DECORATION. The sweep is a gradient painted onto the glyphs, which
+   needs color:transparent to show through - and on an engine without background-clip:text that
+   leaves transparent text on a transparent background, i.e. an invisible reply. The fallback
+   below the guard is a plain muted word, which every engine can draw.
+
+   (No backticks anywhere in this file's comments: the whole stylesheet is one JS template
+   literal, so a stray backtick ends it and the error surfaces as a parse failure thirty lines
+   further down. Cost one build to learn.) */
+.lx-thinking{color:var(--lx-mut)}
+@supports ((-webkit-background-clip:text) or (background-clip:text)){
+  .lx-thinking{
+    display:inline-block;
+    background:linear-gradient(100deg,
+      var(--lx-mut) 0%, var(--lx-mut) 38%, #eaeaf6 50%, var(--lx-mut) 62%, var(--lx-mut) 100%);
+    background-size:250% 100%;
+    -webkit-background-clip:text;
+    background-clip:text;
+    color:transparent;
+    -webkit-text-fill-color:transparent;
+    animation:lxThinkingSweep 2.2s linear infinite;
+  }
+}
+/* Travels in the reading direction and pauses off-screen at each end, so the highlight arrives
+   rather than strobing. */
+@keyframes lxThinkingSweep{0%{background-position:140% 0}100%{background-position:-40% 0}}
+
+/* The page-wide reduced-motion rule below only freezes the animation, which would strand the
+   gradient mid-sweep and leave some letters brighter than others for good. Stated here instead:
+   no gradient at all, just the word. */
+@media (prefers-reduced-motion:reduce){
+  .lx-thinking{background:none;color:var(--lx-mut);-webkit-text-fill-color:currentColor;animation:none}
+}
+
 /* ---- tabs -------------------------------------------------------------- */
 .lx-tab{position:relative;padding:10px 2px;font-size:12.5px;font-weight:500;color:var(--lx-mut);
   background:none;border:none;cursor:pointer;white-space:nowrap}

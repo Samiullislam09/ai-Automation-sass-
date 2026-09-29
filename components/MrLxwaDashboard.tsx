@@ -4373,7 +4373,14 @@ export default function MrLxwaDashboard({
                     // your name?") as much as an order, and "Still working" reads as task
                     // language for the former (owner 2026-09-09, screenshot: a plain Q&A showed
                     // task-style "working" copy).
-                    m.slow ? "Just a moment, still thinking…" : (
+                    m.slow ? (
+                      // One word, animated, rather than "Just a moment, still thinking…"
+                      // (owner 2026-09-30). The sentence apologised for the wait and had to be
+                      // read to learn nothing; the sweep in .lx-thinking shows the same thing
+                      // without asking for a reader. No aria-label: unlike the dots above, this
+                      // has real text, and a label would only talk over it.
+                      <span className="lx-thinking">thinking…</span>
+                    ) : (
                       <span className="lx-typing" aria-label="Mr. Lxwa is typing">
                         <span /><span /><span />
                       </span>
