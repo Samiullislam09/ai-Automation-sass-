@@ -75,7 +75,10 @@ const RAW_WRITE_TOOLS: ChatTool[] = [
       description:
         "Change the customer's RECURRING timetable — the standing instruction for work that repeats by itself. " +
         'Call this for "roz subah 9 baje 2 article banao", "har Monday article likho", "har roz site ka audit ' +
-        'report do", "schedule daily kar do", "automation band kar do", "change my schedule to weekdays". ' +
+        'report do", "ek naya task add karo", "schedule daily kar do", "change my schedule to weekdays" — and for ' +
+        'STOPPING one just the same: "is schedule ko close kar do", "automation band kar do", "rok do", "pause ' +
+        'karo", "turn it off", "schedule hata do" (that is enabled=false; the timetable is kept so they can switch ' +
+        "it back on, and nothing is deleted). " +
         "\n\n" +
         "YOU MUST NAME THE KIND. It is the only required field and it is never assumed: " +
         KIND_HELP +
@@ -96,8 +99,10 @@ const RAW_WRITE_TOOLS: ChatTool[] = [
           enabled: {
             type: "boolean",
             description:
-              "false to switch this timetable OFF (\"band kar do\", \"stop\", \"pause\"), true to switch it on. " +
-              "Leave it out when they are only changing when or how much — setting a time turns it on by itself.",
+              'false to switch this timetable OFF — "close kar do", "band kar do", "rok do", "stop", "pause", ' +
+              '"hata do", "turn it off". true to switch it back on ("chalu karo", "start"). Leave it out when they ' +
+              "are only changing when or how much — setting a time turns it on by itself. Switching off KEEPS the " +
+              "timetable, it does not delete it, so say it is paused/off rather than gone.",
           },
           frequency: {
             type: "string",

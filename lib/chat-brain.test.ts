@@ -924,8 +924,42 @@ test("saying no to a brain task cancels the task, and only the task", async () =
 test("the capabilities block is the registry's own words, with one instruction attached", () => {
   const text = capabilitiesPrompt(REGISTRY);
   assert.ok(text.includes(REGISTRY.capabilities), "the list is passed through, not paraphrased");
-  assert.match(text, /answer ONLY from this list/);
-  assert.equal(capabilitiesPrompt(null), "", "no registry, no claims");
+  assert.match(text, /answer ONLY from the lists above/);
+});
+
+test("the chat's OWN tools are in the block too, or it refuses things it can do", () => {
+  // Reported live 2026-09-30: "is schedule ko close kar do" -> "I can't close schedules at the
+  // moment", one message after the same chat read that schedule out correctly. The model was
+  // obeying "answer ONLY from the lists above" against a list built only from agent manifests,
+  // which the lookups and the settings write have never been part of.
+  const text = capabilitiesPrompt(REGISTRY);
+  for (const t of [...READ_TOOLS, ...WRITE_TOOLS]) {
+    assert.ok(text.includes(t.function.name), `${t.function.name} is offered to the model but not declared possible`);
+  }
+  assert.match(text, /switching it off — is something you CAN do/);
+});
+
+test("its own tools are declared even with no registry — they do not go through the brain", () => {
+  // The old contract here was `capabilitiesPrompt(null) === ""` ("no registry, no claims"), which
+  // conflated the team's capabilities with everything the chat can do. runReadTool and
+  // runWriteTool talk to Supabase directly, so a brain that is down does not take them with it.
+  const text = capabilitiesPrompt(null);
+  assert.ok(text.includes("manage_schedule"));
+  assert.ok(text.includes("lookup_content"));
+  assert.equal(text.includes("WHAT THE TEAM CAN AND CANNOT DO"), false, "no registry, no claims ABOUT THE TEAM");
+});
+
+test("each summary is derived from the tool's own description, never written twice", () => {
+  const text = capabilitiesPrompt(null);
+  for (const t of [...READ_TOOLS, ...WRITE_TOOLS]) {
+    // The line's summary has to be a real prefix of the description it came from, so a tool whose
+    // description changes cannot keep advertising the old one.
+    const line = text.split("\n").find((l) => l.trim().startsWith(t.function.name))!;
+    const summary = line.split(" — ")[1]?.replace(/…$/, "");
+    assert.ok(summary && summary.length > 10, `${t.function.name} has no usable summary`);
+    const flat = t.function.description.replace(/\s+/g, " ");
+    assert.ok(flat.startsWith(summary), `${t.function.name}'s summary is not taken from its description`);
+  }
 });
 
 test("a stale registry is still usable, and says so to us but not to the user", () => {

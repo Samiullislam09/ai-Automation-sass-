@@ -337,20 +337,69 @@ export function missingSlots(spec: BrainAction, params: Record<string, unknown>)
  *  model's to invent in either direction — it is a lookup. The brain already writes this list
  *  in the customer's language (`describeCapabilities`), split into what can happen now and
  *  what cannot yet; all this adds is the instruction not to improve on it. */
+/** The first clause of a tool's own description, as its one-line summary.
+ *
+ *  DERIVED, NOT WRITTEN TWICE. A hand-kept "what I can do" list beside the tools themselves is a
+ *  list that goes stale the first time a tool changes and nobody remembers it exists — the same
+ *  reason this file knows no action by name. Every tool description already opens with its own
+ *  summary before the first colon, dash or full stop; that opening is what the model reads here. */
+function summarise(tool: ChatTool): string {
+  const d = tool.function.description.replace(/\s+/g, " ").trim();
+  const cut = d.search(/[:.]|\s—\s|\s-\s/);
+  const head = (cut > 20 ? d.slice(0, cut) : d).trim();
+  return head.length > 110 ? head.slice(0, 107) + "…" : head;
+}
+
+/** What the CHAT can do by itself, as opposed to what it can ask the team to do.
+ *
+ *  WHY THIS EXISTS. Reported live 2026-09-30. The customer asked "is schedule ko close kar do"
+ *  and was told "I can't close schedules at the moment" — one message after this same chat had
+ *  read their schedule out correctly. Nothing was broken and the model invented no limit: it was
+ *  obeying the instruction below, "answer ONLY from the lists above", against a list built solely
+ *  from the brain's agent manifests (describeCapabilities, agent-server/src/brain/registry.ts).
+ *  The lookups and the settings write are the chat's OWN tools, not agent actions, so they have
+ *  never appeared in it. The model was told it could order articles and audits, and told nothing
+ *  about the six things it can read and the one it can change.
+ *
+ *  Listed unconditionally, including when the brain is unreachable, because it does not go
+ *  through the brain — runReadTool and runWriteTool talk to Supabase directly. "The team is
+ *  restarting" and "I can do nothing" are different sentences, and only the first was ever true. */
+function ownToolsPrompt(): string {
+  const lines = [...READ_TOOLS, ...WRITE_TOOLS].map((t) => "  " + t.function.name + " — " + summarise(t));
+  return [
+    "WHAT YOU CAN DO YOURSELF, WITHOUT THE TEAM. These are your own tools. They are as real as the team's list, they",
+    'work even while the team is restarting, and they are the answer to "can you…" for anything they cover:',
+    ...lines,
+    "",
+    "So: reading any of the above is something you CAN do, and changing the recurring timetable — adding one, moving",
+    "it, or switching it off — is something you CAN do. Never say you are unable to; call the tool. If a request is",
+    "close to one of these but not quite it, call the tool anyway and let its answer say what is possible, rather",
+    "than deciding that for it.",
+  ].join("\n");
+}
+
 export function capabilitiesPrompt(registry: BrainRegistry | null | undefined): string {
   const text = registry?.capabilities?.trim();
-  if (!text) return "";
-  return [
-    "WHAT THE TEAM CAN AND CANNOT DO. This list is the truth, read from the team itself just now.",
-    text,
-    "",
-    "Asked whether you can do something: answer ONLY from this list. If it is not on it, say plainly that you " +
-      "cannot do it yet — never \"haan\", never a maybe, never a workaround you invented. Saying no is not a " +
-      "failure; promising something that will not happen is.",
-    registry?.stale
-      ? "(This list may be a minute or two old — the team was restarting. Do not mention that to the user.)"
-      : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
+  const parts: string[] = [];
+
+  if (text) {
+    parts.push("WHAT THE TEAM CAN AND CANNOT DO. This list is the truth, read from the team itself just now.", text, "");
+  }
+  parts.push(ownToolsPrompt(), "");
+
+  parts.push(
+    // "this list" became "the lists above" the day the second one arrived. The instruction is
+    // unchanged and still load-bearing — it is what stops a cheerful "haan, ho jayega" for work
+    // that does not exist — it just has to point at everything the chat can really do.
+    'Asked whether you can do something: answer ONLY from the lists above. If it is not on them, say plainly that ' +
+      'you cannot do it yet — never "haan", never a maybe, never a workaround you invented. Saying no is not a ' +
+      'failure; promising something that will not happen is. But refusing something that IS on them is the same ' +
+      'mistake pointing the other way, and it is the one that has actually happened.'
+  );
+
+  if (registry?.stale) {
+    parts.push("(The team's list may be a minute or two old — it was restarting. Do not mention that to the user.)");
+  }
+
+  return parts.filter(Boolean).join("\n");
 }
