@@ -159,3 +159,81 @@ test("the result block states the zero rule on every call, not only for content"
   assert.match(block, /ZERO IS ONLY AN ANSWER IF IT IS THE WHOLE ANSWER/);
   assert.match(block, /read_before_answering/);
 });
+
+/* ── the outreach / CRM lookup ──────────────────────────────────────────────────────────── */
+
+import { lookupOutreachShape, LOOKUP_OUTREACH } from "./chat-data-tools";
+
+test("the pipeline counts every stage, zeroes included, so the model cannot guess one", () => {
+  const leads = [
+    { id: "1", company: "A", stage: "pending_approval", icp_score: 90 },
+    { id: "2", company: "B", stage: "pending_approval", icp_score: 80 },
+    { id: "3", company: "C", stage: "contacted", icp_score: 70 },
+    { id: "4", company: "D", stage: "replied", icp_score: 60, replied_at: "2026-09-30T00:00:00Z" },
+    { id: "5", company: "E", stage: "won", icp_score: 95 },
+  ];
+  const d = lookupOutreachShape(leads as any, []) as any;
+  assert.equal(d.pipeline.total, 5);
+  assert.equal(d.pipeline.pending_approval, 2);
+  assert.equal(d.pipeline.contacted, 1);
+  assert.equal(d.pipeline.replied, 1);
+  assert.equal(d.pipeline.won, 1);
+  assert.equal(d.pipeline.lost, 0, "a zero stage is still reported");
+});
+
+test('"messaged" means anyone past the gate, not just the literal contacted bucket', () => {
+  const leads = [
+    { id: "1", company: "A", stage: "contacted" },
+    { id: "2", company: "B", stage: "replied", replied_at: "x" },
+    { id: "3", company: "C", stage: "won" },
+    { id: "4", company: "D", stage: "pending_approval" },
+  ];
+  const d = lookupOutreachShape(leads as any, []) as any;
+  // contacted + replied + won were all messaged; pending_approval was not.
+  assert.equal(d.summary.messaged, 3);
+  assert.equal(d.summary.replied, 1);
+  assert.equal(d.summary.waiting_on_customer, 1);
+});
+
+test('"kaun reply diya" is answerable by name, with what they said', () => {
+  const leads = [
+    { id: "L1", company: "Acme", stage: "replied", replied_at: "x" },
+    { id: "L2", company: "Beta", stage: "contacted" },
+  ];
+  const messages = [
+    { lead_id: "L1", direction: "in", status: "received", body: "haan bhejo details" },
+    { lead_id: "L1", direction: "out", status: "sent", body: "namaste" },
+  ];
+  const d = lookupOutreachShape(leads as any, messages as any) as any;
+  assert.equal(d.who_replied.length, 1);
+  assert.equal(d.who_replied[0].company, "Acme");
+  assert.match(d.who_replied[0].said, /haan bhejo/);
+});
+
+test("nothing messaged but leads waiting to approve is flagged, not read as a failure", () => {
+  const leads = [
+    { id: "1", company: "A", stage: "pending_approval" },
+    { id: "2", company: "B", stage: "pending_approval" },
+  ];
+  const d = lookupOutreachShape(leads as any, []) as any;
+  assert.equal(d.nobody_messaged_yet, true);
+  assert.ok(d.read_before_answering, "the model must be told WHY nothing was sent");
+  assert.match(d.read_before_answering, /waiting for the customer to APPROVE/);
+});
+
+test("a genuinely empty pipeline gets no misleading flag", () => {
+  const d = lookupOutreachShape([], []) as any;
+  assert.equal(d.pipeline.total, 0);
+  assert.equal(d.read_before_answering, undefined);
+});
+
+test("focus narrows to one part of the pipeline, most-promising first", () => {
+  const leads = [
+    { id: "1", company: "Low", stage: "pending_approval", icp_score: 40, reason: "meh" },
+    { id: "2", company: "High", stage: "pending_approval", icp_score: 95, reason: "perfect fit" },
+    { id: "3", company: "Sent", stage: "contacted", icp_score: 88 },
+  ];
+  const d = lookupOutreachShape(leads as any, [], "pending_approval") as any;
+  assert.ok(d.focused_list);
+  assert.equal(d.focused_list.length, 2, "only the two pending, not the contacted one");
+});

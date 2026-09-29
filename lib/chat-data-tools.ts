@@ -48,6 +48,7 @@ export const LOOKUP_PAGES = "lookup_site_pages";
 export const LOOKUP_ANALYTICS = "lookup_analytics";
 export const LOOKUP_SCHEDULE = "lookup_schedule";
 export const LOOKUP_BUSINESS = "lookup_business_profile";
+export const LOOKUP_OUTREACH = "lookup_outreach";
 
 export function isReadTool(name: string | null | undefined): boolean {
   return typeof name === "string" && name.startsWith(READ_PREFIX);
@@ -181,9 +182,36 @@ const RAW_READ_TOOLS: ChatTool[] = [
       parameters: { type: "object", properties: {}, required: [], additionalProperties: false },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: LOOKUP_OUTREACH,
+      description:
+        "Look up the LEADS and WhatsApp OUTREACH pipeline (the CRM): how many leads exist and at which stage, how " +
+        "many are waiting for the customer's approval, who has been messaged, who replied, and what the reply said. " +
+        'Call this for "kitne leads aaye", "kisko message gaya", "kaun reply diya", "approval pe kitne hain", ' +
+        '"kitne convert hue", "leads ka kya status hai", "outreach kaisa chal raha hai", "how many leads / replies". ' +
+        "Always call it instead of guessing a number about leads or outreach.",
+      parameters: {
+        type: "object",
+        properties: {
+          focus: {
+            type: "string",
+            enum: ["all", "pending_approval", "replied", "contacted", "won"],
+            description:
+              "Narrow to one part of the pipeline: 'pending_approval' for leads awaiting the customer's yes, " +
+              "'replied' for the ones who answered, 'contacted' for those messaged, 'won' for converted. " +
+              "Default 'all' for the whole picture.",
+          },
+        },
+        required: [],
+        additionalProperties: false,
+      },
+    },
+  },
 ];
 
-/** What every caller gets: the six lookups, each carrying NEVER_FOR_ORDERS. */
+/** What every caller gets: the lookups, each carrying NEVER_FOR_ORDERS. */
 export const READ_TOOLS: ChatTool[] = withOrderGuard(RAW_READ_TOOLS);
 
 /* ── Running one ─────────────────────────────────────────────────────────────────────────── */
@@ -193,6 +221,8 @@ export const READ_TOOLS: ChatTool[] = withOrderGuard(RAW_READ_TOOLS);
 export type ReadResult = { ok: boolean; tool: string; data?: unknown; note?: string };
 
 const CONTENT_TITLES = 8;
+const OUTREACH_MSG_SCAN = 200; // recent messages pulled to find who replied and what they said
+const OUTREACH_LIST = 10;      // most a single outreach answer lists by name
 const AUDIT_ISSUES = 12;
 const PAGE_HITS = 8;
 const INSIGHT_ROWS = 10;
@@ -212,6 +242,7 @@ export async function runReadTool(
       case LOOKUP_ANALYTICS: return await lookupAnalytics(supabase, tenantId, String(args?.source ?? "all"));
       case LOOKUP_SCHEDULE: return await lookupSchedule(supabase, tenantId);
       case LOOKUP_BUSINESS: return await lookupBusiness(supabase, tenantId);
+      case LOOKUP_OUTREACH: return await lookupOutreach(supabase, tenantId, typeof args?.focus === "string" ? args.focus : "all");
       default: return { ok: false, tool: name, note: "No such lookup." };
     }
   } catch (e: any) {
@@ -476,6 +507,119 @@ async function lookupBusiness(supabase: SupabaseClient, tenantId: string): Promi
 }
 
 /* ── Handing the result to the model ─────────────────────────────────────────────────────── */
+
+/** The CRM/outreach read. Two queries — the leads and the recent messages — shaped by a pure
+ *  function so the exact counts can be tested without a database, the way lookup_content is.
+ *
+ *  It reads only. Approving a lead, sending a message, changing a stage are all writes that
+ *  happen elsewhere behind their own confirmations; this is the tool the model calls to ANSWER
+ *  "kaun reply diya", never to act. */
+async function lookupOutreach(supabase: SupabaseClient, tenantId: string, focus: string): Promise<ReadResult> {
+  const [{ data: leads, error: le }, { data: msgs, error: me }] = await Promise.all([
+    supabase
+      .from("leads")
+      .select("id, company, whatsapp, stage, icp_score, reason, replied_at, contacted_at, created_at")
+      .eq("tenant_id", tenantId)
+      .order("icp_score", { ascending: false, nullsFirst: false }),
+    supabase
+      .from("outreach_messages")
+      .select("lead_id, direction, status, body, created_at")
+      .eq("tenant_id", tenantId)
+      .order("created_at", { ascending: false })
+      .limit(OUTREACH_MSG_SCAN),
+  ]);
+  // A pre-028 database has neither the new columns nor outreach_messages. That is "outreach is
+  // not set up here", a true answer, not an error to throw at the model.
+  if (le && /column .* does not exist/i.test(le.message)) {
+    return { ok: false, tool: LOOKUP_OUTREACH, note: "The CRM/outreach tables are not set up on this workspace yet (migration 028)." };
+  }
+  if (le) throw new Error(le.message);
+  const messages = me && /does not exist/i.test(me.message) ? [] : (msgs ?? []);
+
+  return { ok: true, tool: LOOKUP_OUTREACH, data: lookupOutreachShape(leads ?? [], messages, focus) };
+}
+
+/** The row-to-answer half of lookup_outreach. Pure: leads + recent messages in, the object the
+ *  model reads out. Split out so the counts that matter are a test, not a screenshot. */
+export function lookupOutreachShape(
+  leads: { id?: string; company?: string | null; whatsapp?: string | null; stage?: string | null; icp_score?: number | null; reason?: string | null; replied_at?: string | null }[],
+  messages: { lead_id?: string | null; direction?: string | null; status?: string | null; body?: string | null }[],
+  focus = "all"
+) {
+  const count = (st: string) => leads.filter((l) => l.stage === st).length;
+
+  // The pipeline, every stage the CRM has. Zeroes included on purpose: "0 replied" is an answer,
+  // and leaving it out is how a model guesses one.
+  const pipeline = {
+    total: leads.length,
+    pending_approval: count("pending_approval"),
+    approved: count("approved"),
+    queued: count("queued"),
+    contacted: count("contacted"),
+    delivered: count("delivered"),
+    read: count("read"),
+    replied: count("replied"),
+    in_conversation: count("in_conversation"),
+    interested: count("interested"),
+    won: count("won"),
+    lost: count("lost"),
+    rejected: count("rejected"),
+    opted_out: count("opted_out"),
+  };
+
+  // "Messaged" is anyone past the gate who has been contacted at all — every stage from
+  // contacted onward, not just the literal `contacted` bucket, because a lead who has since
+  // replied was still messaged. The model asking "kisko message gaya" means this, not the one
+  // stage whose name matches.
+  const messagedStages = ["contacted", "delivered", "read", "replied", "in_conversation", "interested", "won", "lost"];
+  const messaged = leads.filter((l) => messagedStages.includes(String(l.stage))).length;
+  const replied = leads.filter((l) => l.stage === "replied" || l.stage === "in_conversation" || !!l.replied_at).length;
+
+  // The people who replied, with what they said, so "kaun reply diya" is answerable by name.
+  // The latest inbound message per lead, newest first.
+  const inboundByLead = new Map<string, string>();
+  for (const m of messages) {
+    if (m.direction === "in" && m.lead_id && !inboundByLead.has(m.lead_id)) {
+      inboundByLead.set(m.lead_id, String(m.body ?? "").slice(0, 200));
+    }
+  }
+  const repliers = leads
+    .filter((l) => l.id && inboundByLead.has(l.id))
+    .slice(0, OUTREACH_LIST)
+    .map((l) => ({ company: l.company ?? "(no name)", said: inboundByLead.get(l.id!) }));
+
+  // A focused list when the model asked for one part of the pipeline — the leads themselves,
+  // capped, most-promising first (already sorted by score in the query).
+  const focusStages: Record<string, string[]> = {
+    pending_approval: ["pending_approval"],
+    replied: ["replied", "in_conversation"],
+    contacted: messagedStages,
+    won: ["won"],
+  };
+  const wanted = focusStages[focus];
+  const list = wanted
+    ? leads
+        .filter((l) => wanted.includes(String(l.stage)))
+        .slice(0, OUTREACH_LIST)
+        .map((l) => ({ company: l.company ?? "(no name)", stage: l.stage, score: l.icp_score, why: l.reason }))
+    : undefined;
+
+  // The single most useful pointer for an empty-looking pipeline: leads waiting on the customer
+  // themselves. Nothing gets messaged until they approve, so "0 contacted" with "15 pending" is
+  // a different answer than "0 contacted" with "0 pending".
+  const waiting_on_customer = pipeline.pending_approval;
+
+  return {
+    pipeline,
+    summary: { total_leads: leads.length, messaged, replied, waiting_on_customer },
+    who_replied: repliers,
+    ...(list ? { focused_list: list } : {}),
+    nobody_messaged_yet: messaged === 0,
+    ...(waiting_on_customer > 0 && messaged === 0
+      ? { read_before_answering: `Nothing has been messaged yet, but ${waiting_on_customer} lead(s) are waiting for the customer to APPROVE them first. If they ask why no outreach has happened, that is the reason — point them at the approvals, do not say the outreach failed.` }
+      : {}),
+  };
+}
 
 /** The block appended to the conversation before the model writes its reply.
  *
