@@ -282,10 +282,25 @@ export async function tick() {
       // a customer asking for a daily audit report had nowhere for the request to go, which is
       // how "har roz mere site ka audit report batana" ended up rewriting their ARTICLE
       // timetable to daily instead (lib/chat-schedule-tools.ts has the full account).
-      if (row.kind !== "article" && row.kind !== "audit") continue;
+      if (row.kind !== "article" && row.kind !== "audit" && row.kind !== "leads") continue;
 
       // Written before anything else can tick again, so a slow enqueue can't double-fire.
       const stamp = () => supabase.from("schedules").update({ last_run_at: now.toISOString() }).eq("id", row.id);
+
+      if (row.kind === "leads") {
+        // Daily discovery (migration 028): find, score and file `count` leads as
+        // pending_approval. Nothing here sends — the agent's own compliance layer marks every
+        // draft draft-only, and Mr. WhatsApp reads only rows a human has since approved.
+        const leadsJobId = await enqueue("leads", {
+          tenantId: row.tenant_id,
+          count: row.count,
+          taskLabel: "Scheduled lead discovery",
+          source: "schedule",
+        } as any);
+        await stamp();
+        console.log(`[scheduler] tenant ${row.tenant_id}: enqueued leads job ${leadsJobId} (target ${row.count}, scheduled)`);
+        continue;
+      }
 
       if (row.kind === "audit") {
         // No count and no auto_publish: an audit produces one report and publishes nothing. The

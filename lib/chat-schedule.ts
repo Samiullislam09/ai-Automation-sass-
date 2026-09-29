@@ -131,8 +131,17 @@ export function parseScheduleCommand(raw: string): SchedulePatch | null {
  *  rewriting the article timetable and calling it saved (see migration 027). A tool that offers
  *  the model a choice has to be able to say which choices are real, so that answer lives here. */
 export const SCHEDULE_KINDS = {
-  article: { runs: "the writing team plans topics and writes `count` articles", takesCount: true },
-  audit: { runs: "Mr. Audit checks the site and files a report", takesCount: false },
+  // unit: what `count` counts, or null where a count is meaningless. maxCount: the per-kind
+  // ceiling applySchedule clamps to — the DB check (1..50, migration 028) is the outer wall,
+  // this is the sensible one. takesAutoPublish: only articles publish anything.
+  article: { runs: "the writing team plans topics and writes `count` articles", unit: "articles", maxCount: 5, takesAutoPublish: true },
+  audit: { runs: "Mr. Audit checks the site and files a report", unit: null, maxCount: 1, takesAutoPublish: false },
+  leads: {
+    runs: "Mr. Leads hunts businesses matching the ICP, scores them and files them in the CRM as pending approval",
+    unit: "leads",
+    maxCount: 50,
+    takesAutoPublish: false,
+  },
 } as const;
 
 export type ScheduleKind = keyof typeof SCHEDULE_KINDS;
@@ -201,7 +210,9 @@ export async function applySchedule(
     day_of_week: patch.dayOfWeek ?? now.day_of_week,
     time_of_day: patch.timeOfDay ?? now.time_of_day,
     timezone: now.timezone,
-    count: Math.min(5, Math.max(1, patch.count ?? now.count)),
+    // Clamped to THIS KIND's ceiling, not a global 5: five was sized for articles and starved
+    // a leads run, whose whole point is volume (migration 028 widened the DB check to 50).
+    count: Math.min(SCHEDULE_KINDS[kind].maxCount, Math.max(1, patch.count ?? now.count)),
     updated_at: new Date().toISOString(),
   };
   const autoPublish = patch.autoPublish ?? now.auto_publish;

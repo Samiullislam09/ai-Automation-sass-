@@ -95,8 +95,11 @@ test("the description says it is the repeating timetable, not a one-off run", ()
 /* ── the refusals, which are the whole point ─────────────────────────────────────────────── */
 
 test("a kind this product cannot schedule REFUSES — it never falls back to the article row", async () => {
+  // "social" is real in the DB check but absent from SCHEDULE_KINDS on purpose: the agent is a
+  // stub, and offering its timetable would book work that never runs. ("leads" was this test's
+  // example until 2026-09-30, when it became schedulable — migration 028.)
   const { db, state } = fakeDb([WEEKLY_ARTICLES]);
-  const res = await runWriteTool(MANAGE_SCHEDULE, { kind: "leads", frequency: "daily" }, db, TENANT);
+  const res = await runWriteTool(MANAGE_SCHEDULE, { kind: "social", frequency: "daily" }, db, TENANT);
 
   assert.equal(res.ok, false);
   assert.match(res.note!, /not something this product can put on a timetable/);
@@ -207,4 +210,32 @@ test("the result block forbids claiming the work itself ran", async () => {
   assert.match(block, /STANDING instruction/);
   assert.match(block, /audit kar diya/);
   assert.match(block, /naming WHICH schedule this was and WHAT MOVED/);
+});
+
+test("a daily LEADS schedule books discovery without touching the other timetables", async () => {
+  const { db, state } = fakeDb([WEEKLY_ARTICLES]);
+  const res = await runWriteTool(
+    MANAGE_SCHEDULE,
+    { kind: "leads", frequency: "daily", time_of_day: "10:00", count: 10 },
+    db,
+    TENANT
+  );
+
+  assert.equal(res.ok, true);
+  const d = res.data as any;
+  assert.equal(d.after.leads_per_run, 10, "count counts LEADS here, and says so");
+  assert.equal(d.after.goes_to, undefined, "a leads run publishes nothing");
+  assert.equal(state.rows.find((r) => r.kind === "article")!.frequency, "weekly");
+  assert.equal(state.rows.find((r) => r.kind === "leads")!.count, 10);
+});
+
+test("the leads count clamps to its own ceiling (50), not the articles' 5", async () => {
+  const { db } = fakeDb([]);
+  const res = await runWriteTool(
+    MANAGE_SCHEDULE,
+    { kind: "leads", frequency: "daily", time_of_day: "10:00", count: 50 },
+    db,
+    TENANT
+  );
+  assert.equal((res.data as any).after.leads_per_run, 50, "50 must survive — the old global clamp cut it to 5");
 });

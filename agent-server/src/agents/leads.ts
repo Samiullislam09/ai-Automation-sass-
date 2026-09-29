@@ -222,7 +222,9 @@ async function loadHistory(tenantId: string): Promise<{ suppression: Suppression
     if (company) knownNames.add(company.toLowerCase());
     if (domain) knownDomains.add(domain);
 
-    if (["unsubscribed", "do_not_contact", "bounced", "skipped"].includes(stage)) {
+    // Old names kept alongside the 028 vocabulary on purpose: suppression is the one list where
+    // recognising too much is free and recognising too little messages someone who said stop.
+    if (["unsubscribed", "do_not_contact", "bounced", "skipped", "opted_out", "rejected", "invalid", "lost"].includes(stage)) {
       suppression.push({ domain, email: email || null, phone: phone || null });
     }
   }
@@ -272,9 +274,11 @@ async function saveLeads(tenantId: string, leads: LeadRecord[]): Promise<{ count
     source: lead.source,
     icp_score: lead.score,
     reason: lead.why,
-    // NOT "new": a row here has a message written and nothing sent. `draft` says exactly that,
-    // and the Leads page's Approve button is what moves it on.
-    stage: "draft",
+    // NOT "new": a row here has a message written and nothing sent. Since migration 028 the
+    // CRM's name for exactly that is pending_approval — the admin's Approve is what moves it
+    // on, and Mr. WhatsApp only ever reads approved/queued rows, so nothing found here can be
+    // messaged without a human having said yes to that specific lead.
+    stage: "pending_approval",
   }));
 
   const rich = leads.map((lead, i) => ({

@@ -126,8 +126,10 @@ const RAW_WRITE_TOOLS: ChatTool[] = [
           count: {
             type: "integer",
             minimum: 1,
-            maximum: 5,
-            description: "How many articles per run. ARTICLES ONLY — it means nothing for an audit. Maximum 5.",
+            maximum: 50,
+            description:
+              "How many per run, for kinds that produce a batch: articles (max 5) or leads (max 50). Meaningless " +
+              "for an audit. The tool clamps to the kind's own ceiling, so pass what the customer said.",
           },
           auto_publish: {
             type: "boolean",
@@ -225,10 +227,12 @@ async function manageSchedule(
 
   let count = num(args?.count);
   let autoPublish = typeof args?.auto_publish === "boolean" ? (args.auto_publish as boolean) : undefined;
-  if (!spec.takesCount) {
-    if (count != null) ignored.push(`count (${count}) — an ${kind} run has no article count`);
-    if (autoPublish != null) ignored.push(`auto_publish — nothing is published by an ${kind} run`);
+  if (!spec.unit && count != null) {
+    ignored.push(`count (${count}) — a ${kind} run is one job, it has no batch size`);
     count = undefined;
+  }
+  if (!spec.takesAutoPublish && autoPublish != null) {
+    ignored.push(`auto_publish — nothing is published by a ${kind} run`);
     autoPublish = undefined;
   }
 
@@ -303,8 +307,9 @@ function summarise(r: ScheduleRow, kind: ScheduleKind) {
   return {
     enabled: r.enabled,
     when: r.enabled ? `${when} at ${r.time_of_day} ${r.timezone}` : "off — nothing runs by itself",
-    ...(SCHEDULE_KINDS[kind].takesCount
-      ? { articles_per_run: r.count, goes_to: r.auto_publish ? "published straight to the site" : "Approvals, for review" }
+    ...(SCHEDULE_KINDS[kind].unit ? { [`${SCHEDULE_KINDS[kind].unit}_per_run`]: r.count } : {}),
+    ...(SCHEDULE_KINDS[kind].takesAutoPublish
+      ? { goes_to: r.auto_publish ? "published straight to the site" : "Approvals, for review" }
       : {}),
   };
 }
@@ -319,11 +324,10 @@ function diff(before: ScheduleRow, after: ScheduleRow, kind: ScheduleKind): stri
     out.push(`${DAY_NAMES[before.day_of_week] ?? "?"} → ${DAY_NAMES[after.day_of_week] ?? "?"}`);
   }
   if (before.time_of_day !== after.time_of_day) out.push(`${before.time_of_day} → ${after.time_of_day}`);
-  if (SCHEDULE_KINDS[kind].takesCount) {
-    if (before.count !== after.count) out.push(`${before.count} → ${after.count} articles per run`);
-    if (before.auto_publish !== after.auto_publish) {
-      out.push(after.auto_publish ? "now publishes straight to the site" : "now lands in Approvals");
-    }
+  const unit = SCHEDULE_KINDS[kind].unit;
+  if (unit && before.count !== after.count) out.push(`${before.count} → ${after.count} ${unit} per run`);
+  if (SCHEDULE_KINDS[kind].takesAutoPublish && before.auto_publish !== after.auto_publish) {
+    out.push(after.auto_publish ? "now publishes straight to the site" : "now lands in Approvals");
   }
   return out;
 }
