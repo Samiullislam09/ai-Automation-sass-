@@ -12,6 +12,9 @@ import { dailyUsage, sweepOrphanedJobs } from "./jobsLog.js";
 import { CAP_TABLE } from "./config/caps.js";
 import { nvidiaWindow } from "./lib/nvidia.js";
 import { mountBrain, startBrain, getRegistry } from "./brain/server.js";
+import { mountWhatsapp } from "./lib/whatsapp/routes.js";
+import { resumeConnected } from "./lib/whatsapp/session.js";
+import { supabase } from "./supabase.js";
 import { enabledActions } from "./brain/registry.js";
 import { stopEvents } from "./brain/events.js";
 
@@ -155,6 +158,10 @@ async function main() {
     );
   }
 
+  // Mr. WhatsApp's HTTP surface (pair / status / send / unpair). Mounted before listen so the
+  // dashboard can reach it the moment the server is up.
+  mountWhatsapp(app);
+
   const httpServer = createServer(app);
   initSocket(httpServer);
   await startWorkers();
@@ -164,6 +171,9 @@ async function main() {
 
   httpServer.listen(env.PORT, () => {
     console.log(`[agent-server] listening on :${env.PORT} — agents: ${AGENT_TYPES.join(", ")}`);
+    // Reopen WhatsApp links for tenants who were connected before this deploy, so a redeploy is
+    // invisible to them rather than silently dropping their inbox until they re-open the page.
+    resumeConnected(supabase).catch((e) => console.error("[whatsapp] resume sweep failed:", e?.message));
   });
 
   process.on("SIGTERM", async () => {

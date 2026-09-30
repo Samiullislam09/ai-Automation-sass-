@@ -28,3 +28,10 @@ export function initSocket(httpServer: HttpServer) {
 export function emitAgentStatus(event: AgentStatusEvent) {
   io?.to(`tenant:${event.tenant}`).emit("agent:status", event);
 }
+
+/** Push a WhatsApp connection change (a new QR, connected, logged out) to a tenant's dashboard,
+ *  so the pairing screen updates live instead of polling. The payload is whatever
+ *  session.ts's sessionStatus returns. */
+export function emitWhatsapp(tenantId: string, status: { status: string; qr: string | null; phone: string | null }) {
+  io?.to(`tenant:${tenantId}`).emit("whatsapp:status", status);
+}
