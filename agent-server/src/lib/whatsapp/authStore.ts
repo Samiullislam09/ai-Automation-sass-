@@ -17,11 +17,8 @@
  *  addressed by (type, id). BufferJSON is Baileys' own (de)serialiser for the Buffers inside
  *  both — using it rather than JSON.stringify is what keeps the signal keys byte-exact across a
  *  round trip through jsonb. */
-import { proto } from "@whiskeysockets/baileys";
-import baileys from "@whiskeysockets/baileys";
+import { proto, initAuthCreds, BufferJSON } from "@whiskeysockets/baileys";
 import type { SupabaseClient } from "@supabase/supabase-js";
-
-const { initAuthCreds, BufferJSON } = baileys as any;
 
 // Baileys' AuthenticationState is not exported as a type in a stable place across versions, so
 // it is described structurally here — just enough for makeWASocket's `auth` field.

@@ -19,12 +19,10 @@
  *  STATE. One WASocket per tenant, kept in a module-level map (this server is a long-lived
  *  process, the same way socket.ts holds its io server). Auth persists in Supabase
  *  (authStore.ts), so a redeploy reconnects without a re-scan. */
-import baileys, { DisconnectReason, Browsers } from "@whiskeysockets/baileys";
+import { makeWASocket, DisconnectReason, Browsers } from "@whiskeysockets/baileys";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { useSupabaseAuthState, clearAuthState } from "./authStore.js";
 import { linkIncoming, recordSentStatus } from "./store.js";
-
-const makeWASocket = (baileys as any).default ?? (baileys as any).makeWASocket;
 
 type Sock = ReturnType<typeof makeWASocket>;
 
