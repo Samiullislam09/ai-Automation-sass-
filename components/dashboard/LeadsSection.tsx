@@ -219,7 +219,7 @@ export default function LeadsSection() {
 
       {err && <div className="mb-3 rounded-xl px-4 py-3 text-[13px]" style={{ background: C.redSoft, color: C.red }}>{err}</div>}
 
-      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <div className="mb-4 grid grid-cols-3 gap-2.5 lg:grid-cols-6">
         <Kpi icon="users" label="Total Leads" value={kpis?.total} tone={C.brand} bg={C.brandSoft} active={tab === "all"} onClick={() => setTab("all")} />
         <Kpi icon="chat" label="Engaged / Messaged" value={kpis?.messaged} tone={C.blue} bg={C.blueSoft} active={tab === "engaged"} onClick={() => setTab("engaged")} />
         <Kpi icon="check" label="Converted" value={kpis?.converted} tone={C.green} bg={C.greenSoft} active={tab === "converted"} onClick={() => setTab("converted")} />
@@ -340,12 +340,12 @@ function rowActions(l: Lead, setStage: (l: Lead, s: string) => void, busy: strin
 
 function Kpi({ icon, label, value, tone, bg, active, onClick }: { icon: string; label: string; value?: number; tone: string; bg: string; active: boolean; onClick: () => void }) {
   return (
-    <button onClick={onClick} className="rounded-2xl p-3.5 text-left transition" style={{ background: C.panel, border: `1px solid ${active ? tone : C.line}`, boxShadow: active ? `0 0 0 1px ${tone}` : "none" }}>
-      <div className="mb-2 flex items-center justify-between">
-        <span className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: bg, color: tone }}><KpiIcon name={icon} /></span>
-      </div>
-      <div className="text-[11.5px] font-medium" style={{ color: C.sub }}>{label}</div>
-      <div className="text-[22px] font-bold leading-tight" style={{ color: C.ink }}>{value ?? "—"}</div>
+    <button onClick={onClick} className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left transition" style={{ background: C.panel, border: `1px solid ${active ? tone : C.line}`, boxShadow: active ? `0 0 0 1px ${tone}` : "none" }}>
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" style={{ background: bg, color: tone }}><KpiIcon name={icon} /></span>
+      <span className="min-w-0">
+        <span className="block truncate text-[10.5px] font-medium leading-tight" style={{ color: C.sub }}>{label}</span>
+        <span className="block text-[18px] font-bold leading-tight" style={{ color: C.ink }}>{value ?? "—"}</span>
+      </span>
     </button>
   );
 }
@@ -408,7 +408,19 @@ function Drawer({ lead, onClose, setStage, busy, waLink }: { lead: Lead; onClose
         <div className="mb-4 space-y-2 text-[13px]" style={{ color: C.ink }}>
           {(lead.whatsapp || lead.phone) && <Row icon="phone" v={lead.whatsapp || lead.phone!} />}
           {lead.email && <Row icon="mail" v={lead.email} />}
-          {lead.website && <Row icon="web" v={lead.website} href={lead.website} />}
+          {lead.website && <Row icon="web" v={lead.website} href={lead.website.startsWith("http") ? lead.website : `https://${lead.website}`} />}
+        </div>
+
+        {/* Lead details — always shown, "—" when absent, so the panel never looks empty. */}
+        <div className="mb-5 rounded-2xl p-4" style={{ background: C.bg, border: `1px solid ${C.line}` }}>
+          <div className="mb-3 text-[13px] font-bold" style={{ color: C.ink }}>Lead details</div>
+          <Detail k="Company" v={lead.company} />
+          <Detail k="Contact" v={lead.name} />
+          <Detail k="Email" v={lead.email ?? null} />
+          <Detail k="Website" v={lead.website ?? null} />
+          <Detail k="City" v={lead.city ?? null} />
+          <Detail k="Source" v={SOURCE_LABEL[lead.source ?? ""] ?? lead.source ?? null} />
+          <Detail k="Created" v={new Date(lead.created_at).toLocaleDateString()} last />
         </div>
         <div className="mb-5 grid grid-cols-2 gap-2">
           {lead.stage === "pending_approval" ? (
@@ -462,6 +474,14 @@ function Row({ icon, v, href }: { icon: string; v: string; href?: string }) {
   const body = <span className="inline-flex items-center gap-2"><span style={{ color: C.sub }}><svg width="15" height="15" viewBox="0 0 24 24">{paths[icon]}</svg></span>{v}</span>;
   return href ? <a href={href} target="_blank" rel="noreferrer" className="block" style={{ color: C.brand }}>{body}</a> : <div>{body}</div>;
 }
+function Detail({ k, v, last }: { k: string; v: string | null | undefined; last?: boolean }) {
+  return (
+    <div className="flex items-start justify-between gap-3" style={{ paddingBottom: last ? 0 : 8, marginBottom: last ? 0 : 8, borderBottom: last ? "none" : `1px solid ${C.line}` }}>
+      <span className="text-[12px]" style={{ color: C.sub }}>{k}</span>
+      <span className="max-w-[60%] truncate text-right text-[12.5px] font-medium" style={{ color: v ? C.ink : C.sub }}>{v || "—"}</span>
+    </div>
+  );
+}
 function StatusRow({ label, on, at, tone, soft, last }: { label: string; on: boolean; at?: string | null; tone: string; soft: string; last?: boolean }) {
   return (
     <div className="flex items-center justify-between" style={{ paddingBottom: last ? 0 : 10, marginBottom: last ? 0 : 10, borderBottom: last ? "none" : `1px solid ${C.line}` }}>
@@ -475,10 +495,10 @@ function StatusRow({ label, on, at, tone, soft, last }: { label: string; on: boo
 }
 
 function AddLeadModal({ open, onClose, onAdded, toast }: { open: boolean; onClose: () => void; onAdded: () => void; toast: (m: string, t?: "error") => void }) {
-  const [f, setF] = useState({ company: "", phone: "", city: "", website: "" });
+  const [f, setF] = useState({ company: "", name: "", phone: "", email: "", city: "", website: "" });
   const [busy, setBusy] = useState(false);
   useEffect(() => {
-    if (!open) setF({ company: "", phone: "", city: "", website: "" });
+    if (!open) setF({ company: "", name: "", phone: "", email: "", city: "", website: "" });
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     if (open) document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -489,7 +509,7 @@ function AddLeadModal({ open, onClose, onAdded, toast }: { open: boolean; onClos
     if (f.phone.replace(/[^0-9]/g, "").length < 8) { toast("Enter a full phone number with country code.", "error"); return; }
     setBusy(true);
     try {
-      const r = await fetch("/api/leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ company: f.company.trim(), phone: f.phone.replace(/[^0-9+]/g, ""), city: f.city.trim(), website: f.website.trim() }) }).then((x) => x.json());
+      const r = await fetch("/api/leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ company: f.company.trim(), name: f.name.trim(), phone: f.phone.replace(/[^0-9+]/g, ""), email: f.email.trim(), city: f.city.trim(), website: f.website.trim() }) }).then((x) => x.json());
       if (!r.ok) { toast(r.error ?? "Could not add.", "error"); return; }
       toast("Lead added — approved and ready to message.");
       onAdded();
@@ -507,8 +527,10 @@ function AddLeadModal({ open, onClose, onAdded, toast }: { open: boolean; onClos
       <div className="w-full max-w-sm rounded-2xl p-6" style={{ background: C.panel }} onClick={(e) => e.stopPropagation()}>
         <h2 className="text-[16px] font-bold" style={{ color: C.ink }}>Add a lead</h2>
         <p className="mb-4 mt-1 text-[12.5px]" style={{ color: C.sub }}>It goes straight to Approved, so you can message it right away.</p>
-        {field("company", "Company or name", "Gulf Steel LLC")}
+        {field("company", "Company", "Gulf Steel LLC")}
+        {field("name", "Contact name", "Ahmed Khan")}
         {field("phone", "Phone (with country code)", "+971 50 123 4567")}
+        {field("email", "Email", "ahmed@gulfsteel.ae")}
         {field("city", "City", "Dubai")}
         {field("website", "Website", "gulfsteel.ae")}
         <div className="flex justify-end gap-2">

@@ -49,6 +49,7 @@ export async function POST(req: NextRequest) {
     tenant_id: tenantId,
     company: company || null,
     name: name || null,
+    email: String(b?.email ?? "").trim() || null,
     phone,
     whatsapp: phone,
     website: String(b?.website ?? "").trim() || null,
