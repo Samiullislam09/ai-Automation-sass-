@@ -4746,7 +4746,7 @@ export default function MrLxwaDashboard({
             and every page whose header has buttons on the right had them sitting under it
             (owner, 2026-09-05: the Audit page's "Export as PDF" half-covered by it). The
             reserved strip is only on >=lg, which is the only size that button exists at. */}
-        <main className={`lx-scroll flex-1 overflow-y-auto p-3 sm:p-4 ${desktopAssistantOpen ? "" : "lg:pr-14"}`} style={{ scrollbarGutter: "stable" }}>
+        <main className="lx-scroll flex-1 overflow-y-auto p-3 sm:p-4" style={{ scrollbarGutter: "stable" }}>
           {children ?? (
             <>
               {Workflow}
@@ -4765,12 +4765,18 @@ export default function MrLxwaDashboard({
           until the owner actually wants it. Mobile already has its own always-visible open
           button in the topbar above, so this stays hidden there. */}
       {!desktopAssistantOpen && (
+        // A bottom-right floating action button, out of the content flow — the old top-right
+        // placement sat over every page's header and forced a reserved right strip (lg:pr-14)
+        // that showed as an empty gap beside full-width pages like Leads. As a FAB it needs no
+        // reserved space, so content now runs full width.
         <button
-          className="lx-icobtn fixed right-4 top-4 z-40 hidden lg:flex"
+          className="fixed bottom-5 right-5 z-40 hidden h-12 w-12 items-center justify-center rounded-full shadow-lg lg:flex"
+          style={{ background: "linear-gradient(135deg,#6366f1,#22d3ee)", color: "#fff" }}
           onClick={() => setDesktopAssistantOpen(true)}
           aria-label="Open AI assistant"
+          title="Ask Mr. Lxwa"
         >
-          <Bot size={16} />
+          <Bot size={20} />
         </button>
       )}
     </div>

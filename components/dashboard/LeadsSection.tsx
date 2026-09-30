@@ -90,6 +90,7 @@ export default function LeadsSection() {
   const [addOpen, setAddOpen] = useState(false);
   const [err, setErr] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [dateRange, setDateRange] = useState("all"); // all | today | 7d | 30d
   // Advanced filters (spec section 7), applied on top of the tab + search. Empty = no constraint.
   const [flt, setFlt] = useState<{ status: string[]; source: string[]; ai: string; you: string; converted: string; client: string; score: string }>(
     { status: [], source: [], ai: "any", you: "any", converted: "any", client: "any", score: "any" }
@@ -142,10 +143,14 @@ export default function LeadsSection() {
       if (flt.client === "yes" && !l.is_client) return false;
       if (flt.client === "no" && l.is_client) return false;
       if (!inScore(l.icp_score, flt.score)) return false;
+      if (dateRange !== "all") {
+        const days = dateRange === "today" ? 1 : dateRange === "7d" ? 7 : 30;
+        if (Date.now() - new Date(l.created_at).getTime() > days * 86400000) return false;
+      }
       if (!needle) return true;
       return [l.company, l.name, l.email, l.phone, l.whatsapp, l.city].some((v) => String(v ?? "").toLowerCase().includes(needle));
     });
-  }, [leads, tab, q, flt]);
+  }, [leads, tab, q, flt, dateRange]);
 
   const activeFilterCount =
     flt.status.length + flt.source.length +
@@ -168,7 +173,7 @@ export default function LeadsSection() {
   const waLink = (l: Lead) => `/dashboard/whatsapp?lead=${l.id}`;
 
   return (
-    <div className="min-h-full rounded-2xl p-3 sm:p-4" style={{ background: C.bg, color: C.ink }}>
+    <div className="min-h-full rounded-2xl p-3 sm:p-4" style={{ background: C.bg, color: C.ink, colorScheme: "light" }}>
       <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-xl font-bold" style={{ color: C.ink }}>Leads</h1>
@@ -177,7 +182,7 @@ export default function LeadsSection() {
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-2 rounded-xl px-3 py-2" style={{ background: C.panel, border: `1px solid ${C.line}`, minWidth: 200 }}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke={C.sub} strokeWidth="2" /><path d="M21 21l-4-4" stroke={C.sub} strokeWidth="2" strokeLinecap="round" /></svg>
-            <input className="w-full bg-transparent text-[13px] outline-none" style={{ color: C.ink }} placeholder="Search name, phone, company…" value={q} onChange={(e) => setQ(e.target.value)} />
+            <input className="w-full text-[13px] outline-none" style={{ color: C.ink, background: "transparent", colorScheme: "light" }} placeholder="Search name, phone, company…" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
           <div className="relative">
             <button className="flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-[13px] font-semibold" style={{ background: C.panel, border: `1px solid ${filtersOpen || activeFilterCount ? C.brand : C.line}`, color: activeFilterCount ? C.brand : C.sub }} onClick={() => setFiltersOpen((o) => !o)}>
@@ -186,11 +191,29 @@ export default function LeadsSection() {
             </button>
             {filtersOpen && <FilterPanel flt={flt} setFlt={setFlt} onClose={() => setFiltersOpen(false)} />}
           </div>
+          <div className="relative">
+            <select
+              className="appearance-none rounded-xl py-2 pl-8 pr-7 text-[13px] font-semibold outline-none"
+              style={{ background: C.panel, border: `1px solid ${dateRange !== "all" ? C.brand : C.line}`, color: dateRange !== "all" ? C.brand : C.sub, colorScheme: "light" }}
+              value={dateRange}
+              onChange={(e) => setDateRange(e.target.value)}
+              title="How far back to show leads"
+            >
+              <option value="all">All time</option>
+              <option value="today">Today</option>
+              <option value="7d">Last 7 days</option>
+              <option value="30d">Last 30 days</option>
+            </select>
+            <svg className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2" width="14" height="14" viewBox="0 0 24 24" fill="none"><rect x="3" y="4.5" width="18" height="17" rx="2" stroke={dateRange !== "all" ? C.brand : C.sub} strokeWidth="1.7" /><path d="M3 9h18M8 3v3M16 3v3" stroke={dateRange !== "all" ? C.brand : C.sub} strokeWidth="1.7" strokeLinecap="round" /></svg>
+          </div>
           <button className="flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-[13px] font-semibold" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.sub }} onClick={exportCsv} title="Download current leads as CSV">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
             Export
           </button>
-          <button className="rounded-xl px-4 py-2 text-[13px] font-semibold text-white" style={{ background: C.brand }} onClick={() => setAddOpen(true)}>+ Add Lead</button>
+          <button className="flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-[13px] font-semibold text-white" style={{ background: C.brand }} onClick={() => setAddOpen(true)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" /></svg>
+            Add Lead
+          </button>
         </div>
       </div>
 
@@ -207,9 +230,12 @@ export default function LeadsSection() {
 
       <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
         {([
-          ["all", "All Leads", kpis?.total], ["new", "New", kpis?.new], ["engaged", "Engaged", kpis?.engaged],
-          ["converted", "Converted", kpis?.converted], ["client", "Client", kpis?.client], ["ai_messaged", "AI Messaged", kpis?.ai_messaged],
-          ["employee_messaged", "You Messaged", kpis?.employee_messaged], ["not_messaged", "Not Messaged", kpis?.not_messaged],
+          ["all", "All Leads", kpis?.total],
+          ["new", "New", kpis?.new],
+          ["engaged", "Engaged", kpis?.engaged],
+          ["converted", "Converted", kpis?.converted],
+          ["client", "Client", kpis?.client],
+          ["not_messaged", "Not Messaged", kpis?.not_messaged],
         ] as [string, string, number | undefined][]).map(([k, label, n]) => (
           <button key={k} onClick={() => setTab(k)} className="flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-semibold"
             style={tab === k ? { background: C.brandSoft, color: C.brand } : { background: C.panel, color: C.sub, border: `1px solid ${C.line}` }}>
