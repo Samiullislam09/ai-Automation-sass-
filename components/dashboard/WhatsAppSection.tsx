@@ -145,11 +145,19 @@ function Inbox() {
         fetch("/api/whatsapp/messages").then((r) => r.json()),
       ]);
       if (ls.ok) {
-        const inConvo = (ls.items as Lead[]).filter((l) =>
+        const all = ls.items as Lead[];
+        const inConvo = all.filter((l) =>
           ["approved", "contacted", "delivered", "read", "replied", "in_conversation", "interested", "won", "lost"].includes(l.stage)
         );
         setLeads(inConvo);
-        setActive((a) => (a ? inConvo.find((x) => x.id === a.id) ?? a : null));
+        // ?lead=<id> deep link (the WhatsApp button on a lead row): open that conversation, even
+        // if the lead is only approved and has no messages yet.
+        const wanted = new URLSearchParams(window.location.search).get("lead");
+        setActive((a) => {
+          if (a) return inConvo.find((x) => x.id === a.id) ?? a;
+          if (wanted) return inConvo.find((x) => x.id === wanted) ?? all.find((x) => x.id === wanted) ?? inConvo[0] ?? null;
+          return inConvo[0] ?? null;
+        });
       }
       if (ib.ok) {
         const map: Record<string, any> = {};
