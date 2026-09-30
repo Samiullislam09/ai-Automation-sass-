@@ -10,7 +10,10 @@
 // "image" is here for the Approvals card's per-picture "another image" button (MASTER_PLAN
 // §19.4.7): it enqueues the same agent the article pipeline uses, with a `slot` so only that
 // one picture is redone and the day's image budget is not spent four times over.
-export const AGENT_JOB_TYPES = ["boss", "keyword", "writer", "social", "seo", "crawler", "analyst", "audit", "image"] as const;
+// "leads" is here so the Leads page's "Find leads" button can enqueue Mr. Lead directly — the
+// same real pg-boss job the chat's "find me leads" starts, so the button and the chat share one
+// pipeline rather than the button having a pretend one of its own.
+export const AGENT_JOB_TYPES = ["boss", "keyword", "writer", "social", "seo", "crawler", "analyst", "audit", "image", "leads"] as const;
 export type AgentJobType = (typeof AGENT_JOB_TYPES)[number];
 
 // One flat shape rather than a discriminated union on purpose: this repo compiles with

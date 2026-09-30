@@ -20,7 +20,7 @@ export async function GET() {
   const tenantId = await getCurrentTenantId(supabase);
   if (!tenantId) return NextResponse.json({ ok: false, error: "Not signed in." }, { status: 401 });
 
-  const [{ data: leads, error: le }, { data: msgs, error: me }] = await Promise.all([
+  const [{ data: leads, error: le }, { data: msgs, error: me }, { data: genRows }] = await Promise.all([
     supabase.from("leads").select("*").eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(1000),
     supabase
       .from("outreach_messages")
@@ -28,6 +28,15 @@ export async function GET() {
       .eq("tenant_id", tenantId)
       .order("created_at", { ascending: false })
       .limit(4000),
+    // The lead-discovery job's own trail, so the page can show "searching now" / "last found X
+    // ago" instead of leaving the user guessing whether Mr. Lead is working.
+    supabase
+      .from("jobs_log")
+      .select("status, action, detail, created_at")
+      .eq("tenant_id", tenantId)
+      .eq("agent", "leads")
+      .order("created_at", { ascending: false })
+      .limit(5),
   ]);
   if (le && /column .* does not exist|relation .* does not exist/i.test(le.message)) {
     return NextResponse.json({ ok: false, error: "The CRM tables are not set up yet (migration 028)." }, { status: 409 });
@@ -84,5 +93,17 @@ export async function GET() {
     client: count((l) => l.stage === "won"),
   };
 
-  return NextResponse.json({ ok: true, leads: enriched, kpis });
+  const gRows = (genRows ?? []) as { status: string; action: string; detail: any; created_at: string }[];
+  const running = gRows.some((r) => r.status === "queued" || r.status === "running");
+  const lastDone = gRows.find((r) => r.status === "success" || r.status === "error");
+  const gen = {
+    running,
+    last_run_at: lastDone?.created_at ?? null,
+    last_status: lastDone?.status ?? null,
+    // How many the last finished run added, if the agent recorded it.
+    last_found: typeof lastDone?.detail?.count === "number" ? lastDone.detail.count : null,
+    last_note: typeof lastDone?.detail?.reason === "string" ? lastDone.detail.reason : null,
+  };
+
+  return NextResponse.json({ ok: true, leads: enriched, kpis, gen });
 }

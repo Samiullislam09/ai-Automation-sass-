@@ -89,6 +89,8 @@ export default function LeadsSection() {
   const [selected, setSelected] = useState<Lead | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [err, setErr] = useState("");
+  const [gen, setGen] = useState<{ running: boolean; last_run_at: string | null; last_status: string | null; last_found: number | null; last_note: string | null } | null>(null);
+  const [genBusy, setGenBusy] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [dateRange, setDateRange] = useState("all"); // all | today | 7d | 30d
   // Advanced filters (spec section 7), applied on top of the tab + search. Empty = no constraint.
@@ -99,11 +101,30 @@ export default function LeadsSection() {
   const load = useCallback(async () => {
     try {
       const d = await fetch("/api/leads/board").then((r) => r.json());
-      if (d.ok) { setLeads(d.leads); setKpis(d.kpis); setErr(""); }
+      if (d.ok) { setLeads(d.leads); setKpis(d.kpis); setGen(d.gen ?? null); setErr(""); }
       else setErr(d.error ?? "Could not load leads.");
     } catch (e: any) { setErr(e?.message ?? "Network error."); }
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  // While a discovery job is running, poll so "searching now" turns into the new leads by itself.
+  useEffect(() => {
+    if (!gen?.running) return;
+    const id = setInterval(load, 5000);
+    return () => clearInterval(id);
+  }, [gen?.running, load]);
+
+  const findLeads = async () => {
+    setGenBusy(true);
+    try {
+      const d = await fetch("/api/agents/trigger", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "leads", count: 10 }) }).then((r) => r.json());
+      if (!d.ok) { toast(d.error ?? "Could not start lead search.", "error"); return; }
+      toast("Mr. Lead is searching — new leads will appear here.");
+      setGen((g) => ({ running: true, last_run_at: g?.last_run_at ?? null, last_status: g?.last_status ?? null, last_found: g?.last_found ?? null, last_note: g?.last_note ?? null }));
+      setTimeout(load, 2000);
+    } catch (e: any) { toast(e?.message ?? "Network error.", "error"); }
+    finally { setGenBusy(false); }
+  };
 
   const setStage = async (l: Lead, stage: string) => {
     setBusy(l.id);
@@ -207,11 +228,35 @@ export default function LeadsSection() {
 
       {err && <div className="mb-3 rounded-xl px-4 py-3 text-[13px]" style={{ background: C.redSoft, color: C.red }}>{err}</div>}
 
-      <div className="mb-4 grid grid-cols-3 gap-2.5 lg:grid-cols-6">
+      {/* lead-gen status strip + Find leads */}
+      <div className="mb-3 flex flex-col gap-2 rounded-2xl px-4 py-3 sm:flex-row sm:items-center sm:justify-between" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+        <div className="flex items-center gap-2.5">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: gen?.running ? C.blueSoft : C.brandSoft, color: gen?.running ? C.blue : C.brand }}>
+            {gen?.running
+              ? <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.4" opacity="0.25" /><path d="M21 12a9 9 0 00-9-9" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" /></svg>
+              : <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" /><path d="M21 21l-4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>}
+          </span>
+          <div className="text-[12.5px]">
+            {gen?.running
+              ? <span style={{ color: C.ink }}>Mr. Lead is searching for new leads…</span>
+              : <span style={{ color: C.sub }}>
+                  {gen?.last_run_at
+                    ? <>Last searched <b style={{ color: C.ink }}>{ago(gen.last_run_at)}</b>{gen.last_found != null ? ` · found ${gen.last_found}` : gen.last_status === "error" ? " · it hit a problem" : ""}</>
+                    : "Mr. Lead hasn't searched yet — press Find leads to start."}
+                </span>}
+          </div>
+        </div>
+        <button className="flex shrink-0 items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-[13px] font-semibold text-white disabled:opacity-60" style={{ background: C.brand }} onClick={findLeads} disabled={genBusy || gen?.running}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="#fff" strokeWidth="2" /><path d="M21 21l-4-4" stroke="#fff" strokeWidth="2" strokeLinecap="round" /></svg>
+          {gen?.running ? "Searching…" : genBusy ? "Starting…" : "Find leads"}
+        </button>
+      </div>
+
+      {/* KPI cards — five, colourful, responsive (Converted removed) */}
+      <div className="mb-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
         <Kpi icon="users" label="Total Leads" value={kpis?.total} tone={C.brand} bg={C.brandSoft} active={tab === "all"} onClick={() => setTab("all")} />
-        <Kpi icon="chat" label="Engaged / Messaged" value={kpis?.messaged} tone={C.blue} bg={C.blueSoft} active={tab === "engaged"} onClick={() => setTab("engaged")} />
-        <Kpi icon="check" label="Converted" value={kpis?.converted} tone={C.green} bg={C.greenSoft} active={tab === "converted"} onClick={() => setTab("converted")} />
-        <Kpi icon="bot" label="AI Agent Messaged" value={kpis?.ai_messaged} tone={C.violet} bg={C.violetSoft} active={tab === "ai_messaged"} onClick={() => setTab("ai_messaged")} />
+        <Kpi icon="chat" label="Engaged" value={kpis?.messaged} tone={C.blue} bg={C.blueSoft} active={tab === "engaged"} onClick={() => setTab("engaged")} />
+        <Kpi icon="bot" label="AI Messaged" value={kpis?.ai_messaged} tone={C.violet} bg={C.violetSoft} active={tab === "ai_messaged"} onClick={() => setTab("ai_messaged")} />
         <Kpi icon="person" label="You Messaged" value={kpis?.employee_messaged} tone={C.amber} bg={C.amberSoft} active={tab === "employee_messaged"} onClick={() => setTab("employee_messaged")} />
         <Kpi icon="mute" label="Not Messaged" value={kpis?.not_messaged} tone={C.sub} bg={C.graySoft} active={tab === "not_messaged"} onClick={() => setTab("not_messaged")} />
       </div>
@@ -328,11 +373,11 @@ function rowActions(l: Lead, setStage: (l: Lead, s: string) => void, busy: strin
 
 function Kpi({ icon, label, value, tone, bg, active, onClick }: { icon: string; label: string; value?: number; tone: string; bg: string; active: boolean; onClick: () => void }) {
   return (
-    <button onClick={onClick} className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left transition" style={{ background: C.panel, border: `1px solid ${active ? tone : C.line}`, boxShadow: active ? `0 0 0 1px ${tone}` : "none" }}>
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" style={{ background: bg, color: tone }}><KpiIcon name={icon} /></span>
+    <button onClick={onClick} className="flex items-center gap-2.5 rounded-2xl px-3 py-3 text-left transition" style={{ background: bg, border: `1px solid ${active ? tone : "transparent"}`, boxShadow: active ? `0 0 0 1.5px ${tone}` : "none" }}>
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white" style={{ background: tone }}><KpiIcon name={icon} /></span>
       <span className="min-w-0">
-        <span className="block truncate text-[10.5px] font-medium leading-tight" style={{ color: C.sub }}>{label}</span>
-        <span className="block text-[18px] font-bold leading-tight" style={{ color: C.ink }}>{value ?? "—"}</span>
+        <span className="block truncate text-[11px] font-semibold leading-tight" style={{ color: tone }}>{label}</span>
+        <span className="block text-[20px] font-bold leading-tight" style={{ color: C.ink }}>{value ?? "—"}</span>
       </span>
     </button>
   );
