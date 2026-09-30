@@ -174,47 +174,35 @@ export default function LeadsSection() {
 
   return (
     <div className="min-h-full rounded-2xl p-3 sm:p-4" style={{ background: C.bg, color: C.ink, colorScheme: "light" }}>
-      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      {/* header — title on its own line; a single-line toolbar below that fits without wrapping */}
+      <div className="mb-3 flex items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold" style={{ color: C.ink }}>Leads</h1>
-          <p className="text-[12.5px]" style={{ color: C.sub }}>Manage, track and automate your leads</p>
+          <p className="hidden text-[12.5px] sm:block" style={{ color: C.sub }}>Manage, track and automate your leads</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-2 rounded-xl px-3 py-2" style={{ background: C.panel, border: `1px solid ${C.line}`, minWidth: 200 }}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke={C.sub} strokeWidth="2" /><path d="M21 21l-4-4" stroke={C.sub} strokeWidth="2" strokeLinecap="round" /></svg>
-            <input className="w-full text-[13px] outline-none" style={{ color: C.ink, background: "transparent", colorScheme: "light" }} placeholder="Search name, phone, company…" value={q} onChange={(e) => setQ(e.target.value)} />
-          </div>
-          <div className="relative">
-            <button className="flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-[13px] font-semibold" style={{ background: C.panel, border: `1px solid ${filtersOpen || activeFilterCount ? C.brand : C.line}`, color: activeFilterCount ? C.brand : C.sub }} onClick={() => setFiltersOpen((o) => !o)}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 5h18M6 12h12M10 19h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
-              Filters{activeFilterCount ? <span className="rounded-full px-1.5 text-[11px] text-white" style={{ background: C.brand }}>{activeFilterCount}</span> : null}
-            </button>
-            {filtersOpen && <FilterPanel flt={flt} setFlt={setFlt} onClose={() => setFiltersOpen(false)} />}
-          </div>
-          <div className="relative">
-            <select
-              className="appearance-none rounded-xl py-2 pl-8 pr-7 text-[13px] font-semibold outline-none"
-              style={{ background: C.panel, border: `1px solid ${dateRange !== "all" ? C.brand : C.line}`, color: dateRange !== "all" ? C.brand : C.sub, colorScheme: "light" }}
-              value={dateRange}
-              onChange={(e) => setDateRange(e.target.value)}
-              title="How far back to show leads"
-            >
-              <option value="all">All time</option>
-              <option value="today">Today</option>
-              <option value="7d">Last 7 days</option>
-              <option value="30d">Last 30 days</option>
-            </select>
-            <svg className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2" width="14" height="14" viewBox="0 0 24 24" fill="none"><rect x="3" y="4.5" width="18" height="17" rx="2" stroke={dateRange !== "all" ? C.brand : C.sub} strokeWidth="1.7" /><path d="M3 9h18M8 3v3M16 3v3" stroke={dateRange !== "all" ? C.brand : C.sub} strokeWidth="1.7" strokeLinecap="round" /></svg>
-          </div>
-          <button className="flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-[13px] font-semibold" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.sub }} onClick={exportCsv} title="Download current leads as CSV">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
-            Export
-          </button>
-          <button className="flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-[13px] font-semibold text-white" style={{ background: C.brand }} onClick={() => setAddOpen(true)}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" /></svg>
-            Add Lead
-          </button>
+        <button className="flex shrink-0 items-center gap-1.5 rounded-xl px-3.5 py-2 text-[13px] font-semibold text-white" style={{ background: C.brand }} onClick={() => setAddOpen(true)}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" /></svg>
+          <span className="hidden sm:inline">Add Lead</span>
+        </button>
+      </div>
+
+      <div className="mb-4 flex items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-3 py-2" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+          <svg className="shrink-0" width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke={C.sub} strokeWidth="2" /><path d="M21 21l-4-4" stroke={C.sub} strokeWidth="2" strokeLinecap="round" /></svg>
+          <input className="w-full min-w-0 text-[13px] outline-none" style={{ color: C.ink, background: "transparent", colorScheme: "light" }} placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
+        <div className="relative shrink-0">
+          <button className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-[13px] font-semibold" style={{ background: filtersOpen || activeFilterCount ? C.brandSoft : C.panel, border: `1px solid ${filtersOpen || activeFilterCount ? C.brand : C.line}`, color: activeFilterCount || filtersOpen ? C.brand : C.sub }} onClick={() => setFiltersOpen((o) => !o)} title="Filters">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M3 5h18M6 12h12M10 19h4" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" /></svg>
+            <span className="hidden md:inline">Filters</span>
+            {activeFilterCount ? <span className="rounded-full px-1.5 text-[11px] text-white" style={{ background: C.brand }}>{activeFilterCount}</span> : null}
+          </button>
+          {filtersOpen && <FilterPanel flt={flt} setFlt={setFlt} dateRange={dateRange} setDateRange={setDateRange} onClose={() => setFiltersOpen(false)} onClear={() => { setFlt({ status: [], source: [], ai: "any", you: "any", converted: "any", client: "any", score: "any" }); setDateRange("all"); }} />}
+        </div>
+        <button className="flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-[13px] font-semibold" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.sub }} onClick={exportCsv} title="Export CSV">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          <span className="hidden md:inline">Export</span>
+        </button>
       </div>
 
       {err && <div className="mb-3 rounded-xl px-4 py-3 text-[13px]" style={{ background: C.redSoft, color: C.red }}>{err}</div>}
@@ -254,7 +242,7 @@ export default function LeadsSection() {
       ) : (
         <>
           <div className="hidden overflow-hidden rounded-2xl md:block" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
-            <div className="overflow-x-auto">
+            <div className="lx-lscroll overflow-x-auto">
               <table className="w-full border-collapse" style={{ minWidth: 920 }}>
                 <thead>
                   <tr className="text-[11.5px] font-semibold uppercase tracking-wide" style={{ color: C.sub, textAlign: "left", borderBottom: `1px solid ${C.line}` }}>
@@ -329,9 +317,9 @@ function rowActions(l: Lead, setStage: (l: Lead, s: string) => void, busy: strin
         </>
       )}
       {num && !["rejected", "opted_out"].includes(l.stage) && (
-        <a href={waLink(l)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold text-white" style={{ background: "#25D366", textDecoration: "none" }} title="Open WhatsApp chat">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M12 21a9 9 0 10-8-4.9L3 21l4.9-1A9 9 0 0012 21z" stroke="#fff" strokeWidth="1.8" strokeLinejoin="round" /></svg>
-          WhatsApp
+        <a href={waLink(l)} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-semibold text-white" style={{ background: "#25D366", textDecoration: "none" }} title="Open WhatsApp chat">
+          <WaGlyph />
+          <span className="hidden lg:inline">Message</span>
         </a>
       )}
     </div>
@@ -373,6 +361,14 @@ function ActBadge({ on, onLabel, offLabel = "Not yet", tone, soft }: { on: boole
     : <span className="text-[11.5px]" style={{ color: C.sub }}>{offLabel}</span>;
 }
 function Th({ children }: { children: React.ReactNode }) { return <th className="px-3 py-2.5">{children}</th>; }
+function WaGlyph({ size = 14 }: { size?: number }) {
+  // The real WhatsApp mark: a speech bubble with a handset. Filled white on the green pill.
+  return (
+    <svg width={size} height={size} viewBox="0 0 32 32" fill="currentColor" aria-hidden>
+      <path d="M16 3C9.2 3 3.7 8.5 3.7 15.3c0 2.4.7 4.7 1.9 6.7L3.5 29l7.2-1.9c1.9 1 4 1.6 6.2 1.6h.1c6.8 0 12.3-5.5 12.3-12.3S22.8 3 16 3zm0 22.4c-1.9 0-3.8-.5-5.4-1.5l-.4-.2-4.3 1.1 1.1-4.2-.3-.4a10 10 0 01-1.6-5.4c0-5.6 4.6-10.1 10.2-10.1 2.7 0 5.2 1 7.1 2.9a10 10 0 013 7.2c0 5.6-4.6 10.1-10.2 10.1zm5.6-7.6c-.3-.2-1.8-.9-2.1-1-.3-.1-.5-.2-.7.2s-.8 1-1 1.2c-.2.2-.4.2-.7.1-.3-.2-1.3-.5-2.5-1.5-.9-.8-1.5-1.8-1.7-2.1-.2-.3 0-.5.1-.7l.5-.6c.2-.2.2-.3.3-.5.1-.2.1-.4 0-.5l-1-2.3c-.2-.6-.5-.5-.7-.5h-.6c-.2 0-.5.1-.8.4-.3.3-1 1-1 2.5s1.1 2.9 1.2 3.1c.2.2 2.2 3.4 5.4 4.8.7.3 1.3.5 1.7.6.7.2 1.4.2 1.9.1.6-.1 1.8-.7 2-1.4.3-.7.3-1.3.2-1.4-.1-.2-.3-.3-.6-.4z" />
+    </svg>
+  );
+}
 
 function Drawer({ lead, onClose, setStage, busy, waLink }: { lead: Lead; onClose: () => void; setStage: (l: Lead, s: string) => void; busy: string | null; waLink: (l: Lead) => string }) {
   useEffect(() => {
@@ -388,7 +384,7 @@ function Drawer({ lead, onClose, setStage, busy, waLink }: { lead: Lead; onClose
   ].filter(Boolean) as { dot: string; label: string; at: string }[];
   return (
     <div className="fixed inset-0 z-[90] flex justify-end" style={{ background: "rgba(15,23,42,.35)" }} onClick={onClose}>
-      <div className="h-full w-full max-w-sm overflow-y-auto p-5" style={{ background: C.panel }} onClick={(e) => e.stopPropagation()}>
+      <div className="lx-lscroll h-full w-full max-w-sm overflow-y-auto p-5" style={{ background: C.panel }} onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-start justify-between">
           <div className="flex items-center gap-3">
             <span className="flex h-11 w-11 items-center justify-center rounded-full text-[15px] font-bold text-white" style={{ background: C.brand }}>{initials(lead)}</span>
@@ -542,72 +538,83 @@ function AddLeadModal({ open, onClose, onAdded, toast }: { open: boolean; onClos
   );
 }
 
-/* ── advanced filter popover (spec section 7) ────────────────────────────────────────────── */
+/* ── advanced filter popover ─────────────────────────────────────────────────────────────── */
 type Flt = { status: string[]; source: string[]; ai: string; you: string; converted: string; client: string; score: string };
-function FilterPanel({ flt, setFlt, onClose }: { flt: Flt; setFlt: (f: Flt) => void; onClose: () => void }) {
+function FilterPanel({ flt, setFlt, dateRange, setDateRange, onClose, onClear }: { flt: Flt; setFlt: (f: Flt) => void; dateRange: string; setDateRange: (v: string) => void; onClose: () => void; onClear: () => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const STATUSES = ["new", "pending_approval", "approved", "contacted", "delivered", "read", "replied", "in_conversation", "interested", "won", "lost"];
-  const SOURCES = ["osm", "places", "jobs", "manual"];
-  const SRC_LBL: Record<string, string> = { osm: "OpenStreetMap", places: "Google Places", jobs: "Job board", manual: "Manual" };
-
+  const STATUSES: [string, string][] = [["new", "New"], ["pending_approval", "Waiting"], ["approved", "Approved"], ["contacted", "Contacted"], ["replied", "Engaged"], ["won", "Won"], ["lost", "Lost"], ["opted_out", "Opted out"]];
+  const SOURCES: [string, string][] = [["osm", "OpenStreetMap"], ["places", "Google Places"], ["jobs", "Job board"], ["manual", "Manual"]];
   const toggle = (arr: string[], v: string) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
-  const clearAll = () => setFlt({ status: [], source: [], ai: "any", you: "any", converted: "any", client: "any", score: "any" });
 
   const Chip = ({ on, label, onClick }: { on: boolean; label: string; onClick: () => void }) => (
-    <button onClick={onClick} className="rounded-lg px-2.5 py-1 text-[12px] font-medium" style={on ? { background: C.brandSoft, color: C.brand } : { background: C.graySoft, color: C.sub }}>{label}</button>
+    <button onClick={onClick} className="rounded-lg px-2.5 py-1.5 text-[12px] font-medium transition" style={on ? { background: C.brand, color: "#fff" } : { background: C.bg, color: C.sub, border: `1px solid ${C.line}` }}>{label}</button>
   );
   const Seg = ({ value, set }: { value: string; set: (v: string) => void }) => (
-    <div className="flex gap-1.5">
-      {[["any", "Any"], ["yes", "Yes"], ["no", "No"]].map(([v, l]) => (
-        <Chip key={v} on={value === v} label={l} onClick={() => set(v)} />
+    <div className="flex overflow-hidden rounded-lg" style={{ border: `1px solid ${C.line}` }}>
+      {[["any", "Any"], ["yes", "Yes"], ["no", "No"]].map(([v, l], i) => (
+        <button key={v} onClick={() => set(v)} className="px-3 py-1 text-[12px] font-semibold" style={{ background: value === v ? C.brand : C.panel, color: value === v ? "#fff" : C.sub, borderLeft: i ? `1px solid ${C.line}` : "none" }}>{l}</button>
       ))}
+    </div>
+  );
+  const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
+    <div className="mb-3.5">
+      <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide" style={{ color: C.sub }}>{title}</div>
+      {children}
     </div>
   );
 
   return (
     <>
-      {/* click-away catcher */}
       <div className="fixed inset-0 z-[95]" onClick={onClose} />
-      <div className="absolute right-0 z-[96] mt-2 w-[320px] rounded-2xl p-4 shadow-xl" style={{ background: C.panel, border: `1px solid ${C.line}`, maxHeight: "70vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
-        <div className="mb-3 flex items-center justify-between">
+      <div className="absolute right-0 z-[96] mt-2 w-[340px] max-w-[92vw] rounded-2xl shadow-xl" style={{ background: C.panel, border: `1px solid ${C.line}` }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: `1px solid ${C.line}` }}>
           <b className="text-[14px]" style={{ color: C.ink }}>Filters</b>
-          <button className="text-[12px] font-semibold" style={{ color: C.brand }} onClick={clearAll}>Clear all</button>
+          <button className="text-[12px] font-semibold" style={{ color: C.brand }} onClick={onClear}>Clear all</button>
         </div>
 
-        <div className="mb-3">
-          <div className="mb-1.5 text-[11.5px] font-semibold uppercase tracking-wide" style={{ color: C.sub }}>Lead status</div>
-          <div className="flex flex-wrap gap-1.5">
-            {STATUSES.map((st) => <Chip key={st} on={flt.status.includes(st)} label={(STAGE[st]?.label ?? st)} onClick={() => setFlt({ ...flt, status: toggle(flt.status, st) })} />)}
-          </div>
+        <div className="lx-lscroll max-h-[60vh] overflow-y-auto px-4 py-3.5">
+          <Section title="Date added">
+            <div className="flex flex-wrap gap-1.5">
+              {[["all", "All time"], ["today", "Today"], ["7d", "Last 7 days"], ["30d", "Last 30 days"]].map(([v, l]) => (
+                <Chip key={v} on={dateRange === v} label={l} onClick={() => setDateRange(v)} />
+              ))}
+            </div>
+          </Section>
+
+          <Section title="Lead status">
+            <div className="flex flex-wrap gap-1.5">
+              {STATUSES.map(([v, l]) => <Chip key={v} on={flt.status.includes(v)} label={l} onClick={() => setFlt({ ...flt, status: toggle(flt.status, v) })} />)}
+            </div>
+          </Section>
+
+          <Section title="Source">
+            <div className="flex flex-wrap gap-1.5">
+              {SOURCES.map(([v, l]) => <Chip key={v} on={flt.source.includes(v)} label={l} onClick={() => setFlt({ ...flt, source: toggle(flt.source, v) })} />)}
+            </div>
+          </Section>
+
+          <div className="mb-2.5 flex items-center justify-between"><span className="text-[12.5px]" style={{ color: C.ink }}>AI Agent messaged</span><Seg value={flt.ai} set={(v) => setFlt({ ...flt, ai: v })} /></div>
+          <div className="mb-2.5 flex items-center justify-between"><span className="text-[12.5px]" style={{ color: C.ink }}>You messaged</span><Seg value={flt.you} set={(v) => setFlt({ ...flt, you: v })} /></div>
+          <div className="mb-2.5 flex items-center justify-between"><span className="text-[12.5px]" style={{ color: C.ink }}>Converted</span><Seg value={flt.converted} set={(v) => setFlt({ ...flt, converted: v })} /></div>
+          <div className="mb-3.5 flex items-center justify-between"><span className="text-[12.5px]" style={{ color: C.ink }}>Client</span><Seg value={flt.client} set={(v) => setFlt({ ...flt, client: v })} /></div>
+
+          <Section title="Lead score">
+            <div className="flex flex-wrap gap-1.5">
+              {[["any", "Any"], ["0-25", "0–25"], ["26-50", "26–50"], ["51-75", "51–75"], ["76-100", "76–100"]].map(([v, l]) => (
+                <Chip key={v} on={flt.score === v} label={l} onClick={() => setFlt({ ...flt, score: v })} />
+              ))}
+            </div>
+          </Section>
         </div>
 
-        <div className="mb-3">
-          <div className="mb-1.5 text-[11.5px] font-semibold uppercase tracking-wide" style={{ color: C.sub }}>Source</div>
-          <div className="flex flex-wrap gap-1.5">
-            {SOURCES.map((sr) => <Chip key={sr} on={flt.source.includes(sr)} label={SRC_LBL[sr]} onClick={() => setFlt({ ...flt, source: toggle(flt.source, sr) })} />)}
-          </div>
+        <div className="px-4 py-3" style={{ borderTop: `1px solid ${C.line}` }}>
+          <button className="w-full rounded-xl py-2.5 text-[13px] font-semibold text-white" style={{ background: C.brand }} onClick={onClose}>Done</button>
         </div>
-
-        <div className="mb-3 flex items-center justify-between"><span className="text-[12.5px]" style={{ color: C.ink }}>AI Agent messaged</span><Seg value={flt.ai} set={(v) => setFlt({ ...flt, ai: v })} /></div>
-        <div className="mb-3 flex items-center justify-between"><span className="text-[12.5px]" style={{ color: C.ink }}>You messaged</span><Seg value={flt.you} set={(v) => setFlt({ ...flt, you: v })} /></div>
-        <div className="mb-3 flex items-center justify-between"><span className="text-[12.5px]" style={{ color: C.ink }}>Converted</span><Seg value={flt.converted} set={(v) => setFlt({ ...flt, converted: v })} /></div>
-        <div className="mb-3 flex items-center justify-between"><span className="text-[12.5px]" style={{ color: C.ink }}>Client</span><Seg value={flt.client} set={(v) => setFlt({ ...flt, client: v })} /></div>
-
-        <div className="mb-1">
-          <div className="mb-1.5 text-[11.5px] font-semibold uppercase tracking-wide" style={{ color: C.sub }}>Lead score</div>
-          <div className="flex flex-wrap gap-1.5">
-            {[["any", "Any"], ["0-25", "0–25"], ["26-50", "26–50"], ["51-75", "51–75"], ["76-100", "76–100"]].map(([v, l]) => (
-              <Chip key={v} on={flt.score === v} label={l} onClick={() => setFlt({ ...flt, score: v })} />
-            ))}
-          </div>
-        </div>
-
-        <button className="mt-4 w-full rounded-xl py-2.5 text-[13px] font-semibold text-white" style={{ background: C.brand }} onClick={onClose}>Apply filters</button>
       </div>
     </>
   );

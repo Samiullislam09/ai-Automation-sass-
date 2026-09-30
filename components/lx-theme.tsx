@@ -745,6 +745,12 @@ export const LX_CSS = `
 .lx-scroll::-webkit-scrollbar{width:6px;height:6px}
 .lx-scroll::-webkit-scrollbar-thumb{background:#20202e;border-radius:99px}
 .lx-scroll::-webkit-scrollbar-track{background:transparent}
+/* Light, professional thin scrollbar for the light surfaces (Leads CRM, drawer). */
+.lx-lscroll{scrollbar-width:thin;scrollbar-color:#cbd5e1 transparent}
+.lx-lscroll::-webkit-scrollbar{width:7px;height:7px}
+.lx-lscroll::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:99px}
+.lx-lscroll::-webkit-scrollbar-thumb:hover{background:#94a3b8}
+.lx-lscroll::-webkit-scrollbar-track{background:transparent}
 
 /* chat bubbles */
 .lx-me{background:linear-gradient(135deg,#5b4bd6,#7c3aed 60%,#8b5cf6);color:#fff;
