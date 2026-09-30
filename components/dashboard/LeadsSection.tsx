@@ -30,18 +30,31 @@ type Lead = {
 
 const FILTERS: [string, string][] = [
   ["all", "All"],
-  ["draft", "New drafts"],
-  ["contacted", "Contacted"],
-  ["do_not_contact", "Do not contact"],
-  ["skipped", "Skipped"],
+  ["pending_approval", "Waiting for you"],
+  ["approved", "Approved"],
+  ["contacted", "Messaged"],
+  ["replied", "Replied"],
+  ["won", "Won"],
+  ["rejected", "Rejected"],
 ];
 
 const STAGE_LABEL: Record<string, { label: string; tone: string }> = {
-  draft: { label: "DRAFT — NOT SENT", tone: "amber" },
-  contacted: { label: "CONTACTED", tone: "green" },
-  do_not_contact: { label: "DO NOT CONTACT", tone: "red" },
-  skipped: { label: "SKIPPED", tone: "mut" },
   new: { label: "NEW", tone: "blue" },
+  pending_approval: { label: "WAITING FOR YOU", tone: "amber" },
+  approved: { label: "APPROVED", tone: "green" },
+  rejected: { label: "REJECTED", tone: "mut" },
+  queued: { label: "QUEUED", tone: "blue" },
+  contacted: { label: "MESSAGED", tone: "blue" },
+  delivered: { label: "DELIVERED", tone: "blue" },
+  read: { label: "READ", tone: "violet" },
+  replied: { label: "REPLIED", tone: "green" },
+  in_conversation: { label: "IN CHAT", tone: "cyan" },
+  interested: { label: "INTERESTED", tone: "cyan" },
+  won: { label: "WON", tone: "green" },
+  lost: { label: "LOST", tone: "mut" },
+  opted_out: { label: "OPTED OUT", tone: "red" },
+  invalid: { label: "INVALID", tone: "mut" },
+  failed: { label: "FAILED", tone: "red" },
 };
 
 function bandTone(score: number | null): string {
@@ -100,7 +113,8 @@ export default function LeadsSection() {
       <div>
         <h1 className="text-lg font-bold">Leads</h1>
         <p className="lx-11 lx-mut mt-1">
-          Researched, scored and a message drafted — nothing sent. Copy a draft and send it yourself, or mark what you already did.
+          Mr. Lead finds and scores these. <b>You approve the good ones</b> — only approved leads can be messaged,
+          and messaging happens on the WhatsApp page, one at a time, by you.
         </p>
       </div>
 
@@ -166,15 +180,31 @@ export default function LeadsSection() {
               )}
 
               <div className="mt-auto flex flex-wrap gap-2 pt-2">
-                {l.draft && <button className="lx-grad lx-11 px-3.5 py-2" onClick={() => copyDraft(l)}>Copy draft</button>}
-                {l.stage !== "contacted" && (
-                  <button className="lx-ghost" disabled={busy === l.id} onClick={() => setStage(l, "contacted")}>I contacted them</button>
+                {/* THE APPROVAL GATE. A lead waiting for a decision shows Approve / Reject —
+                    approving is what lets Mr. WhatsApp ever message it, so it is the primary
+                    (gradient) action and rejecting is the quiet one beside it. */}
+                {l.stage === "pending_approval" && (
+                  <>
+                    <button className="lx-grad lx-11 px-3.5 py-2" disabled={busy === l.id} onClick={() => setStage(l, "approved")}>Approve</button>
+                    <button className="lx-ghost" style={{ color: "#f87171" }} disabled={busy === l.id} onClick={() => setStage(l, "rejected")}>Reject</button>
+                  </>
                 )}
-                {l.stage !== "do_not_contact" && (
-                  <button className="lx-ghost" style={{ color: "#f87171" }} disabled={busy === l.id} onClick={() => setStage(l, "do_not_contact")}>Do not contact</button>
+                {/* Approved and not yet messaged: point them at WhatsApp, which is where sending
+                    happens. Copy-draft stays as the fallback for anyone who wants to send from
+                    their own phone. */}
+                {l.stage === "approved" && (
+                  <>
+                    <a className="lx-grad lx-11 px-3.5 py-2" href="/dashboard/whatsapp" style={{ textDecoration: "none" }}>Message on WhatsApp</a>
+                    {l.draft && <button className="lx-ghost" onClick={() => copyDraft(l)}>Copy draft</button>}
+                  </>
                 )}
-                {l.stage !== "skipped" && l.stage !== "do_not_contact" && (
-                  <button className="lx-ghost" disabled={busy === l.id} onClick={() => setStage(l, "skipped")}>Skip</button>
+                {/* Already in a conversation: the chat lives on the WhatsApp page. */}
+                {["contacted", "delivered", "read", "replied", "in_conversation", "interested"].includes(l.stage) && (
+                  <a className="lx-ghost" href="/dashboard/whatsapp" style={{ textDecoration: "none" }}>Open chat</a>
+                )}
+                {/* Consent is always available and always terminal. */}
+                {!["opted_out", "rejected", "won", "lost"].includes(l.stage) && (
+                  <button className="lx-ghost" style={{ color: "#f87171" }} disabled={busy === l.id} onClick={() => setStage(l, "opted_out")}>Do not contact</button>
                 )}
               </div>
             </div>
@@ -184,7 +214,7 @@ export default function LeadsSection() {
             <div className="text-2xl">🧭</div>
             <p className="lx-11 lx-mut">
               {filter === "all"
-                ? "No leads yet — ask in chat, e.g. \"find me leads for restaurants in Dubai\", and the team starts researching."
+                ? "No leads yet — ask in chat, e.g. \"find me leads for restaurants in Dubai\", or set a daily leads schedule, and Mr. Lead starts filling this."
                 : "Nothing in this state."}
             </p>
           </div>
