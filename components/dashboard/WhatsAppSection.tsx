@@ -216,6 +216,7 @@ function Chat({ lead, onSent, toast }: { lead: Lead; onSent: () => void; toast: 
   const [thread, setThread] = useState<Msg[] | null>(null);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const phone = lead.whatsapp || lead.phone || "";
 
@@ -234,6 +235,31 @@ function Chat({ lead, onSent, toast }: { lead: Lead; onSent: () => void; toast: 
   }, [loadThread]);
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [thread]);
+
+  // "Suggest": on an empty conversation, load Mr. Lead's drafted FIRST message (lead.draft).
+  // Once there are messages, ask Mr. Brain to draft the next REPLY from the thread. Either way
+  // it only fills the box — the human still presses Send.
+  const suggest = async () => {
+    if (!thread || thread.length === 0) {
+      if (lead.draft) setText(lead.draft);
+      else toast("Koi drafted message nahi — khud likho.", "error");
+      return;
+    }
+    setSuggesting(true);
+    try {
+      const r = await fetch("/api/whatsapp/suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ leadId: lead.id }),
+      }).then((x) => x.json());
+      if (r.ok && r.reply) setText(r.reply);
+      else toast(r.error ?? "Draft nahi bana.", "error");
+    } catch (e: any) {
+      toast(e?.message ?? "Network error.", "error");
+    } finally {
+      setSuggesting(false);
+    }
+  };
 
   const send = async () => {
     const body = text.trim();
@@ -284,16 +310,15 @@ function Chat({ lead, onSent, toast }: { lead: Lead; onSent: () => void; toast: 
 
       {/* compose */}
       <div className="flex items-end gap-2 px-3 py-2.5" style={{ background: "#f0f2f5" }}>
-        {lead.draft && (
-          <button
-            className="shrink-0 rounded-full px-3 py-2.5 text-[12px] font-semibold"
-            style={{ background: "#fff", color: WA.green, border: `1px solid ${WA.divider}` }}
-            onClick={() => setText(lead.draft ?? "")}
-            title="Mr. Lead ka likha message box me daalo — bhejne se pehle badal bhi sakte ho"
-          >
-            Suggest
-          </button>
-        )}
+        <button
+          className="shrink-0 rounded-full px-3 py-2.5 text-[12px] font-semibold disabled:opacity-50"
+          style={{ background: "#fff", color: WA.green, border: `1px solid ${WA.divider}` }}
+          onClick={suggest}
+          disabled={suggesting}
+          title="Mr. Brain se ek message draft karwao — bhejne se pehle badal bhi sakte ho"
+        >
+          {suggesting ? "…" : "✨ Suggest"}
+        </button>
         <textarea
           className="flex-1 resize-none rounded-2xl px-4 py-2.5 text-[14px] outline-none"
           style={{ background: "#fff", color: WA.text, maxHeight: 120, border: "none" }}

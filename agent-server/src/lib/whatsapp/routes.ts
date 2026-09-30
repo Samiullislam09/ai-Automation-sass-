@@ -12,6 +12,7 @@ import { supabase } from "../../supabase.js";
 import { env } from "../../env.js";
 import { connect, disconnect, sendText, sessionStatus } from "./session.js";
 import { recordOutgoing } from "./store.js";
+import { suggestReply } from "./suggest.js";
 import { emitWhatsapp } from "../../socket.js";
 
 function authed(req: Request, res: Response): boolean {
@@ -86,6 +87,22 @@ export function mountWhatsapp(app: Express): void {
       res.json({ ok: true, waMessageId });
     } catch (e: any) {
       res.status(500).json({ ok: false, error: e?.message ?? "send failed" });
+    }
+  });
+
+  /** Draft a reply for a conversation — Mr. Brain reads the thread and suggests the next
+   *  message. Returns TEXT; it does not send. The UI drops it into the compose box. A read, so
+   *  the same token gate is enough; there is nothing irreversible here. */
+  app.post("/whatsapp/:tenantId/suggest", async (req, res) => {
+    if (!authed(req, res)) return;
+    const { tenantId } = req.params;
+    const { leadId } = req.body ?? {};
+    if (!leadId) return res.status(400).json({ ok: false, error: "leadId is required" });
+    try {
+      const { reply } = await suggestReply(supabase, tenantId, String(leadId));
+      res.json({ ok: true, reply });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message ?? "suggest failed" });
     }
   });
 

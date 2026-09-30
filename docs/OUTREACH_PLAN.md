@@ -89,8 +89,8 @@ Ye Twenty ko chhodne wali baat nahi hai — ye "pehle wo cheez jo aaj chal sakti
 - [ ] **C** — Baileys session: QR pair tumhara WhatsApp, session save, reconnect
 - [ ] **D** — receive: incoming message → CRM me store → lead se jodo (phone se)
 - [ ] **E** — send (MANUAL): `POST /whatsapp/send`, sirf human click se; status sent→delivered→read
-- [ ] **F** — Mr. WhatsApp agent: approved lead ka pehla message DRAFT (bhejta nahi)
-- [ ] **G** — Mr. Brain reply draft on incoming (bhejta nahi — human sends)
+- [x] **F** — first-message draft (Mr. Lead pipeline already writes lead.draft; Suggest loads it)
+- [x] **G** — Mr. Brain reply draft on demand (Suggest in an active chat → /whatsapp/suggest)
 - [x] **H** — WhatsApp section: QR connect screen + WhatsApp-style chat + conversation list (commit is one)
 - [ ] **I** — settings UI: Mr. Lead / Mr. WhatsApp enable + caps
 - [ ] **J** — Twenty CRM sync adapter (Oracle ke baad activate)
