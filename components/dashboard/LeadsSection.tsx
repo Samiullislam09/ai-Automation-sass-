@@ -173,7 +173,7 @@ export default function LeadsSection() {
   const waLink = (l: Lead) => `/dashboard/whatsapp?lead=${l.id}`;
 
   return (
-    <div className="min-h-full rounded-2xl p-3 sm:p-4" style={{ background: C.bg, color: C.ink, colorScheme: "light" }}>
+    <div className="-m-3 min-h-[calc(100%+1.5rem)] p-4 sm:-m-4 sm:min-h-[calc(100%+2rem)] sm:p-5" style={{ background: C.bg, color: C.ink, colorScheme: "light" }}>
       {/* header — title on its own line; a single-line toolbar below that fits without wrapping */}
       <div className="mb-3 flex items-center justify-between gap-3">
         <div>
