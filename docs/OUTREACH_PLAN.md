@@ -91,7 +91,7 @@ Ye Twenty ko chhodne wali baat nahi hai — ye "pehle wo cheez jo aaj chal sakti
 - [ ] **E** — send (MANUAL): `POST /whatsapp/send`, sirf human click se; status sent→delivered→read
 - [ ] **F** — Mr. WhatsApp agent: approved lead ka pehla message DRAFT (bhejta nahi)
 - [ ] **G** — Mr. Brain reply draft on incoming (bhejta nahi — human sends)
-- [ ] **H** — Dashboard: WhatsApp-jaisa chat UI + QR connect screen + CRM board + approve buttons
+- [x] **H** — WhatsApp section: QR connect screen + WhatsApp-style chat + conversation list (commit is one)
 - [ ] **I** — settings UI: Mr. Lead / Mr. WhatsApp enable + caps
 - [ ] **J** — Twenty CRM sync adapter (Oracle ke baad activate)
 

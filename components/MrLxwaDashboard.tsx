@@ -91,6 +91,7 @@ import {
   Monitor,
   Pause,
   Play,
+  MessageCircle,
 } from "lucide-react";
 
 /* ========================================================================== */
@@ -125,6 +126,7 @@ const NAV: NavItem[] = [
   { label: "Schedule", icon: CalendarDays, href: "/dashboard/schedule" },
   { label: "Content", icon: FileText, href: "/dashboard/content" },
   { label: "Leads", icon: UserRound, href: "/dashboard/leads" },
+  { label: "WhatsApp", icon: MessageCircle, href: "/dashboard/whatsapp" },
   { label: "Site Brain", icon: Globe, href: "/dashboard/site-brain" },
   { label: "Audit", icon: TrendingUp, href: "/dashboard/audit" },
   { label: "Reports", icon: ClipboardList, href: "/dashboard/reports" },
