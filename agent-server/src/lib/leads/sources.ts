@@ -10,7 +10,9 @@
  *
  *   · `osm`    — OpenStreetMap via Nominatim. Free, no key, wired today. Local businesses by
  *                category and area, with website and phone where the map has them.
- *   · `places` — Google Places. SEAM (see below). GOOGLE_PLACES_API_KEY.
+ *   · `places` — Google Places. WIRED. GOOGLE_PLACES_API_KEY (optional; card required at Google).
+ *   · `jobs`   — Adzuna job listings, an INTENT source: a company hiring for a role you sell
+ *                into needs what you sell. WIRED. ADZUNA_APP_ID + ADZUNA_APP_KEY (free tier).
  *   · `apollo` — Apollo.io for B2B. SEAM. APOLLO_API_KEY.
  *
  *  MANNERS — why this file is longer than "call an API"
@@ -44,7 +46,7 @@ export const OSM_ATTRIBUTION = "© OpenStreetMap contributors (ODbL)";
 
 // ── the shape a source returns ──────────────────────────────────────────────────────────────
 
-export type SourceId = "osm" | "places" | "apollo";
+export type SourceId = "osm" | "places" | "apollo" | "jobs";
 
 export type Candidate = {
   name: string;
@@ -412,6 +414,80 @@ export function placesConfigured(): boolean {
   return !!process.env.GOOGLE_PLACES_API_KEY;
 }
 
+const PLACES_HOST = "places.googleapis.com";
+/** Places is a paid Google API with generous per-minute limits; a light 250ms gap keeps a burst
+ *  of ICP search terms from tripping the per-minute quota without slowing a normal run. */
+const PLACES_GAP_MS = 250;
+
+/** Google Places "New" — searchText. The field mask is the MINIMUM this pipeline needs, because
+ *  billing is per requested field: widening it costs money on every call. Maps exactly as the
+ *  seam documented. Never throws — a failure is a report line, like every other source. */
+export async function placesSearch(icp: Icp, limit: number, fetchImpl: typeof fetch = fetch): Promise<Candidate[]> {
+  const key = process.env.GOOGLE_PLACES_API_KEY;
+  if (!key) return [];
+  const out: Candidate[] = [];
+  const seen = new Set<string>();
+
+  for (const term of icp.searchTerms) {
+    if (out.length >= limit) break;
+    const query = icp.geo ? `${term} in ${icp.geo}` : term;
+    const cacheKey = `places:${query.toLowerCase()}:${limit}`;
+    const hit = cached<Candidate[]>(cacheKey);
+    const rows =
+      hit ??
+      (await throttled(PLACES_HOST, PLACES_GAP_MS, async () => {
+        try {
+          const res = await fetchImpl(`https://${PLACES_HOST}/v1/places:searchText`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Goog-Api-Key": key,
+              "X-Goog-FieldMask":
+                "places.displayName,places.websiteUri,places.nationalPhoneNumber,places.internationalPhoneNumber,places.formattedAddress,places.types,places.id",
+            },
+            body: JSON.stringify({ textQuery: query, maxResultCount: Math.min(20, Math.max(5, limit * 2)) }),
+            signal: AbortSignal.timeout(15_000),
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 160)}`);
+          const json: any = await res.json();
+          return Array.isArray(json?.places) ? json.places.map(placeToCandidate).filter(Boolean as any as (c: Candidate | null) => c is Candidate) : [];
+        } catch (e: any) {
+          console.warn(`[leads/places] "${query}" failed:`, e?.message);
+          return [] as Candidate[];
+        }
+      }));
+    if (!hit) remember(cacheKey, rows);
+
+    for (const c of rows) {
+      const dedupeKey = c.domain ?? c.sourceRef ?? `${c.name.toLowerCase()}|${c.address ?? ""}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      out.push(c);
+      if (out.length >= limit) break;
+    }
+  }
+  return out;
+}
+
+function placeToCandidate(p: any): Candidate | null {
+  const name = String(p?.displayName?.text ?? "").trim();
+  if (!name) return null;
+  const website = firstString(p?.websiteUri);
+  const phone = firstString(p?.internationalPhoneNumber, p?.nationalPhoneNumber);
+  return {
+    name,
+    website: website ?? null,
+    domain: domainOf(website),
+    phone: phone ?? null,
+    address: firstString(p?.formattedAddress),
+    categories: Array.isArray(p?.types) ? p.types.map((t: any) => String(t)) : [],
+    source: "places",
+    sourceRef: firstString(p?.id),
+    // Google Places results shown to a user must credit Google; kept short for the card.
+    attribution: "Data © Google",
+  };
+}
+
 // ── source 3 · Apollo (SEAM) ────────────────────────────────────────────────────────────────
 
 /** APOLLO_API_KEY — the B2B half of §17.4: companies rather than shops.
@@ -433,6 +509,122 @@ export function apolloConfigured(): boolean {
   return !!process.env.APOLLO_API_KEY;
 }
 
+// ── source 4 · Adzuna job listings (WIRED) — an INTENT source ────────────────────────────────
+
+/** ADZUNA_APP_ID + ADZUNA_APP_KEY (free tier). A company hiring for a role you sell into is a
+ *  company that needs what you sell — "we're hiring a QHSE Manager" is an ISO consultancy's best
+ *  lead, better than any directory listing, because the need is stated and current. Adzuna is a
+ *  real API, not a scrape, so this is ToS-clean.
+ *
+ *  COUNTRY COVERAGE IS THE CATCH, AND IT IS REPORTED HONESTLY. Adzuna indexes a fixed set of
+ *  countries; the ICP's geo is mapped to one, and a geo Adzuna does not cover (the UAE, for one)
+ *  returns nothing with a note saying exactly that — never a pretend-empty result. */
+export function jobsConfigured(): boolean {
+  return !!(process.env.ADZUNA_APP_ID && process.env.ADZUNA_APP_KEY);
+}
+
+const ADZUNA_HOST = "api.adzuna.com";
+const ADZUNA_GAP_MS = 400;
+
+/** The countries Adzuna indexes, mapped from words that might appear in an ICP geo. Deliberately
+ *  a small, checkable list: an unmapped geo is "not covered", which is the truth, rather than a
+ *  guessed country code that would query the wrong index. UAE is intentionally ABSENT — Adzuna
+ *  has no UAE index, and pretending otherwise would return a confident zero for the wrong reason. */
+const ADZUNA_COUNTRIES: { code: string; match: RegExp }[] = [
+  { code: "gb", match: /uk|united kingdom|england|scotland|wales|london|manchester|birmingham/i },
+  { code: "us", match: /united states|usa|u\.s\.|america|new york|california|texas|chicago/i },
+  { code: "in", match: /india|delhi|mumbai|bangalore|bengaluru|hyderabad|pune|chennai|kolkata|gurgaon|noida/i },
+  { code: "au", match: /australia|sydney|melbourne|brisbane|perth/i },
+  { code: "ca", match: /canada|toronto|vancouver|montreal/i },
+  { code: "sg", match: /singapore/i },
+  { code: "de", match: /germany|deutschland|berlin|munich|muenchen/i },
+  { code: "nl", match: /netherlands|holland|amsterdam/i },
+];
+
+/** Which Adzuna index to hit for this ICP's geo, or null when Adzuna does not cover it. */
+export function adzunaCountryFor(geo: string | null): string | null {
+  if (!geo) return null;
+  for (const c of ADZUNA_COUNTRIES) if (c.match.test(geo)) return c.code;
+  return null;
+}
+
+/** Companies hiring for roles matching the ICP, as lead candidates. The "business" is the
+ *  hiring company; the job posting is the evidence. No website/phone comes from Adzuna, so these
+ *  leads lean on the research + compliance steps to find a contact, same as any other. */
+export async function jobsSearch(icp: Icp, limit: number, fetchImpl: typeof fetch = fetch): Promise<{ candidates: Candidate[]; note: string }> {
+  const id = process.env.ADZUNA_APP_ID, key = process.env.ADZUNA_APP_KEY;
+  if (!id || !key) return { candidates: [], note: "no ADZUNA_APP_ID / ADZUNA_APP_KEY" };
+
+  const country = adzunaCountryFor(icp.geo);
+  if (!country) {
+    return {
+      candidates: [],
+      note: icp.geo
+        ? `Adzuna does not index ${icp.geo} — job-signal leads are unavailable there`
+        : "Adzuna needs a country: add a place to the ICP (e.g. \"in London\") for job-signal leads",
+    };
+  }
+
+  const what = icp.searchTerms[0] ?? icp.industry;
+  const cacheKey = `jobs:${country}:${what.toLowerCase()}:${limit}`;
+  const hit = cached<Candidate[]>(cacheKey);
+  const rows =
+    hit ??
+    (await throttled(ADZUNA_HOST, ADZUNA_GAP_MS, async () => {
+      try {
+        const url =
+          `https://${ADZUNA_HOST}/v1/api/jobs/${country}/search/1?` +
+          new URLSearchParams({
+            app_id: id,
+            app_key: key,
+            what: what,
+            ...(icp.geo ? { where: icp.geo } : {}),
+            results_per_page: String(Math.min(50, Math.max(10, limit * 2))),
+            content_type: "application/json",
+          }).toString();
+        const res = await fetchImpl(url, { headers: { "Accept": "application/json" }, signal: AbortSignal.timeout(15_000) });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json: any = await res.json();
+        return Array.isArray(json?.results) ? json.results.map(jobToCandidate).filter(Boolean as any as (c: Candidate | null) => c is Candidate) : [];
+      } catch (e: any) {
+        console.warn(`[leads/jobs] "${what}" (${country}) failed:`, e?.message);
+        return [] as Candidate[];
+      }
+    }));
+  if (!hit) remember(cacheKey, rows);
+
+  // One row per hiring COMPANY, not per posting — three ads from the same firm is one lead.
+  const seen = new Set<string>();
+  const out: Candidate[] = [];
+  for (const c of rows) {
+    const dedupeKey = c.name.toLowerCase();
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    out.push(c);
+    if (out.length >= limit) break;
+  }
+  return { candidates: out, note: out.length ? `Adzuna (${country}): companies hiring for "${what}"` : `Adzuna (${country}) had no matching postings` };
+}
+
+function jobToCandidate(j: any): Candidate | null {
+  const name = String(j?.company?.display_name ?? "").trim();
+  if (!name) return null;
+  const loc = String(j?.location?.display_name ?? "").trim();
+  const title = String(j?.title ?? "").trim();
+  return {
+    name,
+    website: null,          // Adzuna gives no company site — research step will look for one
+    domain: null,
+    phone: null,
+    address: loc || null,
+    // The hiring signal, kept as a category so qualify()/the card can show WHY this is a lead.
+    categories: [title ? `hiring: ${title}` : "hiring", ...(j?.category?.label ? [String(j.category.label)] : [])],
+    source: "jobs",
+    sourceRef: firstString(j?.id, j?.redirect_url),
+    attribution: "Job data via Adzuna",
+  };
+}
+
 // ── the discovery layer ─────────────────────────────────────────────────────────────────────
 
 export type DiscoverDeps = { fetchImpl?: typeof fetch };
@@ -444,19 +636,41 @@ export async function discover(icp: Icp, limit: number, deps: DiscoverDeps = {})
   const reports: SourceReport[] = [];
   const candidates: Candidate[] = [];
 
-  // Google Places, first choice for local when it is ever wired — reported before OSM runs so
-  // the user can see the better source was skipped and why.
+  // Google Places — the best local source. Runs first when its key is set; OSM then tops up.
+  let placesFound = 0;
+  let placesNote = "no GOOGLE_PLACES_API_KEY — using OpenStreetMap instead";
+  if (placesConfigured()) {
+    try {
+      const rows = await placesSearch(icp, limit, fetchImpl);
+      candidates.push(...rows);
+      placesFound = rows.length;
+      placesNote = rows.length ? "Google Places" : "Google Places returned nothing for this search";
+    } catch (e: any) {
+      placesNote = `Google Places failed: ${String(e?.message ?? e).slice(0, 120)}`;
+    }
+  }
   reports.push({
-    id: "places",
-    label: "Google Places",
-    configured: placesConfigured(),
-    wired: false,
-    envVars: ["GOOGLE_PLACES_API_KEY"],
-    used: false,
-    found: 0,
-    note: placesConfigured()
-      ? "key is set but the Places adapter is not wired yet — using OpenStreetMap instead"
-      : "no GOOGLE_PLACES_API_KEY — using OpenStreetMap instead",
+    id: "places", label: "Google Places", configured: placesConfigured(), wired: true,
+    envVars: ["GOOGLE_PLACES_API_KEY"], used: placesConfigured(), found: placesFound, note: placesNote,
+  });
+
+  // Adzuna job listings — an intent source. Runs whenever its keys are set and the geo is one
+  // Adzuna covers; the adapter's own note explains a skip (no keys, or an uncovered country).
+  let jobsFound = 0;
+  let jobsNote = "no ADZUNA_APP_ID / ADZUNA_APP_KEY";
+  if (jobsConfigured()) {
+    try {
+      const r = await jobsSearch(icp, limit, fetchImpl);
+      candidates.push(...r.candidates);
+      jobsFound = r.candidates.length;
+      jobsNote = r.note;
+    } catch (e: any) {
+      jobsNote = `Adzuna failed: ${String(e?.message ?? e).slice(0, 120)}`;
+    }
+  }
+  reports.push({
+    id: "jobs", label: "Job boards (Adzuna)", configured: jobsConfigured(), wired: true,
+    envVars: ["ADZUNA_APP_ID", "ADZUNA_APP_KEY"], used: jobsConfigured(), found: jobsFound, note: jobsNote,
   });
 
   reports.push({

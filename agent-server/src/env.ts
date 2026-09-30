@@ -45,6 +45,13 @@ export const env = {
   CLOUDFLARE_API_TOKEN: process.env.CLOUDFLARE_API_TOKEN || "",
   // Stock photos, for the "a real photo, not an AI one" cases (restaurant, clinic). Optional:
   // without them the ladder in lib/media/providers.ts simply skips that rung.
+  // Lead discovery sources, all optional (lib/leads/sources.ts). A missing key is a skipped
+  // source with a note, never an error — OpenStreetMap always answers keyless.
+  //   GOOGLE_PLACES_API_KEY — Google Places "New" (needs a billing account at Google).
+  //   ADZUNA_APP_ID/KEY     — Adzuna job listings (free tier), the intent source.
+  GOOGLE_PLACES_API_KEY: process.env.GOOGLE_PLACES_API_KEY || "",
+  ADZUNA_APP_ID: process.env.ADZUNA_APP_ID || "",
+  ADZUNA_APP_KEY: process.env.ADZUNA_APP_KEY || "",
   UNSPLASH_ACCESS_KEY: process.env.UNSPLASH_ACCESS_KEY || "",
   PEXELS_API_KEY: process.env.PEXELS_API_KEY || "",
 

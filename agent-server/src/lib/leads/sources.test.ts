@@ -11,6 +11,8 @@ process.env.SUPABASE_SERVICE_ROLE_KEY ||= "unit-test";
 
 const {
   __resetSourceCaches,
+  jobsConfigured,
+  adzunaCountryFor,
   apolloConfigured,
   describeSources,
   discover,
@@ -178,9 +180,15 @@ test("a paid source is optional, exactly like DataForSEO: absent keys are a note
   const byId = Object.fromEntries(result.reports.map((r) => [r.id, r]));
   assert.equal(byId.osm.used, true);
   assert.equal(byId.osm.found, 15);
-  assert.equal(byId.places.wired, false);
+  // Places is wired now, but with no key it is skipped with the env var named.
+  assert.equal(byId.places.wired, true);
+  assert.equal(byId.places.used, false);
   assert.deepEqual(byId.places.envVars, ["GOOGLE_PLACES_API_KEY"]);
   assert.match(byId.places.note, /no GOOGLE_PLACES_API_KEY/);
+  // Jobs (Adzuna) is wired too; no keys means a skip with its two env vars named.
+  assert.equal(byId.jobs.wired, true);
+  assert.equal(byId.jobs.used, false);
+  assert.deepEqual(byId.jobs.envVars, ["ADZUNA_APP_ID", "ADZUNA_APP_KEY"]);
   assert.equal(byId.apollo.wired, false);
   assert.deepEqual(byId.apollo.envVars, ["APOLLO_API_KEY"]);
 
@@ -212,22 +220,83 @@ test("a source that fails is a report line, not a dead run", async () => {
   assert.equal(result.reports.find((r) => r.id === "osm")!.found, 0);
 });
 
-test("a key on its own does not make a seam wired — it says so instead", async () => {
+test("a Google Places key wires a live call, and its results carry Google attribution", async () => {
   process.env.GOOGLE_PLACES_API_KEY = "test-key";
   try {
     __resetSourceCaches();
     assert.equal(placesConfigured(), true);
-    const icp = buildIcp({ query: "restaurants in Dubai", count: 1 });
+    const icp = buildIcp({ query: "restaurants in Dubai", count: 2 });
     assert.equal(icp.ok, true);
     if (!icp.ok) return;
-    const result = await discover(icp.icp, 1, {
-      fetchImpl: (async () => new Response("[]", { status: 200, headers: { "content-type": "application/json" } })) as unknown as typeof fetch,
+
+    // A Places "New" searchText response shape.
+    const placesBody = JSON.stringify({
+      places: [
+        { id: "P1", displayName: { text: "Zoma Restaurant" }, websiteUri: "https://zoma.example", internationalPhoneNumber: "+971 4 111 2222", formattedAddress: "Jumeirah, Dubai", types: ["restaurant"] },
+        { id: "P2", displayName: { text: "Cafe Bateel" }, websiteUri: "https://bateel.example", formattedAddress: "DIFC, Dubai", types: ["cafe"] },
+      ],
     });
+    const seen: string[] = [];
+    const result = await discover(icp.icp, 2, {
+      fetchImpl: (async (input: any) => {
+        const u = String(input);
+        seen.push(u);
+        if (u.includes("places.googleapis.com")) return new Response(placesBody, { status: 200, headers: { "content-type": "application/json" } });
+        // OSM top-up returns nothing so the assertions are about Places alone.
+        return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
+      }) as unknown as typeof fetch,
+    });
+
     const places = result.reports.find((r) => r.id === "places")!;
     assert.equal(places.configured, true);
-    assert.equal(places.wired, false);
-    assert.match(places.note, /not wired yet/);
+    assert.equal(places.wired, true);
+    assert.equal(places.used, true);
+    assert.ok(places.found >= 1);
+    const fromPlaces = result.candidates.filter((c) => c.source === "places");
+    assert.ok(fromPlaces.length >= 1);
+    assert.equal(fromPlaces[0].attribution, "Data © Google");
+    assert.equal(fromPlaces[0].domain, "zoma.example");
+    assert.ok(seen.some((u) => u.includes("places.googleapis.com")));
   } finally {
     delete process.env.GOOGLE_PLACES_API_KEY;
+  }
+});
+
+test("Adzuna maps a covered geo and reports an uncovered one honestly", async () => {
+  process.env.ADZUNA_APP_ID = "id";
+  process.env.ADZUNA_APP_KEY = "key";
+  try {
+    __resetSourceCaches();
+    assert.equal(jobsConfigured(), true);
+    assert.equal(adzunaCountryFor("in London"), "gb");
+    assert.equal(adzunaCountryFor("Bangalore, India"), "in");
+    assert.equal(adzunaCountryFor("Dubai, UAE"), null, "Adzuna has no UAE index");
+
+    // A covered geo returns hiring companies as candidates.
+    const icp = buildIcp({ query: "logistics in Singapore", count: 3 });
+    assert.equal(icp.ok, true);
+    if (!icp.ok) return;
+    const jobsBody = JSON.stringify({ results: [
+      { id: "J1", title: "Warehouse Manager", company: { display_name: "Acme Logistics" }, location: { display_name: "Singapore" }, category: { label: "Logistics Jobs" } },
+      { id: "J2", title: "Driver", company: { display_name: "Acme Logistics" }, location: { display_name: "Singapore" } },
+      { id: "J3", title: "Ops Lead", company: { display_name: "Beta Freight" }, location: { display_name: "Singapore" } },
+    ] });
+    const result = await discover(icp.icp, 5, {
+      fetchImpl: (async (input: any) => {
+        const u = String(input);
+        if (u.includes("api.adzuna.com")) return new Response(jobsBody, { status: 200, headers: { "content-type": "application/json" } });
+        return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
+      }) as unknown as typeof fetch,
+    });
+    const jobs = result.reports.find((r) => r.id === "jobs")!;
+    assert.equal(jobs.used, true);
+    const fromJobs = result.candidates.filter((c) => c.source === "jobs");
+    // Two postings from Acme collapse to one company; Beta is the second.
+    assert.equal(fromJobs.length, 2);
+    assert.match(fromJobs[0].categories.join(" "), /hiring/);
+    assert.equal(fromJobs[0].attribution, "Job data via Adzuna");
+  } finally {
+    delete process.env.ADZUNA_APP_ID;
+    delete process.env.ADZUNA_APP_KEY;
   }
 });
