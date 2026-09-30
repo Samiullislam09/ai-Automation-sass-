@@ -5,31 +5,27 @@ import WhatsAppConnectModal from "./WhatsAppConnectModal";
 
 /** /dashboard/whatsapp — Mr. WhatsApp, made to look and feel like WhatsApp itself.
  *
- *  WHY THIS ONE PANEL IS WHITE while the rest of the dashboard is dark (owner, 2026-09-30: "ek
- *  dam simple whatsapp jaisa, white bg pe"). A non-technical user has used WhatsApp for years;
- *  the fastest way for them to trust and operate an inbox is for it to BE the inbox they know —
- *  the green header, the conversation list, the wallpaper chat area, the green outgoing bubbles.
- *  So this component renders its own WhatsApp-authentic surface with hard-coded WhatsApp colours,
- *  not the dashboard's theme tokens, on purpose. It is the one screen that should not look like
- *  the product.
+ *  WHITE, ON PURPOSE (owner: "ek dam simple WhatsApp jaisa, white bg"). A non-technical user
+ *  already knows WhatsApp; the fastest way for them to trust an inbox is for it to BE the inbox
+ *  they know. So this renders its own WhatsApp-authentic surface with WhatsApp colours, not the
+ *  dark dashboard theme.
  *
- *  THE COMPOSE BOX SENDS ONE MESSAGE WHEN YOU PRESS SEND. No "send all", no schedule, no auto.
- *  Mr. Brain can drop a suggested reply into the box, but it waits there until you send it. A
- *  person always sends.
+ *  FILLS THE HEIGHT. The section is a flex column that fills <main>; the inbox panel is flex-1,
+ *  so there is no dead space below it (the old fixed min(72vh,660px) left a gap).
  *
- *  NO "not connected" FLICKER. Status starts as `checking`, and once we have ever seen
- *  `connected` we do not fall back to the connect screen on a single empty poll — only an
- *  explicit disconnected/logged_out from a successful response flips it. The old code showed the
- *  Connect call-to-action for the 1-2s before the first poll returned, which read as "it
- *  disconnected" every time the page loaded. */
+ *  RESPONSIVE. On a wide screen it is the classic two panes (chats | chat). On a phone it shows
+ *  ONE pane at a time: the chat list, and when you open a conversation the chat takes over with a
+ *  back arrow — exactly how the WhatsApp app behaves.
+ *
+ *  ONE MESSAGE PER SEND. No "send all", no auto. Suggest fills the box (first-message draft, or a
+ *  Mr. Brain reply once a chat is going); you still press Send. */
 
 const WA = {
-  green: "#008069",       // WhatsApp header green
-  greenDark: "#017561",
+  green: "#008069",
   panel: "#ffffff",
   listHover: "#f5f6f6",
-  chatBg: "#efeae2",      // the classic chat wallpaper tone
-  outBubble: "#d9fdd3",   // outgoing green
+  chatBg: "#efeae2",
+  outBubble: "#d9fdd3",
   inBubble: "#ffffff",
   text: "#111b21",
   sub: "#667781",
@@ -53,10 +49,7 @@ export default function WhatsAppSection() {
       if (r.ok) {
         setStatus({ status: r.status, qr: r.qr ?? null, phone: r.phone ?? null, loaded: true });
         if (r.status === "connected") setEverConnected(true);
-      } else {
-        // A failed status read does NOT mean disconnected — keep the last good state, just mark loaded.
-        setStatus((s) => ({ ...s, loaded: true }));
-      }
+      } else setStatus((s) => ({ ...s, loaded: true }));
     } catch {
       setStatus((s) => ({ ...s, loaded: true }));
     }
@@ -76,12 +69,11 @@ export default function WhatsAppSection() {
     } catch (e: any) { toast(e?.message ?? "Network error.", "error"); }
   };
 
-  // "connected" is sticky: once seen, a single empty poll cannot knock us back to the CTA.
   const connected = status.status === "connected" || (everConnected && status.status === "checking");
   const checking = !status.loaded && !everConnected;
 
   return (
-    <div className="space-y-4">
+    <div className="flex h-full min-h-0 flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: WA.green }}>
@@ -104,11 +96,13 @@ export default function WhatsAppSection() {
       </div>
 
       {checking ? (
-        <div className="lx-card2 flex items-center justify-center p-16"><p className="lx-11 lx-mut">Checking connection…</p></div>
+        <div className="lx-card2 flex flex-1 items-center justify-center"><p className="lx-11 lx-mut">Checking connection…</p></div>
       ) : connected ? (
         <Inbox />
       ) : (
-        <ConnectCta status={status.status} onConnect={() => setModal(true)} />
+        <div className="flex flex-1 items-center justify-center">
+          <ConnectCta status={status.status} onConnect={() => setModal(true)} />
+        </div>
       )}
 
       <WhatsAppConnectModal open={modal} onClose={() => { setModal(false); poll(); }} onConnected={() => { setEverConnected(true); poll(); }} />
@@ -116,17 +110,17 @@ export default function WhatsAppSection() {
   );
 }
 
-/* ── pre-connection call to action (opens the modal) ─────────────────────────────────────── */
+/* ── pre-connection call to action ───────────────────────────────────────────────────────── */
 function ConnectCta({ status, onConnect }: { status: string; onConnect: () => void }) {
   return (
-    <div className="flex flex-col items-center gap-4 rounded-3xl p-10 text-center" style={{ background: WA.panel, color: WA.text }}>
+    <div className="flex flex-col items-center gap-4 rounded-3xl p-10 text-center" style={{ background: WA.panel, color: WA.text, maxWidth: 440 }}>
       <span className="flex h-16 w-16 items-center justify-center rounded-full" style={{ background: WA.green }}>
         <svg width="30" height="30" viewBox="0 0 24 24" fill="none"><path d="M12 21a9 9 0 10-8-4.9L3 21l4.9-1A9 9 0 0012 21z" stroke="#fff" strokeWidth="1.7" strokeLinejoin="round" /></svg>
       </span>
-      <div className="max-w-sm">
-        <h2 className="text-base font-bold">Apna WhatsApp jodo</h2>
+      <div>
+        <h2 className="text-base font-bold">Connect your WhatsApp</h2>
         <p className="text-[13px] mt-1.5" style={{ color: WA.sub }}>
-          Ek baar link karo — WhatsApp Web jaisa — aur har approved lead yahin ek chat ban jayega jise tum reply kar sako.
+          Link it once — like WhatsApp Web — and every lead you approve becomes a chat you can reply to right here.
         </p>
       </div>
       <button className="rounded-full px-6 py-2.5 text-[14px] font-semibold text-white" style={{ background: WA.green }} onClick={onConnect}>
@@ -136,12 +130,13 @@ function ConnectCta({ status, onConnect }: { status: string; onConnect: () => vo
   );
 }
 
-/* ── the inbox: WhatsApp-authentic, white ────────────────────────────────────────────────── */
+/* ── the inbox ───────────────────────────────────────────────────────────────────────────── */
 function Inbox() {
   const { toast } = useStore();
   const [leads, setLeads] = useState<Lead[] | null>(null);
   const [inbox, setInbox] = useState<Record<string, { body: string; direction: string; created_at: string }>>({});
   const [active, setActive] = useState<Lead | null>(null);
+  const [newChat, setNewChat] = useState(false);
 
   const loadList = useCallback(async () => {
     try {
@@ -151,10 +146,10 @@ function Inbox() {
       ]);
       if (ls.ok) {
         const inConvo = (ls.items as Lead[]).filter((l) =>
-          ["contacted", "delivered", "read", "replied", "in_conversation", "interested", "won", "lost"].includes(l.stage)
+          ["approved", "contacted", "delivered", "read", "replied", "in_conversation", "interested", "won", "lost"].includes(l.stage)
         );
         setLeads(inConvo);
-        setActive((a) => a ?? inConvo[0] ?? null);
+        setActive((a) => (a ? inConvo.find((x) => x.id === a.id) ?? a : null));
       }
       if (ib.ok) {
         const map: Record<string, any> = {};
@@ -170,49 +165,81 @@ function Inbox() {
     return () => clearInterval(id);
   }, [loadList]);
 
-  if (leads === null) return <div className="flex items-center justify-center rounded-3xl p-16" style={{ background: WA.panel }}><p className="text-[13px]" style={{ color: WA.sub }}>Loading…</p></div>;
+  if (leads === null) return <div className="flex flex-1 items-center justify-center rounded-3xl" style={{ background: WA.panel }}><p className="text-[13px]" style={{ color: WA.sub }}>Loading…</p></div>;
 
   return (
-    <div className="grid grid-cols-1 overflow-hidden rounded-3xl md:grid-cols-[320px_1fr]" style={{ height: "min(72vh, 660px)", background: WA.panel, border: `1px solid ${WA.divider}` }}>
-      {/* conversation list */}
-      <div className="flex flex-col overflow-y-auto" style={{ borderRight: `1px solid ${WA.divider}`, background: WA.panel }}>
-        <div className="px-4 py-3.5 text-[15px] font-semibold" style={{ color: WA.text, borderBottom: `1px solid ${WA.divider}` }}>
-          Chats
-        </div>
-        {leads.length === 0 ? (
-          <div className="p-5"><p className="text-[13px]" style={{ color: WA.sub }}>Abhi koi chat nahi. Leads page pe kisi ko approve karke pehla message bhejo — wo yahan aa jayega.</p></div>
-        ) : leads.map((l) => {
-          const last = inbox[l.id];
-          const on = active?.id === l.id;
-          return (
+    <div className="min-h-0 flex-1 overflow-hidden rounded-3xl" style={{ background: WA.panel, border: `1px solid ${WA.divider}` }}>
+      <div className="grid h-full grid-cols-1 md:grid-cols-[340px_1fr]">
+        {/* conversation list — hidden on mobile once a chat is open */}
+        <div className={`${active ? "hidden md:flex" : "flex"} h-full min-h-0 flex-col overflow-hidden`} style={{ borderRight: `1px solid ${WA.divider}` }}>
+          <div className="flex items-center justify-between px-4 py-3.5" style={{ borderBottom: `1px solid ${WA.divider}` }}>
+            <span className="text-[15px] font-semibold" style={{ color: WA.text }}>Chats</span>
             <button
-              key={l.id}
-              onClick={() => setActive(l)}
-              className="flex items-center gap-3 px-3.5 py-3 text-left"
-              style={{ background: on ? WA.listHover : WA.panel, borderBottom: `1px solid ${WA.divider}` }}
+              className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-semibold text-white"
+              style={{ background: WA.green }}
+              onClick={() => setNewChat(true)}
+              title="Start a chat with any number"
             >
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[15px] font-bold text-white" style={{ background: WA.green }}>
-                {(l.company || l.name || "?").slice(0, 1).toUpperCase()}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[14px] font-semibold" style={{ color: WA.text }}>{l.company || l.name || "Lead"}</span>
-                <span className="block truncate text-[12.5px]" style={{ color: WA.sub }}>
-                  {last ? (last.direction === "out" ? "✓ " : "") + last.body : "Tap to open"}
-                </span>
-              </span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" /></svg>
+              New chat
             </button>
-          );
-        })}
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {leads.length === 0 ? (
+              <div className="p-5"><p className="text-[13px]" style={{ color: WA.sub }}>No chats yet. Approve a lead on the Leads page and send the first message, or start a New chat with any number.</p></div>
+            ) : leads.map((l) => {
+              const last = inbox[l.id];
+              const on = active?.id === l.id;
+              return (
+                <button
+                  key={l.id}
+                  onClick={() => setActive(l)}
+                  className="flex w-full items-center gap-3 px-3.5 py-3 text-left"
+                  style={{ background: on ? WA.listHover : WA.panel, borderBottom: `1px solid ${WA.divider}` }}
+                >
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[15px] font-bold text-white" style={{ background: WA.green }}>
+                    {(l.company || l.name || "?").slice(0, 1).toUpperCase()}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[14px] font-semibold" style={{ color: WA.text }}>{l.company || l.name || "Lead"}</span>
+                    <span className="block truncate text-[12.5px]" style={{ color: WA.sub }}>
+                      {last ? (last.direction === "out" ? "✓ " : "") + last.body : "Tap to open"}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* chat pane — full width on mobile when a chat is open */}
+        <div className={`${active ? "flex" : "hidden md:flex"} h-full min-h-0 flex-col`} style={{ background: WA.chatBg }}>
+          {active ? (
+            <Chat lead={active} onSent={loadList} onBack={() => setActive(null)} toast={toast} />
+          ) : (
+            <div className="flex h-full items-center justify-center"><p className="text-[13px]" style={{ color: WA.sub }}>Select a chat</p></div>
+          )}
+        </div>
       </div>
 
-      {active ? <Chat lead={active} onSent={loadList} toast={toast} /> : (
-        <div className="flex items-center justify-center" style={{ background: WA.chatBg }}><p className="text-[13px]" style={{ color: WA.sub }}>Ek chat chuno</p></div>
-      )}
+      <NewChatModal
+        open={newChat}
+        onClose={() => setNewChat(false)}
+        onStarted={async (leadId) => {
+          setNewChat(false);
+          await loadList();
+          // open the freshly created chat
+          const ls = await fetch("/api/leads?stage=all").then((r) => r.json()).catch(() => null);
+          const created = ls?.items?.find((x: Lead) => x.id === leadId);
+          if (created) setActive(created);
+        }}
+        toast={toast}
+      />
     </div>
   );
 }
 
-function Chat({ lead, onSent, toast }: { lead: Lead; onSent: () => void; toast: (m: string, t?: "error") => void }) {
+function Chat({ lead, onSent, onBack, toast }: { lead: Lead; onSent: () => void; onBack: () => void; toast: (m: string, t?: "error") => void }) {
   const [thread, setThread] = useState<Msg[] | null>(null);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -236,13 +263,10 @@ function Chat({ lead, onSent, toast }: { lead: Lead; onSent: () => void; toast: 
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [thread]);
 
-  // "Suggest": on an empty conversation, load Mr. Lead's drafted FIRST message (lead.draft).
-  // Once there are messages, ask Mr. Brain to draft the next REPLY from the thread. Either way
-  // it only fills the box — the human still presses Send.
   const suggest = async () => {
     if (!thread || thread.length === 0) {
       if (lead.draft) setText(lead.draft);
-      else toast("Koi drafted message nahi — khud likho.", "error");
+      else toast("No drafted message — write one yourself.", "error");
       return;
     }
     setSuggesting(true);
@@ -253,7 +277,7 @@ function Chat({ lead, onSent, toast }: { lead: Lead; onSent: () => void; toast: 
         body: JSON.stringify({ leadId: lead.id }),
       }).then((x) => x.json());
       if (r.ok && r.reply) setText(r.reply);
-      else toast(r.error ?? "Draft nahi bana.", "error");
+      else toast(r.error ?? "Could not draft a reply.", "error");
     } catch (e: any) {
       toast(e?.message ?? "Network error.", "error");
     } finally {
@@ -264,7 +288,7 @@ function Chat({ lead, onSent, toast }: { lead: Lead; onSent: () => void; toast: 
   const send = async () => {
     const body = text.trim();
     if (!body) return;
-    if (!phone) { toast("Is lead ka number nahi hai.", "error"); return; }
+    if (!phone) { toast("This lead has no phone number.", "error"); return; }
     setSending(true);
     try {
       const r = await fetch("/api/whatsapp/send", {
@@ -272,7 +296,7 @@ function Chat({ lead, onSent, toast }: { lead: Lead; onSent: () => void; toast: 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ leadId: lead.id, phone, text: body }),
       }).then((x) => x.json());
-      if (!r.ok) { toast(r.error ?? "Bhej nahi paye.", "error"); return; }
+      if (!r.ok) { toast(r.error ?? "Could not send.", "error"); return; }
       setText("");
       await loadThread();
       onSent();
@@ -284,9 +308,12 @@ function Chat({ lead, onSent, toast }: { lead: Lead; onSent: () => void; toast: 
   };
 
   return (
-    <div className="flex flex-col" style={{ minWidth: 0, background: WA.chatBg }}>
-      {/* header — WhatsApp green */}
-      <div className="flex items-center gap-3 px-4 py-2.5" style={{ background: WA.green }}>
+    <>
+      {/* header — WhatsApp green, with a back arrow on mobile */}
+      <div className="flex items-center gap-2.5 px-3 py-2.5" style={{ background: WA.green }}>
+        <button className="md:hidden" onClick={onBack} aria-label="Back">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M15 18l-6-6 6-6" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+        </button>
         <span className="flex h-10 w-10 items-center justify-center rounded-full text-[15px] font-bold" style={{ background: "rgba(255,255,255,.25)", color: "#fff" }}>
           {(lead.company || lead.name || "?").slice(0, 1).toUpperCase()}
         </span>
@@ -297,12 +324,12 @@ function Chat({ lead, onSent, toast }: { lead: Lead; onSent: () => void; toast: 
       </div>
 
       {/* messages */}
-      <div className="flex-1 space-y-1.5 overflow-y-auto px-5 py-4" style={{ background: WA.chatBg }}>
+      <div className="flex-1 space-y-1.5 overflow-y-auto px-4 py-4 sm:px-5" style={{ background: WA.chatBg }}>
         {thread === null ? (
           <p className="text-[13px]" style={{ color: WA.sub }}>Loading…</p>
         ) : thread.length === 0 ? (
           <div className="mx-auto mt-6 max-w-xs rounded-lg px-4 py-3 text-center" style={{ background: "#fff5c4", color: "#54656f" }}>
-            <p className="text-[12.5px]">Abhi koi message nahi. Neeche pehla message bhejo — chat yahin se shuru hogi.</p>
+            <p className="text-[12.5px]">No messages yet. Send the first one below — the conversation starts here.</p>
           </div>
         ) : thread.map((m) => <Bubble key={m.id} m={m} />)}
         <div ref={endRef} />
@@ -315,7 +342,7 @@ function Chat({ lead, onSent, toast }: { lead: Lead; onSent: () => void; toast: 
           style={{ background: "#fff", color: WA.green, border: `1px solid ${WA.divider}` }}
           onClick={suggest}
           disabled={suggesting}
-          title="Mr. Brain se ek message draft karwao — bhejne se pehle badal bhi sakte ho"
+          title="Let Mr. Brain draft a message — you can edit it before sending"
         >
           {suggesting ? "…" : "✨ Suggest"}
         </button>
@@ -323,7 +350,7 @@ function Chat({ lead, onSent, toast }: { lead: Lead; onSent: () => void; toast: 
           className="flex-1 resize-none rounded-2xl px-4 py-2.5 text-[14px] outline-none"
           style={{ background: "#fff", color: WA.text, maxHeight: 120, border: "none" }}
           rows={1}
-          placeholder="Message likho…"
+          placeholder="Type a message…"
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }}
@@ -338,7 +365,7 @@ function Chat({ lead, onSent, toast }: { lead: Lead; onSent: () => void; toast: 
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 21l18-9L3 3v7l12 2-12 2v7z" fill="#fff" /></svg>
         </button>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -348,15 +375,77 @@ function Bubble({ m }: { m: Msg }) {
   const tickColor = m.status === "read" ? WA.tickBlue : WA.sub;
   return (
     <div className={`flex ${out ? "justify-end" : "justify-start"}`}>
-      <div
-        className="max-w-[75%] rounded-lg px-2.5 py-1.5"
-        style={{ background: out ? WA.outBubble : WA.inBubble, color: WA.text, boxShadow: "0 1px 0.5px rgba(11,20,26,.13)" }}
-      >
+      <div className="max-w-[80%] rounded-lg px-2.5 py-1.5" style={{ background: out ? WA.outBubble : WA.inBubble, color: WA.text, boxShadow: "0 1px 0.5px rgba(11,20,26,.13)" }}>
         <p className="text-[14px]" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{m.body}</p>
         <div className="mt-0.5 flex items-center justify-end gap-1">
           {m.answered_by === "brain" && out && <span className="text-[10px]" style={{ color: WA.sub }}>AI ·</span>}
           <span className="text-[10px]" style={{ color: WA.sub }}>{new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
           {out && tick && <span className="text-[11px]" style={{ color: tickColor }}>{tick}</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── New chat: message any number directly (creates an approved lead, then you send) ──────── */
+function NewChatModal({ open, onClose, onStarted, toast }: { open: boolean; onClose: () => void; onStarted: (leadId: string) => void; toast: (m: string, t?: "error") => void }) {
+  const [phone, setPhone] = useState("");
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open) { setPhone(""); setName(""); }
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    if (open) document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  const start = async () => {
+    const num = phone.replace(/[^0-9+]/g, "");
+    if (num.replace(/[^0-9]/g, "").length < 8) { toast("Enter a full number with country code, e.g. +9715...", "error"); return; }
+    setBusy(true);
+    try {
+      const r = await fetch("/api/leads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ company: name.trim() || null, name: name.trim() || null, phone: num }),
+      }).then((x) => x.json());
+      if (!r.ok || !r.id) { toast(r.error ?? "Could not start the chat.", "error"); return; }
+      onStarted(r.id);
+    } catch (e: any) {
+      toast(e?.message ?? "Network error.", "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.6)", backdropFilter: "blur(4px)" }} onClick={onClose}>
+      <div className="lx-card w-full max-w-sm rounded-3xl p-6" style={{ border: "1px solid var(--lx-border)" }} onClick={(e) => e.stopPropagation()}>
+        <h2 className="text-base font-bold">New chat</h2>
+        <p className="lx-11 lx-mut mt-1 mb-4">Message any number directly. It becomes a lead so you can track the conversation.</p>
+        <label className="lx-11 lx-mut mb-1 block">Phone number (with country code)</label>
+        <input
+          className="lx-12 mb-3 w-full rounded-xl px-3.5 py-2.5 outline-none"
+          style={{ background: "var(--lx-in)", border: "1px solid var(--lx-border)", color: "var(--lx-text)" }}
+          placeholder="+971 50 123 4567"
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          autoFocus
+        />
+        <label className="lx-11 lx-mut mb-1 block">Name (optional)</label>
+        <input
+          className="lx-12 mb-4 w-full rounded-xl px-3.5 py-2.5 outline-none"
+          style={{ background: "var(--lx-in)", border: "1px solid var(--lx-border)", color: "var(--lx-text)" }}
+          placeholder="Company or person"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <div className="flex justify-end gap-2">
+          <button className="lx-11 rounded-full px-4 py-2" style={{ background: "var(--lx-in)", border: "1px solid var(--lx-border)", color: "var(--lx-mut)" }} onClick={onClose}>Cancel</button>
+          <button className="lx-grad lx-12 rounded-full px-5 py-2 font-semibold disabled:opacity-60" onClick={start} disabled={busy}>{busy ? "Starting…" : "Start chat"}</button>
         </div>
       </div>
     </div>

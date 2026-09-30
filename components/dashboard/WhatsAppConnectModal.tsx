@@ -118,9 +118,9 @@ export default function WhatsAppConnectModal({
           <>
             {/* steps */}
             <ol className="lx-11 lx-mut mb-4 space-y-1.5">
-              <li>1. Phone pe <b style={{ color: "var(--lx-text)" }}>WhatsApp</b> kholo</li>
+              <li>1. Open <b style={{ color: "var(--lx-text)" }}>WhatsApp</b> on your phone</li>
               <li>2. <b style={{ color: "var(--lx-text)" }}>Settings → Linked devices → Link a device</b></li>
-              <li>3. Neeche wale code ko scan karo</li>
+              <li>3. Scan the code below</li>
             </ol>
 
             <div className="mx-auto flex h-[260px] w-[260px] items-center justify-center rounded-2xl" style={{ background: "#fff", border: "1px solid var(--lx-border)" }}>
@@ -130,7 +130,7 @@ export default function WhatsAppConnectModal({
               ) : pairing ? (
                 <span className="lx-11" style={{ color: "#0b0b12" }}>Generating code…</span>
               ) : st === "banned" ? (
-                <span className="lx-11 px-4 text-center" style={{ color: "#b91c1c" }}>WhatsApp ne is number ko block kar diya. Doosra number use karo.</span>
+                <span className="lx-11 px-4 text-center" style={{ color: "#b91c1c" }}>WhatsApp has blocked this number. Try a different one.</span>
               ) : (
                 <span className="lx-11" style={{ color: "#0b0b12" }}>Press connect to get a code</span>
               )}
