@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useStore } from "@/lib/store";
+import WhatsAppConnectModal from "./WhatsAppConnectModal";
 import { LxInput, LxSelect } from "./ui";
 import { Globe, LayoutGrid, Link2, Megaphone, MoreHorizontal, Monitor } from "lucide-react";
 import type { IconType } from "react-icons";
@@ -212,6 +213,8 @@ export default function ConnectSection() {
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<Record<string, string>>({});
   const [secret, setSecret] = useState<{ type: string; value: string } | null>(null);
+  const [waModal, setWaModal] = useState(false);
+  const [waStatus, setWaStatus] = useState<string>("loading");
   const [tab, setTab] = useState<(typeof TABS)[number]["key"]>("all");
   const [googleConnected, setGoogleConnected] = useState(false);
 
@@ -285,6 +288,16 @@ export default function ConnectSection() {
   const filteredCards = CARDS.filter((c) => tab === "all" || tab === c.category);
   const showGoogle = tab === "all" || tab === "marketing";
   const showOthersEmpty = tab === "others";
+  // Mr. WhatsApp status for the card below. Its own connection (Baileys), separate from the
+  // /api/integrations cards, so it has its own status read and its own pairing modal.
+  useEffect(() => {
+    let alive = true;
+    const load = () => fetch("/api/whatsapp/status").then((r) => r.json()).then((d) => { if (alive && d.ok) setWaStatus(d.status); }).catch(() => {});
+    load();
+    const id = setInterval(load, 8000);
+    return () => { alive = false; clearInterval(id); };
+  }, [waModal]);
+
   const liveModalItem = modalCard ? found(modalCard.type) : null;
 
   return (
@@ -292,6 +305,32 @@ export default function ConnectSection() {
       <div>
         <h1 className="text-lg font-bold">Connect</h1>
         <p className="lx-11 lx-mut mt-1">Connect your tools and accounts to automate and streamline your workflow.</p>
+      </div>
+
+      <WhatsAppConnectModal open={waModal} onClose={() => setWaModal(false)} onConnected={() => setWaStatus("connected")} />
+
+      {/* Mr. WhatsApp — a first-class connect card, because pairing a WhatsApp is a bigger,
+          more visible thing than a CMS token and the owner asked for it here as well as on the
+          WhatsApp page. Opens the same modal. */}
+      <div className="lx-card2 flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl" style={{ background: "#25D366" }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 21a9 9 0 10-8-4.9L3 21l4.9-1A9 9 0 0012 21z" stroke="#04120a" strokeWidth="1.7" strokeLinejoin="round" /></svg>
+          </span>
+          <div>
+            <b className="lx-13 block">WhatsApp</b>
+            <span className="lx-11 lx-mut">Link your own number to message and reply to leads — one at a time, by you.</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="lx-10 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1" style={{ background: "var(--lx-in)", border: "1px solid var(--lx-border)" }}>
+            <span className="h-2 w-2 rounded-full" style={{ background: waStatus === "connected" ? "var(--lx-green)" : waStatus === "pairing" ? "var(--lx-cyan)" : "var(--lx-mut)" }} />
+            <span style={{ color: "var(--lx-text)" }}>{waStatus === "connected" ? "Connected" : waStatus === "pairing" ? "Scanning" : "Not connected"}</span>
+          </span>
+          <button className="lx-grad lx-11 rounded-full px-4 py-2 font-semibold" onClick={() => setWaModal(true)}>
+            {waStatus === "connected" ? "Manage" : "Connect"}
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
