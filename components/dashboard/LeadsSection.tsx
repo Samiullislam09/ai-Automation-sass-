@@ -89,6 +89,11 @@ export default function LeadsSection() {
   const [selected, setSelected] = useState<Lead | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [err, setErr] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  // Advanced filters (spec section 7), applied on top of the tab + search. Empty = no constraint.
+  const [flt, setFlt] = useState<{ status: string[]; source: string[]; ai: string; you: string; converted: string; client: string; score: string }>(
+    { status: [], source: [], ai: "any", you: "any", converted: "any", client: "any", score: "any" }
+  );
 
   const load = useCallback(async () => {
     try {
@@ -116,12 +121,49 @@ export default function LeadsSection() {
     if (!leads) return [];
     const match = TAB_MATCH[tab] ?? TAB_MATCH.all;
     const needle = q.trim().toLowerCase();
+    const inScore = (sc: number | null, band: string) => {
+      if (band === "any") return true;
+      if (sc == null) return false;
+      if (band === "0-25") return sc <= 25;
+      if (band === "26-50") return sc > 25 && sc <= 50;
+      if (band === "51-75") return sc > 50 && sc <= 75;
+      return sc > 75;
+    };
     return leads.filter((l) => {
       if (!match(l)) return false;
+      if (flt.status.length && !flt.status.includes(l.stage)) return false;
+      if (flt.source.length && !flt.source.includes(l.source ?? "")) return false;
+      if (flt.ai === "yes" && !l.ai_messaged) return false;
+      if (flt.ai === "no" && l.ai_messaged) return false;
+      if (flt.you === "yes" && !l.human_messaged) return false;
+      if (flt.you === "no" && l.human_messaged) return false;
+      if (flt.converted === "yes" && !l.converted) return false;
+      if (flt.converted === "no" && l.converted) return false;
+      if (flt.client === "yes" && !l.is_client) return false;
+      if (flt.client === "no" && l.is_client) return false;
+      if (!inScore(l.icp_score, flt.score)) return false;
       if (!needle) return true;
       return [l.company, l.name, l.email, l.phone, l.whatsapp, l.city].some((v) => String(v ?? "").toLowerCase().includes(needle));
     });
-  }, [leads, tab, q]);
+  }, [leads, tab, q, flt]);
+
+  const activeFilterCount =
+    flt.status.length + flt.source.length +
+    ["ai", "you", "converted", "client", "score"].filter((k) => (flt as any)[k] !== "any").length;
+
+  const exportCsv = () => {
+    const rows = [["Company", "Name", "Phone", "Source", "Status", "Score", "AI Messaged", "You Messaged", "Client", "Created"]];
+    for (const l of filtered) rows.push([
+      l.company ?? "", l.name ?? "", l.whatsapp || l.phone || "", l.source ?? "", l.stage,
+      String(l.icp_score ?? ""), l.ai_messaged ? "yes" : "no", l.human_messaged ? "yes" : "no", l.is_client ? "yes" : "no",
+      new Date(l.created_at).toISOString(),
+    ]);
+    const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    const a = document.createElement("a");
+    a.href = url; a.download = `leads-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const waLink = (l: Lead) => `/dashboard/whatsapp?lead=${l.id}`;
 
@@ -133,10 +175,21 @@ export default function LeadsSection() {
           <p className="text-[12.5px]" style={{ color: C.sub }}>Manage, track and automate your leads</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-2 rounded-xl px-3 py-2" style={{ background: C.panel, border: `1px solid ${C.line}`, minWidth: 220 }}>
+          <div className="flex items-center gap-2 rounded-xl px-3 py-2" style={{ background: C.panel, border: `1px solid ${C.line}`, minWidth: 200 }}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke={C.sub} strokeWidth="2" /><path d="M21 21l-4-4" stroke={C.sub} strokeWidth="2" strokeLinecap="round" /></svg>
             <input className="w-full bg-transparent text-[13px] outline-none" style={{ color: C.ink }} placeholder="Search name, phone, company…" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
+          <div className="relative">
+            <button className="flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-[13px] font-semibold" style={{ background: C.panel, border: `1px solid ${filtersOpen || activeFilterCount ? C.brand : C.line}`, color: activeFilterCount ? C.brand : C.sub }} onClick={() => setFiltersOpen((o) => !o)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 5h18M6 12h12M10 19h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+              Filters{activeFilterCount ? <span className="rounded-full px-1.5 text-[11px] text-white" style={{ background: C.brand }}>{activeFilterCount}</span> : null}
+            </button>
+            {filtersOpen && <FilterPanel flt={flt} setFlt={setFlt} onClose={() => setFiltersOpen(false)} />}
+          </div>
+          <button className="flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-[13px] font-semibold" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.sub }} onClick={exportCsv} title="Download current leads as CSV">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            Export
+          </button>
           <button className="rounded-xl px-4 py-2 text-[13px] font-semibold text-white" style={{ background: C.brand }} onClick={() => setAddOpen(true)}>+ Add Lead</button>
         </div>
       </div>
@@ -438,5 +491,76 @@ function AddLeadModal({ open, onClose, onAdded, toast }: { open: boolean; onClos
         </div>
       </div>
     </div>
+  );
+}
+
+/* ── advanced filter popover (spec section 7) ────────────────────────────────────────────── */
+type Flt = { status: string[]; source: string[]; ai: string; you: string; converted: string; client: string; score: string };
+function FilterPanel({ flt, setFlt, onClose }: { flt: Flt; setFlt: (f: Flt) => void; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const STATUSES = ["new", "pending_approval", "approved", "contacted", "delivered", "read", "replied", "in_conversation", "interested", "won", "lost"];
+  const SOURCES = ["osm", "places", "jobs", "manual"];
+  const SRC_LBL: Record<string, string> = { osm: "OpenStreetMap", places: "Google Places", jobs: "Job board", manual: "Manual" };
+
+  const toggle = (arr: string[], v: string) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
+  const clearAll = () => setFlt({ status: [], source: [], ai: "any", you: "any", converted: "any", client: "any", score: "any" });
+
+  const Chip = ({ on, label, onClick }: { on: boolean; label: string; onClick: () => void }) => (
+    <button onClick={onClick} className="rounded-lg px-2.5 py-1 text-[12px] font-medium" style={on ? { background: C.brandSoft, color: C.brand } : { background: C.graySoft, color: C.sub }}>{label}</button>
+  );
+  const Seg = ({ value, set }: { value: string; set: (v: string) => void }) => (
+    <div className="flex gap-1.5">
+      {[["any", "Any"], ["yes", "Yes"], ["no", "No"]].map(([v, l]) => (
+        <Chip key={v} on={value === v} label={l} onClick={() => set(v)} />
+      ))}
+    </div>
+  );
+
+  return (
+    <>
+      {/* click-away catcher */}
+      <div className="fixed inset-0 z-[95]" onClick={onClose} />
+      <div className="absolute right-0 z-[96] mt-2 w-[320px] rounded-2xl p-4 shadow-xl" style={{ background: C.panel, border: `1px solid ${C.line}`, maxHeight: "70vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-center justify-between">
+          <b className="text-[14px]" style={{ color: C.ink }}>Filters</b>
+          <button className="text-[12px] font-semibold" style={{ color: C.brand }} onClick={clearAll}>Clear all</button>
+        </div>
+
+        <div className="mb-3">
+          <div className="mb-1.5 text-[11.5px] font-semibold uppercase tracking-wide" style={{ color: C.sub }}>Lead status</div>
+          <div className="flex flex-wrap gap-1.5">
+            {STATUSES.map((st) => <Chip key={st} on={flt.status.includes(st)} label={(STAGE[st]?.label ?? st)} onClick={() => setFlt({ ...flt, status: toggle(flt.status, st) })} />)}
+          </div>
+        </div>
+
+        <div className="mb-3">
+          <div className="mb-1.5 text-[11.5px] font-semibold uppercase tracking-wide" style={{ color: C.sub }}>Source</div>
+          <div className="flex flex-wrap gap-1.5">
+            {SOURCES.map((sr) => <Chip key={sr} on={flt.source.includes(sr)} label={SRC_LBL[sr]} onClick={() => setFlt({ ...flt, source: toggle(flt.source, sr) })} />)}
+          </div>
+        </div>
+
+        <div className="mb-3 flex items-center justify-between"><span className="text-[12.5px]" style={{ color: C.ink }}>AI Agent messaged</span><Seg value={flt.ai} set={(v) => setFlt({ ...flt, ai: v })} /></div>
+        <div className="mb-3 flex items-center justify-between"><span className="text-[12.5px]" style={{ color: C.ink }}>You messaged</span><Seg value={flt.you} set={(v) => setFlt({ ...flt, you: v })} /></div>
+        <div className="mb-3 flex items-center justify-between"><span className="text-[12.5px]" style={{ color: C.ink }}>Converted</span><Seg value={flt.converted} set={(v) => setFlt({ ...flt, converted: v })} /></div>
+        <div className="mb-3 flex items-center justify-between"><span className="text-[12.5px]" style={{ color: C.ink }}>Client</span><Seg value={flt.client} set={(v) => setFlt({ ...flt, client: v })} /></div>
+
+        <div className="mb-1">
+          <div className="mb-1.5 text-[11.5px] font-semibold uppercase tracking-wide" style={{ color: C.sub }}>Lead score</div>
+          <div className="flex flex-wrap gap-1.5">
+            {[["any", "Any"], ["0-25", "0–25"], ["26-50", "26–50"], ["51-75", "51–75"], ["76-100", "76–100"]].map(([v, l]) => (
+              <Chip key={v} on={flt.score === v} label={l} onClick={() => setFlt({ ...flt, score: v })} />
+            ))}
+          </div>
+        </div>
+
+        <button className="mt-4 w-full rounded-xl py-2.5 text-[13px] font-semibold text-white" style={{ background: C.brand }} onClick={onClose}>Apply filters</button>
+      </div>
+    </>
   );
 }
