@@ -433,10 +433,17 @@ export function serperConfigured(): boolean {
  *  ~10,000 searches, and the pool advances to the next key the moment one is exhausted. Same shape
  *  as the NVIDIA key pool. Order is preserved; duplicates and blanks are dropped. */
 export function serperKeys(): string[] {
-  const raw = `${process.env.SERPER_API_KEYS ?? ""},${process.env.SERPER_API_KEY ?? ""}`;
+  // Three ways to supply keys, all pooled together — use whichever is convenient:
+  //   SERPER_API_KEY        a single key
+  //   SERPER_API_KEYS       several in one var, comma-separated
+  //   SERPER_API_KEY_2, _3… numbered, one var each (handy in a Railway variables list)
+  const parts = [process.env.SERPER_API_KEYS ?? "", process.env.SERPER_API_KEY ?? ""];
+  for (const [name, val] of Object.entries(process.env)) {
+    if (/^SERPER_API_KEY_\d+$/.test(name) && val) parts.push(val);
+  }
   const seen = new Set<string>();
   const keys: string[] = [];
-  for (const k of raw.split(",").map((x) => x.trim()).filter(Boolean)) {
+  for (const k of parts.join(",").split(",").map((x) => x.trim()).filter(Boolean)) {
     if (!seen.has(k)) { seen.add(k); keys.push(k); }
   }
   return keys;
