@@ -65,7 +65,7 @@ export function mountBuyerProfile(app: Express): void {
     const { tenantId } = req.params;
     try {
       const row = await loadActiveProfile(tenantId);
-      if (!row) return res.status(409).json({ ok: false, error: "Run the website analysis first — there is no Site Brain to draft a buyer profile from yet." });
+      if (!row) return res.status(409).json({ ok: false, error: "Run the website analysis first — there is no Site Brain to work out your ideal customers from yet." });
 
       const result = await draftBuyerProfile(row.profile, (p) => completeJson(p));
       if (!result.ok) return res.status(422).json({ ok: false, error: result.reason });
@@ -89,7 +89,7 @@ export function mountBuyerProfile(app: Express): void {
     }
     try {
       const row = await loadActiveProfile(tenantId);
-      if (!row) return res.status(409).json({ ok: false, error: "There is no Site Brain to attach a buyer profile to — run the website analysis first." });
+      if (!row) return res.status(409).json({ ok: false, error: "There is no Site Brain to attach ideal customers to — run the website analysis first." });
 
       const clean = sanitizeBuyerProfile(buyerProfile); // stays UNCONFIRMED by construction
       const saved = await persist(tenantId, row.profile, clean, userId ? `user:${userId}` : "user:edit", row.built_from);
@@ -108,7 +108,7 @@ export function mountBuyerProfile(app: Express): void {
     const { userId, buyerProfile } = req.body ?? {};
     try {
       const row = await loadActiveProfile(tenantId);
-      if (!row) return res.status(409).json({ ok: false, error: "There is no buyer profile to confirm yet." });
+      if (!row) return res.status(409).json({ ok: false, error: "There are no ideal customers to confirm yet." });
 
       // Confirm either the edits sent with this call, or whatever is already stored.
       const base = buyerProfile && typeof buyerProfile === "object" ? sanitizeBuyerProfile(buyerProfile) : row.profile.buyer_profile;

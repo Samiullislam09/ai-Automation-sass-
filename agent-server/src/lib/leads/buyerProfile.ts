@@ -44,7 +44,7 @@ const LEAD_GOALS: LeadGoal[] = ["customer", "sponsor", "partner", "distributor",
 export async function draftBuyerProfile(profile: SiteProfile | null | undefined, llmJson: LlmJson): Promise<DraftResult> {
   const brain = profileBlock(profile);
   if (!brain.trim()) {
-    return { ok: false, reason: "There is no Site Brain to work from yet — run the website analysis first, then draft the buyer profile." };
+    return { ok: false, reason: "There is no Site Brain to work from yet — run the website analysis first, then draft your ideal customers." };
   }
 
   let raw: unknown;

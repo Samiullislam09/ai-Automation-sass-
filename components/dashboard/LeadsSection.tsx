@@ -311,9 +311,9 @@ export default function LeadsSection() {
           <p className="hidden text-[12.5px] sm:block" style={{ color: C.sub }}>Manage, track &amp; automate your leads</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <button className="flex h-10 items-center gap-1.5 rounded-xl px-3.5 text-[13px] font-semibold" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.ink }} onClick={() => setBuyerOpen(true)} title="Buyer profile — who buys from you">
+          <button className="flex h-10 items-center gap-1.5 rounded-xl px-3.5 text-[13px] font-semibold" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.ink }} onClick={() => setBuyerOpen(true)} title="Ideal Customers — who buys from you, so Mr. Lead finds buyers not competitors">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 12a4 4 0 100-8 4 4 0 000 8zM4 21a8 8 0 0116 0" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
-            <span className="hidden md:inline">Buyer Profile</span>
+            <span className="hidden md:inline">Ideal Customers</span>
             <span className="md:hidden">Buyers</span>
           </button>
           <button className="flex h-10 items-center gap-1.5 rounded-xl px-3.5 text-[13px] font-semibold" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.ink }} onClick={exportCsv} title="Export CSV">
@@ -354,7 +354,7 @@ export default function LeadsSection() {
               <div className="absolute right-0 z-[96] mt-2 w-64 overflow-hidden rounded-2xl shadow-xl" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
                 <button className="block w-full px-4 py-3 text-left hover:bg-[#fafbfc]" onClick={() => { setGenMenuOpen(false); findLeads("", 10, ""); }}>
                   <div className="text-[13px] font-bold" style={{ color: C.ink }}>✨ Auto</div>
-                  <div className="text-[11.5px]" style={{ color: C.sub }}>Finds real buyers for your business from your confirmed buyer profile</div>
+                  <div className="text-[11.5px]" style={{ color: C.sub }}>Finds real buyers for your business from your Ideal Customers</div>
                 </button>
                 <button className="block w-full px-4 py-3 text-left hover:bg-[#fafbfc]" style={{ borderTop: `1px solid ${C.line}` }} onClick={() => { setGenMenuOpen(false); setGenPanel("manual"); }}>
                   <div className="text-[13px] font-bold" style={{ color: C.ink }}>✍️ Manual</div>
@@ -1135,7 +1135,7 @@ function LeadGenPanel({ mode, gen, busy, target, foundSoFar, onStart, onClose, o
               <div className="mt-0.5 text-[12.5px]" style={{ color: C.ink }}>
                 {gen?.last_question ?? "I work out who buys from you automatically — but I need to read your website once first. Run the site analysis (Site Brain), then press Auto again."}
               </div>
-              <button className="mt-3 rounded-xl px-4 py-2 text-[12.5px] font-semibold text-white" style={{ background: C.brand }} onClick={onOpenBuyerProfile}>Open Buyer profile</button>
+              <button className="mt-3 rounded-xl px-4 py-2 text-[12.5px] font-semibold text-white" style={{ background: C.brand }} onClick={onOpenBuyerProfile}>Open Ideal Customers</button>
             </div>
           </div>
         </div>

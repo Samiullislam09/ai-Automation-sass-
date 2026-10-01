@@ -66,7 +66,7 @@ export default function BuyerProfilePanel({ open, onClose, toast, onConfirmedCha
     setLoading(true);
     try {
       const d = await fetch("/api/leads/buyer-profile").then((r) => r.json());
-      if (!d.ok) { toast(d.error ?? "Could not load the buyer profile.", "error"); setLoading(false); return; }
+      if (!d.ok) { toast(d.error ?? "Could not load your ideal customers.", "error"); setLoading(false); return; }
       const st: LoadState = { hasSiteBrain: !!d.hasSiteBrain, buyerProfile: d.buyerProfile ?? null, ready: !!d.ready };
       setState(st);
       setBp(st.buyerProfile ? { ...emptyProfile(), ...st.buyerProfile } : emptyProfile());
@@ -93,7 +93,7 @@ export default function BuyerProfilePanel({ open, onClose, toast, onConfirmedCha
     setBusy("draft");
     try {
       const d = await fetch("/api/leads/buyer-profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "draft" }) }).then((r) => r.json());
-      if (!d.ok) { toast(d.error ?? "Could not draft the buyer profile.", "error"); return; }
+      if (!d.ok) { toast(d.error ?? "Could not draft your ideal customers.", "error"); return; }
       setBp({ ...emptyProfile(), ...d.buyerProfile });
       setWarnings(Array.isArray(d.warnings) ? d.warnings : []);
       setDirty(false);
@@ -148,7 +148,7 @@ export default function BuyerProfilePanel({ open, onClose, toast, onConfirmedCha
         {/* header */}
         <div className="flex items-center justify-between gap-2 px-4 py-3" style={{ background: C.panel, borderBottom: `1px solid ${C.line}` }}>
           <div className="min-w-0">
-            <h2 className="truncate text-[15px] font-bold" style={{ color: C.ink }}>Buyer profile</h2>
+            <h2 className="truncate text-[15px] font-bold" style={{ color: C.ink }}>Ideal Customers</h2>
             <p className="truncate text-[12px]" style={{ color: C.sub }}>Who buys from you — so Mr. Lead finds buyers, not competitors.</p>
           </div>
           <div className="flex items-center gap-2">
@@ -169,7 +169,7 @@ export default function BuyerProfilePanel({ open, onClose, toast, onConfirmedCha
             <EmptyNote title="No Site Brain yet" body="Run the website analysis first (Settings → Site Brain, or the crawler). Once Mr. Analyst has read your site, I can draft who buys from you." />
           ) : !state.buyerProfile ? (
             <div className="space-y-4">
-              <EmptyNote title="No buyer profile yet" body="I'll read your Site Brain and suggest the kinds of organisations that would BUY what you offer, plus the peers to screen out. You can edit everything before confirming." />
+              <EmptyNote title="No ideal customers set yet" body="I'll read your Site Brain and suggest the kinds of organisations that would BUY what you offer, plus the peers to screen out. You can edit everything — no need to confirm." />
               <button onClick={draft} disabled={busy !== null} className="w-full rounded-xl py-2.5 text-[13px] font-semibold text-white disabled:opacity-60" style={{ background: C.brand }}>
                 {busy === "draft" ? "Drafting from your site…" : "Draft from my site"}
               </button>

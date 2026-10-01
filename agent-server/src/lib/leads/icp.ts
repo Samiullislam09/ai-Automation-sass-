@@ -251,7 +251,7 @@ export function buildIcpFromBuyerSegment(opts: {
     return {
       ok: false,
       missing: ["industry"],
-      question: "This buyer segment has no search terms to look for. Open Leads → Buyer profile, add a term or two, and confirm again.",
+      question: "This buyer segment has no search terms to look for. Open Leads → Ideal Customers, add a term or two, and confirm again.",
     };
   }
 
