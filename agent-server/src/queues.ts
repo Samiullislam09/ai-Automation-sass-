@@ -33,11 +33,18 @@ const QUEUE_OPTIONS = {
  *  active user and a 36 MB database, and got the whole organisation restricted.
  *
  *  With `notify: true` above, a new job wakes its worker immediately, so this poll is only a
- *  backstop for the case where the NOTIFY listener could not be established — hence 30s while
- *  notify is live, and 15s as the base, which is the worst case a job would ever wait. The
- *  Site Brain and Audit pages already say "Queued - waiting for a worker to pick it up", so
- *  that wait is visible rather than mysterious. */
-const WORKER_POLLING = { pollingIntervalSeconds: 15, notifyPollingIntervalSeconds: 30 };
+ *  backstop for the case where the NOTIFY listener could not be established — hence a long
+ *  interval while notify is live, and 15s as the base, which is the worst case a job would
+ *  ever wait. The Site Brain and Audit pages already say "Queued - waiting for a worker to
+ *  pick it up", so that wait is visible rather than mysterious.
+ *
+ *  30s was not enough (2026-10-01): fourteen workers at 30s is still ~40,000 queries a day,
+ *  which showed up on Supabase as ~170 MB/day of Shared Pooler egress AND ~100 MB/day of Log
+ *  Ingestion — the 1 GB free log quota was gone in ten days with one user. NOTIFY is the real
+ *  wakeup path, so the backstop is now 5 minutes; a job only ever waits that long if the
+ *  LISTEN connection itself has died. (The queue is also moving off Supabase entirely — see
+ *  db.ts — after which this interval stops costing anything at all.) */
+const WORKER_POLLING = { pollingIntervalSeconds: 15, notifyPollingIntervalSeconds: 300 };
 export { WORKER_POLLING };
 
 // A full-site crawl (up to ~300 pages, one fetch+embed each, sequential) can genuinely run

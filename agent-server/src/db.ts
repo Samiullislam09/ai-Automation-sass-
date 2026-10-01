@@ -4,8 +4,10 @@ import { env } from "./env.js";
 // Log (once) exactly what host/port/db we parsed out of DATABASE_URL — without the
 // password — so a bad/malformed env var value is obvious in the deploy logs instead of
 // surfacing only as a cryptic downstream DNS/connection error.
+let queueHost = "";
 try {
   const parsed = new URL(env.DATABASE_URL);
+  queueHost = parsed.hostname;
   console.log(
     `[db] connecting to ${parsed.hostname}:${parsed.port || 5432}${parsed.pathname} (user: ${parsed.username || "(none)"}, password set: ${!!parsed.password})`
   );
@@ -13,25 +15,40 @@ try {
   console.error("[db] DATABASE_URL is not a valid URL:", e.message);
 }
 
+// Railway's private network (`*.railway.internal`) speaks plain Postgres — demanding TLS
+// there fails with "The server does not support SSL connections". Everywhere else (Supabase,
+// Railway's public proxy) TLS is required; rejectUnauthorized:false accepts their self-signed
+// chains.
+const queueSsl = queueHost.endsWith(".railway.internal") ? false : { rejectUnauthorized: false };
+
 /** Job queue backend: Postgres (via pg-boss), not Redis/BullMQ.
  *
  *  Why: Upstash's free Redis tier has a hard 500,000 request/month cap, and BullMQ's
  *  internal bookkeeping (locks, markers, events) burns through that fast even at low
- *  job volume — we hit "max requests limit exceeded" in production. Since Supabase
- *  Postgres is already the app's database, pg-boss reuses it as the queue too: one
- *  less service to run/pay for/monitor, no per-request billing surprises.
+ *  job volume — we hit "max requests limit exceeded" in production.
+ *
+ *  Which Postgres: a dedicated Railway Postgres, NOT Supabase, since 2026-10-01. The queue
+ *  lived in Supabase first ("one less service"), but an always-on queue means always-on
+ *  polling, and even at the 30s backstop that idle chatter was ~170 MB/day of pooler egress
+ *  plus ~100 MB/day of Supabase Log Ingestion — the free tier's 1 GB log quota gone in ten
+ *  days, org restricted, app down (see docs/EGRESS_AUDIT.md). On Railway the agent-server and
+ *  its queue DB share a private network: the same chatter costs nothing and generates no
+ *  Supabase logs. App data (tenants, leads, articles) stays in Supabase via supabase.ts —
+ *  only pg-boss's own bookkeeping lives here. Pointing DATABASE_URL back at Supabase still
+ *  works (local dev), it just spends quota.
  *
  *  pg-boss auto-creates its own schema/tables in Postgres on start() (default schema
- *  "pgboss") — no manual migration needed. */
+ *  "pgboss") — no manual migration needed, which is also what makes the move safe: a fresh
+ *  database simply starts with an empty queue. Switch when nothing is mid-run.
+ *
+ *  LISTEN/NOTIFY needs a session-pinned connection. Railway Postgres is a direct connection,
+ *  so it simply works; on Supabase it required the Session pooler (transaction mode breaks it). */
 export const boss = new PgBoss({
   connectionString: env.DATABASE_URL,
-  // Supabase's pooled/direct connection strings both require SSL; rejectUnauthorized:false
-  // avoids local CA-trust issues with Supabase's certificate chain.
-  ssl: { rejectUnauthorized: false },
-  // Supabase's Session pooler caps total connections per project (15 on the free/nano
-  // tier) — keep this pool small and shared across all 5 queues rather than defaulting
-  // to pg's max:10 per instance, which leaves no headroom once Railway + local dev (or
-  // multiple Railway replicas) connect at the same time.
+  ssl: queueSsl,
+  // Kept small on purpose. Railway's Postgres default max_connections is generous, but the
+  // habit came from Supabase's Session pooler (15 connections total on free/nano) and it
+  // still protects local dev + Railway connecting to the same queue DB at once.
   max: 5,
   connectionTimeoutMillis: 15000,
   // LISTEN/NOTIFY: a worker is woken the moment a job is created instead of finding it on its

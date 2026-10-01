@@ -69,6 +69,29 @@ is created, and polling drops to a 30s backstop. Nothing starts later than befor
 
 **Not live until agent-server is redeployed to Railway.**
 
+#### Follow-up — 2026-10-01: 30s was still too much, and logs are a quota too
+
+A month later the free tier was in trouble again, differently: 4.39/5 GB egress (87–99% of it
+Shared Pooler — i.e. pg-boss) and **Log Ingestion 1.68/1 GB, over the limit**. Fourteen workers
+polling every 30s is still ~40,000 queries/day ≈ ~170 MB/day of pooler egress, and Supabase
+logs every one of them on its side (~100 MB/day) — the 1 GB log quota dies in ten days even
+when egress survives the month. The proof it was idle polling and not usage: 20–27 Sep, with
+the Railway service down, every usage chart flatlined to zero.
+
+Two changes, both in `377d9d5`'s spirit:
+
+1. **The queue left Supabase.** `DATABASE_URL` now points at a dedicated Railway Postgres on
+   the same private network as the agent-server (`db.ts`). Queue chatter costs nothing there
+   and generates no Supabase logs. Supabase keeps only app data (via `supabase.ts` /
+   PostgREST, which was 1–12% of egress). pg-boss recreates its schema in the new DB on boot;
+   the old `pgboss` schema in Supabase is inert and can be dropped.
+2. **The NOTIFY backstop poll stretched 30s → 300s** (`queues.ts` WORKER_POLLING). NOTIFY is
+   the real wakeup; the poll only matters when the LISTEN connection has died, and a worst-case
+   5-minute wait is already visible in the UI as "Queued".
+
+Expected steady state on Supabase afterwards: the scheduler's once-a-minute PostgREST sweep and
+real usage — single-digit MB/day.
+
 ### 7. `getCostSummary` read 5,000 whole receipts — FIXED (`c77f6c9`)
 
 `lib/dashboard-data.ts:527`, `limit(5000)`, to add up one number each. Now `detail->cost`.

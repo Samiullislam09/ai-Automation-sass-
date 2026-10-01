@@ -8,8 +8,11 @@ function required(name: string): string {
 
 export const env = {
   PORT: Number(process.env.PORT) || 4000,
-  // Postgres connection string for the job queue (pg-boss) — Supabase project's
-  // "Connection string" (Project Settings -> Database), not the service-role API key.
+  // Postgres connection string for the JOB QUEUE ONLY (pg-boss) — since 2026-10-01 this is
+  // the dedicated Railway Postgres (use the private `postgres.railway.internal` URL on
+  // Railway), NOT Supabase. App data stays in Supabase via SUPABASE_URL below. Pointing this
+  // back at Supabase's pooler still works but burns free-tier egress + log quota — db.ts has
+  // the full story.
   DATABASE_URL: required("DATABASE_URL"),
   SUPABASE_URL: required("SUPABASE_URL"),
   SUPABASE_SERVICE_ROLE_KEY: required("SUPABASE_SERVICE_ROLE_KEY"),

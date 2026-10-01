@@ -34,9 +34,11 @@ Every variable in `.env.example` has to exist in the Space's **Settings -> Repos
 Nothing is read from a file in the image — `.dockerignore` keeps `.env` out of it on purpose,
 because a Space's build layers are downloadable and a public one would hand them to anyone.
 
-`DATABASE_URL` must be the Supabase **pooler** connection string, and Supabase's own note about
-TLS applies here as it did on Railway: the `rediss://`-style requirement is written up in
-`docs/` alongside the other deploy gotchas.
+`DATABASE_URL` is the **queue database** (pg-boss), not the app database: since 2026-10-01 it
+points at a dedicated Railway Postgres (private `postgres.railway.internal` URL on Railway,
+that database's public URL for local dev). Pointing it at Supabase's pooler still works, but
+the queue's idle polling then burns Supabase's free-tier egress and log quota — that is the
+exact incident `docs/EGRESS_AUDIT.md` documents. App data stays on `SUPABASE_URL`.
 
 ## Health
 
