@@ -70,7 +70,7 @@ function initials(l: Lead) { return (l.company || l.name || "?").slice(0, 2).toU
 
 const TAB_MATCH: Record<string, (l: Lead) => boolean> = {
   all: () => true,
-  new: (l) => ["new", "pending_approval", "approved"].includes(l.stage),
+  new: (l) => ["new", "pending_approval"].includes(l.stage), // freshly found, awaiting your review
   engaged: (l) => ["replied", "in_conversation", "interested"].includes(l.stage),
   converted: (l) => l.converted,
   client: (l) => l.is_client,
@@ -91,6 +91,7 @@ export default function LeadsSection() {
   const [err, setErr] = useState("");
   const [gen, setGen] = useState<{ running: boolean; last_run_at: string | null; last_status: string | null; last_found: number | null; last_note: string | null } | null>(null);
   const [genBusy, setGenBusy] = useState(false);
+  const [genOpen, setGenOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [dateRange, setDateRange] = useState("all"); // all | today | 7d | 30d
   // Advanced filters (spec section 7), applied on top of the tab + search. Empty = no constraint.
@@ -114,13 +115,15 @@ export default function LeadsSection() {
     return () => clearInterval(id);
   }, [gen?.running, load]);
 
-  const findLeads = async () => {
+  const findLeads = async (query: string, count: number) => {
     setGenBusy(true);
     try {
-      const d = await fetch("/api/agents/trigger", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "leads", count: 10 }) }).then((r) => r.json());
+      const d = await fetch("/api/agents/trigger", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "leads", ...(query ? { query } : {}), count }) }).then((r) => r.json());
       if (!d.ok) { toast(d.error ?? "Could not start lead search.", "error"); return; }
-      toast("Mr. Lead is searching — new leads will appear here.");
+      toast("Mr. Lead is searching — new leads will appear in the New tab.");
       setGen((g) => ({ running: true, last_run_at: g?.last_run_at ?? null, last_status: g?.last_status ?? null, last_found: g?.last_found ?? null, last_note: g?.last_note ?? null }));
+      setGenOpen(false);
+      setTab("new"); // take them to where the fresh leads will land
       setTimeout(load, 2000);
     } catch (e: any) { toast(e?.message ?? "Network error.", "error"); }
     finally { setGenBusy(false); }
@@ -246,9 +249,9 @@ export default function LeadsSection() {
                 </span>}
           </div>
         </div>
-        <button className="flex shrink-0 items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-[13px] font-semibold text-white disabled:opacity-60" style={{ background: C.brand }} onClick={findLeads} disabled={genBusy || gen?.running}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="#fff" strokeWidth="2" /><path d="M21 21l-4-4" stroke="#fff" strokeWidth="2" strokeLinecap="round" /></svg>
-          {gen?.running ? "Searching…" : genBusy ? "Starting…" : "Find leads"}
+        <button className="flex shrink-0 items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-60" style={{ background: C.brand }} onClick={() => setGenOpen(true)} disabled={gen?.running}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6l2.1 2.1m0-12.8l-2.1 2.1M7.7 16.3l-2.1 2.1" stroke="#fff" strokeWidth="1.8" strokeLinecap="round"/></svg>
+          {gen?.running ? "Searching…" : "Generate leads"}
         </button>
       </div>
 
@@ -347,6 +350,7 @@ export default function LeadsSection() {
 
       {selected && <Drawer lead={selected} onClose={() => setSelected(null)} setStage={setStage} busy={busy} waLink={waLink} />}
       <AddLeadModal open={addOpen} onClose={() => setAddOpen(false)} onAdded={() => { setAddOpen(false); load(); }} toast={toast} />
+      <GenerateLeadsModal open={genOpen} onClose={() => setGenOpen(false)} busy={genBusy} onGenerate={findLeads} />
     </div>
   );
 }
@@ -662,5 +666,64 @@ function FilterPanel({ flt, setFlt, dateRange, setDateRange, onClose, onClear }:
         </div>
       </div>
     </>
+  );
+}
+
+/* ── generate-leads modal: a friendly "what & where" form ────────────────────────────────── */
+const LEADS_PER_RUN_MAX = 25; // client-side convenience cap; per-plan/day enforcement is a TODO (server-side)
+function GenerateLeadsModal({ open, onClose, busy, onGenerate }: { open: boolean; onClose: () => void; busy: boolean; onGenerate: (query: string, count: number) => void }) {
+  const [what, setWhat] = useState("");
+  const [city, setCity] = useState("");
+  const [count, setCount] = useState(10);
+  useEffect(() => {
+    if (!open) { setWhat(""); setCity(""); setCount(10); }
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    if (open) document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+  if (!open) return null;
+
+  const examples = [
+    ["Restaurants", "Dubai"], ["ISO consultants", "Mumbai"], ["Dental clinics", "Abu Dhabi"], ["Manufacturers", "Pune"],
+  ];
+  const go = () => {
+    const w = what.trim();
+    if (!w) return;
+    const query = city.trim() ? `${w} in ${city.trim()}` : w;
+    onGenerate(query, Math.max(1, Math.min(LEADS_PER_RUN_MAX, count)));
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,.45)" }} onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl p-6" style={{ background: C.panel }} onClick={(e) => e.stopPropagation()}>
+        <div className="mb-1 flex items-center gap-2">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg text-white" style={{ background: C.brand }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6l2.1 2.1m0-12.8l-2.1 2.1M7.7 16.3l-2.1 2.1" stroke="#fff" strokeWidth="1.8" strokeLinecap="round"/></svg>
+          </span>
+          <h2 className="text-[16px] font-bold" style={{ color: C.ink }}>Generate leads</h2>
+        </div>
+        <p className="mb-4 text-[12.5px]" style={{ color: C.sub }}>Tell Mr. Lead what businesses to find and where. It pulls them from Google Maps with phone and website, scores each one, and files the good ones in New.</p>
+
+        <label className="mb-1 block text-[12px] font-medium" style={{ color: C.sub }}>What businesses?</label>
+        <input className="mb-3 w-full rounded-xl px-3.5 py-2.5 text-[13px] outline-none" style={{ background: C.bg, border: `1px solid ${C.line}`, color: C.ink, colorScheme: "light" }} placeholder="e.g. ISO certification consultants" value={what} onChange={(e) => setWhat(e.target.value)} autoFocus />
+
+        <label className="mb-1 block text-[12px] font-medium" style={{ color: C.sub }}>Which city or area?</label>
+        <input className="mb-3 w-full rounded-xl px-3.5 py-2.5 text-[13px] outline-none" style={{ background: C.bg, border: `1px solid ${C.line}`, color: C.ink, colorScheme: "light" }} placeholder="e.g. Dubai" value={city} onChange={(e) => setCity(e.target.value)} />
+
+        <div className="mb-4 flex flex-wrap gap-1.5">
+          {examples.map(([w, c]) => (
+            <button key={w} className="rounded-lg px-2.5 py-1 text-[11.5px] font-medium" style={{ background: C.brandSoft, color: C.brand }} onClick={() => { setWhat(w); setCity(c); }}>{w} · {c}</button>
+          ))}
+        </div>
+
+        <label className="mb-1 block text-[12px] font-medium" style={{ color: C.sub }}>How many? <b style={{ color: C.ink }}>{count}</b> <span className="text-[11px]">(max {LEADS_PER_RUN_MAX})</span></label>
+        <input type="range" min={1} max={LEADS_PER_RUN_MAX} value={count} onChange={(e) => setCount(Number(e.target.value))} className="mb-5 w-full" style={{ accentColor: C.brand }} />
+
+        <div className="flex justify-end gap-2">
+          <button className="rounded-xl px-4 py-2 text-[13px] font-semibold" style={{ background: C.graySoft, color: C.sub }} onClick={onClose}>Cancel</button>
+          <button className="rounded-xl px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-60" style={{ background: C.brand }} onClick={go} disabled={busy || !what.trim()}>{busy ? "Starting…" : "Find leads"}</button>
+        </div>
+      </div>
+    </div>
   );
 }

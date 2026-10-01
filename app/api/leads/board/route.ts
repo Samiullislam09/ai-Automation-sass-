@@ -88,7 +88,7 @@ export async function GET() {
     employee_messaged: count((l) => l.human_messaged),
     not_messaged: count((l) => !l.messaged),
     // tab counts
-    new: count((l) => l.stage === "new" || l.stage === "pending_approval" || l.stage === "approved"),
+    new: count((l) => l.stage === "new" || l.stage === "pending_approval"),
     engaged: count((l) => ["replied", "in_conversation", "interested"].includes(l.stage)),
     client: count((l) => l.stage === "won"),
   };
