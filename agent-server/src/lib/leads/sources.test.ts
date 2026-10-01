@@ -341,3 +341,36 @@ test("Serper (Google Maps, no card) maps places to candidates with phone + websi
     delete process.env.SERPER_API_KEY;
   }
 });
+
+test("Serper rotates to the next key when one's free quota is exhausted (402/429)", async () => {
+  process.env.SERPER_API_KEYS = "deadkey,livekey";
+  delete process.env.SERPER_API_KEY;
+  try {
+    __resetSourceCaches();
+    assert.equal(serperConfigured(), true);
+    const icp = buildIcp({ query: "manufacturers in Mumbai", count: 2 });
+    assert.equal(icp.ok, true);
+    if (!icp.ok) return;
+
+    const body = JSON.stringify({ places: [{ title: "Acme Works", address: "Mumbai", phoneNumber: "+91 98765 43210", website: "https://acme.in", cid: "9" }] });
+    const usedKeys: string[] = [];
+    const result = await discover(icp.icp, 2, {
+      fetchImpl: (async (input: any, init: any) => {
+        const u = String(input);
+        if (u.includes("google.serper.dev")) {
+          const k = init?.headers?.["X-API-KEY"];
+          usedKeys.push(k);
+          if (k === "deadkey") return new Response("quota", { status: 429 });   // exhausted
+          return new Response(body, { status: 200, headers: { "content-type": "application/json" } });
+        }
+        return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
+      }) as unknown as typeof fetch,
+    });
+
+    const fromSerper = result.candidates.filter((c) => c.source === "serper");
+    assert.ok(fromSerper.length >= 1, "the live key still produced a lead after the dead one 429'd");
+    assert.ok(usedKeys.includes("deadkey") && usedKeys.includes("livekey"), "both keys were tried, dead first then live");
+  } finally {
+    delete process.env.SERPER_API_KEYS;
+  }
+});

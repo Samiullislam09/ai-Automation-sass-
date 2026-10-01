@@ -425,15 +425,34 @@ function firstString(...values: unknown[]): string | null {
  *  Endpoint https://google.serper.dev/places, body { q, gl? }, header X-API-KEY. Response has a
  *  `places` array of { title, address, phoneNumber, website, category, rating, cid }. */
 export function serperConfigured(): boolean {
-  return !!process.env.SERPER_API_KEY;
+  return serperKeys().length > 0;
 }
+
+/** Serper's free tier is 2,500 searches PER ACCOUNT, one-time. To stretch that, this reads a POOL
+ *  of keys — SERPER_API_KEYS (comma-separated) and/or SERPER_API_KEY — so four free accounts give
+ *  ~10,000 searches, and the pool advances to the next key the moment one is exhausted. Same shape
+ *  as the NVIDIA key pool. Order is preserved; duplicates and blanks are dropped. */
+export function serperKeys(): string[] {
+  const raw = `${process.env.SERPER_API_KEYS ?? ""},${process.env.SERPER_API_KEY ?? ""}`;
+  const seen = new Set<string>();
+  const keys: string[] = [];
+  for (const k of raw.split(",").map((x) => x.trim()).filter(Boolean)) {
+    if (!seen.has(k)) { seen.add(k); keys.push(k); }
+  }
+  return keys;
+}
+
+/** Keys this process has seen exhausted (402 payment-required / 429 quota) — skipped for the rest
+ *  of the run so a dead key is not retried on every term. Resets on restart, which is correct:
+ *  a topped-up key should get another chance next deploy. */
+const serperDeadKeys = new Set<string>();
 
 const SERPER_HOST = "google.serper.dev";
 const SERPER_GAP_MS = 400;
 
 export async function serperSearch(icp: Icp, limit: number, fetchImpl: typeof fetch = fetch): Promise<Candidate[]> {
-  const key = process.env.SERPER_API_KEY;
-  if (!key) return [];
+  const keys = serperKeys().filter((k) => !serperDeadKeys.has(k));
+  if (!keys.length) return [];
   const out: Candidate[] = [];
   const seen = new Set<string>();
   const gl = countryCodeFor(icp.geo);
@@ -446,20 +465,31 @@ export async function serperSearch(icp: Icp, limit: number, fetchImpl: typeof fe
     const rows =
       hit ??
       (await throttled(SERPER_HOST, SERPER_GAP_MS, async () => {
-        try {
-          const res = await fetchImpl(`https://${SERPER_HOST}/places`, {
-            method: "POST",
-            headers: { "X-API-KEY": key, "Content-Type": "application/json" },
-            body: JSON.stringify({ q, ...(gl ? { gl } : {}) }),
-            signal: AbortSignal.timeout(15_000),
-          });
-          if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 140)}`);
-          const json: any = await res.json();
-          return Array.isArray(json?.places) ? json.places.map(serperToCandidate).filter(Boolean as any as (c: Candidate | null) => c is Candidate) : [];
-        } catch (e: any) {
-          console.warn(`[leads/serper] "${q}" failed:`, e?.message);
-          return [] as Candidate[];
+        // Try each live key in turn; a 402/429 means that key's free quota is gone, so mark it
+        // dead and fall through to the next. Any other error is this term's problem, not the key's.
+        for (const key of keys) {
+          if (serperDeadKeys.has(key)) continue;
+          try {
+            const res = await fetchImpl(`https://${SERPER_HOST}/places`, {
+              method: "POST",
+              headers: { "X-API-KEY": key, "Content-Type": "application/json" },
+              body: JSON.stringify({ q, ...(gl ? { gl } : {}) }),
+              signal: AbortSignal.timeout(15_000),
+            });
+            if (res.status === 402 || res.status === 429) {
+              serperDeadKeys.add(key);
+              console.warn(`[leads/serper] key exhausted (HTTP ${res.status}) — rotating to the next`);
+              continue;
+            }
+            if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 140)}`);
+            const json: any = await res.json();
+            return Array.isArray(json?.places) ? json.places.map(serperToCandidate).filter(Boolean as any as (c: Candidate | null) => c is Candidate) : [];
+          } catch (e: any) {
+            console.warn(`[leads/serper] "${q}" failed:`, e?.message);
+            return [] as Candidate[];
+          }
         }
+        return [] as Candidate[]; // every key was exhausted mid-run
       }));
     if (!hit) remember(cacheKey, rows);
 

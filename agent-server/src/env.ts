@@ -52,6 +52,9 @@ export const env = {
   // Serper.dev — Google Maps/Search as JSON, 2,500 free searches, NO card. The free route
   // to real local leads (lib/leads/sources.ts serperSearch).
   SERPER_API_KEY: process.env.SERPER_API_KEY || "",
+  // Optional pool: comma-separated Serper keys. The pool rotates to the next when one's free
+  // 2,500 is spent (lib/leads/sources.ts serperKeys), so N free accounts = N x 2,500 searches.
+  SERPER_API_KEYS: process.env.SERPER_API_KEYS || "",
   GOOGLE_PLACES_API_KEY: process.env.GOOGLE_PLACES_API_KEY || "",
   ADZUNA_APP_ID: process.env.ADZUNA_APP_ID || "",
   ADZUNA_APP_KEY: process.env.ADZUNA_APP_KEY || "",
