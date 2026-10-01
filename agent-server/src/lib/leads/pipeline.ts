@@ -145,6 +145,8 @@ export type LeadRecord = {
   /** The fit gate's verdict (Phase 3). "buyer" for everything that survives the gate; undefined on
    *  explicit-query runs where the gate did not run. */
   classification?: FitVerdict;
+  /** Country read off the candidate's address, for the CRM's Country column. */
+  country?: string | null;
 };
 
 // ── the dependencies every node takes ───────────────────────────────────────────────────────
@@ -1008,6 +1010,7 @@ export async function runPipeline(input: PipelineInput): Promise<PipelineResult>
       region_note: region.note,
       legal_basis: region.basis,
       classification,
+      country: candidate.country ?? null,
     };
 
     // The last gate: nothing leaves this function claiming to have been delivered.

@@ -61,6 +61,7 @@ const STAGE: Record<string, { label: string; fg: string; bg: string }> = {
 // The real-world source a lead came from, not the tool/API name. "serper" is just the API we
 // query Google Maps through, so a lead from it IS a Google Maps / Google Business listing.
 const SOURCE_LABEL: Record<string, string> = { serper: "Google Maps", osm: "OpenStreetMap", places: "Google Places", jobs: "Job board", manual: "Manual", apollo: "Apollo" };
+const SORT_LABEL: Record<string, string> = { newest: "Newest", oldest: "Oldest", score: "Score", name: "Name" };
 
 function ago(iso: string | null): string {
   if (!iso) return "—";
@@ -115,6 +116,7 @@ const TAB_MATCH: Record<string, (l: Lead) => boolean> = {
   all: () => true,
   new: (l) => Date.now() - new Date(l.created_at).getTime() < 86_400_000, // added in the last 24h
   engaged: (l) => ["replied", "in_conversation", "interested"].includes(l.stage),
+  rejected: (l) => l.stage === "rejected",
   converted: (l) => l.converted,
   client: (l) => l.is_client,
   ai_messaged: (l) => l.ai_messaged,
@@ -144,6 +146,9 @@ export default function LeadsSection() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [dateRange, setDateRange] = useState("all"); // all | today | 7d | 30d
   const [sort, setSort] = useState("newest"); // newest | oldest | score | name
+  const [sortOpen, setSortOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(10);
   // Advanced filters (spec section 7), applied on top of the tab + search. Empty = no constraint.
   const [flt, setFlt] = useState<{ status: string[]; source: string[]; city: string[]; ai: string; you: string; converted: string; client: string; score: string }>(
     { status: [], source: [], city: [], ai: "any", you: "any", converted: "any", client: "any", score: "any" }
@@ -279,8 +284,25 @@ export default function LeadsSection() {
   // kept internally to avoid churn; it holds country values.
   const cities = useMemo(() => Array.from(new Set((leads ?? []).map(countryOf).filter(Boolean))).sort(), [leads]);
 
+  // Pagination (client-side over the filtered+sorted rows). Reset to page 1 whenever the view
+  // changes, so a filter never leaves you stranded on an empty page.
+  useEffect(() => { setPage(1); }, [tab, q, flt, dateRange, sort, perPage]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / perPage));
+  const pageSafe = Math.min(page, totalPages);
+  const paged = filtered.slice((pageSafe - 1) * perPage, pageSafe * perPage);
+
   return (
     <div className="-m-3 min-h-[calc(100%+1.5rem)] p-3 sm:-m-4 sm:min-h-[calc(100%+2rem)] sm:p-4" style={{ background: C.bg, color: C.ink, colorScheme: "light" }}>
+      {/* Kill Chrome's dark autofill fill on this light surface: an input it thinks is an email
+          field gets a black background (and the parent dashboard is dark). Force a white inset. */}
+      <style>{`
+        .lx-input{background:#fff !important;color:#0f172a !important;color-scheme:light}
+        .lx-input::placeholder{color:#94a3b8}
+        .lx-input:-webkit-autofill,.lx-input:-webkit-autofill:hover,.lx-input:-webkit-autofill:focus,.lx-input:-webkit-autofill:active{
+          -webkit-box-shadow:0 0 0 1000px #fff inset !important;box-shadow:0 0 0 1000px #fff inset !important;
+          -webkit-text-fill-color:#0f172a !important;caret-color:#0f172a;transition:background-color 9999s ease-in-out 0s}
+        .lx-input:focus{outline:none !important;box-shadow:none !important}
+      `}</style>
       {/* header — title left; Buyer Profile / Export / Add Lead on the right (Filters moved into
           the search row below, to match the reference design) */}
       <div className="mb-4 flex items-center justify-between gap-2">
@@ -308,9 +330,9 @@ export default function LeadsSection() {
       {/* toolbar — a full-width search, then Filters and Generate Leads, like the reference. The
           search has the same quiet border as the KPI cards and no focus ring. */}
       <div className="mb-4 flex items-center gap-2.5">
-        <div className="flex h-11 min-w-0 flex-1 items-center gap-2.5 rounded-xl px-3.5" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+        <div className="flex h-11 min-w-0 flex-1 items-center gap-2.5 rounded-xl px-3.5" style={{ background: "#fff", border: `1px solid ${C.line}` }}>
           <svg className="shrink-0" width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke={C.sub} strokeWidth="2" /><path d="M21 21l-4-4" stroke={C.sub} strokeWidth="2" strokeLinecap="round" /></svg>
-          <input className="w-full min-w-0 border-0 bg-transparent text-[13.5px] outline-none focus:outline-none focus:ring-0" style={{ color: C.ink, colorScheme: "light", boxShadow: "none" }} placeholder="Search by name, email, phone, or company…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input type="search" name="lead-search" autoComplete="off" spellCheck={false} className="lx-input w-full min-w-0 border-0 text-[13.5px]" style={{ background: "#fff" }} placeholder="Search by name, email, phone, or company…" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
         <div className="relative shrink-0">
           <button className="flex h-11 items-center gap-1.5 rounded-xl px-3.5 text-[13px] font-semibold" style={{ background: filtersOpen || activeFilterCount ? C.brandSoft : C.panel, border: `1px solid ${filtersOpen || activeFilterCount ? C.brand : C.line}`, color: activeFilterCount || filtersOpen ? C.brand : C.ink }} onClick={() => setFiltersOpen((o) => !o)} title="Filters">
@@ -387,6 +409,7 @@ export default function LeadsSection() {
             ["engaged", "Engaged", kpis?.engaged],
             ["converted", "Converted", kpis?.converted],
             ["not_messaged", "Not Messaged", kpis?.not_messaged],
+            ["rejected", "Rejected", (leads ?? []).filter((l) => l.stage === "rejected").length],
           ] as [string, string, number | undefined][]).map(([k, label, n]) => (
             <button key={k} onClick={() => setTab(k)} className="flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-semibold"
               style={tab === k ? { background: C.brandSoft, color: C.brand } : { background: C.panel, color: C.sub, border: `1px solid ${C.line}` }}>
@@ -395,15 +418,25 @@ export default function LeadsSection() {
           ))}
         </div>
         <div className="relative hidden shrink-0 sm:block">
-          <select value={sort} onChange={(e) => setSort(e.target.value)}
-            className="h-9 cursor-pointer appearance-none rounded-lg pl-3 pr-8 text-[12.5px] font-semibold outline-none"
-            style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.ink, colorScheme: "light" }}>
-            <option value="newest">Sort by: Newest</option>
-            <option value="oldest">Sort by: Oldest</option>
-            <option value="score">Sort by: Score</option>
-            <option value="name">Sort by: Name</option>
-          </select>
-          <svg className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2" width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke={C.sub} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          <button onClick={() => setSortOpen((o) => !o)} className="flex h-9 items-center gap-2 rounded-lg pl-3 pr-2.5 text-[12.5px] font-semibold" style={{ background: C.panel, border: `1px solid ${sortOpen ? C.brand : C.line}`, color: C.ink }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M3 6h12M3 12h8M3 18h5M17 6v12m0 0l-3-3m3 3l3-3" stroke={C.sub} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            <span style={{ color: C.sub }}>Sort:</span> {SORT_LABEL[sort]}
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" style={{ transform: sortOpen ? "rotate(180deg)" : undefined }}><path d="M6 9l6 6 6-6" stroke={C.sub} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          </button>
+          {sortOpen && (
+            <>
+              <div className="fixed inset-0 z-[95]" onClick={() => setSortOpen(false)} />
+              <div className="absolute right-0 z-[96] mt-1.5 w-40 overflow-hidden rounded-xl py-1 shadow-lg" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+                {Object.entries(SORT_LABEL).map(([k, label]) => (
+                  <button key={k} onClick={() => { setSort(k); setSortOpen(false); }} className="flex w-full items-center justify-between px-3 py-1.5 text-left text-[12.5px]"
+                    style={{ background: sort === k ? C.brandSoft : "transparent", color: sort === k ? C.brand : C.ink, fontWeight: sort === k ? 600 : 400 }}
+                    onMouseEnter={(e) => { if (sort !== k) e.currentTarget.style.background = C.graySoft; }} onMouseLeave={(e) => { if (sort !== k) e.currentTarget.style.background = "transparent"; }}>
+                    {label}{sort === k && <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke={C.brand} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -427,7 +460,7 @@ export default function LeadsSection() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((l) => (
+                  {paged.map((l) => (
                     <tr key={l.id} className="cursor-pointer text-[12.5px] hover:bg-[#fafbfc]" style={{ borderBottom: `1px solid ${C.line}` }} onClick={() => setSelected(l)}>
                       <td className="px-2.5 py-2">
                         <div className="flex items-center gap-2">
@@ -456,16 +489,7 @@ export default function LeadsSection() {
                       <td className="px-2.5 py-2" style={{ color: C.sub, whiteSpace: "nowrap" }}>{SOURCE_LABEL[l.source ?? ""] ?? l.source ?? "—"}</td>
                       <td className="px-2.5 py-2" style={{ whiteSpace: "nowrap" }}><AddedCell iso={l.created_at} /></td>
                       <td className="px-2.5 py-2" style={{ color: C.sub, whiteSpace: "nowrap" }}>{countryOf(l) || "—"}</td>
-                      <td className="px-2.5 py-2" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center gap-1">
-                          <button className="rounded-lg p-1.5" style={{ color: C.sub }} title="Why this lead — overview" onClick={() => setSelected(l)}
-                            onMouseEnter={(e) => { e.currentTarget.style.color = C.brand; e.currentTarget.style.background = C.brandSoft; }}
-                            onMouseLeave={(e) => { e.currentTarget.style.color = C.sub; e.currentTarget.style.background = "transparent"; }}>
-                            <EyeIcon />
-                          </button>
-                          {rowActions(l, setStage, busy, waLink)}
-                        </div>
-                      </td>
+                      <td className="px-2.5 py-2" onClick={(e) => e.stopPropagation()}>{rowActions(l, setStage, busy, waLink)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -474,7 +498,7 @@ export default function LeadsSection() {
           </div>
 
           <div className="space-y-2.5 md:hidden">
-            {filtered.map((l) => (
+            {paged.map((l) => (
               <div key={l.id} className="rounded-2xl p-3.5" style={{ background: C.panel, border: `1px solid ${C.line}` }} onClick={() => setSelected(l)}>
                 <div className="mb-2 flex items-start gap-2.5">
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[12px] font-bold text-white" style={{ background: C.brand }}>{initials(l)}</span>
@@ -496,6 +520,32 @@ export default function LeadsSection() {
                 <div onClick={(e) => e.stopPropagation()}>{rowActions(l, setStage, busy, waLink)}</div>
               </div>
             ))}
+          </div>
+
+          {/* pagination — "Showing X–Y of Z", page controls, and a per-page picker */}
+          <div className="mt-3 flex flex-col items-center justify-between gap-2.5 rounded-2xl px-4 py-3 sm:flex-row" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+            <div className="text-[12px]" style={{ color: C.sub }}>
+              {filtered.length === 0 ? "No leads" : `Showing ${(pageSafe - 1) * perPage + 1}–${Math.min(pageSafe * perPage, filtered.length)} of ${filtered.length} leads`}
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1">
+                <PageBtn disabled={pageSafe <= 1} onClick={() => setPage(pageSafe - 1)} label="‹" />
+                {pageNumbers(pageSafe, totalPages).map((p, i) =>
+                  p === "…"
+                    ? <span key={`e${i}`} className="px-1 text-[12px]" style={{ color: C.sub }}>…</span>
+                    : <button key={p} onClick={() => setPage(p as number)} className="h-8 min-w-8 rounded-lg px-2 text-[12.5px] font-semibold"
+                        style={p === pageSafe ? { background: C.brand, color: "#fff" } : { background: C.panel, color: C.ink, border: `1px solid ${C.line}` }}>{p}</button>
+                )}
+                <PageBtn disabled={pageSafe >= totalPages} onClick={() => setPage(pageSafe + 1)} label="›" />
+              </div>
+              <div className="relative">
+                <select value={perPage} onChange={(e) => setPerPage(Number(e.target.value))}
+                  className="lx-input h-8 cursor-pointer appearance-none rounded-lg pl-2.5 pr-7 text-[12px] font-semibold" style={{ border: `1px solid ${C.line}` }}>
+                  {[10, 25, 50, 100].map((n) => <option key={n} value={n}>{n} / page</option>)}
+                </select>
+                <svg className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2" width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke={C.sub} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              </div>
+            </div>
           </div>
         </>
       )}
@@ -559,15 +609,51 @@ function rowActions(l: Lead, setStage: (l: Lead, s: string, reason?: string) => 
   }
   if (l.stage === "opted_out") return <span className="text-[12px]" style={{ color: C.sub }}>—</span>;
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-1.5">
+      {/* WhatsApp — compact, its own brand green, like the real app */}
       {num ? (
-        <a href={waLink(l)} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11.5px] font-semibold" style={{ background: "#25D366", color: "#ffffff", textDecoration: "none" }} title="Open WhatsApp chat">
-          <WaGlyph size={13} /><span style={{ color: "#ffffff" }}>Message</span>
+        <a href={waLink(l)} title="WhatsApp chat" className="inline-flex h-7 w-7 items-center justify-center rounded-lg" style={{ background: "#25D366", color: "#fff", textDecoration: "none" }}>
+          <WaGlyph size={14} />
         </a>
-      ) : <span className="text-[12px]" style={{ color: C.sub }}>—</span>}
+      ) : <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg" style={{ background: C.graySoft, color: C.line }}><WaGlyph size={14} /></span>}
+      {/* Email — opens the mail client now; the inbox-style email chat comes later (like WhatsApp) */}
+      {l.email ? (
+        <a href={`mailto:${l.email}`} title={`Email ${l.email}`} onClick={(e) => e.stopPropagation()} className="inline-flex h-7 w-7 items-center justify-center rounded-lg" style={{ background: C.brandSoft, color: C.brand, textDecoration: "none" }}>
+          <MailIcon size={14} />
+        </a>
+      ) : <span title="No email" className="inline-flex h-7 w-7 items-center justify-center rounded-lg" style={{ background: C.graySoft, color: C.line }}><MailIcon size={14} /></span>}
       <RejectMenu variant="icon" disabled={busy === l.id} onPick={(reason) => setStage(l, "rejected", reason)} />
     </div>
   );
+}
+
+function MailIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2.5" y="4.5" width="19" height="15" rx="2.5" />
+      <path d="M3 6l9 7 9-7" />
+    </svg>
+  );
+}
+
+function PageBtn({ disabled, onClick, label }: { disabled: boolean; onClick: () => void; label: string }) {
+  return (
+    <button disabled={disabled} onClick={onClick} className="flex h-8 w-8 items-center justify-center rounded-lg text-[15px] disabled:opacity-40"
+      style={{ background: C.panel, color: C.ink, border: `1px solid ${C.line}` }}>{label}</button>
+  );
+}
+
+/** Page numbers with ellipsis: 1 … around-current … last. Keeps the control compact for many pages. */
+function pageNumbers(current: number, total: number): (number | "…")[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const out: (number | "…")[] = [1];
+  const start = Math.max(2, current - 1);
+  const end = Math.min(total - 1, current + 1);
+  if (start > 2) out.push("…");
+  for (let p = start; p <= end; p++) out.push(p);
+  if (end < total - 1) out.push("…");
+  out.push(total);
+  return out;
 }
 
 /** "Added" — a little green Today badge for fresh rows, a short date for the rest. */

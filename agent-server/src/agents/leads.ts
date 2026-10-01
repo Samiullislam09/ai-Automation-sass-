@@ -480,6 +480,7 @@ async function saveLeads(
     // Which confirmed buyer segment + query produced this lead (Phase 2), and the score detail so
     // "68/100" is explainable in the drawer (Phase 4). All nullable — migration 030 adds them, and
     // the core-insert fallback below covers a database where 030 has not run yet.
+    country: lead.country ?? null,
     source_segment: meta.source_segment ?? null,
     source_query: meta.source_query ?? null,
     classification: lead.classification ?? null,

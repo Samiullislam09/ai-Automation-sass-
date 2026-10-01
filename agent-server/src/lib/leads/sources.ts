@@ -63,7 +63,30 @@ export type Candidate = {
   sourceRef: string | null;
   /** Shown wherever the lead is shown, when the source requires it (ODbL). */
   attribution: string | null;
+  /** The country, read off the address where the source gives one (Google Maps addresses end
+   *  with it). Null when it can't be told. Stamped on the lead so the CRM's Country column fills. */
+  country?: string | null;
 };
+
+/** The country from a postal address, or null. Google Maps / Serper addresses reliably end with
+ *  the country, so the last comma-segment is taken and common short forms (UAE, USA, UK …) are
+ *  canonicalised. Conservative: a segment that is a number or too short is skipped. */
+export function countryFromAddress(address: string | null | undefined): string | null {
+  const parts = String(address ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (!parts.length) return null;
+  const aliases: [RegExp, string][] = [
+    [/^(uae|u\.?a\.?e\.?|united arab emirates)$/i, "United Arab Emirates"],
+    [/^(ksa|saudi arabia)$/i, "Saudi Arabia"],
+    [/^(uk|u\.?k\.?|united kingdom|england|scotland|wales|britain)$/i, "United Kingdom"],
+    [/^(usa|u\.?s\.?a\.?|united states( of america)?|america)$/i, "United States"],
+    [/^(uae?|emirates)$/i, "United Arab Emirates"],
+  ];
+  for (const seg of [parts[parts.length - 1], parts[parts.length - 2]].filter(Boolean)) {
+    for (const [re, name] of aliases) if (re.test(seg)) return name;
+  }
+  const last = parts[parts.length - 1];
+  return /^[A-Za-z][A-Za-z .'\-]{2,39}$/.test(last) ? last : null;
+}
 
 /** What each source did this run — printed in the agent's output so "why only 4 leads?" has an
  *  answer that names the missing key instead of shrugging. */
@@ -526,6 +549,7 @@ function serperToCandidate(p: any): Candidate | null {
     source: "serper",
     sourceRef: firstString(p?.cid),
     attribution: "Data via Google Maps (Serper)",
+    country: countryFromAddress(firstString(p?.address)),
   };
 }
 

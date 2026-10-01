@@ -137,6 +137,13 @@ export default function BuyerProfilePanel({ open, onClose, toast, onConfirmedCha
 
   return (
     <div className="fixed inset-0 z-[90] flex justify-end" style={{ background: "rgba(15,23,42,.35)", colorScheme: "light" }} onClick={onClose}>
+      <style>{`
+        .lx-bp-input{background:#fff !important;color:#0f172a !important;color-scheme:light}
+        .lx-bp-input::placeholder{color:#94a3b8}
+        .lx-bp-input:-webkit-autofill,.lx-bp-input:-webkit-autofill:hover,.lx-bp-input:-webkit-autofill:focus{
+          -webkit-box-shadow:0 0 0 1000px #fff inset !important;-webkit-text-fill-color:#0f172a !important;caret-color:#0f172a;transition:background-color 9999s}
+        .lx-bp-input:focus{outline:none !important;box-shadow:none !important}
+      `}</style>
       <div className="flex h-full w-full max-w-[560px] flex-col" style={{ background: C.bg, color: C.ink }} onClick={(e) => e.stopPropagation()}>
         {/* header */}
         <div className="flex items-center justify-between gap-2 px-4 py-3" style={{ background: C.panel, borderBottom: `1px solid ${C.line}` }}>
@@ -177,11 +184,11 @@ export default function BuyerProfilePanel({ open, onClose, toast, onConfirmedCha
 
               {/* offer + goal + geo */}
               <Field label="What you offer">
-                <textarea value={bp.offer ?? ""} onChange={(e) => edit({ offer: e.target.value })} rows={2} className="w-full resize-none rounded-lg px-3 py-2 text-[13px] outline-none" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.ink }} placeholder="What this business sells or provides" />
+                <textarea value={bp.offer ?? ""} onChange={(e) => edit({ offer: e.target.value })} rows={2} autoComplete="off" className="lx-bp-input w-full resize-none rounded-lg px-3 py-2 text-[13px] outline-none" style={{ border: `1px solid ${C.line}` }} placeholder="What this business sells or provides" />
               </Field>
               <div className="grid grid-cols-2 gap-3">
                 <Field label="A “lead” means">
-                  <select value={bp.lead_goal ?? ""} onChange={(e) => edit({ lead_goal: (e.target.value || null) as BuyerProfile["lead_goal"] })} className="w-full rounded-lg px-3 py-2 text-[13px] outline-none" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.ink }}>
+                  <select value={bp.lead_goal ?? ""} onChange={(e) => edit({ lead_goal: (e.target.value || null) as BuyerProfile["lead_goal"] })} className="lx-bp-input w-full rounded-lg px-3 py-2 text-[13px] outline-none" style={{ border: `1px solid ${C.line}` }}>
                     <option value="">—</option>
                     {LEAD_GOALS.map((g) => <option key={g} value={g}>{g}</option>)}
                   </select>
@@ -294,8 +301,8 @@ function Card({ children, onDelete, from }: { children: React.ReactNode; onDelet
 
 function Line({ value, onChange, placeholder, bold }: { value: string; onChange: (v: string) => void; placeholder?: string; bold?: boolean }) {
   return (
-    <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
-      className="w-full rounded-lg px-2.5 py-1.5 text-[13px] outline-none" style={{ background: C.bg, border: `1px solid ${C.line}`, color: C.ink, fontWeight: bold ? 600 : 400 }} />
+    <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} autoComplete="off"
+      className="lx-bp-input w-full rounded-lg px-2.5 py-1.5 text-[13px] outline-none" style={{ border: `1px solid ${C.line}`, fontWeight: bold ? 600 : 400 }} />
   );
 }
 
@@ -311,7 +318,7 @@ function ChipInput({ values, onChange, placeholder }: { values: string[]; onChan
     setText("");
   };
   return (
-    <div className="rounded-lg px-2 py-1.5" style={{ background: C.bg, border: `1px solid ${C.line}` }}>
+    <div className="rounded-lg px-2 py-1.5" style={{ background: "#fff", border: `1px solid ${C.line}` }}>
       <div className="flex flex-wrap gap-1.5">
         {values.map((v, i) => (
           <span key={i} className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11.5px]" style={{ background: C.brandSoft, color: C.brand }}>
@@ -325,8 +332,9 @@ function ChipInput({ values, onChange, placeholder }: { values: string[]; onChan
           onKeyDown={(e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); add(); } }}
           onBlur={add}
           placeholder={values.length ? "" : placeholder}
-          className="min-w-[80px] flex-1 bg-transparent text-[12.5px] outline-none"
-          style={{ color: C.ink }}
+          autoComplete="off"
+          className="lx-bp-input min-w-[80px] flex-1 text-[12.5px] outline-none"
+          style={{ border: "none" }}
         />
       </div>
     </div>

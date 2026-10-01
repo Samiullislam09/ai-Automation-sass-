@@ -14,6 +14,7 @@ const {
   serperConfigured,
   jobsConfigured,
   adzunaCountryFor,
+  countryFromAddress,
   apolloConfigured,
   describeSources,
   discover,
@@ -373,4 +374,14 @@ test("Serper rotates to the next key when one's free quota is exhausted (402/429
   } finally {
     delete process.env.SERPER_API_KEYS;
   }
+});
+
+test("countryFromAddress pulls the country off a Google Maps address and canonicalises short forms", () => {
+  assert.equal(countryFromAddress("Jumeirah Rd, Dubai, United Arab Emirates"), "United Arab Emirates");
+  assert.equal(countryFromAddress("Some St, Dubai, UAE"), "United Arab Emirates");
+  assert.equal(countryFromAddress("221B Baker St, London, UK"), "United Kingdom");
+  assert.equal(countryFromAddress("MG Road, Pune, India"), "India");
+  assert.equal(countryFromAddress(""), null);
+  assert.equal(countryFromAddress(null), null);
+  assert.equal(countryFromAddress("12345"), null); // a bare postcode is not a country
 });
