@@ -11,6 +11,7 @@ process.env.SUPABASE_SERVICE_ROLE_KEY ||= "unit-test";
 
 const {
   __resetSourceCaches,
+  serperConfigured,
   jobsConfigured,
   adzunaCountryFor,
   apolloConfigured,
@@ -298,5 +299,45 @@ test("Adzuna maps a covered geo and reports an uncovered one honestly", async ()
   } finally {
     delete process.env.ADZUNA_APP_ID;
     delete process.env.ADZUNA_APP_KEY;
+  }
+});
+
+test("Serper (Google Maps, no card) maps places to candidates with phone + website", async () => {
+  process.env.SERPER_API_KEY = "test-key";
+  try {
+    __resetSourceCaches();
+    assert.equal(serperConfigured(), true);
+    const icp = buildIcp({ query: "manufacturers in Dubai", count: 3 });
+    assert.equal(icp.ok, true);
+    if (!icp.ok) return;
+
+    const body = JSON.stringify({ places: [
+      { position: 1, title: "Gulf Steel Industries", address: "Al Quoz, Dubai", phoneNumber: "+971 4 123 4567", website: "https://gulfsteel.ae", category: "Manufacturer", cid: "111" },
+      { position: 2, title: "Emirates Foods LLC", address: "DIP, Dubai", phoneNumber: "+971 4 987 6543", website: "https://emiratesfoods.ae", category: "Food", cid: "222" },
+    ] });
+    const seen: string[] = [];
+    const result = await discover(icp.icp, 3, {
+      fetchImpl: (async (input: any, init: any) => {
+        const u = String(input); seen.push(u);
+        if (u.includes("google.serper.dev")) {
+          // confirm it POSTs with the api key header
+          assert.equal(init?.headers?.["X-API-KEY"], "test-key");
+          return new Response(body, { status: 200, headers: { "content-type": "application/json" } });
+        }
+        return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
+      }) as unknown as typeof fetch,
+    });
+
+    const sr = result.reports.find((r) => r.id === "serper")!;
+    assert.equal(sr.configured, true);
+    assert.equal(sr.used, true);
+    assert.ok(sr.found >= 2);
+    const fromSerper = result.candidates.filter((c) => c.source === "serper");
+    assert.equal(fromSerper[0].name, "Gulf Steel Industries");
+    assert.equal(fromSerper[0].phone, "+971 4 123 4567");
+    assert.equal(fromSerper[0].domain, "gulfsteel.ae");
+    assert.ok(seen.some((u) => u.includes("google.serper.dev/places")));
+  } finally {
+    delete process.env.SERPER_API_KEY;
   }
 });

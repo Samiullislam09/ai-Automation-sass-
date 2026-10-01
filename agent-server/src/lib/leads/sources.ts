@@ -10,7 +10,9 @@
  *
  *   · `osm`    — OpenStreetMap via Nominatim. Free, no key, wired today. Local businesses by
  *                category and area, with website and phone where the map has them.
- *   · `places` — Google Places. WIRED. GOOGLE_PLACES_API_KEY (optional; card required at Google).
+ *   · `serper` — Google Maps via Serper.dev. WIRED. SERPER_API_KEY — 2,500 free searches, NO
+ *                card. The free, no-card route to real Google Maps leads (name, phone, website).
+ *   · `places` — Google Places direct. WIRED. GOOGLE_PLACES_API_KEY (needs a card at Google).
  *   · `jobs`   — Adzuna job listings, an INTENT source: a company hiring for a role you sell
  *                into needs what you sell. WIRED. ADZUNA_APP_ID + ADZUNA_APP_KEY (free tier).
  *   · `apollo` — Apollo.io for B2B. SEAM. APOLLO_API_KEY.
@@ -46,7 +48,7 @@ export const OSM_ATTRIBUTION = "© OpenStreetMap contributors (ODbL)";
 
 // ── the shape a source returns ──────────────────────────────────────────────────────────────
 
-export type SourceId = "osm" | "places" | "apollo" | "jobs";
+export type SourceId = "osm" | "places" | "serper" | "apollo" | "jobs";
 
 export type Candidate = {
   name: string;
@@ -410,6 +412,107 @@ function firstString(...values: unknown[]): string | null {
  *
  *  It stays a seam because a wrong field mask is billable and there is no test account here to
  *  prove one against. `wired: false` is the honest answer, and the run says so out loud. */
+// ── source · Google Maps via Serper.dev (WIRED) — the free, no-card route ─────────────────────
+
+/** SERPER_API_KEY. Serper returns Google's own local/maps results as JSON — the same businesses
+ *  Google Maps shows, with phoneNumber and website — for a flat 2,500 free searches on signup and
+ *  NO credit card. That makes it the one source that gives real, accurate local leads without the
+ *  card Google Places itself demands, which is exactly the constraint this install is under.
+ *
+ *  Legitimate API, not a scrape: we call Serper, Serper calls Google. No browser, no proxy, no
+ *  account of the customer's at risk.
+ *
+ *  Endpoint https://google.serper.dev/places, body { q, gl? }, header X-API-KEY. Response has a
+ *  `places` array of { title, address, phoneNumber, website, category, rating, cid }. */
+export function serperConfigured(): boolean {
+  return !!process.env.SERPER_API_KEY;
+}
+
+const SERPER_HOST = "google.serper.dev";
+const SERPER_GAP_MS = 400;
+
+export async function serperSearch(icp: Icp, limit: number, fetchImpl: typeof fetch = fetch): Promise<Candidate[]> {
+  const key = process.env.SERPER_API_KEY;
+  if (!key) return [];
+  const out: Candidate[] = [];
+  const seen = new Set<string>();
+  const gl = countryCodeFor(icp.geo);
+
+  for (const term of icp.searchTerms) {
+    if (out.length >= limit) break;
+    const q = icp.geo ? `${term} in ${icp.geo}` : term;
+    const cacheKey = `serper:${q.toLowerCase()}:${limit}`;
+    const hit = cached<Candidate[]>(cacheKey);
+    const rows =
+      hit ??
+      (await throttled(SERPER_HOST, SERPER_GAP_MS, async () => {
+        try {
+          const res = await fetchImpl(`https://${SERPER_HOST}/places`, {
+            method: "POST",
+            headers: { "X-API-KEY": key, "Content-Type": "application/json" },
+            body: JSON.stringify({ q, ...(gl ? { gl } : {}) }),
+            signal: AbortSignal.timeout(15_000),
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 140)}`);
+          const json: any = await res.json();
+          return Array.isArray(json?.places) ? json.places.map(serperToCandidate).filter(Boolean as any as (c: Candidate | null) => c is Candidate) : [];
+        } catch (e: any) {
+          console.warn(`[leads/serper] "${q}" failed:`, e?.message);
+          return [] as Candidate[];
+        }
+      }));
+    if (!hit) remember(cacheKey, rows);
+
+    for (const c of rows) {
+      const dedupeKey = c.domain ?? c.sourceRef ?? `${c.name.toLowerCase()}|${c.address ?? ""}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      out.push(c);
+      if (out.length >= limit) break;
+    }
+  }
+  return out;
+}
+
+function serperToCandidate(p: any): Candidate | null {
+  const name = String(p?.title ?? "").trim();
+  if (!name) return null;
+  const website = firstString(p?.website);
+  const phone = firstString(p?.phoneNumber);
+  return {
+    name,
+    website: website ?? null,
+    domain: domainOf(website),
+    phone: phone ?? null,
+    address: firstString(p?.address),
+    categories: p?.category ? [String(p.category)] : [],
+    source: "serper",
+    sourceRef: firstString(p?.cid),
+    attribution: "Data via Google Maps (Serper)",
+  };
+}
+
+/** Rough ICP-geo → ISO country code for Serper's `gl` param. Reuses the same spirit as the
+ *  Adzuna map but includes the UAE, because Serper (unlike Adzuna) covers it. Unknown → undefined,
+ *  which lets Serper infer from the query text. */
+function countryCodeFor(geo: string | null): string | undefined {
+  if (!geo) return undefined;
+  const g = geo.toLowerCase();
+  const map: [RegExp, string][] = [
+    [/uae|united arab|dubai|abu dhabi|sharjah|ajman/, "ae"],
+    [/saudi|riyadh|jeddah|ksa/, "sa"],
+    [/qatar|doha/, "qa"],
+    [/india|delhi|mumbai|bangalore|bengaluru|hyderabad|pune|chennai/, "in"],
+    [/uk|united kingdom|london|england/, "gb"],
+    [/usa?|united states|america|new york/, "us"],
+    [/singapore/, "sg"],
+    [/australia|sydney|melbourne/, "au"],
+    [/canada|toronto/, "ca"],
+  ];
+  for (const [re, code] of map) if (re.test(g)) return code;
+  return undefined;
+}
+
 export function placesConfigured(): boolean {
   return !!process.env.GOOGLE_PLACES_API_KEY;
 }
@@ -635,6 +738,25 @@ export async function discover(icp: Icp, limit: number, deps: DiscoverDeps = {})
   const fetchImpl = deps.fetchImpl ?? fetch;
   const reports: SourceReport[] = [];
   const candidates: Candidate[] = [];
+
+  // Serper (Google Maps, free + no card) — FIRST, because it is the one source that gives real
+  // Google Maps leads without a billing card, which is the constraint this install lives under.
+  let serperFound = 0;
+  let serperNote = "no SERPER_API_KEY — the free, no-card Google Maps route is off";
+  if (serperConfigured()) {
+    try {
+      const rows = await serperSearch(icp, limit, fetchImpl);
+      candidates.push(...rows);
+      serperFound = rows.length;
+      serperNote = rows.length ? "Google Maps via Serper (free, no card)" : "Serper returned nothing for this search";
+    } catch (e: any) {
+      serperNote = `Serper failed: ${String(e?.message ?? e).slice(0, 120)}`;
+    }
+  }
+  reports.push({
+    id: "serper", label: "Google Maps (Serper)", configured: serperConfigured(), wired: true,
+    envVars: ["SERPER_API_KEY"], used: serperConfigured(), found: serperFound, note: serperNote,
+  });
 
   // Google Places — the best local source. Runs first when its key is set; OSM then tops up.
   let placesFound = 0;

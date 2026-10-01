@@ -49,6 +49,9 @@ export const env = {
   // source with a note, never an error — OpenStreetMap always answers keyless.
   //   GOOGLE_PLACES_API_KEY — Google Places "New" (needs a billing account at Google).
   //   ADZUNA_APP_ID/KEY     — Adzuna job listings (free tier), the intent source.
+  // Serper.dev — Google Maps/Search as JSON, 2,500 free searches, NO card. The free route
+  // to real local leads (lib/leads/sources.ts serperSearch).
+  SERPER_API_KEY: process.env.SERPER_API_KEY || "",
   GOOGLE_PLACES_API_KEY: process.env.GOOGLE_PLACES_API_KEY || "",
   ADZUNA_APP_ID: process.env.ADZUNA_APP_ID || "",
   ADZUNA_APP_KEY: process.env.ADZUNA_APP_KEY || "",
