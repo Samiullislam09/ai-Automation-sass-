@@ -107,15 +107,19 @@ export async function GET() {
   const runningRow = gRows.find((r) => r.status === "queued" || r.status === "running");
   const running = runningRow != null;
   const lastDone = gRows.find((r) => r.status === "success" || r.status === "error");
+  const d = (lastDone?.detail ?? {}) as any;
   const gen = {
     running,
     // When the live run started — the Leads page counts rows newer than this as "found so far".
     running_since: runningRow?.created_at ?? null,
     last_run_at: lastDone?.created_at ?? null,
     last_status: lastDone?.status ?? null,
-    // How many the last finished run added, if the agent recorded it.
-    last_found: typeof lastDone?.detail?.count === "number" ? lastDone.detail.count : null,
-    last_note: typeof lastDone?.detail?.reason === "string" ? lastDone.detail.reason : null,
+    // How many the last finished run added, if the agent recorded it (agent returns `found`).
+    last_found: typeof d.count === "number" ? d.count : typeof d.found === "number" ? d.found : null,
+    last_note: typeof d.note === "string" ? d.note : typeof d.reason === "string" ? d.reason : null,
+    // So the Live panel can show WHY a run found nothing — e.g. the buyer profile isn't confirmed.
+    last_needs: Array.isArray(d.needs) ? d.needs : [],
+    last_question: typeof d.question === "string" ? d.question : null,
   };
 
   return NextResponse.json({ ok: true, leads: enriched, kpis, gen });

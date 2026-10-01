@@ -26,7 +26,7 @@ const C = {
 
 type Lead = {
   id: string; company: string | null; name: string | null; email?: string | null;
-  phone: string | null; whatsapp?: string | null; website?: string | null; city?: string | null;
+  phone: string | null; whatsapp?: string | null; website?: string | null; city?: string | null; country?: string | null;
   source: string | null; icp_score: number | null; reason: string | null; draft?: string | null;
   stage: string; created_at: string; notes?: string | null;
   source_segment?: string | null; source_query?: string | null; classification?: string | null;
@@ -37,7 +37,7 @@ type Lead = {
   last_out_at: string | null; last_out_body: string | null; last_in_at: string | null; last_in_body: string | null;
 };
 type Kpis = { total: number; messaged: number; converted: number; ai_messaged: number; employee_messaged: number; not_messaged: number; new: number; engaged: number; client: number };
-type Gen = { running: boolean; running_since?: string | null; last_run_at: string | null; last_status: string | null; last_found: number | null; last_note: string | null };
+type Gen = { running: boolean; running_since?: string | null; last_run_at: string | null; last_status: string | null; last_found: number | null; last_note: string | null; last_needs?: string[]; last_question?: string | null };
 
 const STAGE: Record<string, { label: string; fg: string; bg: string }> = {
   new: { label: "New", fg: C.blue, bg: C.blueSoft },
@@ -78,6 +78,36 @@ function fmtDay(iso: string) { return new Date(iso).toLocaleDateString(undefined
 function siteLabel(url: string) { return url.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, ""); }
 function initials(l: Lead) { return (l.company || l.name || "?").slice(0, 2).toUpperCase(); }
 function cityOf(l: Lead): string { return (l.city ?? "").trim(); }
+function countryOf(l: Lead): string { return (l.country ?? "").trim(); }
+
+// Common country → dialling code, so a bare local number can be shown with its country code when
+// we actually KNOW the country. We never guess a code for a lead whose country we don't have.
+const COUNTRY_DIAL: Record<string, string> = {
+  india: "+91", "united arab emirates": "+971", uae: "+971", "u.a.e": "+971",
+  "united states": "+1", usa: "+1", "united states of america": "+1",
+  "united kingdom": "+44", uk: "+44", "u.k": "+44", canada: "+1", australia: "+61",
+  pakistan: "+92", "saudi arabia": "+966", qatar: "+974", kuwait: "+965", oman: "+968",
+  bahrain: "+973", singapore: "+65", germany: "+49", france: "+33", spain: "+34", italy: "+39",
+};
+/** The phone, shown with its country code. If it already has one (+ or 00) it's left alone;
+ *  otherwise, only when the lead's country is known, the code is prepended and a local trunk 0
+ *  dropped. Never invents a code for an unknown country. */
+function phoneDisplay(l: Lead): string {
+  const raw = (l.whatsapp || l.phone || "").trim();
+  if (!raw) return "—";
+  if (/^(\+|00)/.test(raw)) return raw;
+  const dial = l.country ? COUNTRY_DIAL[l.country.trim().toLowerCase()] : null;
+  return dial ? `${dial} ${raw.replace(/^0+/, "")}` : raw;
+}
+
+function EyeIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M1.5 12S5 5 12 5s10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12z" />
+      <circle cx="12" cy="12" r="2.5" />
+    </svg>
+  );
+}
 
 const TAB_MATCH: Record<string, (l: Lead) => boolean> = {
   all: () => true,
@@ -196,7 +226,7 @@ export default function LeadsSection() {
       if (!match(l)) return false;
       if (flt.status.length && !flt.status.includes(l.stage)) return false;
       if (flt.source.length && !flt.source.includes(l.source ?? "")) return false;
-      if (flt.city.length && !flt.city.includes(cityOf(l))) return false;
+      if (flt.city.length && !flt.city.includes(countryOf(l))) return false; // `city` key now holds Country values (filter relabelled)
       if (flt.ai === "yes" && !l.ai_messaged) return false;
       if (flt.ai === "no" && l.ai_messaged) return false;
       if (flt.you === "yes" && !l.human_messaged) return false;
@@ -211,7 +241,7 @@ export default function LeadsSection() {
         if (Date.now() - new Date(l.created_at).getTime() > days * 86400000) return false;
       }
       if (!needle) return true;
-      return [l.company, l.name, l.email, l.phone, l.whatsapp, l.city].some((v) => String(v ?? "").toLowerCase().includes(needle));
+      return [l.company, l.name, l.email, l.phone, l.whatsapp, l.country].some((v) => String(v ?? "").toLowerCase().includes(needle));
     });
   }, [leads, tab, q, flt, dateRange]);
 
@@ -220,9 +250,9 @@ export default function LeadsSection() {
     ["ai", "you", "converted", "client", "score"].filter((k) => (flt as any)[k] !== "any").length;
 
   const exportCsv = () => {
-    const rows = [["Company", "Name", "Phone", "Email", "Website", "City", "Source", "Status", "Score", "AI Messaged", "You Messaged", "Client", "Created"]];
+    const rows = [["Company", "Name", "Phone", "Email", "Website", "Country", "Source", "Status", "Score", "AI Messaged", "You Messaged", "Client", "Created"]];
     for (const l of filtered) rows.push([
-      l.company ?? "", l.name ?? "", l.whatsapp || l.phone || "", l.email ?? "", l.website ?? "", cityOf(l), l.source ?? "", l.stage,
+      l.company ?? "", l.name ?? "", phoneDisplay(l), l.email ?? "", l.website ?? "", countryOf(l), l.source ?? "", l.stage,
       String(l.icp_score ?? ""), l.ai_messaged ? "yes" : "no", l.human_messaged ? "yes" : "no", l.is_client ? "yes" : "no",
       new Date(l.created_at).toISOString(),
     ]);
@@ -234,7 +264,9 @@ export default function LeadsSection() {
   };
 
   const waLink = (l: Lead) => `/dashboard/whatsapp?lead=${l.id}`;
-  const cities = useMemo(() => Array.from(new Set((leads ?? []).map(cityOf).filter(Boolean))).sort(), [leads]);
+  // Filter list is now countries (the City column was replaced by Country). The `flt.city` key is
+  // kept internally to avoid churn; it holds country values.
+  const cities = useMemo(() => Array.from(new Set((leads ?? []).map(countryOf).filter(Boolean))).sort(), [leads]);
 
   return (
     <div className="-m-3 min-h-[calc(100%+1.5rem)] p-3 sm:-m-4 sm:min-h-[calc(100%+2rem)] sm:p-4" style={{ background: C.bg, color: C.ink, colorScheme: "light" }}>
@@ -286,7 +318,7 @@ export default function LeadsSection() {
               <div className="absolute right-0 z-[96] mt-2 w-64 overflow-hidden rounded-2xl shadow-xl" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
                 <button className="block w-full px-4 py-3 text-left hover:bg-[#fafbfc]" onClick={() => { setGenMenuOpen(false); findLeads("", 10, ""); }}>
                   <div className="text-[13px] font-bold" style={{ color: C.ink }}>✨ Auto</div>
-                  <div className="text-[11.5px]" style={{ color: C.sub }}>AI reads your business and finds 10 matching leads itself</div>
+                  <div className="text-[11.5px]" style={{ color: C.sub }}>Finds real buyers for your business from your confirmed buyer profile</div>
                 </button>
                 <button className="block w-full px-4 py-3 text-left hover:bg-[#fafbfc]" style={{ borderTop: `1px solid ${C.line}` }} onClick={() => { setGenMenuOpen(false); setGenPanel("manual"); }}>
                   <div className="text-[13px] font-bold" style={{ color: C.ink }}>✍️ Manual</div>
@@ -355,7 +387,7 @@ export default function LeadsSection() {
               <table className="w-full border-collapse" style={{ minWidth: 980 }}>
                 <thead>
                   <tr className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: C.sub, textAlign: "left", borderBottom: `1px solid ${C.line}` }}>
-                    <Th>Lead</Th><Th>Email</Th><Th>Website</Th><Th>City</Th><Th>Source</Th><Th>Added</Th><Th>Messaged</Th><Th>Score</Th><Th>Actions</Th>
+                    <Th>Lead</Th><Th>Score</Th><Th>Messaged</Th><Th>Contact</Th><Th>Source</Th><Th>Added</Th><Th>Country</Th><Th>Actions</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -370,26 +402,34 @@ export default function LeadsSection() {
                               {l.stage === "rejected" && <span className="shrink-0 rounded px-1 text-[10px] font-semibold" style={{ color: C.red, background: C.redSoft }}>Rejected</span>}
                               {l.stage === "opted_out" && <span className="shrink-0 rounded px-1 text-[10px] font-semibold" style={{ color: C.red, background: C.redSoft }}>Opted out</span>}
                             </div>
-                            <div className="truncate text-[11px]" style={{ color: C.sub, maxWidth: 150 }}>{l.whatsapp || l.phone || "—"}</div>
+                            <div className="truncate text-[11px]" style={{ color: C.sub, maxWidth: 150 }}>{phoneDisplay(l)}</div>
                           </div>
                         </div>
                       </td>
+                      <td className="px-2.5 py-2"><span className="rounded-md px-1.5 py-0.5 text-[11.5px] font-bold" style={{ color: scoreColor(l.icp_score), background: C.graySoft }}>{l.icp_score ?? "—"}</span></td>
+                      <td className="px-2.5 py-2" style={{ whiteSpace: "nowrap" }}><MessagedCell l={l} /></td>
+                      {/* Contact: email on top, website below — one column, like the Lead cell stacks name + phone */}
                       <td className="px-2.5 py-2">
                         {l.email
-                          ? <a href={`mailto:${l.email}`} className="block truncate" style={{ color: C.blue, maxWidth: 160 }} onClick={(e) => e.stopPropagation()}>{l.email}</a>
+                          ? <a href={`mailto:${l.email}`} className="block truncate" style={{ color: C.blue, maxWidth: 180 }} onClick={(e) => e.stopPropagation()}>{l.email}</a>
                           : <span style={{ color: C.sub }}>—</span>}
-                      </td>
-                      <td className="px-2.5 py-2">
                         {l.website
-                          ? <a href={l.website.startsWith("http") ? l.website : `https://${l.website}`} target="_blank" rel="noreferrer" className="block truncate" style={{ color: C.blue, maxWidth: 130 }} onClick={(e) => e.stopPropagation()}>{siteLabel(l.website)}</a>
-                          : <span style={{ color: C.sub }}>—</span>}
+                          ? <a href={l.website.startsWith("http") ? l.website : `https://${l.website}`} target="_blank" rel="noreferrer" className="block truncate text-[11px]" style={{ color: C.sub, maxWidth: 180 }} onClick={(e) => e.stopPropagation()}>{siteLabel(l.website)}</a>
+                          : <span className="block text-[11px]" style={{ color: C.line }}>—</span>}
                       </td>
-                      <td className="px-2.5 py-2" style={{ color: C.sub, whiteSpace: "nowrap" }}>{cityOf(l) || "—"}</td>
                       <td className="px-2.5 py-2" style={{ color: C.sub, whiteSpace: "nowrap" }}>{SOURCE_LABEL[l.source ?? ""] ?? l.source ?? "—"}</td>
                       <td className="px-2.5 py-2" style={{ whiteSpace: "nowrap" }}><AddedCell iso={l.created_at} /></td>
-                      <td className="px-2.5 py-2" style={{ whiteSpace: "nowrap" }}><MessagedCell l={l} /></td>
-                      <td className="px-2.5 py-2"><span className="rounded-md px-1.5 py-0.5 text-[11.5px] font-bold" style={{ color: scoreColor(l.icp_score), background: C.graySoft }}>{l.icp_score ?? "—"}</span></td>
-                      <td className="px-2.5 py-2" onClick={(e) => e.stopPropagation()}>{rowActions(l, setStage, busy, waLink)}</td>
+                      <td className="px-2.5 py-2" style={{ color: C.sub, whiteSpace: "nowrap" }}>{countryOf(l) || "—"}</td>
+                      <td className="px-2.5 py-2" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-1">
+                          <button className="rounded-lg p-1.5" style={{ color: C.sub }} title="Why this lead — overview" onClick={() => setSelected(l)}
+                            onMouseEnter={(e) => { e.currentTarget.style.color = C.brand; e.currentTarget.style.background = C.brandSoft; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.color = C.sub; e.currentTarget.style.background = "transparent"; }}>
+                            <EyeIcon />
+                          </button>
+                          {rowActions(l, setStage, busy, waLink)}
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -404,7 +444,7 @@ export default function LeadsSection() {
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[12px] font-bold text-white" style={{ background: C.brand }}>{initials(l)}</span>
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-semibold" style={{ color: C.ink }}>{l.company || l.name || "Untitled"}</div>
-                    <div className="truncate text-[12px]" style={{ color: C.sub }}>{l.whatsapp || l.phone || "—"}{cityOf(l) ? ` · ${cityOf(l)}` : ""} · {SOURCE_LABEL[l.source ?? ""] ?? l.source ?? "—"}</div>
+                    <div className="truncate text-[12px]" style={{ color: C.sub }}>{phoneDisplay(l)}{countryOf(l) ? ` · ${countryOf(l)}` : ""} · {SOURCE_LABEL[l.source ?? ""] ?? l.source ?? "—"}</div>
                     {(l.email || l.website) && (
                       <div className="truncate text-[11.5px]" style={{ color: C.blue }}>{l.email ?? ""}{l.email && l.website ? " · " : ""}{l.website ? siteLabel(l.website) : ""}</div>
                     )}
@@ -825,7 +865,7 @@ function FilterPanel({ flt, setFlt, cities, dateRange, setDateRange, onClose, on
           </Section>
 
           {cities.length > 0 && (
-            <Section title="City">
+            <Section title="Country">
               <div className="flex flex-wrap gap-1.5">
                 {cities.map((c) => <Chip key={c} on={flt.city.includes(c)} label={c} onClick={() => setFlt({ ...flt, city: toggle(flt.city, c) })} />)}
               </div>
@@ -864,7 +904,7 @@ function FilterPanel({ flt, setFlt, cities, dateRange, setDateRange, onClose, on
 const LEADS_PER_RUN_MAX = 25; // client-side convenience cap; per-plan/day enforcement is a TODO (server-side)
 const GEN_STEPS = ["Searching sources", "Filtering leads", "Verifying info", "Saving to database"];
 
-function LeadGenPanel({ mode, gen, busy, target, foundSoFar, onStart, onClose, onViewNew }: {
+function LeadGenPanel({ mode, gen, busy, target, foundSoFar, onStart, onClose, onViewNew, onOpenBuyerProfile }: {
   mode: "manual" | "live" | "done";
   gen: Gen | null;
   busy: boolean;
@@ -873,7 +913,11 @@ function LeadGenPanel({ mode, gen, busy, target, foundSoFar, onStart, onClose, o
   onStart: (query: string, count: number, city: string) => void;
   onClose: () => void;
   onViewNew: () => void;
+  onOpenBuyerProfile: () => void;
 }) {
+  // An Auto run that returned "confirm your buyer profile first" is NOT a failed/empty search —
+  // it means no search ran. Show that as a clear call to action, not a misleading "found 0".
+  const needsBuyerProfile = mode === "done" && Array.isArray(gen?.last_needs) && gen!.last_needs!.includes("buyer_profile");
   const [what, setWhat] = useState("");
   const [city, setCity] = useState("");
   const [count, setCount] = useState(10);
@@ -922,7 +966,7 @@ function LeadGenPanel({ mode, gen, busy, target, foundSoFar, onStart, onClose, o
           <div className="min-w-0">
             <div className="truncate text-[14px] font-bold" style={{ color: C.ink }}>{mode === "manual" ? "Generate leads" : "Live Lead Generation"}</div>
             <div className="truncate text-[11.5px]" style={{ color: C.sub }}>
-              {mode === "manual" ? "Tell Mr. Lead what to look for — he does the rest." : mode === "live" ? "Watch your leads being generated in real-time." : failed ? "The last run hit a problem." : "Run finished."}
+              {mode === "manual" ? "Tell Mr. Lead what to look for — he does the rest." : mode === "live" ? "Watch your leads being generated in real-time." : needsBuyerProfile ? "One step first — confirm who buys from you." : failed ? "The last run hit a problem." : "Run finished."}
             </div>
           </div>
         </div>
