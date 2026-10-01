@@ -162,9 +162,15 @@ export class LeadsAgent extends Agent {
     ctx.onProgress({ phase: "discover", label: `Looking for ${icp.industry}${icp.geo ? ` in ${icp.geo}` : ""}...` });
     ctx.progress(0.15, `Looking for ${icp.industry}${icp.geo ? ` in ${icp.geo}` : ""}`);
 
-    const { candidates, reports } = await discover(icp, icp.count);
+    // OVER-FETCH. The fit gate + buyer-fit scoring deliberately drop most candidates (quality over
+    // quantity), so asking a source for exactly `count` leaves only a handful after the cuts — the
+    // owner asked for 10 and got 3. We pull several times the target so the pipeline has material to
+    // reach it; the RunLedger below still caps what's SAVED at `count`, and Serper already returns
+    // ~20 results per query, so keeping more of each is nearly free on the quota.
+    const discoverLimit = Math.min(60, Math.max(icp.count * 4, icp.count + 15));
+    const { candidates, reports } = await discover(icp, discoverLimit);
     const sources = describeSources(reports);
-    ctx.log(`discovery: ${sources.join(" | ")}`);
+    ctx.log(`discovery: ${candidates.length} candidates for a target of ${icp.count} — ${sources.join(" | ")}`);
 
     // A business already on the list is not a new lead, even when the map gives it a different
     // (or no) website this time. Match on normalised name OR known phone — the cheap pass before
@@ -236,9 +242,12 @@ export class LeadsAgent extends Agent {
           sent: false,
         });
         ctx.progress(Math.min(0.95, 0.3 + found.length / Math.max(1, icp.count) * 0.65), `${found.length} leads written`);
+        // Persist the running count so the polling Leads page can show it climb (leads batch-save
+        // only at the end, so the DB row count stays 0 until then — this is the live number).
+        ctx.onProgress({ phase: "pipeline", label: `${found.length} of ${icp.count} found`, done: found.length, total: icp.count, found: found.length });
       },
       onDrop: (d) => ctx.log(`dropped ${d.name} at ${d.stage}: ${d.reason}`),
-      onProgress: (done, total, label) => ctx.onProgress({ phase: "pipeline", label, done, total }),
+      onProgress: (done, total, label) => ctx.onProgress({ phase: "pipeline", label, done, total, considered: done }),
     });
 
     // ── 6 · durable ───────────────────────────────────────────────────────────────────────

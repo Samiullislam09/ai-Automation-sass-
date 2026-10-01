@@ -37,7 +37,7 @@ type Lead = {
   last_out_at: string | null; last_out_body: string | null; last_in_at: string | null; last_in_body: string | null;
 };
 type Kpis = { total: number; messaged: number; converted: number; ai_messaged: number; employee_messaged: number; not_messaged: number; new: number; engaged: number; client: number };
-type Gen = { running: boolean; running_since?: string | null; last_run_at: string | null; last_status: string | null; last_found: number | null; last_note: string | null; last_needs?: string[]; last_question?: string | null };
+type Gen = { running: boolean; running_since?: string | null; running_found?: number | null; running_label?: string | null; running_done?: number | null; running_total?: number | null; last_run_at: string | null; last_status: string | null; last_found: number | null; last_saved?: number | null; last_note: string | null; last_needs?: string[]; last_question?: string | null };
 
 const STAGE: Record<string, { label: string; fg: string; bg: string }> = {
   new: { label: "New", fg: C.blue, bg: C.blueSoft },
@@ -351,7 +351,15 @@ export default function LeadsSection() {
           gen={gen}
           busy={genBusy}
           target={genTarget}
-          foundSoFar={gen?.running_since ? (leads ?? []).filter((l) => new Date(l.created_at).getTime() >= new Date(gen.running_since!).getTime()).length : 0}
+          foundSoFar={
+            // Live count: the agent's own running tally (leads batch-save at the end, so counting
+            // DB rows would stay 0 mid-run); fall back to rows created since the run began.
+            typeof gen?.running_found === "number"
+              ? gen.running_found
+              : gen?.running_since
+                ? (leads ?? []).filter((l) => new Date(l.created_at).getTime() >= new Date(gen.running_since!).getTime()).length
+                : 0
+          }
           onStart={findLeads}
           onClose={() => setGenPanel("closed")}
           onViewNew={() => { setGenPanel("closed"); setTab("new"); }}
@@ -936,9 +944,16 @@ function LeadGenPanel({ mode, gen, busy, target, foundSoFar, onStart, onClose, o
   const startedAt = gen?.running_since ? new Date(gen.running_since).getTime() : Date.now();
   const elapsedS = Math.max(0, (Date.now() - startedAt) / 1000);
   const step = mode === "done" ? GEN_STEPS.length : foundSoFar > 0 ? 3 : Math.min(2, Math.floor(elapsedS / 20));
-  const pct = mode === "done" ? 100 : target ? Math.min(95, Math.round((foundSoFar / Math.max(1, target)) * 100)) : null;
+  // Progress blends two real signals: how many leads are found vs the target, and how far through
+  // the candidate list the run is — so the bar still moves while sites are being read, before the
+  // first lead lands. Whichever is higher wins; capped at 95% until the run actually finishes.
+  const byFound = target ? (foundSoFar / Math.max(1, target)) * 100 : 0;
+  const byConsidered = gen?.running_total ? ((gen.running_done ?? 0) / gen.running_total) * 70 : 0;
+  const pct = mode === "done" ? 100 : (target || gen?.running_total) ? Math.min(95, Math.max(3, Math.round(Math.max(byFound, byConsidered)))) : null;
   const failed = mode === "done" && gen?.last_status === "error";
-  const doneFound = gen?.last_found;
+  // The real count the run saved. last_saved is the truest (rows written); last_found is the
+  // pipeline's count; fall back to what we tallied live so the panel never wrongly says 0.
+  const doneFound = gen?.last_saved ?? gen?.last_found ?? foundSoFar;
 
   const examples = [["Restaurants", "Dubai"], ["ISO consultants", "Mumbai"], ["Dental clinics", "Abu Dhabi"], ["Manufacturers", "Pune"]];
   const go = () => {

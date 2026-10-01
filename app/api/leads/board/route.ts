@@ -108,14 +108,23 @@ export async function GET() {
   const running = runningRow != null;
   const lastDone = gRows.find((r) => r.status === "success" || r.status === "error");
   const d = (lastDone?.detail ?? {}) as any;
+  // The running job's live progress (agent writes detail.progress every few seconds). Leads
+  // batch-save only at the end, so the DB row count can't show mid-run growth — this is the live
+  // "found so far" the Leads page shows instead.
+  const rp = (runningRow?.detail as any)?.progress ?? {};
   const gen = {
     running,
+    running_found: typeof rp.found === "number" ? rp.found : null,
+    running_label: typeof rp.label === "string" ? rp.label : null,
+    running_done: typeof rp.done === "number" ? rp.done : null,
+    running_total: typeof rp.total === "number" ? rp.total : null,
     // When the live run started — the Leads page counts rows newer than this as "found so far".
     running_since: runningRow?.created_at ?? null,
     last_run_at: lastDone?.created_at ?? null,
     last_status: lastDone?.status ?? null,
     // How many the last finished run added, if the agent recorded it (agent returns `found`).
     last_found: typeof d.count === "number" ? d.count : typeof d.found === "number" ? d.found : null,
+    last_saved: typeof d.saved === "number" ? d.saved : null,
     last_note: typeof d.note === "string" ? d.note : typeof d.reason === "string" ? d.reason : null,
     // So the Live panel can show WHY a run found nothing — e.g. the buyer profile isn't confirmed.
     last_needs: Array.isArray(d.needs) ? d.needs : [],

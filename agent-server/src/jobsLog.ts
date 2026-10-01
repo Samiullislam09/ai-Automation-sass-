@@ -49,7 +49,11 @@ export async function logJobProgress(id: string | undefined, progress: Record<st
  *  reads 150 keyword/writer rows at a time. That is how a 36 MB database with one user burned
  *  through Supabase's 5 GB monthly egress in four days (2026-09-05) and got the whole
  *  organisation restricted. */
-const HEAVY_KEYS = ["body", "blueprint", "issues", "meta", "pages", "pageSummary", "html", "markdown"];
+const HEAVY_KEYS = ["body", "blueprint", "issues", "meta", "pages", "pageSummary", "html", "markdown",
+  // Mr. Lead's full records: the leads it saved and the ones it dropped, each a whole object with a
+  // draft message. They already live in the `leads` table — keeping them here too is what pushed the
+  // leads receipt past the byte cap and stripped its summary numbers (found/saved/drop_counts).
+  "leads", "dropped"];
 
 /** Belt to the blacklist's braces: a `detail` bigger than this is something new and unforeseen
  *  that would be re-read sixty times every four seconds, so it is cut down to the keys the
@@ -60,6 +64,8 @@ const SAFE_KEYS = [
   "publishedUrl", "attempted", "error", "hint", "chosenBy", "wordCount", "qualityGate", "source",
   "chained", "awaitingChoice", "researchOnly", "recommended", "contentItemId", "scheduleRunId",
   "autoPublish", "blockedByGate", "pagesCrawled", "urlsFound", "skipped", "built", "version", "cost",
+  // Mr. Lead's run summary — the numbers the Leads page shows ("found N", drop reasons, avg score).
+  "found", "saved", "considered", "strong", "drop_counts", "avg_score", "sources", "icp", "needs", "question", "note", "region_note", "warnings", "capped", "daily_cap",
   // A failure's own fields. They are the whole point of the row when something breaks, so they
   // survive the cut — the Audit and Site Brain pages read them straight back out.
   "cause", "stack", "attempts", "durationMs", "agent", "at", "progress",
