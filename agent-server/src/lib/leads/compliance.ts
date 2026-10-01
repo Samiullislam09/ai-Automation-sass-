@@ -56,6 +56,10 @@ export const POLICY = {
   HARD_MAX_PER_RUN: 50,
   /** Below this the draft is not shown at all (plan §17.4: "< 50 → archive, dikhao mat"). */
   MIN_SCORE: 50,
+  /** The higher bar a BUYER-mode lead must clear (high-quality-leads plan, Phase 4): when a tenant
+   *  has a confirmed buyer profile we hold leads to a stricter line, because we can — the fit gate
+   *  and buyer-fit scoring give us the evidence to. Quality over quantity. */
+  MIN_SCORE_BUYER: 60,
 } as const;
 
 /** Free consumer mail providers. An address here is a person's own mailbox — a business that
@@ -478,6 +482,41 @@ export function assertDraftOnly(record: unknown): void {
 
 export function stripWww(domain: string): string {
   return String(domain ?? "").trim().toLowerCase().replace(/^www\./, "").replace(/\/+$/, "");
+}
+
+/** Phone as a bare comparison key: digits only, and the last 10 (so +971-4-355-7119,
+ *  0097143557119 and 043557119 compare as the same number). Returns "" for nothing usable, and
+ *  callers treat "" as "no phone to dedupe on" — never a match. The whole point is that the same
+ *  business found twice, however its number is formatted, is one lead. */
+export function phoneKey(phone: string | null | undefined): string {
+  const digits = String(phone ?? "").replace(/[^0-9]/g, "");
+  if (digits.length < 7) return ""; // too short to trust as an identity
+  return digits.slice(-10);
+}
+
+/** Company-form words dropped from a name key: "Pvt Ltd", "LLC", "FZE" and the like, which say
+ *  how a business is registered, not which business it is. Whole words only — matched by
+ *  tokenising, never as substrings, so "company" never eats the "co" inside "Coca". */
+const NAME_SUFFIX_WORDS = new Set([
+  "pvt", "private", "ltd", "limited", "llc", "llp", "inc", "co", "corp", "corporation",
+  "fz", "fze", "fzc", "fzco", "fzllc", "group", "company", "services", "solutions",
+]);
+
+/** Business name as a comparison key: lowercased, punctuation flattened to spaces, then company-
+ *  form words removed token by token, so "Ascent World Pvt. Ltd." and "Ascent World" are the same
+ *  lead. Conservative — only universal suffixes, never industry words. Returns "" for nothing
+ *  usable (callers treat "" as "no name to dedupe on", never a match); a name made ENTIRELY of
+ *  suffix words keeps its raw tokens rather than collapsing every such name to one empty key. */
+export function nameKey(name: string | null | undefined): string {
+  const tokens = String(name ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean);
+  if (!tokens.length) return "";
+  const kept = tokens.filter((t) => !NAME_SUFFIX_WORDS.has(t));
+  return (kept.length ? kept : tokens).join(" ");
 }
 
 /** The registrable-ish host of a URL, or null. Used everywhere a lead is identified. */

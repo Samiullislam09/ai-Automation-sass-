@@ -228,6 +228,82 @@ export function searchTermsFor(industry: string, geo: string | null): string[] {
   return [...new Set(terms.map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean))];
 }
 
+/** Build an ICP from ONE confirmed BUYER segment (high-quality-leads plan, Phase 2) instead of
+ *  from the client's own industry. This is the whole fix: for an ISO consultancy, the segment is
+ *  "Manufacturers" with terms like "manufacturers / factories", so discovery looks for BUYERS, not
+ *  for other ISO consultancies. The segment's search terms ARE the queries — they were confirmed
+ *  by the client, so no LLM runs here; this stays the deterministic builder icp.ts has always been.
+ *
+ *  The client's offering/proof/audience still come from the Site Brain (the draft pitches what they
+ *  sell). Geo precedence: an explicit city from the Generate modal > the buyer profile's geo_scope
+ *  > the Site Brain geo. Queries are capped to protect the Serper free quota. */
+export function buildIcpFromBuyerSegment(opts: {
+  segment: { name: string; search_terms: string[] };
+  geoScope: string[];
+  profile?: SiteProfile | null;
+  count?: number | null;
+  /** An explicit city from the Generate modal, which wins over the buyer profile's geo_scope. */
+  geoOverride?: string | null;
+}): IcpResult {
+  const { segment, geoScope, profile } = opts;
+  const terms = (segment.search_terms ?? []).map((t) => String(t).trim()).filter(Boolean);
+  if (!segment.name?.trim() || !terms.length) {
+    return {
+      ok: false,
+      missing: ["industry"],
+      question: "This buyer segment has no search terms to look for. Open Leads → Buyer profile, add a term or two, and confirm again.",
+    };
+  }
+
+  const override = String(opts.geoOverride ?? "").trim() || null;
+  const geo = override ?? geoScope.map((g) => String(g).trim()).find(Boolean) ?? profile?.geo ?? null;
+  const industry = clip(segment.name.trim(), 120);
+
+  // The queries: up to 3 of the segment's own terms, each tied to the geo once. Capped at 4 so a
+  // single run never spends more than a handful of Serper searches.
+  const searchTerms = [
+    ...new Set(
+      terms
+        .slice(0, 3)
+        .map((t) => (geo ? `${t} in ${geo}` : t).replace(/\s+/g, " ").trim())
+        .filter(Boolean),
+    ),
+  ].slice(0, 4);
+
+  const offering = profile?.offerings ?? [];
+  const proof = profile?.proof ?? [];
+  const asked = Number(opts.count ?? DEFAULT_COUNT);
+  const count = Math.max(1, Math.min(MAX_COUNT, Number.isFinite(asked) ? Math.round(asked) : DEFAULT_COUNT));
+
+  const evidence: IcpEvidence[] = [
+    { field: "industry", value: industry, from: "site-brain" },
+    ...(geo ? [{ field: "geo", value: geo, from: override ? "user-query" : "site-brain" } as IcpEvidence] : []),
+    { field: "buyer_segment", value: segment.name, from: "site-brain" },
+  ];
+
+  const warnings: string[] = [];
+  if (!offering.length) warnings.push("No offering on file — drafts will ask a question rather than pitch.");
+  if (!proof.length) warnings.push("No proven facts on file — drafts may state no credential or number about you.");
+
+  return {
+    ok: true,
+    warnings,
+    icp: {
+      kind: decideKind(industry, geo),
+      industry,
+      geo,
+      sizeSignals: [],
+      offering,
+      proof,
+      audience: profile?.audience ?? null,
+      language: profile?.language ?? null,
+      count,
+      searchTerms,
+      evidence,
+    },
+  };
+}
+
 function decideKind(industry: string, geo: string | null): IcpKind {
   if (LOCAL_VERTICALS.test(industry)) return "local";
   if (B2B_VERTICALS.test(industry)) return "b2b";

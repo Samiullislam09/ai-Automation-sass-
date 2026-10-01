@@ -26,6 +26,33 @@ const ALLOWED_STAGES = [
   "opted_out", // they asked to stop. Terminal, forever
 ] as const;
 
+/** Why a human rejected a lead (high-quality-leads plan, Phase 6). Two of these feed back into
+ *  discovery: competitor/wrong_industry add the lead's domain to the tenant's negative list so
+ *  Gate A never surfaces it again. The rest are recorded for the metrics and the profile-
+ *  suggestion card; none silently edits the confirmed buyer profile. */
+const REJECT_REASONS = ["competitor", "wrong_industry", "wrong_city", "too_small", "too_large", "already_served", "duplicate", "other"] as const;
+const FEEDBACK_TO_NEGATIVE = new Set(["competitor", "wrong_industry"]);
+
+/** Append a domain to this tenant's lead negative list in agent_settings (merge, idempotent).
+ *  Best-effort: a feedback-loop failure must never fail the reject the user asked for. */
+async function addNegativeDomain(supabase: any, tenantId: string, domain: string) {
+  const d = String(domain || "").trim().toLowerCase().replace(/^www\./, "");
+  if (!d) return;
+  try {
+    const { data } = await supabase.from("agent_settings").select("settings").eq("tenant_id", tenantId).eq("agent", "leads").maybeSingle();
+    const settings = (data?.settings && typeof data.settings === "object" ? data.settings : {}) as Record<string, any>;
+    const list: string[] = Array.isArray(settings.negative_domains) ? settings.negative_domains : [];
+    if (list.includes(d)) return;
+    const next = { ...settings, negative_domains: [...list, d].slice(-2000) };
+    await supabase.from("agent_settings").upsert(
+      { tenant_id: tenantId, agent: "leads", settings: next, updated_at: new Date().toISOString() },
+      { onConflict: "tenant_id,agent" },
+    );
+  } catch {
+    // swallow — the reject itself already succeeded
+  }
+}
+
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const supabase = await createClient();
@@ -38,6 +65,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ ok: false, error: `stage must be one of: ${ALLOWED_STAGES.join(", ")}` }, { status: 400 });
   }
 
+  // The reject reason (Phase 6). Validated, stored on the row, and — for competitor/wrong_industry
+  // — fed back into the negative list. Optional, so an old client that sends no reason still works.
+  const rejectReason = REJECT_REASONS.includes(body?.reject_reason) ? body.reject_reason : null;
+
   const patch: Record<string, unknown> = { stage, updated_at: new Date().toISOString() };
   if (stage === "approved") {
     const { data: u } = await supabase.auth.getUser();
@@ -45,19 +76,31 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     patch.approved_by = u?.user?.id ?? null;
   } else if (stage === "rejected") {
     patch.rejected_at = new Date().toISOString();
+    if (rejectReason) patch.reject_reason = rejectReason;
   } else if (stage === "opted_out") {
     patch.opt_out = true;
     patch.opt_out_at = new Date().toISOString();
   }
 
-  const { error } = await supabase.from("leads").update(patch).eq("id", id).eq("tenant_id", tenantId);
+  let error = (await supabase.from("leads").update(patch).eq("id", id).eq("tenant_id", tenantId)).error;
+  // If reject_reason isn't a column yet (pre-030), retry without it rather than fail the reject.
+  if (error && /reject_reason/i.test(error.message)) {
+    delete patch.reject_reason;
+    error = (await supabase.from("leads").update(patch).eq("id", id).eq("tenant_id", tenantId)).error;
+  }
   if (error) {
-    // A database still on the pre-028 stage vocabulary rejects the new names via its check
-    // constraint. Saying which migration beats a bare constraint name six ways.
     const hint = /leads_stage_check|violates check/i.test(error.message)
       ? " (has supabase/migrations/028_outreach_crm.sql been applied?)"
       : "";
     return NextResponse.json({ ok: false, error: error.message + hint }, { status: 500 });
   }
+
+  // Feedback loop: a competitor / wrong-industry reject teaches Gate A not to surface that domain.
+  if (stage === "rejected" && rejectReason && FEEDBACK_TO_NEGATIVE.has(rejectReason)) {
+    const { data: lead } = await supabase.from("leads").select("domain, website").eq("id", id).eq("tenant_id", tenantId).maybeSingle();
+    const dom = lead?.domain || (lead?.website ? String(lead.website).replace(/^https?:\/\/(www\.)?/i, "").replace(/[/:?#].*$/, "") : "");
+    if (dom) await addNegativeDomain(supabase, tenantId, dom);
+  }
+
   return NextResponse.json({ ok: true });
 }

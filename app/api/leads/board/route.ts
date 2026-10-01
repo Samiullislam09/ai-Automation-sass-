@@ -20,6 +20,16 @@ export async function GET() {
   const tenantId = await getCurrentTenantId(supabase);
   if (!tenantId) return NextResponse.json({ ok: false, error: "Not signed in." }, { status: 401 });
 
+  // Approval gate inverted (owner decision 2026-10-01): every lead arrives approved; the human
+  // rejects, not approves. New discoveries land as "approved" at the source (agents/leads.ts) —
+  // this sweep retires the rows written under the old policy so none stay stuck in "needs
+  // review". Idempotent, matches zero rows once the backlog is gone.
+  await supabase
+    .from("leads")
+    .update({ stage: "approved", approved_at: new Date().toISOString() })
+    .eq("tenant_id", tenantId)
+    .eq("stage", "pending_approval");
+
   const [{ data: leads, error: le }, { data: msgs, error: me }, { data: genRows }] = await Promise.all([
     supabase.from("leads").select("*").eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(1000),
     supabase
@@ -87,17 +97,20 @@ export async function GET() {
     ai_messaged: count((l) => l.ai_messaged),
     employee_messaged: count((l) => l.human_messaged),
     not_messaged: count((l) => !l.messaged),
-    // tab counts
-    new: count((l) => l.stage === "new" || l.stage === "pending_approval"),
+    // tab counts. "New" means freshly added (last 24h) now that nothing waits in review.
+    new: count((l) => Date.now() - new Date(l.created_at).getTime() < 86_400_000),
     engaged: count((l) => ["replied", "in_conversation", "interested"].includes(l.stage)),
     client: count((l) => l.stage === "won"),
   };
 
   const gRows = (genRows ?? []) as { status: string; action: string; detail: any; created_at: string }[];
-  const running = gRows.some((r) => r.status === "queued" || r.status === "running");
+  const runningRow = gRows.find((r) => r.status === "queued" || r.status === "running");
+  const running = runningRow != null;
   const lastDone = gRows.find((r) => r.status === "success" || r.status === "error");
   const gen = {
     running,
+    // When the live run started — the Leads page counts rows newer than this as "found so far".
+    running_since: runningRow?.created_at ?? null,
     last_run_at: lastDone?.created_at ?? null,
     last_status: lastDone?.status ?? null,
     // How many the last finished run added, if the agent recorded it.

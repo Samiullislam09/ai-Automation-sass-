@@ -13,6 +13,7 @@ import { CAP_TABLE } from "./config/caps.js";
 import { nvidiaWindow } from "./lib/nvidia.js";
 import { mountBrain, startBrain, getRegistry } from "./brain/server.js";
 import { mountWhatsapp } from "./lib/whatsapp/routes.js";
+import { mountBuyerProfile } from "./lib/leads/buyerProfileRoutes.js";
 import { resumeConnected } from "./lib/whatsapp/session.js";
 import { supabase } from "./supabase.js";
 import { enabledActions } from "./brain/registry.js";
@@ -161,6 +162,9 @@ async function main() {
   // Mr. WhatsApp's HTTP surface (pair / status / send / unpair). Mounted before listen so the
   // dashboard can reach it the moment the server is up.
   mountWhatsapp(app);
+
+  // The buyer-profile screen's HTTP surface (draft / read / save / confirm). Same token gate.
+  mountBuyerProfile(app);
 
   const httpServer = createServer(app);
   initSocket(httpServer);

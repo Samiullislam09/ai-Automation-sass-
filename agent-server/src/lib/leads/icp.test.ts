@@ -9,7 +9,7 @@ process.env.DATABASE_URL ||= "postgres://unit-test/none";
 process.env.SUPABASE_URL ||= "http://unit-test.invalid";
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= "unit-test";
 
-const { buildIcp, parseQuery, describeIcp, searchTermsFor, MAX_COUNT } = await import("./icp.js");
+const { buildIcp, buildIcpFromBuyerSegment, parseQuery, describeIcp, searchTermsFor, MAX_COUNT } = await import("./icp.js");
 type SiteProfile = import("../siteProfile.js").SiteProfile;
 
 function profileFixture(over: Partial<SiteProfile> = {}): SiteProfile {
@@ -31,6 +31,60 @@ function profileFixture(over: Partial<SiteProfile> = {}): SiteProfile {
     ...over,
   } as SiteProfile;
 }
+
+// ── ICP from a confirmed buyer segment (Phase 2) ──────────────────────────────────────────────
+
+test("buildIcpFromBuyerSegment: the segment's own terms become the queries (buyers, not peers)", () => {
+  const result = buildIcpFromBuyerSegment({
+    segment: { name: "Manufacturers", search_terms: ["manufacturers", "factories", "exporters"] },
+    geoScope: ["UAE"],
+    profile: profileFixture(),
+    count: 10,
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.icp.industry, "Manufacturers");
+  assert.equal(result.icp.geo, "UAE");
+  // each term tied to the geo once, capped
+  assert.deepEqual(result.icp.searchTerms, ["manufacturers in UAE", "factories in UAE", "exporters in UAE"]);
+  // the offering/proof still come from the Site Brain, for the pitch
+  assert.equal(result.icp.offering.length, 1);
+  assert.ok(result.icp.evidence.some((e) => e.field === "buyer_segment" && e.value === "Manufacturers"));
+});
+
+test("buildIcpFromBuyerSegment: an explicit city overrides the buyer profile's geo_scope", () => {
+  const result = buildIcpFromBuyerSegment({
+    segment: { name: "Hotels", search_terms: ["hotels"] },
+    geoScope: ["UAE"],
+    profile: profileFixture(),
+    geoOverride: "Dubai Marina",
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.icp.geo, "Dubai Marina");
+  assert.deepEqual(result.icp.searchTerms, ["hotels in Dubai Marina"]);
+  assert.ok(result.icp.evidence.some((e) => e.field === "geo" && e.from === "user-query"));
+});
+
+test("buildIcpFromBuyerSegment: queries are capped to protect the Serper quota", () => {
+  const result = buildIcpFromBuyerSegment({
+    segment: { name: "X", search_terms: ["a", "b", "c", "d", "e", "f"] },
+    geoScope: [],
+    profile: profileFixture({ geo: null }),
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.ok(result.icp.searchTerms.length <= 4, "no more than 4 queries per run");
+  // no geo anywhere → bare terms
+  assert.deepEqual(result.icp.searchTerms, ["a", "b", "c"]);
+});
+
+test("buildIcpFromBuyerSegment: a segment with no terms asks rather than searching", () => {
+  const result = buildIcpFromBuyerSegment({ segment: { name: "Empty", search_terms: [] }, geoScope: ["UAE"], profile: profileFixture() });
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.match(result.question, /no search terms/i);
+});
 
 // ── no profile, no query ────────────────────────────────────────────────────────────────────
 

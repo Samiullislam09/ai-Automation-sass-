@@ -10,7 +10,8 @@ process.env.DATABASE_URL ||= "postgres://unit-test/none";
 process.env.SUPABASE_URL ||= "http://unit-test.invalid";
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= "unit-test";
 
-const { research, qualify, personalise, draft, runPipeline, buildFindLeadsOutput, industryTerms } = await import("./pipeline.js");
+const { research, qualify, qualifyBuyer, personalise, draft, runPipeline, buildFindLeadsOutput, industryTerms, competitorCueHit, classifyFit } = await import("./pipeline.js");
+type FitGate = import("./pipeline.js").FitGate;
 const { buildIcp } = await import("./icp.js");
 const { RunLedger } = await import("./compliance.js");
 const { MANIFESTS } = await import("../../brain/manifests.js");
@@ -59,7 +60,7 @@ const ICP = (() => {
 })();
 
 function candidate(over: Partial<Candidate> = {}): Candidate {
-  return {
+  const base: Candidate = {
     name: "Al Safa Restaurant",
     website: "https://alsafa.example",
     domain: "alsafa.example",
@@ -69,8 +70,17 @@ function candidate(over: Partial<Candidate> = {}): Candidate {
     source: "osm",
     sourceRef: "node/1",
     attribution: "© OpenStreetMap contributors (ODbL)",
-    ...over,
   };
+  const merged = { ...base, ...over };
+  // A fixture for a DIFFERENT business (its own domain) that did not spell out a phone gets a
+  // distinct one derived from that domain, so the real phone-dedup doesn't collapse unrelated
+  // fixtures into one lead. Tests that WANT a phone collision pass `phone` explicitly.
+  if (over.phone === undefined && over.domain && over.domain !== base.domain) {
+    let h = 0;
+    for (const ch of over.domain) h = (h * 31 + ch.charCodeAt(0)) % 9000000;
+    merged.phone = `+971 50 ${String(1000000 + h).slice(0, 7)}`;
+  }
+  return merged;
 }
 
 const HOME_TEXT =
@@ -100,10 +110,18 @@ const GOOD_PAGES = {
 };
 
 /** A model that answers each of the three prompts this pipeline sends. Overridable per test. */
-function fakeLlm(over: { summary?: unknown; observation?: unknown; message?: unknown | (() => unknown) } = {}) {
+function fakeLlm(over: { summary?: unknown; observation?: unknown; message?: unknown | (() => unknown); classify?: unknown } = {}) {
   const prompts: string[] = [];
   const llmJson = async <T>(prompt: string): Promise<T> => {
     prompts.push(prompt);
+    if (prompt.includes("BUYER of an offer")) {
+      // Default: a buyer, with a quote that really is in HOME_TEXT so it verifies in code.
+      return (over.classify ?? {
+        verdict: "buyer",
+        quote: "We opened our second branch on Jumeirah Road in 2026",
+        reason: "A restaurant — a customer for article writing, not a peer.",
+      }) as T;
+    }
     if (prompt.includes("research analyst")) {
       return (over.summary ?? {
         what_they_do: "A Lebanese restaurant in Jumeirah with two branches.",
@@ -443,6 +461,183 @@ test("runPipeline honours suppression, duplicates and the per-domain ceiling bef
   assert.equal(result.leads.length, 1);
   // The suppressed and duplicate leads cost zero page fetches and zero model calls.
   assert.ok(!fetcher.calls.some((u) => u.includes("nope.example") || u.includes("known.example")));
+});
+
+test("runPipeline DROPS a lead already known by PHONE, even with a brand-new-looking website", async () => {
+  const llm = fakeLlm();
+  // Same business, different URL this time — but the phone number is one we already have.
+  const pages = {
+    "https://alsafa-new.example": { title: "Al Safa Restaurant", text: HOME_TEXT },
+    "https://alsafa-new.example/contact": { title: "Contact", text: CONTACT_TEXT },
+  };
+  const result = await runPipeline({
+    candidates: [candidate({ name: "Al Safa (new site)", website: "https://alsafa-new.example", domain: "alsafa-new.example", phone: "+971 50 123 4567" })],
+    icp: ICP,
+    identity: IDENTITY,
+    deps: deps({ fetchPage: fakeFetcher(pages).fetchPage, llmJson: llm.llmJson }),
+    knownPhones: new Set(["1501234567"]), // phoneKey of +971 50 123 4567 (digits, last 10)
+  });
+
+  assert.equal(result.leads.length, 0);
+  assert.equal(result.dropped[0].stage, "duplicate");
+});
+
+test("runPipeline DROPS a website-less lead that matches a known NAME", async () => {
+  const result = await runPipeline({
+    // A bare map pin: no website, no domain. Its only identity is its name (and phone).
+    candidates: [candidate({ name: "Al Safa Restaurant Pvt Ltd", website: null, domain: null, phone: null })],
+    icp: ICP,
+    identity: IDENTITY,
+    deps: deps(),
+    knownNames: new Set(["al safa restaurant"]), // nameKey drops the "Pvt Ltd" suffix
+  });
+
+  assert.equal(result.leads.length, 0);
+  assert.equal(result.dropped[0].stage, "duplicate");
+});
+
+test("runPipeline DROPS the same phone twice WITHIN one run, keeping the first", async () => {
+  const llm = fakeLlm();
+  const pages = {
+    ...GOOD_PAGES,
+    "https://alsafa-two.example": { title: "Al Safa Restaurant", text: HOME_TEXT },
+    "https://alsafa-two.example/contact": { title: "Contact", text: CONTACT_TEXT },
+  };
+  const result = await runPipeline({
+    candidates: [
+      candidate(), // phone +971 50 123 4567
+      candidate({ name: "Al Safa (duplicate line)", website: "https://alsafa-two.example", domain: "alsafa-two.example", phone: "+971 50 123 4567" }), // same phone
+    ],
+    icp: ICP,
+    identity: IDENTITY,
+    deps: deps({ fetchPage: fakeFetcher(pages).fetchPage, llmJson: llm.llmJson }),
+  });
+
+  assert.equal(result.leads.length, 1);
+  assert.equal(result.dropped.filter((d) => d.stage === "duplicate").length, 1);
+});
+
+// ── the fit gate (Phase 3) ────────────────────────────────────────────────────────────────────
+
+const GATE: FitGate = {
+  offer: "We write monthly SEO articles for restaurants.",
+  buyerSegments: ["Restaurants", "Cafes"],
+  competitorSegments: [{ name: "Marketing agencies", cues: ["seo agency", "marketing agency", "content agency"] }],
+  negativeDomains: ["rejected-before.example"],
+  buyingSignals: [{ name: "No online menu", look_for: "menu", weight: 6 }, { name: "Recent branch", look_for: "branch opened", weight: 8 }],
+};
+
+test("Gate A: a candidate whose listing contains a competitor cue is dropped by rule, no fetch", () => {
+  const hit = competitorCueHit(
+    { name: "BrightSEO Agency", domain: "brightseo.example", website: "https://brightseo.example", categories: ["seo agency"] },
+    GATE,
+  );
+  assert.match(String(hit), /competitor/i);
+});
+
+test("Gate A: a buyer-shaped candidate passes the cue check", () => {
+  const hit = competitorCueHit(
+    { name: "Al Safa Restaurant", domain: "alsafa.example", website: "https://alsafa.example", categories: ["restaurant"] },
+    GATE,
+  );
+  assert.equal(hit, null);
+});
+
+test("Gate A: a domain on the negative list is dropped", () => {
+  const hit = competitorCueHit(
+    { name: "Whoever", domain: "rejected-before.example", website: "https://rejected-before.example", categories: [] },
+    GATE,
+  );
+  assert.match(String(hit), /do-not-contact/i);
+});
+
+test("Gate B: classifyFit returns buyer when the model says buyer AND the quote is on the page", async () => {
+  const r = await research(candidate(), deps());
+  if (!r.ok) return assert.fail("research failed");
+  const v = await classifyFit(r.researched, GATE, deps());
+  assert.equal(v.verdict, "buyer");
+  assert.ok(v.quote);
+});
+
+test("Gate B: a competitor verdict (with a real quote) classifies as competitor", async () => {
+  const r = await research(candidate(), deps());
+  if (!r.ok) return assert.fail("research failed");
+  const d = deps({ llmJson: fakeLlm({ classify: { verdict: "competitor", quote: "We opened our second branch on Jumeirah Road in 2026", reason: "they sell the same service" } }).llmJson });
+  const v = await classifyFit(r.researched, GATE, d);
+  assert.equal(v.verdict, "competitor");
+});
+
+test("Gate B: a verdict whose quote is NOT on the page is downgraded to unclear (no admitting on an unverifiable claim)", async () => {
+  const r = await research(candidate(), deps());
+  if (!r.ok) return assert.fail("research failed");
+  const d = deps({ llmJson: fakeLlm({ classify: { verdict: "buyer", quote: "this sentence is nowhere on their website at all", reason: "x" } }).llmJson });
+  const v = await classifyFit(r.researched, GATE, d);
+  assert.equal(v.verdict, "unclear");
+  assert.equal(v.quote, null);
+});
+
+test("runPipeline with fitGate: a cue-matching competitor is dropped before any page is fetched", async () => {
+  const fetcher = fakeFetcher(GOOD_PAGES);
+  const result = await runPipeline({
+    candidates: [
+      candidate({ name: "BrightSEO Agency", website: "https://brightseo.example", domain: "brightseo.example", categories: ["seo agency"] }),
+      candidate(),
+    ],
+    icp: ICP,
+    identity: IDENTITY,
+    deps: deps({ fetchPage: fetcher.fetchPage }),
+    fitGate: GATE,
+  });
+  assert.equal(result.leads.length, 1);
+  assert.equal(result.leads[0].name, "Al Safa Restaurant");
+  assert.equal(result.leads[0].classification, "buyer");
+  assert.ok(result.dropped.some((d) => d.stage === "competitor" && d.name === "BrightSEO Agency"));
+  // the competitor cost zero fetches
+  assert.ok(!fetcher.calls.some((u) => u.includes("brightseo.example")));
+});
+
+test("runPipeline with fitGate: Gate B drops a competitor the cues missed, after reading the page", async () => {
+  const result = await runPipeline({
+    candidates: [candidate()],
+    icp: ICP,
+    identity: IDENTITY,
+    deps: deps({ llmJson: fakeLlm({ classify: { verdict: "competitor", quote: "We opened our second branch on Jumeirah Road in 2026", reason: "peer" } }).llmJson }),
+    fitGate: GATE,
+  });
+  assert.equal(result.leads.length, 0);
+  assert.ok(result.dropped.some((d) => d.stage === "competitor"));
+});
+
+test("runPipeline WITHOUT fitGate behaves exactly as before (gate off → no classify call)", async () => {
+  const llm = fakeLlm();
+  const result = await runPipeline({ candidates: [candidate()], icp: ICP, identity: IDENTITY, deps: deps({ llmJson: llm.llmJson }) });
+  assert.equal(result.leads.length, 1);
+  assert.equal(result.leads[0].classification, undefined);
+  assert.ok(!llm.prompts.some((p) => p.includes("BUYER of an offer")), "no classifier prompt when the gate is off");
+});
+
+// ── buyer-fit scoring (Phase 4) ───────────────────────────────────────────────────────────────
+
+test("qualifyBuyer: a confirmed segment + verified signals score well, and every point is attributable", async () => {
+  const r = await research(candidate(), deps());
+  if (!r.ok) return assert.fail("research failed");
+  // icp.industry stands in for the confirmed buyer segment name; "restaurant" is in the listing.
+  const scored = qualifyBuyer(r.researched, ICP, GATE.buyingSignals, NOW);
+  assert.ok(scored.score >= 60, `expected a decent score, got ${scored.score}`);
+  const groups = new Set(scored.components.map((c) => c.group));
+  assert.ok(groups.has("fit") && groups.has("signals") && groups.has("reachability") && groups.has("timing"));
+  // the buyer-segment group is the 30-point one now, not 20
+  assert.equal(scored.components.find((c) => c.id === "buyer-segment")?.max, 30);
+  assert.ok(scored.components.find((c) => c.id === "buying-signals")!.points > 0, "signals were verified on the page");
+});
+
+test("qualifyBuyer: zero verified buying signals caps the total at 55 (low intent)", async () => {
+  const r = await research(candidate(), deps());
+  if (!r.ok) return assert.fail("research failed");
+  // signals whose words are nowhere on the page → none verified → cap
+  const scored = qualifyBuyer(r.researched, ICP, [{ name: "Runs paid ads", look_for: "adwords campaign quarterly budget", weight: 9 }], NOW);
+  assert.ok(scored.score <= 55, `expected cap at 55, got ${scored.score}`);
+  assert.notEqual(scored.band, "strong");
 });
 
 test("runPipeline stops at the run ceiling instead of drafting past it", async () => {

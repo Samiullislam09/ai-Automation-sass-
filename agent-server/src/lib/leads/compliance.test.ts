@@ -21,6 +21,8 @@ const {
   checkIdentification,
   checkOptOut,
   domainOf,
+  nameKey,
+  phoneKey,
   emailIsBusinessContact,
   isSuppressed,
   regionAllows,
@@ -261,4 +263,30 @@ test("domainOf is forgiving about how a website was written down", () => {
   assert.equal(domainOf("alsafa.ae"), "alsafa.ae");
   assert.equal(domainOf(""), null);
   assert.equal(domainOf("not a url at all"), null);
+});
+
+// ── dedup keys · the same business, however it was written down, is one lead ──────────────────
+
+test("phoneKey makes the same number compare equal across formats, and ignores junk", () => {
+  // + , 00 and bare international spellings of one number all reduce to the same last-10 key,
+  // whatever spacing or punctuation they carry.
+  const a = phoneKey("+91 98765 43210");
+  assert.equal(phoneKey("0091-98765-43210"), a);
+  assert.equal(phoneKey("(91) 98765 43210"), a);
+  assert.equal(phoneKey("919876543210"), a);
+  // too short to be an identity, and nothing at all, are both "no phone to dedupe on" (never a match)
+  assert.equal(phoneKey("123"), "");
+  assert.equal(phoneKey(""), "");
+  assert.equal(phoneKey(null), "");
+});
+
+test("nameKey collapses company suffixes and punctuation so one business is one key", () => {
+  const k = nameKey("Ascent World");
+  assert.equal(nameKey("Ascent World Pvt. Ltd."), k);
+  assert.equal(nameKey("ASCENT WORLD LLC"), k);
+  assert.equal(nameKey("  Ascent   World  "), k);
+  // different businesses stay different
+  assert.notEqual(nameKey("Ascent World"), nameKey("Ascent Global"));
+  assert.equal(nameKey(""), "");
+  assert.equal(nameKey(null), "");
 });

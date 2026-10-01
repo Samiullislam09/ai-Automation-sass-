@@ -288,9 +288,9 @@ export async function tick() {
       const stamp = () => supabase.from("schedules").update({ last_run_at: now.toISOString() }).eq("id", row.id);
 
       if (row.kind === "leads") {
-        // Daily discovery (migration 028): find, score and file `count` leads as
-        // pending_approval. Nothing here sends — the agent's own compliance layer marks every
-        // draft draft-only, and Mr. WhatsApp reads only rows a human has since approved.
+        // Daily discovery (migration 028): find, score and file `count` leads — approved on
+        // arrival since 2026-10-01 (the human rejects, not approves). Nothing here sends — the
+        // agent's compliance layer marks every draft draft-only; sending stays a human action.
         const leadsJobId = await enqueue("leads", {
           tenantId: row.tenant_id,
           count: row.count,

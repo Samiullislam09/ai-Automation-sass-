@@ -83,6 +83,30 @@ function envOverride(agentType: string): number | null | undefined {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
+/** Daily cap on the NUMBER OF LEADS (not runs) a tenant may generate (high-quality-leads plan,
+ *  Phase 7). The RUN cap above limits how often Mr. Lead starts; this limits how many leads land,
+ *  which is what actually spends the Serper free quota. null = no lead cap. */
+export const LEADS_PER_DAY: Record<Plan, number | null> = {
+  free: 25,
+  starter: 200,
+  growth: null,
+};
+
+/** The lead/day cap in force for one tenant. Precedence: an explicit per-tenant setting
+ *  (agent_settings → daily_cap) > a `leads_per_day` key in daily_cap_overrides > the plan. `null`
+ *  anywhere means no cap. */
+export function leadsPerDayCap(plan?: string | null, overrides?: Record<string, unknown> | null, explicit?: number | null): number | null {
+  if (typeof explicit === "number" && explicit > 0) return explicit;
+  if (overrides && Object.prototype.hasOwnProperty.call(overrides, "leads_per_day")) {
+    const v = overrides["leads_per_day"];
+    if (v === null) return null;
+    const n = Number(v);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  const p = plan as Plan;
+  return Object.prototype.hasOwnProperty.call(LEADS_PER_DAY, p) ? LEADS_PER_DAY[p] : LEADS_PER_DAY.free;
+}
+
 /** The daily cap in force for one tenant + agent. `null` means no daily cap. */
 export function capFor(agentType: string, plan?: string | null, overrides?: Record<string, unknown> | null): number | null {
   // 1. Per-tenant override — the custom-contract escape hatch. `null` here is meaningful

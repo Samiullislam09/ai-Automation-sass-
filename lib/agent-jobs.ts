@@ -20,6 +20,46 @@ export type AgentJobType = (typeof AGENT_JOB_TYPES)[number];
 // strict:false, where TS can't narrow `ok: true | false` unions at all.
 export type EnqueueResult = { ok: boolean; jobId?: string; error?: string; status?: number };
 
+/** Call a SYNCHRONOUS agent-server endpoint (not the pg-boss queue) — e.g. the buyer-profile
+ *  draft/save/confirm routes, which return a result straight away rather than a job id. Same URL,
+ *  same optional x-agent-token, same one-retry-on-transient behaviour as enqueueAgentJob. `path`
+ *  starts with "/" and must already be tenant-scoped by the caller (the browser never learns the
+ *  tenant id or the server URL). Returns the parsed JSON body plus an `ok`/`status`. */
+export async function callAgentServer(
+  method: "GET" | "POST",
+  path: string,
+  body?: Record<string, unknown>
+): Promise<{ ok: boolean; status: number; data: any; error?: string }> {
+  const agentServerUrl = process.env.AGENT_SERVER_URL;
+  if (!agentServerUrl) return { ok: false, status: 503, data: null, error: "Agent server not configured." };
+
+  const attempt = async () => {
+    const res = await fetch(`${agentServerUrl}${path}`, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        ...(process.env.AGENT_SERVER_TOKEN ? { "x-agent-token": process.env.AGENT_SERVER_TOKEN } : {}),
+      },
+      ...(method === "POST" ? { body: JSON.stringify(body ?? {}) } : {}),
+      signal: AbortSignal.timeout(30000),
+    });
+    const data = await res.json().catch(() => ({} as any));
+    return { ok: res.ok && data?.ok !== false, status: res.status, data, error: data?.error };
+  };
+
+  const transient = (e: any) => /timeout|abort|ECONNREFUSED|ECONNRESET|fetch failed|ENOTFOUND|EAI_AGAIN/i.test(String(e?.name ?? "") + " " + String(e?.message ?? ""));
+  try {
+    return await attempt();
+  } catch (first: any) {
+    if (!transient(first)) return { ok: false, status: 502, data: null, error: first?.message ?? "Could not reach the agent server." };
+    try {
+      return await attempt();
+    } catch {
+      return { ok: false, status: 504, data: null, error: "The agent server took too long to answer — it is probably restarting after an update. Wait a minute and try again." };
+    }
+  }
+}
+
 export async function enqueueAgentJob(
   type: AgentJobType,
   tenantId: string,

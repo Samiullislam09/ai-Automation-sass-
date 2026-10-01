@@ -1,6 +1,7 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
+import BuyerProfilePanel from "./BuyerProfilePanel";
 
 /** /dashboard/leads — a premium, light, CRM-style lead board (owner supplied a reference mockup,
  *  2026-09-30). Self-contained LIGHT surface, like the WhatsApp page, because the dashboard theme
@@ -28,15 +29,21 @@ type Lead = {
   phone: string | null; whatsapp?: string | null; website?: string | null; city?: string | null;
   source: string | null; icp_score: number | null; reason: string | null; draft?: string | null;
   stage: string; created_at: string; notes?: string | null;
+  source_segment?: string | null; source_query?: string | null; classification?: string | null;
+  score_breakdown?: { score?: number; band?: string; components?: { id: string; group: string; points: number; max: number; why: string }[] } | null;
+  reject_reason?: string | null; observation?: string | null; evidence?: any;
   approved_at?: string | null; contacted_at?: string | null; replied_at?: string | null;
   ai_messaged: boolean; human_messaged: boolean; messaged: boolean; converted: boolean; is_client: boolean;
   last_out_at: string | null; last_out_body: string | null; last_in_at: string | null; last_in_body: string | null;
 };
 type Kpis = { total: number; messaged: number; converted: number; ai_messaged: number; employee_messaged: number; not_messaged: number; new: number; engaged: number; client: number };
+type Gen = { running: boolean; running_since?: string | null; last_run_at: string | null; last_status: string | null; last_found: number | null; last_note: string | null };
 
 const STAGE: Record<string, { label: string; fg: string; bg: string }> = {
   new: { label: "New", fg: C.blue, bg: C.blueSoft },
-  pending_approval: { label: "Needs review", fg: C.amber, bg: C.amberSoft },
+  // Approval gate inverted (2026-10-01): everything arrives approved; a straggler row written
+  // under the old policy reads as Approved too until the board API's sweep renames it.
+  pending_approval: { label: "Approved", fg: C.green, bg: C.greenSoft },
   approved: { label: "Approved", fg: C.green, bg: C.greenSoft },
   rejected: { label: "Rejected", fg: C.sub, bg: C.graySoft },
   contacted: { label: "Contacted", fg: C.blue, bg: C.blueSoft },
@@ -66,12 +73,15 @@ function ago(iso: string | null): string {
   return `${Math.floor(days / 7)}w ago`;
 }
 function scoreColor(s: number | null) { return s == null ? C.sub : s >= 70 ? C.green : s >= 40 ? C.amber : C.red; }
+function isToday(iso: string) { return Date.now() - new Date(iso).getTime() < 86_400_000; }
+function fmtDay(iso: string) { return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" }); }
+function siteLabel(url: string) { return url.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, ""); }
 function initials(l: Lead) { return (l.company || l.name || "?").slice(0, 2).toUpperCase(); }
 function cityOf(l: Lead): string { return (l.city ?? "").trim(); }
 
 const TAB_MATCH: Record<string, (l: Lead) => boolean> = {
   all: () => true,
-  new: (l) => ["new", "pending_approval"].includes(l.stage), // freshly found, awaiting your review
+  new: (l) => Date.now() - new Date(l.created_at).getTime() < 86_400_000, // added in the last 24h
   engaged: (l) => ["replied", "in_conversation", "interested"].includes(l.stage),
   converted: (l) => l.converted,
   client: (l) => l.is_client,
@@ -89,10 +99,16 @@ export default function LeadsSection() {
   const [busy, setBusy] = useState<string | null>(null);
   const [selected, setSelected] = useState<Lead | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [buyerOpen, setBuyerOpen] = useState(false);
   const [err, setErr] = useState("");
-  const [gen, setGen] = useState<{ running: boolean; last_run_at: string | null; last_status: string | null; last_found: number | null; last_note: string | null } | null>(null);
+  const [gen, setGen] = useState<Gen | null>(null);
   const [genBusy, setGenBusy] = useState(false);
-  const [genOpen, setGenOpen] = useState(false);
+  // The lead-generation panel under the KPI cards: closed → nothing; manual → the inline
+  // "what & where" form; live → the real-time progress card; done → the "found N" summary.
+  const [genPanel, setGenPanel] = useState<"closed" | "manual" | "live" | "done">("closed");
+  const [genTarget, setGenTarget] = useState<number | null>(null);
+  const [genMenuOpen, setGenMenuOpen] = useState(false);
+  const wasRunning = useRef(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [dateRange, setDateRange] = useState("all"); // all | today | 7d | 30d
   // Advanced filters (spec section 7), applied on top of the tab + search. Empty = no constraint.
@@ -109,35 +125,56 @@ export default function LeadsSection() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  // While a discovery job is running, poll so "searching now" turns into the new leads by itself.
+  // While a discovery job is running, poll so the live panel's "found so far" grows by itself.
   useEffect(() => {
     if (!gen?.running) return;
     const id = setInterval(load, 5000);
     return () => clearInterval(id);
   }, [gen?.running, load]);
 
+  // Drive the panel from the server's truth: a run in flight (started here, from chat, or by the
+  // schedule) shows the live card; the moment it stops, flip to the "done" summary once.
+  useEffect(() => {
+    if (gen?.running) {
+      wasRunning.current = true;
+      setGenPanel((p) => (p === "manual" ? p : "live"));
+    } else if (gen && wasRunning.current) {
+      wasRunning.current = false;
+      setGenPanel("done");
+    }
+  }, [gen, gen?.running]);
+
+  // The run's target count survives a reload via sessionStorage (jobs_log doesn't record it).
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem("lx-leadgen-target");
+      if (raw) setGenTarget(Number(raw) || null);
+    } catch {}
+  }, []);
+
   const findLeads = async (query: string, count: number, city: string) => {
     setGenBusy(true);
     try {
       const d = await fetch("/api/agents/trigger", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "leads", ...(query ? { query } : {}), ...(city ? { city } : {}), count }) }).then((r) => r.json());
       if (!d.ok) { toast(d.error ?? "Could not start lead search.", "error"); return; }
-      toast("Mr. Lead is searching — new leads will appear in the New tab.");
-      setGen((g) => ({ running: true, last_run_at: g?.last_run_at ?? null, last_status: g?.last_status ?? null, last_found: g?.last_found ?? null, last_note: g?.last_note ?? null }));
-      setGenOpen(false);
-      setTab("new"); // take them to where the fresh leads will land
+      try { sessionStorage.setItem("lx-leadgen-target", String(count)); } catch {}
+      setGenTarget(count);
+      setGen((g) => ({ ...(g ?? { last_run_at: null, last_status: null, last_found: null, last_note: null }), running: true, running_since: new Date().toISOString() }));
+      setGenPanel("live");
+      toast("Mr. Lead is searching — watch the new leads arrive below.");
       setTimeout(load, 2000);
     } catch (e: any) { toast(e?.message ?? "Network error.", "error"); }
     finally { setGenBusy(false); }
   };
 
-  const setStage = async (l: Lead, stage: string) => {
+  const setStage = async (l: Lead, stage: string, rejectReason?: string) => {
     setBusy(l.id);
     try {
-      const d = await fetch(`/api/leads/${l.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stage }) }).then((r) => r.json());
+      const d = await fetch(`/api/leads/${l.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stage, ...(rejectReason ? { reject_reason: rejectReason } : {}) }) }).then((r) => r.json());
       if (!d.ok) { toast(d.error ?? "Couldn't update.", "error"); return; }
-      setLeads((prev) => prev?.map((x) => (x.id === l.id ? { ...x, stage } : x)) ?? prev);
-      setSelected((s) => (s && s.id === l.id ? { ...s, stage } : s));
-      toast("Updated.");
+      setLeads((prev) => prev?.map((x) => (x.id === l.id ? { ...x, stage, ...(rejectReason ? { reject_reason: rejectReason } : {}) } : x)) ?? prev);
+      setSelected((s) => (s && s.id === l.id ? { ...s, stage, ...(rejectReason ? { reject_reason: rejectReason } : {}) } : s));
+      toast(rejectReason ? "Rejected — I'll use that to find better leads." : "Updated.");
       load();
     } catch (e: any) { toast(e?.message ?? "Network error.", "error"); }
     finally { setBusy(null); }
@@ -183,9 +220,9 @@ export default function LeadsSection() {
     ["ai", "you", "converted", "client", "score"].filter((k) => (flt as any)[k] !== "any").length;
 
   const exportCsv = () => {
-    const rows = [["Company", "Name", "Phone", "Source", "Status", "Score", "AI Messaged", "You Messaged", "Client", "Created"]];
+    const rows = [["Company", "Name", "Phone", "Email", "Website", "City", "Source", "Status", "Score", "AI Messaged", "You Messaged", "Client", "Created"]];
     for (const l of filtered) rows.push([
-      l.company ?? "", l.name ?? "", l.whatsapp || l.phone || "", l.source ?? "", l.stage,
+      l.company ?? "", l.name ?? "", l.whatsapp || l.phone || "", l.email ?? "", l.website ?? "", cityOf(l), l.source ?? "", l.stage,
       String(l.icp_score ?? ""), l.ai_messaged ? "yes" : "no", l.human_messaged ? "yes" : "no", l.is_client ? "yes" : "no",
       new Date(l.created_at).toISOString(),
     ]);
@@ -201,62 +238,67 @@ export default function LeadsSection() {
 
   return (
     <div className="-m-3 min-h-[calc(100%+1.5rem)] p-3 sm:-m-4 sm:min-h-[calc(100%+2rem)] sm:p-4" style={{ background: C.bg, color: C.ink, colorScheme: "light" }}>
-      {/* header — title on its own line; a single-line toolbar below that fits without wrapping */}
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div>
+      {/* header — title left; Filters / Export / Add Lead together on the right */}
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="min-w-0">
           <h1 className="text-xl font-bold" style={{ color: C.ink }}>Leads</h1>
           <p className="hidden text-[12.5px] sm:block" style={{ color: C.sub }}>Manage, track and automate your leads</p>
         </div>
-        <button className="flex shrink-0 items-center gap-1.5 rounded-xl px-3.5 py-2 text-[13px] font-semibold text-white" style={{ background: C.brand }} onClick={() => setAddOpen(true)}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" /></svg>
-          <span className="hidden sm:inline">Add Lead</span>
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <div className="relative">
+            <button className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-[13px] font-semibold" style={{ background: filtersOpen || activeFilterCount ? C.brandSoft : C.panel, border: `1px solid ${filtersOpen || activeFilterCount ? C.brand : C.line}`, color: activeFilterCount || filtersOpen ? C.brand : C.sub }} onClick={() => setFiltersOpen((o) => !o)} title="Filters">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M3 5h18M6 12h12M10 19h4" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" /></svg>
+              <span className="hidden md:inline">Filters</span>
+              {activeFilterCount ? <span className="rounded-full px-1.5 text-[11px] text-white" style={{ background: C.brand }}>{activeFilterCount}</span> : null}
+            </button>
+            {filtersOpen && <FilterPanel flt={flt} setFlt={setFlt} cities={cities} dateRange={dateRange} setDateRange={setDateRange} onClose={() => setFiltersOpen(false)} onClear={() => { setFlt({ status: [], source: [], city: [], ai: "any", you: "any", converted: "any", client: "any", score: "any" }); setDateRange("all"); }} />}
+          </div>
+          <button className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-[13px] font-semibold" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.sub }} onClick={() => setBuyerOpen(true)} title="Buyer profile — who buys from you">
+            <span className="hidden md:inline">Buyer profile</span>
+            <span className="md:hidden">Buyers</span>
+          </button>
+          <button className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-[13px] font-semibold" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.sub }} onClick={exportCsv} title="Export CSV">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            <span className="hidden md:inline">Export</span>
+          </button>
+          <button className="flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-[13px] font-semibold text-white" style={{ background: C.brand }} onClick={() => setAddOpen(true)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" /></svg>
+            <span className="hidden sm:inline">Add Lead</span>
+          </button>
+        </div>
       </div>
 
+      {/* one line: search + Generate leads (Auto / Manual) */}
       <div className="mb-3 flex items-center gap-2">
-        <div className="flex min-w-0 max-w-sm flex-1 items-center gap-2 rounded-xl px-3 py-2" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+        <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-3 py-2" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
           <svg className="shrink-0" width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke={C.sub} strokeWidth="2" /><path d="M21 21l-4-4" stroke={C.sub} strokeWidth="2" strokeLinecap="round" /></svg>
           <input className="w-full min-w-0 text-[13px] outline-none" style={{ color: C.ink, background: "transparent", colorScheme: "light" }} placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
         <div className="relative shrink-0">
-          <button className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-[13px] font-semibold" style={{ background: filtersOpen || activeFilterCount ? C.brandSoft : C.panel, border: `1px solid ${filtersOpen || activeFilterCount ? C.brand : C.line}`, color: activeFilterCount || filtersOpen ? C.brand : C.sub }} onClick={() => setFiltersOpen((o) => !o)} title="Filters">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M3 5h18M6 12h12M10 19h4" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" /></svg>
-            <span className="hidden md:inline">Filters</span>
-            {activeFilterCount ? <span className="rounded-full px-1.5 text-[11px] text-white" style={{ background: C.brand }}>{activeFilterCount}</span> : null}
+          <button className="flex items-center gap-1.5 rounded-xl px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-60" style={{ background: C.brand }} onClick={() => setGenMenuOpen((o) => !o)} disabled={gen?.running || genBusy}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6l2.1 2.1m0-12.8l-2.1 2.1M7.7 16.3l-2.1 2.1" stroke="#fff" strokeWidth="1.8" strokeLinecap="round"/></svg>
+            <span>{gen?.running ? "Searching…" : "Generate leads"}</span>
+            {!gen?.running && <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>}
           </button>
-          {filtersOpen && <FilterPanel flt={flt} setFlt={setFlt} cities={cities} dateRange={dateRange} setDateRange={setDateRange} onClose={() => setFiltersOpen(false)} onClear={() => { setFlt({ status: [], source: [], city: [], ai: "any", you: "any", converted: "any", client: "any", score: "any" }); setDateRange("all"); }} />}
+          {genMenuOpen && !gen?.running && (
+            <>
+              <div className="fixed inset-0 z-[95]" onClick={() => setGenMenuOpen(false)} />
+              <div className="absolute right-0 z-[96] mt-2 w-64 overflow-hidden rounded-2xl shadow-xl" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+                <button className="block w-full px-4 py-3 text-left hover:bg-[#fafbfc]" onClick={() => { setGenMenuOpen(false); findLeads("", 10, ""); }}>
+                  <div className="text-[13px] font-bold" style={{ color: C.ink }}>✨ Auto</div>
+                  <div className="text-[11.5px]" style={{ color: C.sub }}>AI reads your business and finds 10 matching leads itself</div>
+                </button>
+                <button className="block w-full px-4 py-3 text-left hover:bg-[#fafbfc]" style={{ borderTop: `1px solid ${C.line}` }} onClick={() => { setGenMenuOpen(false); setGenPanel("manual"); }}>
+                  <div className="text-[13px] font-bold" style={{ color: C.ink }}>✍️ Manual</div>
+                  <div className="text-[11.5px]" style={{ color: C.sub }}>You choose what businesses, which city, how many</div>
+                </button>
+              </div>
+            </>
+          )}
         </div>
-        <button className="flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-[13px] font-semibold" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.sub }} onClick={exportCsv} title="Export CSV">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
-          <span className="hidden md:inline">Export</span>
-        </button>
       </div>
 
       {err && <div className="mb-3 rounded-xl px-4 py-3 text-[13px]" style={{ background: C.redSoft, color: C.red }}>{err}</div>}
-
-      {/* lead-gen status strip + Find leads */}
-      <div className="mb-3 flex flex-col gap-2 rounded-2xl px-4 py-3 sm:flex-row sm:items-center sm:justify-between" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
-        <div className="flex items-center gap-2.5">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: gen?.running ? C.blueSoft : C.brandSoft, color: gen?.running ? C.blue : C.brand }}>
-            {gen?.running
-              ? <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.4" opacity="0.25" /><path d="M21 12a9 9 0 00-9-9" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" /></svg>
-              : <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" /><path d="M21 21l-4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>}
-          </span>
-          <div className="text-[12.5px]">
-            {gen?.running
-              ? <span style={{ color: C.ink }}>Mr. Lead is searching for new leads…</span>
-              : <span style={{ color: C.sub }}>
-                  {gen?.last_run_at
-                    ? <>Last searched <b style={{ color: C.ink }}>{ago(gen.last_run_at)}</b>{gen.last_found != null ? ` · found ${gen.last_found}` : gen.last_status === "error" ? " · it hit a problem" : ""}</>
-                    : "Mr. Lead hasn't searched yet — press Find leads to start."}
-                </span>}
-          </div>
-        </div>
-        <button className="flex shrink-0 items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-60" style={{ background: C.brand }} onClick={() => setGenOpen(true)} disabled={gen?.running}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6l2.1 2.1m0-12.8l-2.1 2.1M7.7 16.3l-2.1 2.1" stroke="#fff" strokeWidth="1.8" strokeLinecap="round"/></svg>
-          {gen?.running ? "Searching…" : "Generate leads"}
-        </button>
-      </div>
 
       {/* KPI cards — five, colourful, responsive (Converted removed) */}
       <div className="mb-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
@@ -266,6 +308,21 @@ export default function LeadsSection() {
         <Kpi icon="person" label="You Messaged" value={kpis?.employee_messaged} tone={C.amber} bg={C.amberSoft} active={tab === "employee_messaged"} onClick={() => setTab("employee_messaged")} />
         <Kpi icon="mute" label="Not Messaged" value={kpis?.not_messaged} tone={C.sub} bg={C.graySoft} active={tab === "not_messaged"} onClick={() => setTab("not_messaged")} />
       </div>
+
+      {/* live lead-generation panel — the manual form, the real-time progress card, or the
+          "done" summary, right under the KPIs where the owner's reference mockup puts it */}
+      {genPanel !== "closed" && (
+        <LeadGenPanel
+          mode={genPanel}
+          gen={gen}
+          busy={genBusy}
+          target={genTarget}
+          foundSoFar={gen?.running_since ? (leads ?? []).filter((l) => new Date(l.created_at).getTime() >= new Date(gen.running_since!).getTime()).length : 0}
+          onStart={findLeads}
+          onClose={() => setGenPanel("closed")}
+          onViewNew={() => { setGenPanel("closed"); setTab("new"); }}
+        />
+      )}
 
       <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
         {([
@@ -293,32 +350,46 @@ export default function LeadsSection() {
         <>
           <div className="hidden overflow-hidden rounded-2xl md:block" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
             <div className="lx-lscroll overflow-x-auto">
-              <table className="w-full border-collapse" style={{ minWidth: 920 }}>
+              {/* compact on purpose: small type, tight padding, no Status column (everything
+                  arrives approved) — so far more rows fit on one screen */}
+              <table className="w-full border-collapse" style={{ minWidth: 980 }}>
                 <thead>
-                  <tr className="text-[11.5px] font-semibold uppercase tracking-wide" style={{ color: C.sub, textAlign: "left", borderBottom: `1px solid ${C.line}` }}>
-                    <Th>Lead</Th><Th>City</Th><Th>Source</Th><Th>Status</Th><Th>AI Agent</Th><Th>You</Th><Th>Score</Th><Th>Last Msg</Th><Th>Actions</Th>
+                  <tr className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: C.sub, textAlign: "left", borderBottom: `1px solid ${C.line}` }}>
+                    <Th>Lead</Th><Th>Email</Th><Th>Website</Th><Th>City</Th><Th>Source</Th><Th>Added</Th><Th>Messaged</Th><Th>Score</Th><Th>Actions</Th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.map((l) => (
-                    <tr key={l.id} className="cursor-pointer text-[13px] hover:bg-[#fafbfc]" style={{ borderBottom: `1px solid ${C.line}` }} onClick={() => setSelected(l)}>
-                      <td className="px-3 py-3">
-                        <div className="flex items-center gap-2.5">
-                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[12px] font-bold text-white" style={{ background: C.brand }}>{initials(l)}</span>
+                    <tr key={l.id} className="cursor-pointer text-[12.5px] hover:bg-[#fafbfc]" style={{ borderBottom: `1px solid ${C.line}` }} onClick={() => setSelected(l)}>
+                      <td className="px-2.5 py-2">
+                        <div className="flex items-center gap-2">
+                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10.5px] font-bold text-white" style={{ background: C.brand }}>{initials(l)}</span>
                           <div className="min-w-0">
-                            <div className="truncate font-semibold" style={{ color: C.ink, maxWidth: 170 }}>{l.company || l.name || "Untitled"}</div>
-                            <div className="truncate text-[11.5px]" style={{ color: C.sub, maxWidth: 170 }}>{l.whatsapp || l.phone || l.email || "—"}</div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="truncate font-semibold" style={{ color: C.ink, maxWidth: 150 }}>{l.company || l.name || "Untitled"}</span>
+                              {l.stage === "rejected" && <span className="shrink-0 rounded px-1 text-[10px] font-semibold" style={{ color: C.red, background: C.redSoft }}>Rejected</span>}
+                              {l.stage === "opted_out" && <span className="shrink-0 rounded px-1 text-[10px] font-semibold" style={{ color: C.red, background: C.redSoft }}>Opted out</span>}
+                            </div>
+                            <div className="truncate text-[11px]" style={{ color: C.sub, maxWidth: 150 }}>{l.whatsapp || l.phone || "—"}</div>
                           </div>
                         </div>
                       </td>
-                      <td className="px-3 py-3" style={{ color: C.sub, whiteSpace: "nowrap" }}>{cityOf(l) || "—"}</td>
-                      <td className="px-3 py-3" style={{ color: C.sub }}>{SOURCE_LABEL[l.source ?? ""] ?? l.source ?? "—"}</td>
-                      <td className="px-3 py-3"><StageChip stage={l.stage} /></td>
-                      <td className="px-3 py-3"><ActBadge on={l.ai_messaged} onLabel="Messaged" tone={C.violet} soft={C.violetSoft} /></td>
-                      <td className="px-3 py-3"><ActBadge on={l.human_messaged} onLabel="Messaged" tone={C.amber} soft={C.amberSoft} /></td>
-                      <td className="px-3 py-3"><span className="rounded-md px-2 py-0.5 text-[12px] font-bold" style={{ color: scoreColor(l.icp_score), background: C.graySoft }}>{l.icp_score ?? "—"}</span></td>
-                      <td className="px-3 py-3" style={{ color: C.sub, whiteSpace: "nowrap" }}>{ago(l.last_out_at || l.last_in_at)}</td>
-                      <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>{rowActions(l, setStage, busy, waLink)}</td>
+                      <td className="px-2.5 py-2">
+                        {l.email
+                          ? <a href={`mailto:${l.email}`} className="block truncate" style={{ color: C.blue, maxWidth: 160 }} onClick={(e) => e.stopPropagation()}>{l.email}</a>
+                          : <span style={{ color: C.sub }}>—</span>}
+                      </td>
+                      <td className="px-2.5 py-2">
+                        {l.website
+                          ? <a href={l.website.startsWith("http") ? l.website : `https://${l.website}`} target="_blank" rel="noreferrer" className="block truncate" style={{ color: C.blue, maxWidth: 130 }} onClick={(e) => e.stopPropagation()}>{siteLabel(l.website)}</a>
+                          : <span style={{ color: C.sub }}>—</span>}
+                      </td>
+                      <td className="px-2.5 py-2" style={{ color: C.sub, whiteSpace: "nowrap" }}>{cityOf(l) || "—"}</td>
+                      <td className="px-2.5 py-2" style={{ color: C.sub, whiteSpace: "nowrap" }}>{SOURCE_LABEL[l.source ?? ""] ?? l.source ?? "—"}</td>
+                      <td className="px-2.5 py-2" style={{ whiteSpace: "nowrap" }}><AddedCell iso={l.created_at} /></td>
+                      <td className="px-2.5 py-2" style={{ whiteSpace: "nowrap" }}><MessagedCell l={l} /></td>
+                      <td className="px-2.5 py-2"><span className="rounded-md px-1.5 py-0.5 text-[11.5px] font-bold" style={{ color: scoreColor(l.icp_score), background: C.graySoft }}>{l.icp_score ?? "—"}</span></td>
+                      <td className="px-2.5 py-2" onClick={(e) => e.stopPropagation()}>{rowActions(l, setStage, busy, waLink)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -330,17 +401,21 @@ export default function LeadsSection() {
             {filtered.map((l) => (
               <div key={l.id} className="rounded-2xl p-3.5" style={{ background: C.panel, border: `1px solid ${C.line}` }} onClick={() => setSelected(l)}>
                 <div className="mb-2 flex items-start gap-2.5">
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[13px] font-bold text-white" style={{ background: C.brand }}>{initials(l)}</span>
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[12px] font-bold text-white" style={{ background: C.brand }}>{initials(l)}</span>
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-semibold" style={{ color: C.ink }}>{l.company || l.name || "Untitled"}</div>
                     <div className="truncate text-[12px]" style={{ color: C.sub }}>{l.whatsapp || l.phone || "—"}{cityOf(l) ? ` · ${cityOf(l)}` : ""} · {SOURCE_LABEL[l.source ?? ""] ?? l.source ?? "—"}</div>
+                    {(l.email || l.website) && (
+                      <div className="truncate text-[11.5px]" style={{ color: C.blue }}>{l.email ?? ""}{l.email && l.website ? " · " : ""}{l.website ? siteLabel(l.website) : ""}</div>
+                    )}
                   </div>
                   <span className="rounded-md px-2 py-0.5 text-[12px] font-bold" style={{ color: scoreColor(l.icp_score), background: C.graySoft }}>{l.icp_score ?? "—"}</span>
                 </div>
-                <div className="mb-2.5 flex flex-wrap gap-1.5">
-                  <StageChip stage={l.stage} />
-                  {l.ai_messaged && <Tag tone={C.violet} soft={C.violetSoft}>AI messaged</Tag>}
-                  {l.human_messaged && <Tag tone={C.amber} soft={C.amberSoft}>You messaged</Tag>}
+                <div className="mb-2.5 flex flex-wrap items-center gap-1.5">
+                  <AddedCell iso={l.created_at} />
+                  <MessagedCell l={l} />
+                  {l.stage === "rejected" && <Tag tone={C.red} soft={C.redSoft}>Rejected</Tag>}
+                  {l.stage === "opted_out" && <Tag tone={C.red} soft={C.redSoft}>Opted out</Tag>}
                 </div>
                 <div onClick={(e) => e.stopPropagation()}>{rowActions(l, setStage, busy, waLink)}</div>
               </div>
@@ -351,36 +426,102 @@ export default function LeadsSection() {
 
       {selected && <Drawer lead={selected} onClose={() => setSelected(null)} setStage={setStage} busy={busy} waLink={waLink} />}
       <AddLeadModal open={addOpen} onClose={() => setAddOpen(false)} onAdded={() => { setAddOpen(false); load(); }} toast={toast} />
-      <GenerateLeadsModal open={genOpen} onClose={() => setGenOpen(false)} busy={genBusy} onGenerate={findLeads} />
+      <BuyerProfilePanel open={buyerOpen} onClose={() => setBuyerOpen(false)} toast={toast} />
     </div>
   );
 }
 
-function rowActions(l: Lead, setStage: (l: Lead, s: string) => void, busy: string | null, waLink: (l: Lead) => string) {
+const REJECT_REASONS: { key: string; label: string }[] = [
+  { key: "competitor", label: "Competitor" },
+  { key: "wrong_industry", label: "Wrong industry" },
+  { key: "wrong_city", label: "Wrong city" },
+  { key: "too_small", label: "Too small" },
+  { key: "too_large", label: "Too large" },
+  { key: "already_served", label: "Already served" },
+  { key: "duplicate", label: "Duplicate" },
+  { key: "other", label: "Other" },
+];
+
+/** The reject control: a ✕ (or a labelled button) that opens a little menu of reasons. The reason
+ *  is the whole point of Phase 6 — "Competitor" and "Wrong industry" teach the finder to stop
+ *  surfacing that domain, the rest feed the metrics — so rejecting always asks why. */
+function RejectMenu({ onPick, disabled, variant }: { onPick: (reason: string) => void; disabled?: boolean; variant: "icon" | "button" }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      {variant === "icon" ? (
+        <button className="rounded-lg p-1.5 disabled:opacity-60" style={{ color: open ? C.red : C.sub, background: open ? C.redSoft : "transparent" }} title="Reject this lead" disabled={disabled} onClick={() => setOpen((o) => !o)}
+          onMouseEnter={(e) => { e.currentTarget.style.color = C.red; e.currentTarget.style.background = C.redSoft; }}
+          onMouseLeave={(e) => { if (!open) { e.currentTarget.style.color = C.sub; e.currentTarget.style.background = "transparent"; } }}>
+          <svg width="13" height="13" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+        </button>
+      ) : (
+        <button className="rounded-xl px-3.5 py-2 text-[13px] font-semibold disabled:opacity-60" style={{ color: C.red, background: C.redSoft }} disabled={disabled} onClick={() => setOpen((o) => !o)}>Reject…</button>
+      )}
+      {open && (
+        <>
+          <div className="fixed inset-0 z-[105]" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 z-[106] mt-1 w-44 overflow-hidden rounded-xl py-1 shadow-lg" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+            <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide" style={{ color: C.sub }}>Why reject?</div>
+            {REJECT_REASONS.map((r) => (
+              <button key={r.key} className="block w-full px-3 py-1.5 text-left text-[12.5px]" style={{ color: C.ink }} onClick={() => { setOpen(false); onPick(r.key); }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = C.graySoft)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>{r.label}</button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function rowActions(l: Lead, setStage: (l: Lead, s: string, reason?: string) => void, busy: string | null, waLink: (l: Lead) => string) {
   const num = l.whatsapp || l.phone;
-  // pending → the gate (Approve / Reject). approved-and-onward → one Message action. One job per
-  // row, not three crammed buttons.
-  if (l.stage === "pending_approval") {
+  // Every lead arrives approved now, so the default action is Message, with a quiet ✕ to
+  // reject the ones the user doesn't want. A rejected lead gets one Restore button back.
+  if (l.stage === "rejected") {
+    return <button className="rounded-lg px-2.5 py-1 text-[11.5px] font-semibold disabled:opacity-60" style={{ color: C.brand, background: C.brandSoft }} disabled={busy === l.id} onClick={() => setStage(l, "approved")}>Restore</button>;
+  }
+  if (l.stage === "opted_out") return <span className="text-[12px]" style={{ color: C.sub }}>—</span>;
+  return (
+    <div className="flex items-center gap-1">
+      {num ? (
+        <a href={waLink(l)} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11.5px] font-semibold" style={{ background: "#25D366", color: "#ffffff", textDecoration: "none" }} title="Open WhatsApp chat">
+          <WaGlyph size={13} /><span style={{ color: "#ffffff" }}>Message</span>
+        </a>
+      ) : <span className="text-[12px]" style={{ color: C.sub }}>—</span>}
+      <RejectMenu variant="icon" disabled={busy === l.id} onPick={(reason) => setStage(l, "rejected", reason)} />
+    </div>
+  );
+}
+
+/** "Added" — a little green Today badge for fresh rows, a short date for the rest. */
+function AddedCell({ iso }: { iso: string }) {
+  return isToday(iso)
+    ? <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold" style={{ color: C.green, background: C.greenSoft }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: C.green }} />Today</span>
+    : <span className="text-[12px]" style={{ color: C.sub }}>{fmtDay(iso)}</span>;
+}
+
+/** Who has messaged this lead — one green, human answer: the AI agent, you, both, or no one. */
+function MessagedCell({ l }: { l: Lead }) {
+  if (l.ai_messaged || l.human_messaged) {
+    const who = l.ai_messaged && l.human_messaged ? "AI + You" : l.ai_messaged ? "AI Agent" : "You";
     return (
-      <div className="flex items-center gap-1.5">
-        <button className="rounded-lg px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-60" style={{ background: C.brand }} disabled={busy === l.id} onClick={() => setStage(l, "approved")}>Approve</button>
-        <button className="rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-60" style={{ color: C.red, background: C.redSoft }} disabled={busy === l.id} onClick={() => setStage(l, "rejected")}>Reject</button>
-      </div>
+      <span className="inline-flex items-center gap-1.5">
+        <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold" style={{ color: C.green, background: C.greenSoft }}>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke={C.green} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          {who}
+        </span>
+        {l.last_out_at && <span className="text-[10.5px]" style={{ color: C.sub }}>{ago(l.last_out_at)}</span>}
+      </span>
     );
   }
-  if (num && !["rejected", "opted_out"].includes(l.stage)) {
-    return (
-      <a href={waLink(l)} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold" style={{ background: "#25D366", color: "#ffffff", textDecoration: "none" }} title="Open WhatsApp chat">
-        <WaGlyph /><span style={{ color: "#ffffff" }}>Message</span>
-      </a>
-    );
-  }
-  return <span className="text-[12px]" style={{ color: C.sub }}>—</span>;
+  return <span className="text-[11.5px]" style={{ color: C.sub }}>Not yet</span>;
 }
 
 function Kpi({ icon, label, value, tone, bg, active, onClick }: { icon: string; label: string; value?: number; tone: string; bg: string; active: boolean; onClick: () => void }) {
+  // active = a hairline 1px outline at ~25% opacity — present but quiet, per the owner
   return (
-    <button onClick={onClick} className="flex items-center gap-2.5 rounded-2xl px-3 py-3 text-left transition" style={{ background: bg, border: `2px solid ${active ? tone : "transparent"}` }}>
+    <button onClick={onClick} className="flex items-center gap-2.5 rounded-2xl px-3 py-3 text-left transition" style={{ background: bg, border: `1px solid ${active ? `${tone}40` : "transparent"}` }}>
       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white" style={{ background: tone }}><KpiIcon name={icon} /></span>
       <span className="min-w-0">
         <span className="block truncate text-[11px] font-semibold leading-tight" style={{ color: tone }}>{label}</span>
@@ -411,12 +552,7 @@ function StageChip({ stage }: { stage: string }) {
 function Tag({ children, tone, soft }: { children: React.ReactNode; tone: string; soft: string }) {
   return <span className="rounded-md px-2 py-0.5 text-[11px] font-semibold" style={{ color: tone, background: soft }}>{children}</span>;
 }
-function ActBadge({ on, onLabel, offLabel = "Not yet", tone, soft }: { on: boolean; onLabel: string; offLabel?: string; tone: string; soft: string }) {
-  return on
-    ? <span className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11.5px] font-semibold" style={{ color: tone, background: soft }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: tone }} />{onLabel}</span>
-    : <span className="text-[11.5px]" style={{ color: C.sub }}>{offLabel}</span>;
-}
-function Th({ children }: { children: React.ReactNode }) { return <th className="px-3 py-2.5">{children}</th>; }
+function Th({ children }: { children: React.ReactNode }) { return <th className="px-2.5 py-2">{children}</th>; }
 function WaGlyph({ size = 14 }: { size?: number }) {
   // The real WhatsApp mark: a speech bubble with a handset. Filled white on the green pill.
   return (
@@ -426,7 +562,7 @@ function WaGlyph({ size = 14 }: { size?: number }) {
   );
 }
 
-function Drawer({ lead, onClose, setStage, busy, waLink }: { lead: Lead; onClose: () => void; setStage: (l: Lead, s: string) => void; busy: string | null; waLink: (l: Lead) => string }) {
+function Drawer({ lead, onClose, setStage, busy, waLink }: { lead: Lead; onClose: () => void; setStage: (l: Lead, s: string, reason?: string) => void; busy: string | null; waLink: (l: Lead) => string }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", onKey);
@@ -475,28 +611,62 @@ function Drawer({ lead, onClose, setStage, busy, waLink }: { lead: Lead; onClose
           <Detail k="Created" v={new Date(lead.created_at).toLocaleDateString()} last />
         </div>
         <div className="mb-5 grid grid-cols-2 gap-2">
-          {lead.stage === "pending_approval" ? (
-            <>
-              <button className="rounded-xl py-2.5 text-[13px] font-semibold text-white" style={{ background: C.brand }} disabled={busy === lead.id} onClick={() => setStage(lead, "approved")}>Approve</button>
-              <button className="rounded-xl py-2.5 text-[13px] font-semibold" style={{ color: C.red, background: C.redSoft }} disabled={busy === lead.id} onClick={() => setStage(lead, "rejected")}>Reject</button>
-            </>
+          {lead.stage === "rejected" ? (
+            <button className="col-span-2 rounded-xl py-2.5 text-[13px] font-semibold" style={{ color: C.brand, background: C.brandSoft }} disabled={busy === lead.id} onClick={() => setStage(lead, "approved")}>Restore this lead</button>
           ) : (
-            <a href={waLink(lead)} className="col-span-2 flex items-center justify-center gap-2 rounded-xl py-2.5 text-[13px] font-semibold text-white" style={{ background: "#25D366", textDecoration: "none" }}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 21a9 9 0 10-8-4.9L3 21l4.9-1A9 9 0 0012 21z" stroke="#fff" strokeWidth="1.8" strokeLinejoin="round" /></svg>
-              Open WhatsApp chat
-            </a>
+            <>
+              <a href={waLink(lead)} className="flex items-center justify-center gap-2 rounded-xl py-2.5 text-[13px] font-semibold text-white" style={{ background: "#25D366", textDecoration: "none" }}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 21a9 9 0 10-8-4.9L3 21l4.9-1A9 9 0 0012 21z" stroke="#fff" strokeWidth="1.8" strokeLinejoin="round" /></svg>
+                WhatsApp chat
+              </a>
+              <div className="flex justify-center"><RejectMenu variant="button" disabled={busy === lead.id} onPick={(reason) => setStage(lead, "rejected", reason)} /></div>
+            </>
           )}
         </div>
         <div className="mb-5 rounded-2xl p-4" style={{ background: C.bg, border: `1px solid ${C.line}` }}>
           <div className="mb-3 text-[13px] font-bold" style={{ color: C.ink }}>Automation status</div>
-          <StatusRow label="AI Agent" on={lead.ai_messaged} at={lead.ai_messaged ? lead.last_out_at : null} tone={C.violet} soft={C.violetSoft} />
-          <StatusRow label="You" on={lead.human_messaged} at={lead.human_messaged ? lead.last_out_at : null} tone={C.amber} soft={C.amberSoft} />
+          <StatusRow label="AI Agent" on={lead.ai_messaged} at={lead.ai_messaged ? lead.last_out_at : null} tone={C.green} soft={C.greenSoft} />
+          <StatusRow label="You" on={lead.human_messaged} at={lead.human_messaged ? lead.last_out_at : null} tone={C.green} soft={C.greenSoft} />
           <StatusRow label="Client" on={lead.is_client} tone={C.green} soft={C.greenSoft} last />
         </div>
-        {lead.reason && (
-          <div className="mb-5">
-            <div className="mb-1.5 text-[13px] font-bold" style={{ color: C.ink }}>Why this lead</div>
-            <p className="text-[12.5px]" style={{ color: C.sub }}>{lead.reason}</p>
+        {(lead.reason || lead.observation || lead.source_segment || lead.score_breakdown) && (
+          <div className="mb-5 rounded-2xl p-4" style={{ background: C.bg, border: `1px solid ${C.line}` }}>
+            <div className="mb-2 text-[13px] font-bold" style={{ color: C.ink }}>Why this lead</div>
+            {(lead.observation || lead.reason) && <p className="mb-2 text-[12.5px]" style={{ color: C.sub }}>{lead.observation || lead.reason}</p>}
+            {lead.evidence?.quote && <p className="mb-2 border-l-2 pl-2 text-[12px] italic" style={{ borderColor: C.line, color: C.sub }}>“{lead.evidence.quote}”</p>}
+            <div className="flex flex-wrap gap-1.5">
+              {lead.classification && <Tag tone={lead.classification === "buyer" ? C.green : C.amber} soft={lead.classification === "buyer" ? C.greenSoft : C.amberSoft}>{lead.classification === "buyer" ? "Buyer ✓" : lead.classification}</Tag>}
+              {lead.source_segment && <Tag tone={C.brand} soft={C.brandSoft}>Segment: {lead.source_segment}</Tag>}
+              {lead.source_query && <Tag tone={C.sub} soft={C.graySoft}>Found via “{lead.source_query}”</Tag>}
+            </div>
+            {/* verified buying signals, from the stored score breakdown */}
+            {(() => {
+              const sig = lead.score_breakdown?.components?.find((c) => c.id === "buying-signals");
+              return sig && sig.points > 0 ? <p className="mt-2 text-[12px]" style={{ color: C.green }}>✓ {sig.why}</p> : null;
+            })()}
+            {/* the score, explained group by group */}
+            {lead.score_breakdown?.components && (
+              <div className="mt-3 space-y-1">
+                {Object.entries(
+                  lead.score_breakdown.components.reduce((acc: Record<string, { p: number; m: number }>, c) => {
+                    const g = acc[c.group] ?? { p: 0, m: 0 };
+                    acc[c.group] = { p: g.p + c.points, m: g.m + c.max };
+                    return acc;
+                  }, {}),
+                ).map(([group, v]) => (
+                  <div key={group} className="flex items-center justify-between text-[11.5px]" style={{ color: C.sub }}>
+                    <span className="capitalize">{group === "fit" ? "Buyer fit" : group === "timing" ? "Health & size" : group}</span>
+                    <span className="font-semibold" style={{ color: C.ink }}>{v.p}/{v.m}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        {lead.stage === "rejected" && lead.reject_reason && (
+          <div className="mb-5 rounded-xl p-3 text-[12px]" style={{ background: C.redSoft, color: C.red }}>
+            Rejected as: {REJECT_REASONS.find((r) => r.key === lead.reject_reason)?.label ?? lead.reject_reason}
+            {(lead.reject_reason === "competitor" || lead.reject_reason === "wrong_industry") && <span style={{ color: C.sub }}> — this domain won’t be surfaced again.</span>}
           </div>
         )}
         <div>
@@ -603,7 +773,7 @@ function FilterPanel({ flt, setFlt, cities, dateRange, setDateRange, onClose, on
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const STATUSES: [string, string][] = [["new", "New"], ["pending_approval", "Waiting"], ["approved", "Approved"], ["contacted", "Contacted"], ["replied", "Engaged"], ["won", "Won"], ["lost", "Lost"], ["opted_out", "Opted out"]];
+  const STATUSES: [string, string][] = [["approved", "Approved"], ["contacted", "Contacted"], ["replied", "Engaged"], ["won", "Won"], ["lost", "Lost"], ["rejected", "Rejected"], ["opted_out", "Opted out"]];
   const SOURCES: [string, string][] = [["osm", "OpenStreetMap"], ["places", "Google Places"], ["jobs", "Job board"], ["manual", "Manual"]];
   const toggle = (arr: string[], v: string) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
 
@@ -684,83 +854,172 @@ function FilterPanel({ flt, setFlt, cities, dateRange, setDateRange, onClose, on
   );
 }
 
-/* ── generate-leads modal: a friendly "what & where" form ────────────────────────────────── */
+/* ── live lead-generation panel (under the KPI cards) ────────────────────────────────────────
+ *  Three faces of one card. manual → the "what & where" form, inline, no modal. live → the
+ *  real-time progress card from the owner's reference mockup (ring, found/target, step trail).
+ *  done → the result summary with a "View new leads" shortcut. The numbers are real: "found so
+ *  far" counts rows that actually landed since the run started; the step trail is the one
+ *  honest animation — the server records no per-step signal, so steps advance on elapsed time
+ *  and snap to "Saving to database" the moment real rows appear. */
 const LEADS_PER_RUN_MAX = 25; // client-side convenience cap; per-plan/day enforcement is a TODO (server-side)
-function GenerateLeadsModal({ open, onClose, busy, onGenerate }: { open: boolean; onClose: () => void; busy: boolean; onGenerate: (query: string, count: number, city: string) => void }) {
-  const [mode, setMode] = useState<"manual" | "auto">("manual");
+const GEN_STEPS = ["Searching sources", "Filtering leads", "Verifying info", "Saving to database"];
+
+function LeadGenPanel({ mode, gen, busy, target, foundSoFar, onStart, onClose, onViewNew }: {
+  mode: "manual" | "live" | "done";
+  gen: Gen | null;
+  busy: boolean;
+  target: number | null;
+  foundSoFar: number;
+  onStart: (query: string, count: number, city: string) => void;
+  onClose: () => void;
+  onViewNew: () => void;
+}) {
   const [what, setWhat] = useState("");
   const [city, setCity] = useState("");
   const [count, setCount] = useState(10);
+  const [, tick] = useState(0);
   useEffect(() => {
-    if (!open) { setWhat(""); setCity(""); setCount(10); setMode("manual"); }
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    if (open) document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
-  if (!open) return null;
+    if (mode !== "live") return;
+    const id = setInterval(() => tick((n) => n + 1), 2000);
+    return () => clearInterval(id);
+  }, [mode]);
 
-  const examples = [
-    ["Restaurants", "Dubai"], ["ISO consultants", "Mumbai"], ["Dental clinics", "Abu Dhabi"], ["Manufacturers", "Pune"],
-  ];
+  const startedAt = gen?.running_since ? new Date(gen.running_since).getTime() : Date.now();
+  const elapsedS = Math.max(0, (Date.now() - startedAt) / 1000);
+  const step = mode === "done" ? GEN_STEPS.length : foundSoFar > 0 ? 3 : Math.min(2, Math.floor(elapsedS / 20));
+  const pct = mode === "done" ? 100 : target ? Math.min(95, Math.round((foundSoFar / Math.max(1, target)) * 100)) : null;
+  const failed = mode === "done" && gen?.last_status === "error";
+  const doneFound = gen?.last_found;
+
+  const examples = [["Restaurants", "Dubai"], ["ISO consultants", "Mumbai"], ["Dental clinics", "Abu Dhabi"], ["Manufacturers", "Pune"]];
   const go = () => {
     const n = Math.max(1, Math.min(LEADS_PER_RUN_MAX, count));
-    if (mode === "auto") { onGenerate("", n, ""); return; }   // AI picks from the Site Brain ICP
     const w = what.trim();
     if (!w) return;
     const c = city.trim();
-    onGenerate(c ? `${w} in ${c}` : w, n, c);
+    onStart(c ? `${w} in ${c}` : w, n, c);
   };
-  const canGo = mode === "auto" || !!what.trim();
+
+  const R = 24, CIRC = 2 * Math.PI * R;
+  const ring = (
+    <div className="relative h-16 w-16 shrink-0">
+      <svg width="64" height="64" viewBox="0 0 64 64" className={mode === "live" && pct == null ? "animate-spin" : undefined} style={{ transform: pct != null ? "rotate(-90deg)" : undefined }}>
+        <circle cx="32" cy="32" r={R} fill="none" stroke={C.line} strokeWidth="5" />
+        <circle cx="32" cy="32" r={R} fill="none" stroke={failed ? C.red : C.green} strokeWidth="5" strokeLinecap="round"
+          strokeDasharray={`${((pct ?? 25) / 100) * CIRC} ${CIRC}`} style={{ transition: "stroke-dasharray .6s" }} />
+      </svg>
+      <span className="absolute inset-0 flex items-center justify-center text-[13px] font-bold" style={{ color: failed ? C.red : C.green }}>
+        {mode === "done" ? (failed ? "!" : "✓") : pct != null ? `${pct}%` : foundSoFar}
+      </span>
+    </div>
+  );
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,.45)" }} onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl p-6" style={{ background: C.panel }} onClick={(e) => e.stopPropagation()}>
-        <div className="mb-1 flex items-center gap-2">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg text-white" style={{ background: C.brand }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6l2.1 2.1m0-12.8l-2.1 2.1M7.7 16.3l-2.1 2.1" stroke="#fff" strokeWidth="1.8" strokeLinecap="round"/></svg>
-          </span>
-          <h2 className="text-[16px] font-bold" style={{ color: C.ink }}>Generate leads</h2>
-        </div>
-        <p className="mb-3 text-[12.5px]" style={{ color: C.sub }}>Mr. Lead pulls businesses from Google Maps with phone and website, scores each one, and files the good ones in New.</p>
-
-        {/* Auto vs Manual */}
-        <div className="mb-4 grid grid-cols-2 gap-2">
-          <button onClick={() => setMode("auto")} className="rounded-xl px-3 py-2.5 text-left" style={{ background: mode === "auto" ? C.brandSoft : C.bg, border: `1.5px solid ${mode === "auto" ? C.brand : C.line}` }}>
-            <div className="text-[13px] font-bold" style={{ color: mode === "auto" ? C.brand : C.ink }}>✨ Auto</div>
-            <div className="text-[11px]" style={{ color: C.sub }}>AI picks from your business</div>
-          </button>
-          <button onClick={() => setMode("manual")} className="rounded-xl px-3 py-2.5 text-left" style={{ background: mode === "manual" ? C.brandSoft : C.bg, border: `1.5px solid ${mode === "manual" ? C.brand : C.line}` }}>
-            <div className="text-[13px] font-bold" style={{ color: mode === "manual" ? C.brand : C.ink }}>✍️ Manual</div>
-            <div className="text-[11px]" style={{ color: C.sub }}>You choose what & where</div>
-          </button>
-        </div>
-
-        {mode === "auto" ? (
-          <div className="mb-4 rounded-xl px-3.5 py-3 text-[12.5px]" style={{ background: C.bg, border: `1px solid ${C.line}`, color: C.sub }}>
-            Mr. Lead will read your Site Brain (what you sell, who to) and find matching businesses itself. No input needed — just pick how many.
-          </div>
-        ) : (
-          <>
-            <label className="mb-1 block text-[12px] font-medium" style={{ color: C.sub }}>What businesses?</label>
-            <input className="mb-3 w-full rounded-xl px-3.5 py-2.5 text-[13px] outline-none" style={{ background: C.bg, border: `1px solid ${C.line}`, color: C.ink, colorScheme: "light" }} placeholder="e.g. ISO certification consultants" value={what} onChange={(e) => setWhat(e.target.value)} autoFocus />
-            <label className="mb-1 block text-[12px] font-medium" style={{ color: C.sub }}>Which city or area?</label>
-            <input className="mb-3 w-full rounded-xl px-3.5 py-2.5 text-[13px] outline-none" style={{ background: C.bg, border: `1px solid ${C.line}`, color: C.ink, colorScheme: "light" }} placeholder="e.g. Dubai" value={city} onChange={(e) => setCity(e.target.value)} />
-            <div className="mb-4 flex flex-wrap gap-1.5">
-              {examples.map(([w, c]) => (
-                <button key={w} className="rounded-lg px-2.5 py-1 text-[11.5px] font-medium" style={{ background: C.brandSoft, color: C.brand }} onClick={() => { setWhat(w); setCity(c); }}>{w} · {c}</button>
-              ))}
+    <div className="mb-4 overflow-hidden rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+      <div className="flex items-center justify-between gap-3 px-4 py-3" style={{ borderBottom: `1px solid ${C.line}` }}>
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[16px]" style={{ background: C.blueSoft }}>🚀</span>
+          <div className="min-w-0">
+            <div className="truncate text-[14px] font-bold" style={{ color: C.ink }}>{mode === "manual" ? "Generate leads" : "Live Lead Generation"}</div>
+            <div className="truncate text-[11.5px]" style={{ color: C.sub }}>
+              {mode === "manual" ? "Tell Mr. Lead what to look for — he does the rest." : mode === "live" ? "Watch your leads being generated in real-time." : failed ? "The last run hit a problem." : "Run finished."}
             </div>
-          </>
-        )}
-
-        <label className="mb-1 block text-[12px] font-medium" style={{ color: C.sub }}>How many? <b style={{ color: C.ink }}>{count}</b> <span className="text-[11px]">(max {LEADS_PER_RUN_MAX})</span></label>
-        <input type="range" min={1} max={LEADS_PER_RUN_MAX} value={count} onChange={(e) => setCount(Number(e.target.value))} className="mb-5 w-full" style={{ accentColor: C.brand }} />
-
-        <div className="flex justify-end gap-2">
-          <button className="rounded-xl px-4 py-2 text-[13px] font-semibold" style={{ background: C.graySoft, color: C.sub }} onClick={onClose}>Cancel</button>
-          <button className="rounded-xl px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-60" style={{ background: C.brand }} onClick={go} disabled={busy || !canGo}>{busy ? "Starting…" : "Find leads"}</button>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {mode === "live" && (
+            <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-semibold" style={{ color: C.green, background: C.greenSoft }}>
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ background: C.green }} />Running
+            </span>
+          )}
+          {mode === "done" && !failed && (
+            <button className="rounded-lg px-3 py-1.5 text-[12px] font-semibold text-white" style={{ background: C.brand }} onClick={onViewNew}>View new leads</button>
+          )}
+          {mode !== "live" && (
+            <button onClick={onClose} className="rounded-full p-1.5" style={{ background: C.graySoft, color: C.sub }} aria-label="Close">
+              <svg width="14" height="14" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
+            </button>
+          )}
         </div>
       </div>
+
+      {mode === "manual" ? (
+        <div className="p-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-[12px] font-medium" style={{ color: C.sub }}>What businesses?</label>
+              <input className="w-full rounded-xl px-3.5 py-2.5 text-[13px] outline-none" style={{ background: C.bg, border: `1px solid ${C.line}`, color: C.ink, colorScheme: "light" }} placeholder="e.g. ISO certification consultants" value={what} onChange={(e) => setWhat(e.target.value)} autoFocus />
+            </div>
+            <div>
+              <label className="mb-1 block text-[12px] font-medium" style={{ color: C.sub }}>Which city or area?</label>
+              <input className="w-full rounded-xl px-3.5 py-2.5 text-[13px] outline-none" style={{ background: C.bg, border: `1px solid ${C.line}`, color: C.ink, colorScheme: "light" }} placeholder="e.g. Dubai" value={city} onChange={(e) => setCity(e.target.value)} />
+            </div>
+          </div>
+          <div className="mt-2.5 flex flex-wrap gap-1.5">
+            {examples.map(([w, c]) => (
+              <button key={w} className="rounded-lg px-2.5 py-1 text-[11.5px] font-medium" style={{ background: C.brandSoft, color: C.brand }} onClick={() => { setWhat(w); setCity(c); }}>{w} · {c}</button>
+            ))}
+          </div>
+          <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex-1 sm:max-w-xs">
+              <label className="mb-1 block text-[12px] font-medium" style={{ color: C.sub }}>How many? <b style={{ color: C.ink }}>{count}</b> <span className="text-[11px]">(max {LEADS_PER_RUN_MAX})</span></label>
+              <input type="range" min={1} max={LEADS_PER_RUN_MAX} value={count} onChange={(e) => setCount(Number(e.target.value))} className="w-full" style={{ accentColor: C.brand }} />
+            </div>
+            <button className="rounded-xl px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-60" style={{ background: C.brand }} onClick={go} disabled={busy || !what.trim()}>{busy ? "Starting…" : "Start generating"}</button>
+          </div>
+        </div>
+      ) : (
+        <div className="p-4">
+          <div className="flex flex-col gap-4 rounded-xl p-3.5 sm:flex-row sm:items-center" style={{ background: C.bg, border: `1px solid ${C.line}` }}>
+            <div className="flex min-w-0 flex-1 items-center gap-3.5">
+              {ring}
+              <div className="min-w-0">
+                <div className="text-[13.5px] font-bold" style={{ color: C.ink }}>
+                  {mode === "live" ? "Collecting leads…" : failed ? "It hit a problem" : doneFound != null ? `Done — ${doneFound} new lead${doneFound === 1 ? "" : "s"}` : "Done"}
+                </div>
+                <div className="text-[12px]" style={{ color: C.sub }}>
+                  {mode === "live" ? "Finding potential customers from multiple sources. You can leave this page — they save by themselves." : failed ? (gen?.last_note ?? "Try again in a minute; the reason is logged in Reports.") : "Fresh leads are in the table below with a green Today badge."}
+                </div>
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-5 pl-[66px] sm:pl-0">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: C.sub }}>Found</div>
+                <div className="text-[20px] font-bold leading-tight" style={{ color: C.ink }}>{mode === "done" ? (doneFound ?? foundSoFar) : foundSoFar}</div>
+                <div className="text-[10.5px]" style={{ color: C.sub }}>so far</div>
+              </div>
+              {target != null && (
+                <div style={{ borderLeft: `1px solid ${C.line}`, paddingLeft: 20 }}>
+                  <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: C.sub }}>Target</div>
+                  <div className="text-[20px] font-bold leading-tight" style={{ color: C.ink }}>{target}</div>
+                  <div className="text-[10.5px]" style={{ color: C.sub }}>this run</div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-3.5 flex items-center gap-2 overflow-x-auto pb-1">
+            {GEN_STEPS.map((label, i) => {
+              const doneStep = i < step || mode === "done";
+              const current = mode === "live" && i === step;
+              return (
+                <div key={label} className="flex min-w-0 shrink-0 items-center gap-2">
+                  {i > 0 && <span className="hidden h-px w-6 sm:block lg:w-10" style={{ background: C.line }} />}
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
+                    style={{ background: doneStep ? C.green : current ? C.blueSoft : C.graySoft, border: current ? `2px solid ${C.blue}` : "none" }}>
+                    {doneStep
+                      ? <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                      : current
+                        ? <span className="h-2 w-2 animate-pulse rounded-full" style={{ background: C.blue }} />
+                        : <span className="h-1.5 w-1.5 rounded-full" style={{ background: C.sub, opacity: 0.4 }} />}
+                  </span>
+                  <span className="whitespace-nowrap text-[11.5px] font-medium" style={{ color: doneStep ? C.ink : current ? C.blue : C.sub }}>{label}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

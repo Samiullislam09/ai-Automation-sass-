@@ -111,6 +111,76 @@ export type SiteType = "business" | "ecommerce" | "blog" | "portfolio" | "nonpro
 
 export type Confidence = "high" | "medium" | "low";
 
+/* ── the BUYER PROFILE (high-quality-leads plan, Phase 1) ────────────────────────────────────
+   Site Brain answers "what is this business". The buyer profile answers the different question
+   lead generation actually needs: "who BUYS from this business, and who merely LOOKS like it".
+   Built once from the Site Brain by an LLM, then CONFIRMED by the client — unconfirmed, lead
+   generation refuses to run (same discipline as icp.ts: no guessing). Every item carries an
+   evidence tag naming the Site Brain field it was drafted from, so nothing here is invented.
+
+   This lives inside the profile jsonb (additive, nullable) — no migration, and an old profile
+   simply has `buyer_profile: null` until the first draft runs. It is deliberately NOT one of
+   PROFILE_FIELDS: it has its own confirmation lifecycle, not the per-field confidence/sources
+   maps the analyst's fields use. */
+
+/** Where a drafted item came from: which Site Brain field, and the exact words that justify it.
+ *  `from` is a field name ("what_they_do", "offerings", "audience", "proof", "usp") or "user"
+ *  when a human typed it. An item with no evidence is allowed only when a human added it. */
+export type EvidenceTag = { from: string; quote: string | null };
+
+/** What counts as a "lead" for this tenant. A blog wants sponsors; a consultancy wants
+ *  customers; a distributor-led business wants partners. Drives the drafter's framing. */
+export type LeadGoal = "customer" | "sponsor" | "partner" | "distributor" | "other";
+
+/** A category of organisation that BUYS the offer (never a peer). `search_terms` are the generic,
+ *  industry-neutral words a map/web search would find them by — e.g. for an ISO consultancy's
+ *  buyer: "manufacturers", "exporters", "food processing company". */
+export type BuyerSegment = {
+  name: string;
+  why_buy: string;
+  search_terms: string[];
+  evidence: EvidenceTag;
+};
+
+/** A category of organisation that SELLS the same/similar offer — a peer/competitor to screen
+ *  OUT. `cues` are substrings to match against a prospect's business name, domain or category
+ *  (e.g. "iso consultant", "certification body"). These come from the tenant's own profile, so
+ *  nothing industry-specific is hardcoded in the gate. */
+export type CompetitorSegment = {
+  name: string;
+  cues: string[];
+  evidence: EvidenceTag;
+};
+
+/** An observable thing on a prospect's own web presence that suggests they need the offer.
+ *  `look_for` is what the classifier/scorer hunts for in the page text; `weight` is a relative
+ *  1–10 importance the Phase-4 scorer normalises. */
+export type BuyingSignal = {
+  name: string;
+  look_for: string;
+  weight: number;
+  evidence: EvidenceTag | null;
+};
+
+export type BuyerProfile = {
+  /** What the client sells/provides, 1–2 lines — the thing a buyer would be buying. */
+  offer: string | null;
+  lead_goal: LeadGoal | null;
+  buyer_segments: BuyerSegment[];
+  competitor_segments: CompetitorSegment[];
+  buying_signals: BuyingSignal[];
+  /** Cities / regions / countries to target. Falls back to the Site Brain `geo` and to the
+   *  user's query at run time (Phase 2). */
+  geo_scope: string[];
+  /** A human has reviewed and accepted this. Lead generation runs only when true. */
+  confirmed: boolean;
+  confirmed_by: string | null;
+  confirmed_at: string | null;
+  /** Who produced the current draft: 'agent:buyer-profile' or 'user:<uuid>'. */
+  drafted_by: string | null;
+  drafted_at: string | null;
+};
+
 /** The fields that carry a confidence + sources entry. Keys of the two maps below. */
 export const PROFILE_FIELDS = [
   "site_type",
@@ -162,6 +232,9 @@ export type SiteProfile = {
   credentials: Credential[];
   money_pages: MoneyPage[];
   publishing_rules: PublishingRules | null;
+  /** Who buys from this business vs who merely looks like it (high-quality-leads plan, Phase 1).
+   *  Null until the first draft runs; lead generation refuses to run until it is confirmed. */
+  buyer_profile: BuyerProfile | null;
   /** How sure we are, per field. "low" is a real answer and is shown to the user as one. */
   confidence: Partial<Record<ProfileField, Confidence>>;
   /** Where each field came from: page URLs, "onboarding", "google-search-console", "user".
@@ -222,9 +295,60 @@ export function emptyProfile(): SiteProfile {
     credentials: [],
     money_pages: [],
     publishing_rules: null,
+    buyer_profile: null,
     confidence: {},
     sources: {},
   };
+}
+
+/** A buyer profile with nothing filled in — the shape the drafter populates and the UI edits.
+ *  Unconfirmed by definition. */
+export function emptyBuyerProfile(): BuyerProfile {
+  return {
+    offer: null,
+    lead_goal: null,
+    buyer_segments: [],
+    competitor_segments: [],
+    buying_signals: [],
+    geo_scope: [],
+    confirmed: false,
+    confirmed_by: null,
+    confirmed_at: null,
+    drafted_by: null,
+    drafted_at: null,
+  };
+}
+
+/** Merge a stored/partial buyer profile onto the full shape so a caller never trips over a
+ *  missing array. Returns null only when there is genuinely nothing there. */
+export function normalizeBuyerProfile(raw: unknown): BuyerProfile | null {
+  if (!raw || typeof raw !== "object") return null;
+  const p = raw as Partial<BuyerProfile>;
+  const base = emptyBuyerProfile();
+  return {
+    ...base,
+    ...p,
+    offer: typeof p.offer === "string" ? p.offer : null,
+    lead_goal: (["customer", "sponsor", "partner", "distributor", "other"] as const).includes(p.lead_goal as any) ? (p.lead_goal as LeadGoal) : null,
+    buyer_segments: asArray<BuyerSegment>(p.buyer_segments),
+    competitor_segments: asArray<CompetitorSegment>(p.competitor_segments),
+    buying_signals: asArray<BuyingSignal>(p.buying_signals),
+    geo_scope: asArray<string>(p.geo_scope),
+    confirmed: p.confirmed === true,
+    confirmed_by: typeof p.confirmed_by === "string" ? p.confirmed_by : null,
+    confirmed_at: typeof p.confirmed_at === "string" ? p.confirmed_at : null,
+    drafted_by: typeof p.drafted_by === "string" ? p.drafted_by : null,
+    drafted_at: typeof p.drafted_at === "string" ? p.drafted_at : null,
+  };
+}
+
+/** Is this profile's buyer profile ready to drive lead generation? Confirmed by a human AND it
+ *  actually names at least one buyer segment with a search term — a confirmed-but-empty profile
+ *  would search for nothing. The one gate lead generation checks (Phase 1 item 3). */
+export function buyerProfileReady(profile: SiteProfile | null | undefined): boolean {
+  const bp = profile?.buyer_profile;
+  if (!bp || !bp.confirmed) return false;
+  return bp.buyer_segments.some((s) => s && s.name && asArray<string>(s.search_terms).some((t) => String(t).trim()));
 }
 
 /** Merge whatever the database happens to hold onto the full shape, so a profile written by
@@ -248,6 +372,7 @@ export function normalizeProfile(raw: unknown): SiteProfile {
     objections: asArray(p.objections),
     credentials: asArray(p.credentials),
     money_pages: asArray(p.money_pages),
+    buyer_profile: normalizeBuyerProfile(p.buyer_profile),
     confidence: (p.confidence && typeof p.confidence === "object" ? p.confidence : {}) as SiteProfile["confidence"],
     sources: (p.sources && typeof p.sources === "object" ? p.sources : {}) as SiteProfile["sources"],
   };

@@ -127,6 +127,10 @@ create table if not exists whatsapp_sessions (
   -- The QR the client scans, as a data string, only while status = 'pairing'. Cleared on connect.
   qr           text,
   last_connected_at timestamptz,
+  -- Set once, on the FIRST successful pairing, and never moved: the warmup cap (a fresh number
+  -- sends less for its first days) is measured from here. last_connected_at moves on every
+  -- reconnect and would reset the warmup each deploy.
+  first_connected_at timestamptz,
   -- Sending-day bookkeeping for the cap: how many went out since counter_date (tenant TZ day).
   sent_today   integer not null default 0,
   counter_date date,
