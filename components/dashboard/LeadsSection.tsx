@@ -36,7 +36,7 @@ type Kpis = { total: number; messaged: number; converted: number; ai_messaged: n
 
 const STAGE: Record<string, { label: string; fg: string; bg: string }> = {
   new: { label: "New", fg: C.blue, bg: C.blueSoft },
-  pending_approval: { label: "Waiting", fg: C.amber, bg: C.amberSoft },
+  pending_approval: { label: "Needs review", fg: C.amber, bg: C.amberSoft },
   approved: { label: "Approved", fg: C.green, bg: C.greenSoft },
   rejected: { label: "Rejected", fg: C.sub, bg: C.graySoft },
   contacted: { label: "Contacted", fg: C.blue, bg: C.blueSoft },
@@ -67,6 +67,7 @@ function ago(iso: string | null): string {
 }
 function scoreColor(s: number | null) { return s == null ? C.sub : s >= 70 ? C.green : s >= 40 ? C.amber : C.red; }
 function initials(l: Lead) { return (l.company || l.name || "?").slice(0, 2).toUpperCase(); }
+function cityOf(l: Lead): string { return (l.city ?? "").trim(); }
 
 const TAB_MATCH: Record<string, (l: Lead) => boolean> = {
   all: () => true,
@@ -95,8 +96,8 @@ export default function LeadsSection() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [dateRange, setDateRange] = useState("all"); // all | today | 7d | 30d
   // Advanced filters (spec section 7), applied on top of the tab + search. Empty = no constraint.
-  const [flt, setFlt] = useState<{ status: string[]; source: string[]; ai: string; you: string; converted: string; client: string; score: string }>(
-    { status: [], source: [], ai: "any", you: "any", converted: "any", client: "any", score: "any" }
+  const [flt, setFlt] = useState<{ status: string[]; source: string[]; city: string[]; ai: string; you: string; converted: string; client: string; score: string }>(
+    { status: [], source: [], city: [], ai: "any", you: "any", converted: "any", client: "any", score: "any" }
   );
 
   const load = useCallback(async () => {
@@ -115,10 +116,10 @@ export default function LeadsSection() {
     return () => clearInterval(id);
   }, [gen?.running, load]);
 
-  const findLeads = async (query: string, count: number) => {
+  const findLeads = async (query: string, count: number, city: string) => {
     setGenBusy(true);
     try {
-      const d = await fetch("/api/agents/trigger", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "leads", ...(query ? { query } : {}), count }) }).then((r) => r.json());
+      const d = await fetch("/api/agents/trigger", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "leads", ...(query ? { query } : {}), ...(city ? { city } : {}), count }) }).then((r) => r.json());
       if (!d.ok) { toast(d.error ?? "Could not start lead search.", "error"); return; }
       toast("Mr. Lead is searching — new leads will appear in the New tab.");
       setGen((g) => ({ running: true, last_run_at: g?.last_run_at ?? null, last_status: g?.last_status ?? null, last_found: g?.last_found ?? null, last_note: g?.last_note ?? null }));
@@ -158,6 +159,7 @@ export default function LeadsSection() {
       if (!match(l)) return false;
       if (flt.status.length && !flt.status.includes(l.stage)) return false;
       if (flt.source.length && !flt.source.includes(l.source ?? "")) return false;
+      if (flt.city.length && !flt.city.includes(cityOf(l))) return false;
       if (flt.ai === "yes" && !l.ai_messaged) return false;
       if (flt.ai === "no" && l.ai_messaged) return false;
       if (flt.you === "yes" && !l.human_messaged) return false;
@@ -177,7 +179,7 @@ export default function LeadsSection() {
   }, [leads, tab, q, flt, dateRange]);
 
   const activeFilterCount =
-    flt.status.length + flt.source.length +
+    flt.status.length + flt.source.length + flt.city.length +
     ["ai", "you", "converted", "client", "score"].filter((k) => (flt as any)[k] !== "any").length;
 
   const exportCsv = () => {
@@ -195,9 +197,10 @@ export default function LeadsSection() {
   };
 
   const waLink = (l: Lead) => `/dashboard/whatsapp?lead=${l.id}`;
+  const cities = useMemo(() => Array.from(new Set((leads ?? []).map(cityOf).filter(Boolean))).sort(), [leads]);
 
   return (
-    <div className="-m-3 min-h-[calc(100%+1.5rem)] p-4 sm:-m-4 sm:min-h-[calc(100%+2rem)] sm:p-5" style={{ background: C.bg, color: C.ink, colorScheme: "light" }}>
+    <div className="-m-3 min-h-[calc(100%+1.5rem)] p-3 sm:-m-4 sm:min-h-[calc(100%+2rem)] sm:p-4" style={{ background: C.bg, color: C.ink, colorScheme: "light" }}>
       {/* header — title on its own line; a single-line toolbar below that fits without wrapping */}
       <div className="mb-3 flex items-center justify-between gap-3">
         <div>
@@ -210,8 +213,8 @@ export default function LeadsSection() {
         </button>
       </div>
 
-      <div className="mb-4 flex items-center gap-2">
-        <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-3 py-2" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+      <div className="mb-3 flex items-center gap-2">
+        <div className="flex min-w-0 max-w-sm flex-1 items-center gap-2 rounded-xl px-3 py-2" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
           <svg className="shrink-0" width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke={C.sub} strokeWidth="2" /><path d="M21 21l-4-4" stroke={C.sub} strokeWidth="2" strokeLinecap="round" /></svg>
           <input className="w-full min-w-0 text-[13px] outline-none" style={{ color: C.ink, background: "transparent", colorScheme: "light" }} placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
@@ -221,7 +224,7 @@ export default function LeadsSection() {
             <span className="hidden md:inline">Filters</span>
             {activeFilterCount ? <span className="rounded-full px-1.5 text-[11px] text-white" style={{ background: C.brand }}>{activeFilterCount}</span> : null}
           </button>
-          {filtersOpen && <FilterPanel flt={flt} setFlt={setFlt} dateRange={dateRange} setDateRange={setDateRange} onClose={() => setFiltersOpen(false)} onClear={() => { setFlt({ status: [], source: [], ai: "any", you: "any", converted: "any", client: "any", score: "any" }); setDateRange("all"); }} />}
+          {filtersOpen && <FilterPanel flt={flt} setFlt={setFlt} cities={cities} dateRange={dateRange} setDateRange={setDateRange} onClose={() => setFiltersOpen(false)} onClear={() => { setFlt({ status: [], source: [], city: [], ai: "any", you: "any", converted: "any", client: "any", score: "any" }); setDateRange("all"); }} />}
         </div>
         <button className="flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-[13px] font-semibold" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.sub }} onClick={exportCsv} title="Export CSV">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
@@ -270,7 +273,6 @@ export default function LeadsSection() {
           ["new", "New", kpis?.new],
           ["engaged", "Engaged", kpis?.engaged],
           ["converted", "Converted", kpis?.converted],
-          ["client", "Client", kpis?.client],
           ["not_messaged", "Not Messaged", kpis?.not_messaged],
         ] as [string, string, number | undefined][]).map(([k, label, n]) => (
           <button key={k} onClick={() => setTab(k)} className="flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-semibold"
@@ -294,7 +296,7 @@ export default function LeadsSection() {
               <table className="w-full border-collapse" style={{ minWidth: 920 }}>
                 <thead>
                   <tr className="text-[11.5px] font-semibold uppercase tracking-wide" style={{ color: C.sub, textAlign: "left", borderBottom: `1px solid ${C.line}` }}>
-                    <Th>Lead</Th><Th>Source</Th><Th>Status</Th><Th>AI Agent</Th><Th>You</Th><Th>Client</Th><Th>Score</Th><Th>Last Msg</Th><Th>Actions</Th>
+                    <Th>Lead</Th><Th>City</Th><Th>Source</Th><Th>Status</Th><Th>AI Agent</Th><Th>You</Th><Th>Score</Th><Th>Last Msg</Th><Th>Actions</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -309,11 +311,11 @@ export default function LeadsSection() {
                           </div>
                         </div>
                       </td>
+                      <td className="px-3 py-3" style={{ color: C.sub, whiteSpace: "nowrap" }}>{cityOf(l) || "—"}</td>
                       <td className="px-3 py-3" style={{ color: C.sub }}>{SOURCE_LABEL[l.source ?? ""] ?? l.source ?? "—"}</td>
                       <td className="px-3 py-3"><StageChip stage={l.stage} /></td>
                       <td className="px-3 py-3"><ActBadge on={l.ai_messaged} onLabel="Messaged" tone={C.violet} soft={C.violetSoft} /></td>
                       <td className="px-3 py-3"><ActBadge on={l.human_messaged} onLabel="Messaged" tone={C.amber} soft={C.amberSoft} /></td>
-                      <td className="px-3 py-3"><ActBadge on={l.is_client} onLabel="Client" offLabel="Not yet" tone={C.green} soft={C.greenSoft} /></td>
                       <td className="px-3 py-3"><span className="rounded-md px-2 py-0.5 text-[12px] font-bold" style={{ color: scoreColor(l.icp_score), background: C.graySoft }}>{l.icp_score ?? "—"}</span></td>
                       <td className="px-3 py-3" style={{ color: C.sub, whiteSpace: "nowrap" }}>{ago(l.last_out_at || l.last_in_at)}</td>
                       <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>{rowActions(l, setStage, busy, waLink)}</td>
@@ -331,7 +333,7 @@ export default function LeadsSection() {
                   <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[13px] font-bold text-white" style={{ background: C.brand }}>{initials(l)}</span>
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-semibold" style={{ color: C.ink }}>{l.company || l.name || "Untitled"}</div>
-                    <div className="truncate text-[12px]" style={{ color: C.sub }}>{l.whatsapp || l.phone || "—"} · {SOURCE_LABEL[l.source ?? ""] ?? l.source ?? "—"}</div>
+                    <div className="truncate text-[12px]" style={{ color: C.sub }}>{l.whatsapp || l.phone || "—"}{cityOf(l) ? ` · ${cityOf(l)}` : ""} · {SOURCE_LABEL[l.source ?? ""] ?? l.source ?? "—"}</div>
                   </div>
                   <span className="rounded-md px-2 py-0.5 text-[12px] font-bold" style={{ color: scoreColor(l.icp_score), background: C.graySoft }}>{l.icp_score ?? "—"}</span>
                 </div>
@@ -339,7 +341,6 @@ export default function LeadsSection() {
                   <StageChip stage={l.stage} />
                   {l.ai_messaged && <Tag tone={C.violet} soft={C.violetSoft}>AI messaged</Tag>}
                   {l.human_messaged && <Tag tone={C.amber} soft={C.amberSoft}>You messaged</Tag>}
-                  {l.is_client && <Tag tone={C.green} soft={C.greenSoft}>Client</Tag>}
                 </div>
                 <div onClick={(e) => e.stopPropagation()}>{rowActions(l, setStage, busy, waLink)}</div>
               </div>
@@ -357,27 +358,29 @@ export default function LeadsSection() {
 
 function rowActions(l: Lead, setStage: (l: Lead, s: string) => void, busy: string | null, waLink: (l: Lead) => string) {
   const num = l.whatsapp || l.phone;
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      {l.stage === "pending_approval" && (
-        <>
-          <button className="rounded-lg px-3 py-1.5 text-[12px] font-semibold text-white" style={{ background: C.brand }} disabled={busy === l.id} onClick={() => setStage(l, "approved")}>Approve</button>
-          <button className="rounded-lg px-2.5 py-1.5 text-[12px] font-semibold" style={{ color: C.red, background: C.redSoft }} disabled={busy === l.id} onClick={() => setStage(l, "rejected")}>Reject</button>
-        </>
-      )}
-      {num && !["rejected", "opted_out"].includes(l.stage) && (
-        <a href={waLink(l)} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-semibold text-white" style={{ background: "#25D366", textDecoration: "none" }} title="Open WhatsApp chat">
-          <WaGlyph />
-          <span className="hidden lg:inline">Message</span>
-        </a>
-      )}
-    </div>
-  );
+  // pending → the gate (Approve / Reject). approved-and-onward → one Message action. One job per
+  // row, not three crammed buttons.
+  if (l.stage === "pending_approval") {
+    return (
+      <div className="flex items-center gap-1.5">
+        <button className="rounded-lg px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-60" style={{ background: C.brand }} disabled={busy === l.id} onClick={() => setStage(l, "approved")}>Approve</button>
+        <button className="rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-60" style={{ color: C.red, background: C.redSoft }} disabled={busy === l.id} onClick={() => setStage(l, "rejected")}>Reject</button>
+      </div>
+    );
+  }
+  if (num && !["rejected", "opted_out"].includes(l.stage)) {
+    return (
+      <a href={waLink(l)} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold" style={{ background: "#25D366", color: "#ffffff", textDecoration: "none" }} title="Open WhatsApp chat">
+        <WaGlyph /><span style={{ color: "#ffffff" }}>Message</span>
+      </a>
+    );
+  }
+  return <span className="text-[12px]" style={{ color: C.sub }}>—</span>;
 }
 
 function Kpi({ icon, label, value, tone, bg, active, onClick }: { icon: string; label: string; value?: number; tone: string; bg: string; active: boolean; onClick: () => void }) {
   return (
-    <button onClick={onClick} className="flex items-center gap-2.5 rounded-2xl px-3 py-3 text-left transition" style={{ background: bg, border: `1px solid ${active ? tone : "transparent"}`, boxShadow: active ? `0 0 0 1.5px ${tone}` : "none" }}>
+    <button onClick={onClick} className="flex items-center gap-2.5 rounded-2xl px-3 py-3 text-left transition" style={{ background: bg, border: `2px solid ${active ? tone : "transparent"}` }}>
       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white" style={{ background: tone }}><KpiIcon name={icon} /></span>
       <span className="min-w-0">
         <span className="block truncate text-[11px] font-semibold leading-tight" style={{ color: tone }}>{label}</span>
@@ -399,7 +402,11 @@ function KpiIcon({ name }: { name: string }) {
 }
 function StageChip({ stage }: { stage: string }) {
   const s = STAGE[stage] ?? { label: stage, fg: C.sub, bg: C.graySoft };
-  return <span className="rounded-md px-2 py-0.5 text-[11.5px] font-semibold" style={{ color: s.fg, background: s.bg }}>{s.label}</span>;
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-semibold" style={{ color: s.fg, background: s.bg }}>
+      <span className="h-1.5 w-1.5 rounded-full" style={{ background: s.fg }} />{s.label}
+    </span>
+  );
 }
 function Tag({ children, tone, soft }: { children: React.ReactNode; tone: string; soft: string }) {
   return <span className="rounded-md px-2 py-0.5 text-[11px] font-semibold" style={{ color: tone, background: soft }}>{children}</span>;
@@ -588,8 +595,8 @@ function AddLeadModal({ open, onClose, onAdded, toast }: { open: boolean; onClos
 }
 
 /* ── advanced filter popover ─────────────────────────────────────────────────────────────── */
-type Flt = { status: string[]; source: string[]; ai: string; you: string; converted: string; client: string; score: string };
-function FilterPanel({ flt, setFlt, dateRange, setDateRange, onClose, onClear }: { flt: Flt; setFlt: (f: Flt) => void; dateRange: string; setDateRange: (v: string) => void; onClose: () => void; onClear: () => void }) {
+type Flt = { status: string[]; source: string[]; city: string[]; ai: string; you: string; converted: string; client: string; score: string };
+function FilterPanel({ flt, setFlt, cities, dateRange, setDateRange, onClose, onClear }: { flt: Flt; setFlt: (f: Flt) => void; cities: string[]; dateRange: string; setDateRange: (v: string) => void; onClose: () => void; onClear: () => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", onKey);
@@ -647,6 +654,14 @@ function FilterPanel({ flt, setFlt, dateRange, setDateRange, onClose, onClear }:
             </div>
           </Section>
 
+          {cities.length > 0 && (
+            <Section title="City">
+              <div className="flex flex-wrap gap-1.5">
+                {cities.map((c) => <Chip key={c} on={flt.city.includes(c)} label={c} onClick={() => setFlt({ ...flt, city: toggle(flt.city, c) })} />)}
+              </div>
+            </Section>
+          )}
+
           <div className="mb-2.5 flex items-center justify-between"><span className="text-[12.5px]" style={{ color: C.ink }}>AI Agent messaged</span><Seg value={flt.ai} set={(v) => setFlt({ ...flt, ai: v })} /></div>
           <div className="mb-2.5 flex items-center justify-between"><span className="text-[12.5px]" style={{ color: C.ink }}>You messaged</span><Seg value={flt.you} set={(v) => setFlt({ ...flt, you: v })} /></div>
           <div className="mb-2.5 flex items-center justify-between"><span className="text-[12.5px]" style={{ color: C.ink }}>Converted</span><Seg value={flt.converted} set={(v) => setFlt({ ...flt, converted: v })} /></div>
@@ -671,12 +686,13 @@ function FilterPanel({ flt, setFlt, dateRange, setDateRange, onClose, onClear }:
 
 /* ── generate-leads modal: a friendly "what & where" form ────────────────────────────────── */
 const LEADS_PER_RUN_MAX = 25; // client-side convenience cap; per-plan/day enforcement is a TODO (server-side)
-function GenerateLeadsModal({ open, onClose, busy, onGenerate }: { open: boolean; onClose: () => void; busy: boolean; onGenerate: (query: string, count: number) => void }) {
+function GenerateLeadsModal({ open, onClose, busy, onGenerate }: { open: boolean; onClose: () => void; busy: boolean; onGenerate: (query: string, count: number, city: string) => void }) {
+  const [mode, setMode] = useState<"manual" | "auto">("manual");
   const [what, setWhat] = useState("");
   const [city, setCity] = useState("");
   const [count, setCount] = useState(10);
   useEffect(() => {
-    if (!open) { setWhat(""); setCity(""); setCount(10); }
+    if (!open) { setWhat(""); setCity(""); setCount(10); setMode("manual"); }
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     if (open) document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -687,11 +703,14 @@ function GenerateLeadsModal({ open, onClose, busy, onGenerate }: { open: boolean
     ["Restaurants", "Dubai"], ["ISO consultants", "Mumbai"], ["Dental clinics", "Abu Dhabi"], ["Manufacturers", "Pune"],
   ];
   const go = () => {
+    const n = Math.max(1, Math.min(LEADS_PER_RUN_MAX, count));
+    if (mode === "auto") { onGenerate("", n, ""); return; }   // AI picks from the Site Brain ICP
     const w = what.trim();
     if (!w) return;
-    const query = city.trim() ? `${w} in ${city.trim()}` : w;
-    onGenerate(query, Math.max(1, Math.min(LEADS_PER_RUN_MAX, count)));
+    const c = city.trim();
+    onGenerate(c ? `${w} in ${c}` : w, n, c);
   };
+  const canGo = mode === "auto" || !!what.trim();
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,.45)" }} onClick={onClose}>
@@ -702,26 +721,44 @@ function GenerateLeadsModal({ open, onClose, busy, onGenerate }: { open: boolean
           </span>
           <h2 className="text-[16px] font-bold" style={{ color: C.ink }}>Generate leads</h2>
         </div>
-        <p className="mb-4 text-[12.5px]" style={{ color: C.sub }}>Tell Mr. Lead what businesses to find and where. It pulls them from Google Maps with phone and website, scores each one, and files the good ones in New.</p>
+        <p className="mb-3 text-[12.5px]" style={{ color: C.sub }}>Mr. Lead pulls businesses from Google Maps with phone and website, scores each one, and files the good ones in New.</p>
 
-        <label className="mb-1 block text-[12px] font-medium" style={{ color: C.sub }}>What businesses?</label>
-        <input className="mb-3 w-full rounded-xl px-3.5 py-2.5 text-[13px] outline-none" style={{ background: C.bg, border: `1px solid ${C.line}`, color: C.ink, colorScheme: "light" }} placeholder="e.g. ISO certification consultants" value={what} onChange={(e) => setWhat(e.target.value)} autoFocus />
-
-        <label className="mb-1 block text-[12px] font-medium" style={{ color: C.sub }}>Which city or area?</label>
-        <input className="mb-3 w-full rounded-xl px-3.5 py-2.5 text-[13px] outline-none" style={{ background: C.bg, border: `1px solid ${C.line}`, color: C.ink, colorScheme: "light" }} placeholder="e.g. Dubai" value={city} onChange={(e) => setCity(e.target.value)} />
-
-        <div className="mb-4 flex flex-wrap gap-1.5">
-          {examples.map(([w, c]) => (
-            <button key={w} className="rounded-lg px-2.5 py-1 text-[11.5px] font-medium" style={{ background: C.brandSoft, color: C.brand }} onClick={() => { setWhat(w); setCity(c); }}>{w} · {c}</button>
-          ))}
+        {/* Auto vs Manual */}
+        <div className="mb-4 grid grid-cols-2 gap-2">
+          <button onClick={() => setMode("auto")} className="rounded-xl px-3 py-2.5 text-left" style={{ background: mode === "auto" ? C.brandSoft : C.bg, border: `1.5px solid ${mode === "auto" ? C.brand : C.line}` }}>
+            <div className="text-[13px] font-bold" style={{ color: mode === "auto" ? C.brand : C.ink }}>✨ Auto</div>
+            <div className="text-[11px]" style={{ color: C.sub }}>AI picks from your business</div>
+          </button>
+          <button onClick={() => setMode("manual")} className="rounded-xl px-3 py-2.5 text-left" style={{ background: mode === "manual" ? C.brandSoft : C.bg, border: `1.5px solid ${mode === "manual" ? C.brand : C.line}` }}>
+            <div className="text-[13px] font-bold" style={{ color: mode === "manual" ? C.brand : C.ink }}>✍️ Manual</div>
+            <div className="text-[11px]" style={{ color: C.sub }}>You choose what & where</div>
+          </button>
         </div>
+
+        {mode === "auto" ? (
+          <div className="mb-4 rounded-xl px-3.5 py-3 text-[12.5px]" style={{ background: C.bg, border: `1px solid ${C.line}`, color: C.sub }}>
+            Mr. Lead will read your Site Brain (what you sell, who to) and find matching businesses itself. No input needed — just pick how many.
+          </div>
+        ) : (
+          <>
+            <label className="mb-1 block text-[12px] font-medium" style={{ color: C.sub }}>What businesses?</label>
+            <input className="mb-3 w-full rounded-xl px-3.5 py-2.5 text-[13px] outline-none" style={{ background: C.bg, border: `1px solid ${C.line}`, color: C.ink, colorScheme: "light" }} placeholder="e.g. ISO certification consultants" value={what} onChange={(e) => setWhat(e.target.value)} autoFocus />
+            <label className="mb-1 block text-[12px] font-medium" style={{ color: C.sub }}>Which city or area?</label>
+            <input className="mb-3 w-full rounded-xl px-3.5 py-2.5 text-[13px] outline-none" style={{ background: C.bg, border: `1px solid ${C.line}`, color: C.ink, colorScheme: "light" }} placeholder="e.g. Dubai" value={city} onChange={(e) => setCity(e.target.value)} />
+            <div className="mb-4 flex flex-wrap gap-1.5">
+              {examples.map(([w, c]) => (
+                <button key={w} className="rounded-lg px-2.5 py-1 text-[11.5px] font-medium" style={{ background: C.brandSoft, color: C.brand }} onClick={() => { setWhat(w); setCity(c); }}>{w} · {c}</button>
+              ))}
+            </div>
+          </>
+        )}
 
         <label className="mb-1 block text-[12px] font-medium" style={{ color: C.sub }}>How many? <b style={{ color: C.ink }}>{count}</b> <span className="text-[11px]">(max {LEADS_PER_RUN_MAX})</span></label>
         <input type="range" min={1} max={LEADS_PER_RUN_MAX} value={count} onChange={(e) => setCount(Number(e.target.value))} className="mb-5 w-full" style={{ accentColor: C.brand }} />
 
         <div className="flex justify-end gap-2">
           <button className="rounded-xl px-4 py-2 text-[13px] font-semibold" style={{ background: C.graySoft, color: C.sub }} onClick={onClose}>Cancel</button>
-          <button className="rounded-xl px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-60" style={{ background: C.brand }} onClick={go} disabled={busy || !what.trim()}>{busy ? "Starting…" : "Find leads"}</button>
+          <button className="rounded-xl px-5 py-2 text-[13px] font-semibold text-white disabled:opacity-60" style={{ background: C.brand }} onClick={go} disabled={busy || !canGo}>{busy ? "Starting…" : "Find leads"}</button>
         </div>
       </div>
     </div>

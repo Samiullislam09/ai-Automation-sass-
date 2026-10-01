@@ -41,6 +41,7 @@ export class LeadsAgent extends Agent {
     const { tenantId } = job.data;
     const query = typeof job.data.query === "string" ? job.data.query : typeof job.data.topic === "string" ? job.data.topic : null;
     const count = Number(job.data.count) || null;
+    const city = typeof job.data.city === "string" && job.data.city.trim() ? job.data.city.trim() : null;
 
     ctx.onProgress({ phase: "icp", label: "Working out who to look for..." });
     ctx.progress(0.05, "Working out who to look for");
@@ -148,7 +149,7 @@ export class LeadsAgent extends Agent {
 
     // ── 6 · durable ───────────────────────────────────────────────────────────────────────
     ctx.onProgress({ phase: "saving", label: `Saving ${result.leads.length} leads...` });
-    const saved = await saveLeads(tenantId, result.leads);
+    const saved = await saveLeads(tenantId, result.leads, city);
 
     ctx.progress(1, `${result.leads.length} leads, ${result.leads.filter((l) => l.band === "strong").length} strong`);
 
@@ -258,7 +259,7 @@ function isUnknownColumn(error: { code?: string; message?: string } | null): boo
   return error.code === "42703" || error.code === "PGRST204" || /column .* does not exist/i.test(String(error.message ?? ""));
 }
 
-async function saveLeads(tenantId: string, leads: LeadRecord[]): Promise<{ count: number; warning: string | null }> {
+async function saveLeads(tenantId: string, leads: LeadRecord[], city: string | null = null): Promise<{ count: number; warning: string | null }> {
   if (!leads.length) return { count: 0, warning: null };
 
   // Belt and braces: the pipeline already asserts this, and it is asserted again here because
@@ -283,6 +284,10 @@ async function saveLeads(tenantId: string, leads: LeadRecord[]): Promise<{ count
 
   const rich = leads.map((lead, i) => ({
     ...core[i],
+    // The city the user asked for in the Generate modal, stamped on every lead from this run so
+    // the CRM's City column and city filter have a value even though Serper returns only a full
+    // address. Null for runs with no city (Auto mode / chat).
+    city,
     website: lead.website,
     domain: lead.domain,
     draft: lead.draft,
