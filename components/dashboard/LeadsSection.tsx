@@ -353,6 +353,7 @@ export default function LeadsSection() {
           onStart={findLeads}
           onClose={() => setGenPanel("closed")}
           onViewNew={() => { setGenPanel("closed"); setTab("new"); }}
+          onOpenBuyerProfile={() => { setGenPanel("closed"); setBuyerOpen(true); }}
         />
       )}
 
@@ -622,7 +623,7 @@ function Drawer({ lead, onClose, setStage, busy, waLink }: { lead: Lead; onClose
             <span className="flex h-11 w-11 items-center justify-center rounded-full text-[15px] font-bold text-white" style={{ background: C.brand }}>{initials(lead)}</span>
             <div>
               <div className="text-[15px] font-bold" style={{ color: C.ink }}>{lead.company || lead.name || "Lead"}</div>
-              <div className="text-[12px]" style={{ color: C.sub }}>{lead.city || SOURCE_LABEL[lead.source ?? ""] || ""}</div>
+              <div className="text-[12px]" style={{ color: C.sub }}>{lead.country || lead.city || SOURCE_LABEL[lead.source ?? ""] || ""}</div>
             </div>
           </div>
           <button onClick={onClose} className="rounded-full p-1.5" style={{ background: C.graySoft, color: C.sub }} aria-label="Close">
@@ -646,6 +647,7 @@ function Drawer({ lead, onClose, setStage, busy, waLink }: { lead: Lead; onClose
           <Detail k="Contact" v={lead.name} />
           <Detail k="Email" v={lead.email ?? null} />
           <Detail k="Website" v={lead.website ?? null} />
+          <Detail k="Country" v={lead.country ?? null} />
           <Detail k="City" v={lead.city ?? null} />
           <Detail k="Source" v={SOURCE_LABEL[lead.source ?? ""] ?? lead.source ?? null} />
           <Detail k="Created" v={new Date(lead.created_at).toLocaleDateString()} last />
@@ -976,7 +978,7 @@ function LeadGenPanel({ mode, gen, busy, target, foundSoFar, onStart, onClose, o
               <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ background: C.green }} />Running
             </span>
           )}
-          {mode === "done" && !failed && (
+          {mode === "done" && !failed && !needsBuyerProfile && (
             <button className="rounded-lg px-3 py-1.5 text-[12px] font-semibold text-white" style={{ background: C.brand }} onClick={onViewNew}>View new leads</button>
           )}
           {mode !== "live" && (
@@ -987,7 +989,20 @@ function LeadGenPanel({ mode, gen, busy, target, foundSoFar, onStart, onClose, o
         </div>
       </div>
 
-      {mode === "manual" ? (
+      {needsBuyerProfile ? (
+        <div className="p-4">
+          <div className="flex items-start gap-3 rounded-xl p-3.5" style={{ background: C.amberSoft }}>
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[15px]" style={{ background: "#fff" }}>🎯</span>
+            <div className="min-w-0 flex-1">
+              <div className="text-[13px] font-bold" style={{ color: C.amber }}>Confirm your buyer profile first</div>
+              <div className="mt-0.5 text-[12.5px]" style={{ color: C.ink }}>
+                {gen?.last_question ?? "Auto mode needs to know who BUYS from you (so it finds buyers, not competitors). Open Buyer profile, draft it from your site, review and Confirm — then run Auto again."}
+              </div>
+              <button className="mt-3 rounded-xl px-4 py-2 text-[12.5px] font-semibold text-white" style={{ background: C.brand }} onClick={onOpenBuyerProfile}>Open Buyer profile</button>
+            </div>
+          </div>
+        </div>
+      ) : mode === "manual" ? (
         <div className="p-4">
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
