@@ -401,43 +401,20 @@ export default function LeadsSection() {
         />
       )}
 
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          {([
-            ["all", "All Leads", kpis?.total],
-            ["new", "New", kpis?.new],
-            ["engaged", "Engaged", kpis?.engaged],
-            ["converted", "Converted", kpis?.converted],
-            ["not_messaged", "Not Messaged", kpis?.not_messaged],
-            ["rejected", "Rejected", (leads ?? []).filter((l) => l.stage === "rejected").length],
-          ] as [string, string, number | undefined][]).map(([k, label, n]) => (
-            <button key={k} onClick={() => setTab(k)} className="flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-semibold"
-              style={tab === k ? { background: C.brandSoft, color: C.brand } : { background: C.panel, color: C.sub, border: `1px solid ${C.line}` }}>
-              {label}{n != null && <span className="rounded-full px-1.5 text-[11px]" style={{ background: tab === k ? "#fff" : C.graySoft, color: tab === k ? C.brand : C.sub }}>{n}</span>}
-            </button>
-          ))}
-        </div>
-        <div className="relative hidden shrink-0 sm:block">
-          <button onClick={() => setSortOpen((o) => !o)} className="flex h-9 items-center gap-2 rounded-lg pl-3 pr-2.5 text-[12.5px] font-semibold" style={{ background: C.panel, border: `1px solid ${sortOpen ? C.brand : C.line}`, color: C.ink }}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M3 6h12M3 12h8M3 18h5M17 6v12m0 0l-3-3m3 3l3-3" stroke={C.sub} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
-            <span style={{ color: C.sub }}>Sort:</span> {SORT_LABEL[sort]}
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" style={{ transform: sortOpen ? "rotate(180deg)" : undefined }}><path d="M6 9l6 6 6-6" stroke={C.sub} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+      <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
+        {([
+          ["all", "All Leads", kpis?.total],
+          ["new", "New", kpis?.new],
+          ["engaged", "Engaged", kpis?.engaged],
+          ["converted", "Converted", kpis?.converted],
+          ["not_messaged", "Not Messaged", kpis?.not_messaged],
+          ["rejected", "Rejected", (leads ?? []).filter((l) => l.stage === "rejected").length],
+        ] as [string, string, number | undefined][]).map(([k, label, n]) => (
+          <button key={k} onClick={() => setTab(k)} className="flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-semibold"
+            style={tab === k ? { background: C.brandSoft, color: C.brand } : { background: C.panel, color: C.sub, border: `1px solid ${C.line}` }}>
+            {label}{n != null && <span className="rounded-full px-1.5 text-[11px]" style={{ background: tab === k ? "#fff" : C.graySoft, color: tab === k ? C.brand : C.sub }}>{n}</span>}
           </button>
-          {sortOpen && (
-            <>
-              <div className="fixed inset-0 z-[95]" onClick={() => setSortOpen(false)} />
-              <div className="absolute right-0 z-[96] mt-1.5 w-40 overflow-hidden rounded-xl py-1 shadow-lg" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
-                {Object.entries(SORT_LABEL).map(([k, label]) => (
-                  <button key={k} onClick={() => { setSort(k); setSortOpen(false); }} className="flex w-full items-center justify-between px-3 py-1.5 text-left text-[12.5px]"
-                    style={{ background: sort === k ? C.brandSoft : "transparent", color: sort === k ? C.brand : C.ink, fontWeight: sort === k ? 600 : 400 }}
-                    onMouseEnter={(e) => { if (sort !== k) e.currentTarget.style.background = C.graySoft; }} onMouseLeave={(e) => { if (sort !== k) e.currentTarget.style.background = "transparent"; }}>
-                    {label}{sort === k && <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke={C.brand} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" /></svg>}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
+        ))}
       </div>
 
       {leads === null ? (
@@ -495,6 +472,7 @@ export default function LeadsSection() {
                 </tbody>
               </table>
             </div>
+            <Pagination page={pageSafe} totalPages={totalPages} perPage={perPage} total={filtered.length} setPage={setPage} setPerPage={setPerPage} />
           </div>
 
           <div className="space-y-2.5 md:hidden">
@@ -522,30 +500,9 @@ export default function LeadsSection() {
             ))}
           </div>
 
-          {/* pagination — "Showing X–Y of Z", page controls, and a per-page picker */}
-          <div className="mt-3 flex flex-col items-center justify-between gap-2.5 rounded-2xl px-4 py-3 sm:flex-row" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
-            <div className="text-[12px]" style={{ color: C.sub }}>
-              {filtered.length === 0 ? "No leads" : `Showing ${(pageSafe - 1) * perPage + 1}–${Math.min(pageSafe * perPage, filtered.length)} of ${filtered.length} leads`}
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1">
-                <PageBtn disabled={pageSafe <= 1} onClick={() => setPage(pageSafe - 1)} label="‹" />
-                {pageNumbers(pageSafe, totalPages).map((p, i) =>
-                  p === "…"
-                    ? <span key={`e${i}`} className="px-1 text-[12px]" style={{ color: C.sub }}>…</span>
-                    : <button key={p} onClick={() => setPage(p as number)} className="h-8 min-w-8 rounded-lg px-2 text-[12.5px] font-semibold"
-                        style={p === pageSafe ? { background: C.brand, color: "#fff" } : { background: C.panel, color: C.ink, border: `1px solid ${C.line}` }}>{p}</button>
-                )}
-                <PageBtn disabled={pageSafe >= totalPages} onClick={() => setPage(pageSafe + 1)} label="›" />
-              </div>
-              <div className="relative">
-                <select value={perPage} onChange={(e) => setPerPage(Number(e.target.value))}
-                  className="lx-input h-8 cursor-pointer appearance-none rounded-lg pl-2.5 pr-7 text-[12px] font-semibold" style={{ border: `1px solid ${C.line}` }}>
-                  {[10, 25, 50, 100].map((n) => <option key={n} value={n}>{n} / page</option>)}
-                </select>
-                <svg className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2" width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke={C.sub} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-              </div>
-            </div>
+          {/* mobile pagination — the same control, in its own card under the lead cards */}
+          <div className="rounded-2xl md:hidden" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+            <Pagination page={pageSafe} totalPages={totalPages} perPage={perPage} total={filtered.length} setPage={setPage} setPerPage={setPerPage} />
           </div>
         </>
       )}
@@ -640,6 +597,57 @@ function PageBtn({ disabled, onClick, label }: { disabled: boolean; onClick: () 
   return (
     <button disabled={disabled} onClick={onClick} className="flex h-8 w-8 items-center justify-center rounded-lg text-[15px] disabled:opacity-40"
       style={{ background: C.panel, color: C.ink, border: `1px solid ${C.line}` }}>{label}</button>
+  );
+}
+
+/** The table's footer: "Showing X–Y of Z", compact page controls, and a styled per-page dropdown
+ *  that opens UPWARD (it sits at the bottom of the table). Lives inside the table card, so it is
+ *  never a full-width bar of its own. */
+function Pagination({ page, totalPages, perPage, total, setPage, setPerPage }: {
+  page: number; totalPages: number; perPage: number; total: number;
+  setPage: (n: number) => void; setPerPage: (n: number) => void;
+}) {
+  const [ppOpen, setPpOpen] = useState(false);
+  const from = total === 0 ? 0 : (page - 1) * perPage + 1;
+  const to = Math.min(page * perPage, total);
+  return (
+    <div className="flex flex-col items-center justify-between gap-2.5 px-3.5 py-2.5 sm:flex-row" style={{ borderTop: `1px solid ${C.line}` }}>
+      <div className="text-[12px]" style={{ color: C.sub }}>
+        {total === 0 ? "No leads" : <>Showing <span className="font-semibold" style={{ color: C.ink }}>{from}–{to}</span> of <span className="font-semibold" style={{ color: C.ink }}>{total}</span> leads</>}
+      </div>
+      <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
+          <PageBtn disabled={page <= 1} onClick={() => setPage(page - 1)} label="‹" />
+          {pageNumbers(page, totalPages).map((p, i) =>
+            p === "…"
+              ? <span key={`e${i}`} className="px-1 text-[12px]" style={{ color: C.sub }}>…</span>
+              : <button key={p} onClick={() => setPage(p as number)} className="h-8 min-w-8 rounded-lg px-2 text-[12.5px] font-semibold"
+                  style={p === page ? { background: C.brand, color: "#fff" } : { background: C.panel, color: C.ink, border: `1px solid ${C.line}` }}>{p}</button>
+          )}
+          <PageBtn disabled={page >= totalPages} onClick={() => setPage(page + 1)} label="›" />
+        </div>
+        <div className="relative">
+          <button onClick={() => setPpOpen((o) => !o)} className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-semibold" style={{ background: C.panel, border: `1px solid ${ppOpen ? C.brand : C.line}`, color: C.ink }}>
+            {perPage} / page
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" style={{ transform: ppOpen ? "rotate(180deg)" : undefined }}><path d="M6 9l6 6 6-6" stroke={C.sub} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          </button>
+          {ppOpen && (
+            <>
+              <div className="fixed inset-0 z-[95]" onClick={() => setPpOpen(false)} />
+              <div className="absolute bottom-full right-0 z-[96] mb-1.5 w-28 overflow-hidden rounded-xl py-1 shadow-lg" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+                {[10, 25, 50, 100].map((n) => (
+                  <button key={n} onClick={() => { setPerPage(n); setPpOpen(false); }} className="flex w-full items-center justify-between px-3 py-1.5 text-left text-[12.5px]"
+                    style={{ background: n === perPage ? C.brandSoft : "transparent", color: n === perPage ? C.brand : C.ink, fontWeight: n === perPage ? 600 : 400 }}
+                    onMouseEnter={(e) => { if (n !== perPage) e.currentTarget.style.background = C.graySoft; }} onMouseLeave={(e) => { if (n !== perPage) e.currentTarget.style.background = "transparent"; }}>
+                    {n} / page{n === perPage && <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke={C.brand} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
