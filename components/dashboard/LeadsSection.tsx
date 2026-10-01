@@ -115,7 +115,9 @@ function EyeIcon() {
 const TAB_MATCH: Record<string, (l: Lead) => boolean> = {
   all: () => true,
   new: (l) => Date.now() - new Date(l.created_at).getTime() < 86_400_000, // added in the last 24h
-  engaged: (l) => ["replied", "in_conversation", "interested"].includes(l.stage),
+  // "Engaged" = leads you've started a conversation with (messaged or they replied), so the tab
+  // matches the "Engaged" KPI card (kpis.messaged) — the two used to disagree (KPI 4, tab 0).
+  engaged: (l) => l.messaged || ["replied", "in_conversation", "interested"].includes(l.stage),
   rejected: (l) => l.stage === "rejected",
   converted: (l) => l.converted,
   client: (l) => l.is_client,
@@ -405,7 +407,7 @@ export default function LeadsSection() {
         {([
           ["all", "All Leads", kpis?.total],
           ["new", "New", kpis?.new],
-          ["engaged", "Engaged", kpis?.engaged],
+          ["engaged", "Engaged", kpis?.messaged],
           ["converted", "Converted", kpis?.converted],
           ["not_messaged", "Not Messaged", kpis?.not_messaged],
           ["rejected", "Rejected", (leads ?? []).filter((l) => l.stage === "rejected").length],

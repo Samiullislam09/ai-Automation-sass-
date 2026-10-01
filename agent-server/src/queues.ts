@@ -59,7 +59,11 @@ export { WORKER_POLLING };
 // 8-10 minutes on a normal day. At the 15-minute default, one slow site meant pg-boss expired
 // and retried it three times — every retry stuck in the same place, no report ever filed.
 const CRAWLER_QUEUE_OPTIONS = { ...QUEUE_OPTIONS, expireInSeconds: 3600 };
-const LONG_RUNNING: AgentType[] = ["crawler", "analyst", "audit"];
+// Mr. Lead joins this class (2026-10-02): it over-fetches several times the target and runs each
+// candidate through research + up to four LLM calls on the shared 30 rpm limiter, so a 10-lead
+// run can genuinely take well over 15 minutes. At the default expiry pg-boss killed and retried it
+// mid-run; 1 hour gives it room to finish.
+const LONG_RUNNING: AgentType[] = ["crawler", "analyst", "audit", "leads"];
 
 /** The brain's own queue. Not an agent: the only thing it carries is "look at task X again",
  *  which is how a retry survives its backoff and how a step wakes up after a delay. Kept off
