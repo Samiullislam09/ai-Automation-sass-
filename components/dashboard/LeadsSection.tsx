@@ -58,7 +58,9 @@ const STAGE: Record<string, { label: string; fg: string; bg: string }> = {
   invalid: { label: "Invalid", fg: C.sub, bg: C.graySoft },
   failed: { label: "Failed", fg: C.red, bg: C.redSoft },
 };
-const SOURCE_LABEL: Record<string, string> = { osm: "OpenStreetMap", places: "Google Places", jobs: "Job board", manual: "Manual", apollo: "Apollo" };
+// The real-world source a lead came from, not the tool/API name. "serper" is just the API we
+// query Google Maps through, so a lead from it IS a Google Maps / Google Business listing.
+const SOURCE_LABEL: Record<string, string> = { serper: "Google Maps", osm: "OpenStreetMap", places: "Google Places", jobs: "Job board", manual: "Manual", apollo: "Apollo" };
 
 function ago(iso: string | null): string {
   if (!iso) return "—";
@@ -816,7 +818,7 @@ function FilterPanel({ flt, setFlt, cities, dateRange, setDateRange, onClose, on
   }, [onClose]);
 
   const STATUSES: [string, string][] = [["approved", "Approved"], ["contacted", "Contacted"], ["replied", "Engaged"], ["won", "Won"], ["lost", "Lost"], ["rejected", "Rejected"], ["opted_out", "Opted out"]];
-  const SOURCES: [string, string][] = [["osm", "OpenStreetMap"], ["places", "Google Places"], ["jobs", "Job board"], ["manual", "Manual"]];
+  const SOURCES: [string, string][] = [["serper", "Google Maps"], ["osm", "OpenStreetMap"], ["places", "Google Places"], ["jobs", "Job board"], ["manual", "Manual"]];
   const toggle = (arr: string[], v: string) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
 
   const Chip = ({ on, label, onClick }: { on: boolean; label: string; onClick: () => void }) => (
