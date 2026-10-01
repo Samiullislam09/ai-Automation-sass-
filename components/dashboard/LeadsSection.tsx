@@ -143,6 +143,7 @@ export default function LeadsSection() {
   const wasRunning = useRef(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [dateRange, setDateRange] = useState("all"); // all | today | 7d | 30d
+  const [sort, setSort] = useState("newest"); // newest | oldest | score | name
   // Advanced filters (spec section 7), applied on top of the tab + search. Empty = no constraint.
   const [flt, setFlt] = useState<{ status: string[]; source: string[]; city: string[]; ai: string; you: string; converted: string; client: string; score: string }>(
     { status: [], source: [], city: [], ai: "any", you: "any", converted: "any", client: "any", score: "any" }
@@ -224,7 +225,7 @@ export default function LeadsSection() {
       if (band === "51-75") return sc > 50 && sc <= 75;
       return sc > 75;
     };
-    return leads.filter((l) => {
+    const rows = leads.filter((l) => {
       if (!match(l)) return false;
       if (flt.status.length && !flt.status.includes(l.stage)) return false;
       if (flt.source.length && !flt.source.includes(l.source ?? "")) return false;
@@ -245,7 +246,15 @@ export default function LeadsSection() {
       if (!needle) return true;
       return [l.company, l.name, l.email, l.phone, l.whatsapp, l.country].some((v) => String(v ?? "").toLowerCase().includes(needle));
     });
-  }, [leads, tab, q, flt, dateRange]);
+    const t = (l: Lead) => new Date(l.created_at).getTime();
+    const cmp: Record<string, (a: Lead, b: Lead) => number> = {
+      newest: (a, b) => t(b) - t(a),
+      oldest: (a, b) => t(a) - t(b),
+      score: (a, b) => (b.icp_score ?? -1) - (a.icp_score ?? -1),
+      name: (a, b) => String(a.company || a.name || "").localeCompare(String(b.company || b.name || "")),
+    };
+    return [...rows].sort(cmp[sort] ?? cmp.newest);
+  }, [leads, tab, q, flt, dateRange, sort]);
 
   const activeFilterCount =
     flt.status.length + flt.source.length + flt.city.length +
@@ -272,46 +281,49 @@ export default function LeadsSection() {
 
   return (
     <div className="-m-3 min-h-[calc(100%+1.5rem)] p-3 sm:-m-4 sm:min-h-[calc(100%+2rem)] sm:p-4" style={{ background: C.bg, color: C.ink, colorScheme: "light" }}>
-      {/* header — title left; Filters / Export / Add Lead together on the right */}
-      <div className="mb-3 flex items-center justify-between gap-2">
+      {/* header — title left; Buyer Profile / Export / Add Lead on the right (Filters moved into
+          the search row below, to match the reference design) */}
+      <div className="mb-4 flex items-center justify-between gap-2">
         <div className="min-w-0">
-          <h1 className="text-xl font-bold" style={{ color: C.ink }}>Leads</h1>
-          <p className="hidden text-[12.5px] sm:block" style={{ color: C.sub }}>Manage, track and automate your leads</p>
+          <h1 className="text-[22px] font-bold leading-tight" style={{ color: C.ink }}>Leads</h1>
+          <p className="hidden text-[12.5px] sm:block" style={{ color: C.sub }}>Manage, track &amp; automate your leads</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <div className="relative">
-            <button className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-[13px] font-semibold" style={{ background: filtersOpen || activeFilterCount ? C.brandSoft : C.panel, border: `1px solid ${filtersOpen || activeFilterCount ? C.brand : C.line}`, color: activeFilterCount || filtersOpen ? C.brand : C.sub }} onClick={() => setFiltersOpen((o) => !o)} title="Filters">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M3 5h18M6 12h12M10 19h4" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" /></svg>
-              <span className="hidden md:inline">Filters</span>
-              {activeFilterCount ? <span className="rounded-full px-1.5 text-[11px] text-white" style={{ background: C.brand }}>{activeFilterCount}</span> : null}
-            </button>
-            {filtersOpen && <FilterPanel flt={flt} setFlt={setFlt} cities={cities} dateRange={dateRange} setDateRange={setDateRange} onClose={() => setFiltersOpen(false)} onClear={() => { setFlt({ status: [], source: [], city: [], ai: "any", you: "any", converted: "any", client: "any", score: "any" }); setDateRange("all"); }} />}
-          </div>
-          <button className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-[13px] font-semibold" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.sub }} onClick={() => setBuyerOpen(true)} title="Buyer profile — who buys from you">
-            <span className="hidden md:inline">Buyer profile</span>
+          <button className="flex h-10 items-center gap-1.5 rounded-xl px-3.5 text-[13px] font-semibold" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.ink }} onClick={() => setBuyerOpen(true)} title="Buyer profile — who buys from you">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 12a4 4 0 100-8 4 4 0 000 8zM4 21a8 8 0 0116 0" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+            <span className="hidden md:inline">Buyer Profile</span>
             <span className="md:hidden">Buyers</span>
           </button>
-          <button className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-[13px] font-semibold" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.sub }} onClick={exportCsv} title="Export CSV">
+          <button className="flex h-10 items-center gap-1.5 rounded-xl px-3.5 text-[13px] font-semibold" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.ink }} onClick={exportCsv} title="Export CSV">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
             <span className="hidden md:inline">Export</span>
           </button>
-          <button className="flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-[13px] font-semibold text-white" style={{ background: C.brand }} onClick={() => setAddOpen(true)}>
+          <button className="flex h-10 items-center gap-1.5 rounded-xl px-4 text-[13px] font-semibold text-white" style={{ background: C.brand }} onClick={() => setAddOpen(true)}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" /></svg>
             <span className="hidden sm:inline">Add Lead</span>
           </button>
         </div>
       </div>
 
-      {/* one line: a compact search on the left, Generate leads on the right */}
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <div className="flex h-9 w-full max-w-xs items-center gap-2 rounded-lg px-2.5" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
-          <svg className="shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke={C.sub} strokeWidth="2" /><path d="M21 21l-4-4" stroke={C.sub} strokeWidth="2" strokeLinecap="round" /></svg>
-          <input className="w-full min-w-0 text-[13px] outline-none" style={{ color: C.ink, background: "transparent", colorScheme: "light" }} placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />
+      {/* toolbar — a full-width search, then Filters and Generate Leads, like the reference. The
+          search has the same quiet border as the KPI cards and no focus ring. */}
+      <div className="mb-4 flex items-center gap-2.5">
+        <div className="flex h-11 min-w-0 flex-1 items-center gap-2.5 rounded-xl px-3.5" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+          <svg className="shrink-0" width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke={C.sub} strokeWidth="2" /><path d="M21 21l-4-4" stroke={C.sub} strokeWidth="2" strokeLinecap="round" /></svg>
+          <input className="w-full min-w-0 border-0 bg-transparent text-[13.5px] outline-none focus:outline-none focus:ring-0" style={{ color: C.ink, colorScheme: "light", boxShadow: "none" }} placeholder="Search by name, email, phone, or company…" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
         <div className="relative shrink-0">
-          <button className="flex h-9 items-center gap-1.5 rounded-lg px-4 text-[13px] font-semibold text-white disabled:opacity-60" style={{ background: C.brand }} onClick={() => setGenMenuOpen((o) => !o)} disabled={gen?.running || genBusy}>
+          <button className="flex h-11 items-center gap-1.5 rounded-xl px-3.5 text-[13px] font-semibold" style={{ background: filtersOpen || activeFilterCount ? C.brandSoft : C.panel, border: `1px solid ${filtersOpen || activeFilterCount ? C.brand : C.line}`, color: activeFilterCount || filtersOpen ? C.brand : C.ink }} onClick={() => setFiltersOpen((o) => !o)} title="Filters">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M3 5h18M6 12h12M10 19h4" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" /></svg>
+            <span className="hidden sm:inline">Filters</span>
+            {activeFilterCount ? <span className="rounded-full px-1.5 text-[11px] text-white" style={{ background: C.brand }}>{activeFilterCount}</span> : null}
+          </button>
+          {filtersOpen && <FilterPanel flt={flt} setFlt={setFlt} cities={cities} dateRange={dateRange} setDateRange={setDateRange} onClose={() => setFiltersOpen(false)} onClear={() => { setFlt({ status: [], source: [], city: [], ai: "any", you: "any", converted: "any", client: "any", score: "any" }); setDateRange("all"); }} />}
+        </div>
+        <div className="relative shrink-0">
+          <button className="flex h-11 items-center gap-1.5 rounded-xl px-4 text-[13px] font-semibold text-white disabled:opacity-60" style={{ background: C.brand }} onClick={() => setGenMenuOpen((o) => !o)} disabled={gen?.running || genBusy}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6l2.1 2.1m0-12.8l-2.1 2.1M7.7 16.3l-2.1 2.1" stroke="#fff" strokeWidth="1.8" strokeLinecap="round"/></svg>
-            <span>{gen?.running ? "Searching…" : "Generate leads"}</span>
+            <span>{gen?.running ? "Searching…" : "Generate Leads"}</span>
             {!gen?.running && <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>}
           </button>
           {genMenuOpen && !gen?.running && (
@@ -367,19 +379,32 @@ export default function LeadsSection() {
         />
       )}
 
-      <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
-        {([
-          ["all", "All Leads", kpis?.total],
-          ["new", "New", kpis?.new],
-          ["engaged", "Engaged", kpis?.engaged],
-          ["converted", "Converted", kpis?.converted],
-          ["not_messaged", "Not Messaged", kpis?.not_messaged],
-        ] as [string, string, number | undefined][]).map(([k, label, n]) => (
-          <button key={k} onClick={() => setTab(k)} className="flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-semibold"
-            style={tab === k ? { background: C.brandSoft, color: C.brand } : { background: C.panel, color: C.sub, border: `1px solid ${C.line}` }}>
-            {label}{n != null && <span className="rounded-full px-1.5 text-[11px]" style={{ background: tab === k ? "#fff" : C.graySoft, color: tab === k ? C.brand : C.sub }}>{n}</span>}
-          </button>
-        ))}
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {([
+            ["all", "All Leads", kpis?.total],
+            ["new", "New", kpis?.new],
+            ["engaged", "Engaged", kpis?.engaged],
+            ["converted", "Converted", kpis?.converted],
+            ["not_messaged", "Not Messaged", kpis?.not_messaged],
+          ] as [string, string, number | undefined][]).map(([k, label, n]) => (
+            <button key={k} onClick={() => setTab(k)} className="flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-semibold"
+              style={tab === k ? { background: C.brandSoft, color: C.brand } : { background: C.panel, color: C.sub, border: `1px solid ${C.line}` }}>
+              {label}{n != null && <span className="rounded-full px-1.5 text-[11px]" style={{ background: tab === k ? "#fff" : C.graySoft, color: tab === k ? C.brand : C.sub }}>{n}</span>}
+            </button>
+          ))}
+        </div>
+        <div className="relative hidden shrink-0 sm:block">
+          <select value={sort} onChange={(e) => setSort(e.target.value)}
+            className="h-9 cursor-pointer appearance-none rounded-lg pl-3 pr-8 text-[12.5px] font-semibold outline-none"
+            style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.ink, colorScheme: "light" }}>
+            <option value="newest">Sort by: Newest</option>
+            <option value="oldest">Sort by: Oldest</option>
+            <option value="score">Sort by: Score</option>
+            <option value="name">Sort by: Name</option>
+          </select>
+          <svg className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2" width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke={C.sub} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+        </div>
       </div>
 
       {leads === null ? (
