@@ -342,13 +342,21 @@ export function normalizeBuyerProfile(raw: unknown): BuyerProfile | null {
   };
 }
 
-/** Is this profile's buyer profile ready to drive lead generation? Confirmed by a human AND it
- *  actually names at least one buyer segment with a search term — a confirmed-but-empty profile
- *  would search for nothing. The one gate lead generation checks (Phase 1 item 3). */
-export function buyerProfileReady(profile: SiteProfile | null | undefined): boolean {
+/** Does this buyer profile have at least one buyer segment we can actually search by? This is all
+ *  lead generation needs — a drafted profile is as usable as a confirmed one. The owner's rule
+ *  (2026-10-02): make it EASY. We never block an Auto run waiting for a human to press Confirm;
+ *  if there's no profile we draft one automatically and use it, and the client refines it later
+ *  (or lets the reject-reason feedback loop do it). Confirm is optional polish, not a gate. */
+export function buyerProfileUsable(profile: SiteProfile | null | undefined): boolean {
   const bp = profile?.buyer_profile;
-  if (!bp || !bp.confirmed) return false;
+  if (!bp) return false;
   return bp.buyer_segments.some((s) => s && s.name && asArray<string>(s.search_terms).some((t) => String(t).trim()));
+}
+
+/** Confirmed by a human AND usable. Kept for anywhere that specifically wants the confirmed state
+ *  (e.g. a "✓ Confirmed" badge); lead generation uses buyerProfileUsable, not this. */
+export function buyerProfileReady(profile: SiteProfile | null | undefined): boolean {
+  return !!profile?.buyer_profile?.confirmed && buyerProfileUsable(profile);
 }
 
 /** Merge whatever the database happens to hold onto the full shape, so a profile written by

@@ -113,7 +113,7 @@ export default function BuyerProfilePanel({ open, onClose, toast, onConfirmedCha
       setDirty(false);
       setState((s) => (s ? { ...s, buyerProfile: d.buyerProfile, ready: false } : s));
       onConfirmedChange?.(false);
-      toast("Saved. It still needs confirming before lead generation will use it.");
+      toast("Saved — Mr. Lead will use this. (Confirm is optional, just marks it as reviewed.)");
     } catch (e: any) { toast(e?.message ?? "Network error.", "error"); }
     finally { setBusy(null); }
   };
@@ -148,7 +148,7 @@ export default function BuyerProfilePanel({ open, onClose, toast, onConfirmedCha
             {confirmed ? (
               <span className="rounded-full px-2 py-1 text-[11px] font-semibold" style={{ background: C.greenSoft, color: C.green }}>Confirmed ✓</span>
             ) : state?.buyerProfile ? (
-              <span className="rounded-full px-2 py-1 text-[11px] font-semibold" style={{ background: C.amberSoft, color: C.amber }}>Needs confirming</span>
+              <span className="rounded-full px-2 py-1 text-[11px] font-semibold" style={{ background: C.brandSoft, color: C.brand }}>Draft · in use</span>
             ) : null}
             <button onClick={onClose} className="rounded-full p-1.5" style={{ background: C.graySoft, color: C.sub }} aria-label="Close">✕</button>
           </div>

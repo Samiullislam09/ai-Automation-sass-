@@ -2,7 +2,8 @@ import type { Job } from "pg-boss";
 import { Agent, type AgentContext, type AgentJobData } from "./base.js";
 import { supabase } from "../supabase.js";
 import { completeJson } from "../lib/llm.js";
-import { loadActiveProfile, buyerProfileReady } from "../lib/siteProfile.js";
+import { loadActiveProfile, saveProfile, buyerProfileUsable, type SiteProfile } from "../lib/siteProfile.js";
+import { draftBuyerProfile } from "../lib/leads/buyerProfile.js";
 import { buildIcp, buildIcpFromBuyerSegment, describeIcp } from "../lib/leads/icp.js";
 import { getLeadSettings, patchLeadSettings, leadsDailyStatus } from "../lib/outreach/settings.js";
 import { discover, describeSources, fetchPageForResearch } from "../lib/leads/sources.js";
@@ -52,50 +53,59 @@ export class LeadsAgent extends Agent {
       loadActiveProfile(tenantId),
     ]);
 
-    // ── 0 · the buyer-profile gate (high-quality-leads plan, Phase 1) ───────────────────────
-    // An AUTO run (no explicit query) must not search until the client has confirmed WHO buys
-    // from them — otherwise the ICP is built from "what the client is" and we return competitors.
-    // An explicit query is the user telling us exactly who to look for, so it still runs: the gate
-    // is for the guess case only, consistent with icp.ts ("no guessing"). Phase 2 then builds the
-    // ICP from the confirmed buyer segments.
-    if (!query && !buyerProfileReady(profileRow?.profile ?? null)) {
-      const hasDraft = !!profileRow?.profile?.buyer_profile;
-      return {
-        leads: [],
-        found: 0,
-        needs: ["buyer_profile"],
-        question: hasDraft
-          ? "Your buyer profile isn't confirmed yet. Open Leads → Buyer profile, check the segments I drafted, and press Confirm — then I'll go find buyers, not competitors."
-          : "I don't have a buyer profile for you yet. Open Leads → Buyer profile, press “Draft from my site”, review the buyer vs competitor segments, and Confirm — then I'll find real buyers.",
-        sent: false as const,
-        note: "No search was run — the buyer profile needs confirming first.",
-      };
+    // ── 0 · make sure we know WHO buys (high-quality-leads plan — EASY, owner 2026-10-02) ───
+    // No blocking "confirm first" gate. For an Auto run we need a buyer profile so discovery hunts
+    // buyers, not the client's own trade — but if one isn't there we DRAFT it from the Site Brain
+    // automatically and use it right away, saving it so the client can refine it later (or let the
+    // reject-reason feedback loop do it). The only genuine stop is having no Site Brain at all,
+    // because then we don't know the business yet — that points at the crawler, not a form.
+    let profile: SiteProfile | null = profileRow?.profile ?? null;
+    if (!query && !buyerProfileUsable(profile)) {
+      ctx.onProgress({ phase: "icp", label: "Working out who buys from you..." });
+      const drafted = await draftBuyerProfile(profile, (p) => completeJson(p));
+      if (!drafted.ok) {
+        return {
+          leads: [],
+          found: 0,
+          needs: ["site_brain"],
+          question: "I need to read your website first so I know who your buyers are. Run the site analysis (Site Brain), then try Auto again — I'll find buyers by myself.",
+          sent: false as const,
+          note: "No search was run — your Site Brain needs building first.",
+        };
+      }
+      // Persist the auto-draft (unconfirmed) so it shows in Buyer profile and the next run reuses it.
+      try {
+        const saved = await saveProfile(tenantId, { ...(profile ?? ({} as SiteProfile)), buyer_profile: drafted.buyerProfile }, {
+          builtFrom: { ...(profileRow?.built_from ?? {}), buyer_profile_autodraft_at: new Date().toISOString() },
+          createdBy: "agent:buyer-profile",
+        });
+        profile = saved.profile;
+      } catch (e) {
+        // If the save fails we still use the in-memory draft for this run — leads now, persist later.
+        profile = { ...(profile ?? ({} as SiteProfile)), buyer_profile: drafted.buyerProfile };
+        ctx.log(`buyer profile auto-draft save failed (using in-memory): ${(e as Error).message}`);
+      }
+      ctx.log(`auto-drafted buyer profile: ${drafted.buyerProfile.buyer_segments.map((s) => s.name).join(", ")}`);
     }
 
-    // ── 1 · the ICP. No guessing: a missing one is a question, not a search ────────────────
-    // Two sources, and explicit always wins: a user query is the user telling us exactly who to
-    // look for (deterministic parser, unchanged). Otherwise an Auto run builds the ICP from ONE
-    // confirmed BUYER segment — the Phase-2 fix that makes discovery hunt buyers, not peers —
-    // picking the next segment round-robin so scheduled runs cover them all over time.
+    // ── 1 · the ICP. Explicit query wins; otherwise build it from ONE buyer segment, round-robin
+    //        across runs so scheduled runs cover them all over time. ────────────────────────────
     const settings = await getLeadSettings(tenantId);
     let sourceSegment: string | null = null;
     let icpResult: ReturnType<typeof buildIcp>;
     if (query) {
-      icpResult = buildIcp({ profile: profileRow?.profile ?? null, query, count });
+      icpResult = buildIcp({ profile, query, count });
     } else {
-      const bp = profileRow!.profile.buyer_profile!; // the gate above guarantees this is confirmed
+      const bp = profile!.buyer_profile!; // guaranteed usable by step 0 (drafted or already present)
       const segs = bp.buyer_segments;
       const idx = segs.length ? settings.segment_cursor % segs.length : 0;
       const seg = segs[idx];
       sourceSegment = seg?.name ?? null;
-      // Advance the cursor whether or not this run finds anything, so the next run moves on.
       await patchLeadSettings(tenantId, { segment_cursor: settings.segment_cursor + 1 });
-      icpResult = buildIcpFromBuyerSegment({ segment: seg, geoScope: bp.geo_scope, profile: profileRow!.profile, count, geoOverride: city });
+      icpResult = buildIcpFromBuyerSegment({ segment: seg, geoScope: bp.geo_scope, profile, count, geoOverride: city });
       ctx.log(`buyer segment ${idx + 1}/${segs.length}: ${sourceSegment}`);
     }
     if (!icpResult.ok) {
-      // Returned rather than thrown: nothing here is retryable, and the fix is a sentence from
-      // the user. Same shape the analyst uses when there is no crawl to read.
       return {
         leads: [],
         found: 0,
@@ -108,18 +118,16 @@ export class LeadsAgent extends Agent {
     const { icp, warnings } = icpResult;
     ctx.log(`ICP: ${describeIcp(icp)} (${icp.evidence.map((e) => `${e.field}<-${e.from}`).join(", ")})`);
 
-    // The buyer-vs-competitor gate (Phase 3) runs whenever the tenant has a CONFIRMED buyer
-    // profile — on Auto runs always, and on explicit-query runs too, so a peer is screened out even
-    // when the user typed the search. With no confirmed profile there are no competitor cues to
-    // judge against, so the gate stays off and discovery behaves exactly as before.
-    const fitProfile = profileRow?.profile ?? null;
-    const fitGate = buyerProfileReady(fitProfile)
+    // The buyer-vs-competitor gate (Phase 3) runs whenever the tenant has a USABLE buyer profile
+    // (drafted or confirmed — no confirm needed), so a peer is screened out on Auto and on explicit
+    // queries alike. With no buyer profile at all the gate stays off and discovery is unchanged.
+    const fitGate = buyerProfileUsable(profile)
       ? {
-          offer: fitProfile!.buyer_profile!.offer,
-          buyerSegments: fitProfile!.buyer_profile!.buyer_segments.map((s) => s.name),
-          competitorSegments: fitProfile!.buyer_profile!.competitor_segments.map((s) => ({ name: s.name, cues: s.cues })),
+          offer: profile!.buyer_profile!.offer,
+          buyerSegments: profile!.buyer_profile!.buyer_segments.map((s) => s.name),
+          competitorSegments: profile!.buyer_profile!.competitor_segments.map((s) => ({ name: s.name, cues: s.cues })),
           negativeDomains: settings.negative_domains,
-          buyingSignals: fitProfile!.buyer_profile!.buying_signals.map((s) => ({ name: s.name, look_for: s.look_for, weight: s.weight })),
+          buyingSignals: profile!.buyer_profile!.buying_signals.map((s) => ({ name: s.name, look_for: s.look_for, weight: s.weight })),
         }
       : undefined;
 

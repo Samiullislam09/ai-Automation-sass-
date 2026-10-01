@@ -917,9 +917,10 @@ function LeadGenPanel({ mode, gen, busy, target, foundSoFar, onStart, onClose, o
   onViewNew: () => void;
   onOpenBuyerProfile: () => void;
 }) {
-  // An Auto run that returned "confirm your buyer profile first" is NOT a failed/empty search —
-  // it means no search ran. Show that as a clear call to action, not a misleading "found 0".
-  const needsBuyerProfile = mode === "done" && Array.isArray(gen?.last_needs) && gen!.last_needs!.includes("buyer_profile");
+  // An Auto run that stopped because it needs the Site Brain first (it auto-drafts the buyer
+  // profile itself, so that is no longer a blocker) is NOT a failed/empty search — show a clear
+  // call to action rather than a misleading "found 0".
+  const needsBuyerProfile = mode === "done" && Array.isArray(gen?.last_needs) && (gen!.last_needs!.includes("site_brain") || gen!.last_needs!.includes("buyer_profile"));
   const [what, setWhat] = useState("");
   const [city, setCity] = useState("");
   const [count, setCount] = useState(10);
@@ -992,11 +993,11 @@ function LeadGenPanel({ mode, gen, busy, target, foundSoFar, onStart, onClose, o
       {needsBuyerProfile ? (
         <div className="p-4">
           <div className="flex items-start gap-3 rounded-xl p-3.5" style={{ background: C.amberSoft }}>
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[15px]" style={{ background: "#fff" }}>🎯</span>
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[15px]" style={{ background: "#fff" }}>🧭</span>
             <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-bold" style={{ color: C.amber }}>Confirm your buyer profile first</div>
+              <div className="text-[13px] font-bold" style={{ color: C.amber }}>Read your website first</div>
               <div className="mt-0.5 text-[12.5px]" style={{ color: C.ink }}>
-                {gen?.last_question ?? "Auto mode needs to know who BUYS from you (so it finds buyers, not competitors). Open Buyer profile, draft it from your site, review and Confirm — then run Auto again."}
+                {gen?.last_question ?? "I work out who buys from you automatically — but I need to read your website once first. Run the site analysis (Site Brain), then press Auto again."}
               </div>
               <button className="mt-3 rounded-xl px-4 py-2 text-[12.5px] font-semibold text-white" style={{ background: C.brand }} onClick={onOpenBuyerProfile}>Open Buyer profile</button>
             </div>

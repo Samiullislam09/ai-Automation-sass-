@@ -12,7 +12,7 @@ process.env.SUPABASE_URL ||= "http://unit-test.invalid";
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= "unit-test";
 
 const { draftBuyerProfile, validateDraft, buildDraftPrompt } = await import("./buyerProfile.js");
-const { emptyProfile, buyerProfileReady, normalizeProfile } = await import("../siteProfile.js");
+const { emptyProfile, buyerProfileReady, buyerProfileUsable, normalizeProfile } = await import("../siteProfile.js");
 
 type SiteProfile = import("../siteProfile.js").SiteProfile;
 
@@ -132,6 +132,15 @@ test("a thin Site Brain cannot be drafted from — it asks rather than guesses",
 test("a draft with zero usable buyer segments is a failure, not an empty profile", async () => {
   const res = await draftBuyerProfile(ISO_BRAIN, fakeLlm({ ...ISO_DRAFT, buyer_segments: [] }));
   assert.equal(res.ok, false);
+});
+
+test("buyerProfileUsable: a DRAFTED (unconfirmed) profile with a segment+term is usable — no confirm needed (easy flow)", () => {
+  const { buyerProfile } = validateDraft(ISO_DRAFT, ISO_BRAIN);
+  const drafted = normalizeProfile({ ...emptyProfile(), buyer_profile: buyerProfile });
+  assert.equal(buyerProfileUsable(drafted), true, "drafted profile drives lead gen without confirming");
+  assert.equal(buyerProfileReady(drafted), false, "but it is not yet CONFIRMED");
+  // no profile at all → not usable
+  assert.equal(buyerProfileUsable(normalizeProfile(emptyProfile())), false);
 });
 
 test("buyerProfileReady: false until confirmed AND a segment has a search term", () => {
