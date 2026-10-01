@@ -302,14 +302,14 @@ export default function LeadsSection() {
         </div>
       </div>
 
-      {/* one line: search + Generate leads (Auto / Manual) */}
-      <div className="mb-3 flex items-center gap-2">
-        <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-3 py-2" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
-          <svg className="shrink-0" width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke={C.sub} strokeWidth="2" /><path d="M21 21l-4-4" stroke={C.sub} strokeWidth="2" strokeLinecap="round" /></svg>
+      {/* one line: a compact search on the left, Generate leads on the right */}
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="flex h-9 w-full max-w-xs items-center gap-2 rounded-lg px-2.5" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+          <svg className="shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke={C.sub} strokeWidth="2" /><path d="M21 21l-4-4" stroke={C.sub} strokeWidth="2" strokeLinecap="round" /></svg>
           <input className="w-full min-w-0 text-[13px] outline-none" style={{ color: C.ink, background: "transparent", colorScheme: "light" }} placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
         <div className="relative shrink-0">
-          <button className="flex items-center gap-1.5 rounded-xl px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-60" style={{ background: C.brand }} onClick={() => setGenMenuOpen((o) => !o)} disabled={gen?.running || genBusy}>
+          <button className="flex h-9 items-center gap-1.5 rounded-lg px-4 text-[13px] font-semibold text-white disabled:opacity-60" style={{ background: C.brand }} onClick={() => setGenMenuOpen((o) => !o)} disabled={gen?.running || genBusy}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6l2.1 2.1m0-12.8l-2.1 2.1M7.7 16.3l-2.1 2.1" stroke="#fff" strokeWidth="1.8" strokeLinecap="round"/></svg>
             <span>{gen?.running ? "Searching…" : "Generate leads"}</span>
             {!gen?.running && <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>}
