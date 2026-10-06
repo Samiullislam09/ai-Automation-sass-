@@ -249,7 +249,7 @@ function Inbox() {
         {/* chat pane — full width on mobile when a chat is open */}
         <div className={`${active ? "flex" : "hidden md:flex"} h-full min-h-0 flex-col`} style={{ background: WA.chatBg }}>
           {active ? (
-            <Chat lead={active} onSent={loadList} onBack={() => setActive(null)} toast={toast} />
+            <Chat lead={active} onSent={loadList} onBack={() => setActive(null)} onDeleted={() => { setActive(null); loadList(); }} toast={toast} />
           ) : (
             <div className="flex h-full items-center justify-center"><p className="text-[13px]" style={{ color: WA.sub }}>Select a chat</p></div>
           )}
@@ -273,7 +273,7 @@ function Inbox() {
   );
 }
 
-function Chat({ lead, onSent, onBack, toast }: { lead: Lead; onSent: () => void; onBack: () => void; toast: (m: string, t?: "error") => void }) {
+function Chat({ lead, onSent, onBack, onDeleted, toast }: { lead: Lead; onSent: () => void; onBack: () => void; onDeleted: () => void; toast: (m: string, t?: "error") => void }) {
   const [thread, setThread] = useState<Msg[] | null>(null);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -459,9 +459,9 @@ function Chat({ lead, onSent, onBack, toast }: { lead: Lead; onSent: () => void;
           style={{ background: "#fff", color: WA.green, border: `1px solid ${WA.divider}` }}
           onClick={suggest}
           disabled={suggesting}
-          title="Let Mr. Brain draft a message — you can edit it before sending"
+          title="Let Mr. Lxwa draft a reply — you can edit it before sending"
         >
-          {suggesting ? "…" : "✨ Suggest"}
+          {suggesting ? "…" : "✨ Mr Lxwa"}
         </button>
         <textarea
           ref={taRef}
@@ -484,7 +484,7 @@ function Chat({ lead, onSent, onBack, toast }: { lead: Lead; onSent: () => void;
         </button>
       </div>
 
-      {details && <LeadDetailsDrawer lead={lead} onWa={onWa} dp={dp} onClose={() => setDetails(false)} />}
+      {details && <LeadDetailsDrawer lead={lead} onWa={onWa} dp={dp} onClose={() => setDetails(false)} onDeleted={() => { setDetails(false); onDeleted(); }} toast={toast} />}
     </>
   );
 }
@@ -497,12 +497,28 @@ function srcLabel(s: string | null | undefined): string | null {
   return ({ serper: "Google Maps", osm: "OpenStreetMap", places: "Google Places", jobs: "Job board", manual: "Manual", apollo: "Apollo" } as Record<string, string>)[s] ?? s;
 }
 
-function LeadDetailsDrawer({ lead, onWa, dp, onClose }: { lead: Lead; onWa: boolean | null; dp: string | null; onClose: () => void }) {
+function LeadDetailsDrawer({ lead, onWa, dp, onClose, onDeleted, toast }: { lead: Lead; onWa: boolean | null; dp: string | null; onClose: () => void; onDeleted: () => void; toast: (m: string, t?: "error") => void }) {
+  const [deleting, setDeleting] = useState(false);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  const del = async () => {
+    if (!window.confirm("Delete this contact and its whole conversation permanently? This can't be undone.")) return;
+    setDeleting(true);
+    try {
+      const r = await fetch(`/api/leads/${lead.id}`, { method: "DELETE" }).then((x) => x.json());
+      if (!r.ok) { toast(r.error ?? "Could not delete.", "error"); return; }
+      toast("Deleted.");
+      onDeleted();
+    } catch (e: any) {
+      toast(e?.message ?? "Network error.", "error");
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const C = { ink: "#111b21", sub: "#667781", line: "#e9edef", soft: "#f0f2f5", brand: "#4f46e5", brandSoft: "#eef2ff", green: "#16a34a", greenSoft: "#e7f6ec" };
   const num = (lead.whatsapp || lead.phone || "").replace(/[^0-9]/g, "");
@@ -573,6 +589,12 @@ function LeadDetailsDrawer({ lead, onWa, dp, onClose }: { lead: Lead; onWa: bool
               ))}
             </>
           )}
+
+          {/* permanent delete — for a junk/duplicate contact (e.g. a privacy-LID chat) you never
+              want to see again. Hard delete: removes the lead and its whole conversation. */}
+          <button onClick={del} disabled={deleting} className="mt-5 w-full rounded-xl py-2.5 text-[13px] font-semibold disabled:opacity-60" style={{ background: "#fdeaea", color: "#b42318" }}>
+            {deleting ? "Deleting…" : "Delete permanently"}
+          </button>
         </div>
       </div>
     </div>

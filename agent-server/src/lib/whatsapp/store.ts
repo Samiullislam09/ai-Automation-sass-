@@ -61,7 +61,18 @@ export async function linkIncoming(
     .select("id, stage, whatsapp, phone")
     .eq("tenant_id", tenantId);
 
-  let lead = (leads ?? []).find((l) => samePhone(l.whatsapp, msg.phone) || samePhone(l.phone, msg.phone));
+  // Among all leads whose number matches, pick the MOST SPECIFIC one — the longest significant
+  // number — so the same person saved twice (e.g. "7602468881" and "917602468881") always routes
+  // to the one with the country code, deterministically, instead of landing on whichever row the
+  // query happened to return first. (The operator can delete the duplicate; this stops the scatter
+  // in the meantime.)
+  const matches = (leads ?? []).filter((l) => samePhone(l.whatsapp, msg.phone) || samePhone(l.phone, msg.phone));
+  matches.sort((a, b) => {
+    const la = Math.max(sigDigits(a.whatsapp).length, sigDigits(a.phone).length);
+    const lb = Math.max(sigDigits(b.whatsapp).length, sigDigits(b.phone).length);
+    return lb - la;
+  });
+  let lead = matches[0];
 
   // No matching lead? Don't drop the reply — CREATE a lead for this number so the conversation
   // always appears in the inbox. This also saves anyone who messages the business first (a number

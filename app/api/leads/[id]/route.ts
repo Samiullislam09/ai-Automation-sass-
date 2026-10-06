@@ -104,3 +104,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   return NextResponse.json({ ok: true });
 }
+
+/** Permanently delete a lead and its whole conversation. Unlike Reject (which keeps the row at
+ *  stage "rejected" so it is never re-surfaced), this is a hard delete — for a junk/duplicate
+ *  contact the user never wants to see again (e.g. a privacy-LID chat that couldn't be matched).
+ *  Tenant-scoped. Messages go first in case the FK has no cascade. */
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const supabase = await createClient();
+  const tenantId = await getCurrentTenantId(supabase);
+  if (!tenantId) return NextResponse.json({ ok: false, error: "Not signed in." }, { status: 401 });
+
+  await supabase.from("outreach_messages").delete().eq("tenant_id", tenantId).eq("lead_id", id);
+  const { error } = await supabase.from("leads").delete().eq("id", id).eq("tenant_id", tenantId);
+  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true });
+}
