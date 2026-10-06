@@ -10,7 +10,7 @@
 import type { Express, Request, Response } from "express";
 import { supabase } from "../../supabase.js";
 import { env } from "../../env.js";
-import { connect, disconnect, sendText, sessionStatus, getProfilePicture } from "./session.js";
+import { connect, disconnect, sendText, sessionStatus, getContactInfo } from "./session.js";
 import { recordOutgoing } from "./store.js";
 import { suggestReply } from "./suggest.js";
 import { emitWhatsapp } from "../../socket.js";
@@ -52,17 +52,17 @@ export function mountWhatsapp(app: Express): void {
     res.json({ ok: true, ...sessionStatus(req.params.tenantId) });
   });
 
-  /** The real WhatsApp profile photo URL for a number (?phone=), or null. Read-only; the UI shows
-   *  the default avatar when it's null. */
+  /** Whether a number (?phone=) is on WhatsApp, plus its photo — one call the chat uses on open.
+   *  Read-only; never fails the UI (unknowns come back as null). */
   app.get("/whatsapp/:tenantId/avatar", async (req, res) => {
     if (!authed(req, res)) return;
     const phone = String(req.query.phone ?? "");
     if (!phone) return res.status(400).json({ ok: false, error: "phone is required" });
     try {
-      const url = await getProfilePicture(req.params.tenantId, phone);
-      res.json({ ok: true, url });
-    } catch (e: any) {
-      res.json({ ok: true, url: null }); // never fail the UI over a missing photo
+      const { onWhatsapp, photo } = await getContactInfo(req.params.tenantId, phone);
+      res.json({ ok: true, url: photo, onWhatsapp });
+    } catch {
+      res.json({ ok: true, url: null, onWhatsapp: null });
     }
   });
 

@@ -15,5 +15,5 @@ export async function GET(req: NextRequest) {
   if (!phone) return NextResponse.json({ ok: true, url: null });
 
   const r = await callWhatsapp(tenantId, "avatar", { query: `phone=${encodeURIComponent(phone)}` });
-  return NextResponse.json({ ok: true, url: r.ok ? (r.url ?? null) : null });
+  return NextResponse.json({ ok: true, url: r.ok ? (r.url ?? null) : null, onWhatsapp: r.ok ? (r.onWhatsapp ?? null) : null });
 }

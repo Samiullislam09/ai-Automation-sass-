@@ -34,7 +34,15 @@ const WA = {
 };
 
 type Status = { status: string; qr: string | null; phone: string | null };
-type Lead = { id: string; company: string | null; name: string | null; whatsapp: string | null; phone: string | null; stage: string; icp_score: number | null; draft?: string | null };
+type Lead = {
+  id: string; company: string | null; name: string | null; whatsapp: string | null; phone: string | null;
+  stage: string; icp_score: number | null; draft?: string | null;
+  email?: string | null; website?: string | null; country?: string | null; city?: string | null;
+  source?: string | null; reason?: string | null; observation?: string | null; created_at?: string | null;
+  source_segment?: string | null; source_query?: string | null; classification?: string | null;
+  score_breakdown?: { score?: number; band?: string; components?: { id: string; group: string; points: number; max: number; why: string }[] } | null;
+  evidence?: any; reject_reason?: string | null;
+};
 type Msg = { id: string; direction: "in" | "out"; status: string; body: string; answered_by?: string | null; created_at: string };
 
 export default function WhatsAppSection() {
@@ -257,6 +265,8 @@ function Chat({ lead, onSent, onBack, toast }: { lead: Lead; onSent: () => void;
   const [sending, setSending] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
   const [dp, setDp] = useState<string | null>(null);
+  const [onWa, setOnWa] = useState<boolean | null>(null);
+  const [details, setDetails] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const autoFor = useRef<string | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -293,11 +303,12 @@ function Chat({ lead, onSent, onBack, toast }: { lead: Lead; onSent: () => void;
   // short-lived); null when there's no visible photo or the number isn't on WhatsApp → silhouette.
   useEffect(() => {
     setDp(null);
+    setOnWa(null);
     if (!phone) return;
     let on = true;
     fetch(`/api/whatsapp/avatar?phone=${encodeURIComponent(phone)}`)
       .then((r) => r.json())
-      .then((d) => { if (on && d?.url) setDp(d.url); })
+      .then((d) => { if (!on) return; if (d?.url) setDp(d.url); if (typeof d?.onWhatsapp === "boolean") setOnWa(d.onWhatsapp); })
       .catch(() => {});
     return () => { on = false; };
   }, [phone]);
@@ -381,12 +392,27 @@ function Chat({ lead, onSent, onBack, toast }: { lead: Lead; onSent: () => void;
         <button className="md:hidden" onClick={onBack} aria-label="Back">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M15 18l-6-6 6-6" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </button>
-        <WaAvatar size={40} src={dp} />
-        <div className="min-w-0">
-          <b className="block truncate text-[15px] text-white">{lead.company || lead.name || "Lead"}</b>
-          <span className="text-[12px]" style={{ color: "rgba(255,255,255,.8)" }}>{phone ? `+${phone.replace(/[^0-9]/g, "")}` : "no number"}</span>
-        </div>
+        {/* clicking the contact opens the lead's full details, like the Leads page drawer */}
+        <button className="flex min-w-0 flex-1 items-center gap-2.5 text-left" onClick={() => setDetails(true)} title="View lead details">
+          <WaAvatar size={40} src={dp} />
+          <div className="min-w-0">
+            <b className="block truncate text-[15px] text-white">{lead.company || lead.name || "Lead"}</b>
+            <span className="text-[12px]" style={{ color: "rgba(255,255,255,.8)" }}>
+              {onWa === false ? "not on WhatsApp" : phone ? `+${phone.replace(/[^0-9]/g, "")}` : "no number"}
+            </span>
+          </div>
+        </button>
+        <button onClick={() => setDetails(true)} className="shrink-0 rounded-full p-1.5" title="Lead details" aria-label="Lead details">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="#fff" strokeWidth="1.8" /><path d="M12 11v5M12 8h.01" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" /></svg>
+        </button>
       </div>
+
+      {/* a plain "not on WhatsApp" strip when the number has no WhatsApp account (e.g. a landline) */}
+      {onWa === false && (
+        <div className="px-4 py-2 text-center text-[12.5px]" style={{ background: "#fdeaea", color: "#b42318" }}>
+          This number isn’t on WhatsApp — it looks like a landline. Message their mobile/WhatsApp number instead.
+        </div>
+      )}
 
       {/* messages */}
       <div className="flex-1 space-y-1.5 overflow-y-auto px-4 py-4 sm:px-5" style={{ background: WA.chatBg }}>
@@ -425,19 +451,110 @@ function Chat({ lead, onSent, onBack, toast }: { lead: Lead; onSent: () => void;
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full disabled:opacity-50"
           style={{ background: WA.green }}
           onClick={send}
-          disabled={sending || !text.trim()}
-          title="Send"
+          disabled={sending || !text.trim() || onWa === false}
+          title={onWa === false ? "This number isn't on WhatsApp" : "Send"}
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 21l18-9L3 3v7l12 2-12 2v7z" fill="#fff" /></svg>
         </button>
       </div>
+
+      {details && <LeadDetailsDrawer lead={lead} onWa={onWa} dp={dp} onClose={() => setDetails(false)} />}
     </>
   );
 }
 
+/** The lead's full story, opened by tapping the contact in the chat header — the same "why this
+ *  lead" the Leads page shows, right where you're about to message them: where it came from, which
+ *  buyer segment, the score and its breakdown, the evidence, and the contact details. */
+function srcLabel(s: string | null | undefined): string | null {
+  if (!s) return null;
+  return ({ serper: "Google Maps", osm: "OpenStreetMap", places: "Google Places", jobs: "Job board", manual: "Manual", apollo: "Apollo" } as Record<string, string>)[s] ?? s;
+}
+
+function LeadDetailsDrawer({ lead, onWa, dp, onClose }: { lead: Lead; onWa: boolean | null; dp: string | null; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const C = { ink: "#111b21", sub: "#667781", line: "#e9edef", soft: "#f0f2f5", brand: "#4f46e5", brandSoft: "#eef2ff", green: "#16a34a", greenSoft: "#e7f6ec" };
+  const num = (lead.whatsapp || lead.phone || "").replace(/[^0-9]/g, "");
+  const score = lead.icp_score ?? lead.score_breakdown?.score ?? null;
+  const groups = lead.score_breakdown?.components
+    ? Object.entries(lead.score_breakdown.components.reduce((a: Record<string, { p: number; m: number }>, c) => {
+        const g = a[c.group] ?? { p: 0, m: 0 }; a[c.group] = { p: g.p + c.points, m: g.m + c.max }; return a;
+      }, {}))
+    : [];
+  const Row = ({ k, v, href }: { k: string; v?: string | null; href?: string }) =>
+    v ? (
+      <div className="flex justify-between gap-3 py-1.5 text-[13px]" style={{ borderBottom: `1px solid ${C.line}` }}>
+        <span style={{ color: C.sub }}>{k}</span>
+        {href ? <a href={href} target="_blank" rel="noreferrer" className="truncate text-right" style={{ color: C.brand }}>{v}</a> : <span className="truncate text-right" style={{ color: C.ink }}>{v}</span>}
+      </div>
+    ) : null;
+
+  return (
+    <div className="fixed inset-0 z-[80] flex justify-end" style={{ background: "rgba(15,23,42,.35)", colorScheme: "light" }} onClick={onClose}>
+      <div className="flex h-full w-full max-w-[420px] flex-col overflow-y-auto" style={{ background: "#fff", color: C.ink }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: `1px solid ${C.line}` }}>
+          <span className="text-[14px] font-bold">Lead details</span>
+          <button onClick={onClose} className="rounded-full p-1.5" style={{ background: C.soft, color: C.sub }} aria-label="Close">✕</button>
+        </div>
+        <div className="p-4">
+          <div className="mb-3 flex items-center gap-3">
+            <WaAvatar size={52} src={dp} />
+            <div className="min-w-0">
+              <div className="truncate text-[15px] font-bold">{lead.company || lead.name || "Lead"}</div>
+              <div className="text-[12.5px]" style={{ color: C.sub }}>{num ? `+${num}` : "no number"}</div>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {score != null && <span className="rounded-md px-1.5 py-0.5 text-[11px] font-bold" style={{ background: C.soft, color: score >= 70 ? C.green : "#d97706" }}>{score}/100</span>}
+                {lead.classification && <span className="rounded-md px-1.5 py-0.5 text-[11px] font-semibold" style={{ background: C.greenSoft, color: C.green }}>{lead.classification === "buyer" ? "Buyer ✓" : lead.classification}</span>}
+                {onWa === false && <span className="rounded-md px-1.5 py-0.5 text-[11px] font-semibold" style={{ background: "#fdeaea", color: "#b42318" }}>Not on WhatsApp</span>}
+                {onWa === true && <span className="rounded-md px-1.5 py-0.5 text-[11px] font-semibold" style={{ background: C.greenSoft, color: C.green }}>On WhatsApp</span>}
+              </div>
+            </div>
+          </div>
+
+          {(lead.observation || lead.reason) && (
+            <div className="mb-3 rounded-xl p-3" style={{ background: C.soft }}>
+              <div className="mb-1 text-[12px] font-bold" style={{ color: C.ink }}>Why this lead</div>
+              <p className="text-[12.5px]" style={{ color: C.sub }}>{lead.observation || lead.reason}</p>
+              {lead.evidence?.quote && <p className="mt-1.5 border-l-2 pl-2 text-[12px] italic" style={{ borderColor: C.line, color: C.sub }}>“{lead.evidence.quote}”</p>}
+            </div>
+          )}
+
+          <div className="mb-1 text-[12px] font-bold" style={{ color: C.ink }}>Details</div>
+          <Row k="Segment" v={lead.source_segment} />
+          <Row k="Found via" v={lead.source_query} />
+          <Row k="Source" v={srcLabel(lead.source)} />
+          <Row k="Email" v={lead.email ?? null} href={lead.email ? `mailto:${lead.email}` : undefined} />
+          <Row k="Website" v={lead.website ? lead.website.replace(/^https?:\/\//, "") : null} href={lead.website ? (lead.website.startsWith("http") ? lead.website : `https://${lead.website}`) : undefined} />
+          <Row k="Country" v={lead.country ?? null} />
+          <Row k="City" v={lead.city ?? null} />
+          <Row k="Stage" v={lead.stage} />
+          <Row k="Added" v={lead.created_at ? new Date(lead.created_at).toLocaleDateString() : null} />
+          {lead.reject_reason && <Row k="Rejected as" v={lead.reject_reason} />}
+
+          {groups.length > 0 && (
+            <>
+              <div className="mb-1 mt-3 text-[12px] font-bold" style={{ color: C.ink }}>Score breakdown</div>
+              {groups.map(([g, v]) => (
+                <div key={g} className="flex justify-between py-1 text-[12.5px]" style={{ color: C.sub }}>
+                  <span className="capitalize">{g === "fit" ? "Buyer fit" : g === "timing" ? "Health & size" : g}</span>
+                  <span className="font-semibold" style={{ color: C.ink }}>{(v as any).p}/{(v as any).m}</span>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** WhatsApp-style default avatar: a muted circle with a white person silhouette, exactly the
- *  placeholder WhatsApp shows for a contact with no photo. (Real profile photos would be fetched
- *  from WhatsApp on the server — a follow-up; this is the clean default until then.) */
+ *  placeholder WhatsApp shows for a contact with no photo. */
 function WaAvatar({ size = 44, src }: { size?: number; src?: string | null }) {
   const [broken, setBroken] = useState(false);
   if (src && !broken) {

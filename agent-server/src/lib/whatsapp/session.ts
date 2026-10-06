@@ -225,6 +225,33 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   ]);
 }
 
+/** Is a number on WhatsApp, and what's its photo — in ONE call (the dashboard needs both when a
+ *  chat opens). `onWhatsapp: null` means we couldn't tell (not connected / check timed out), which
+ *  the UI treats as "unknown", not "no". A landline returns `onWhatsapp: false` so the UI can say
+ *  so plainly and disable Send instead of letting a message hang. */
+export async function getContactInfo(tenantId: string, phone: string): Promise<{ onWhatsapp: boolean | null; photo: string | null }> {
+  const s = sessions.get(tenantId);
+  if (!s || s.status !== "connected" || !s.sock) return { onWhatsapp: null, photo: null };
+  const jid = `${phone.replace(/[^0-9]/g, "")}@s.whatsapp.net`;
+  let onWhatsapp: boolean | null = null;
+  let photo: string | null = null;
+  try {
+    const results = await withTimeout(s.sock.onWhatsApp(jid), 10_000, "checking the number");
+    const info = Array.isArray(results) ? results[0] : undefined;
+    onWhatsapp = !!info?.exists;
+    if (info?.exists) {
+      try {
+        photo = (await withTimeout(s.sock.profilePictureUrl(info.jid ?? jid, "image"), 8_000, "fetching the photo")) ?? null;
+      } catch {
+        photo = null; // no public photo / privacy
+      }
+    }
+  } catch {
+    onWhatsapp = null; // couldn't check — leave it unknown
+  }
+  return { onWhatsapp, photo };
+}
+
 /** The real WhatsApp profile photo URL for a number, or null. Only works while connected, and
  *  only for numbers that are on WhatsApp with a photo the privacy settings let us see — otherwise
  *  null (the UI falls back to the default avatar). The URL WhatsApp returns is short-lived, so the
