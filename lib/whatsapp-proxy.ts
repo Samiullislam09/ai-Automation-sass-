@@ -14,16 +14,16 @@ export type WaResult = { ok: boolean; status?: number; error?: string; [k: strin
 
 export async function callWhatsapp(
   tenantId: string,
-  path: "connect" | "status" | "send" | "disconnect" | "suggest",
-  init: { method?: "GET" | "POST"; body?: unknown } = {}
+  path: "connect" | "status" | "send" | "disconnect" | "suggest" | "avatar",
+  init: { method?: "GET" | "POST"; body?: unknown; query?: string } = {}
 ): Promise<WaResult> {
   const base = process.env.AGENT_SERVER_URL;
   if (!base) return { ok: false, error: "Agent server not configured.", status: 503 };
 
-  const url = `${base.replace(/\/+$/, "")}/whatsapp/${tenantId}/${path}`;
+  const url = `${base.replace(/\/+$/, "")}/whatsapp/${tenantId}/${path}${init.query ? `?${init.query}` : ""}`;
   const attempt = async (): Promise<WaResult> => {
     const res = await fetch(url, {
-      method: init.method ?? (path === "status" ? "GET" : "POST"),
+      method: init.method ?? (path === "status" || path === "avatar" ? "GET" : "POST"),
       headers: {
         "Content-Type": "application/json",
         ...(process.env.AGENT_SERVER_TOKEN ? { "x-agent-token": process.env.AGENT_SERVER_TOKEN } : {}),

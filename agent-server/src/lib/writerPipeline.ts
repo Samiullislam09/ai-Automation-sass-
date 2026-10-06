@@ -270,7 +270,18 @@ export async function writeSection(
     `LENGTH: at least 300 words for this section — this is a hard minimum, not a target. Do not stop early; if you run short, go deeper on the reader's question with specifics rather than padding.`,
     `Start with "## ${section.h2}" then the prose. The very next paragraph after the heading must answer "${section.readerQuestion}" directly in its first sentence (the number, the yes/no, or the name first), in 40-58 words total — this is the length Google most often lifts into a featured snippet, so do not open with throat-clearing.`,
     `Short paragraphs (2-4 sentences) for everything after that first one. No filler, no "in today's fast-paced world" openings. Never use an em dash (—); use a period, comma, or colon instead. Use only facts present in the context above — never invent a statistic, price, award, client name or date.`,
-    `Rhythm: at least one sentence of 6 words or fewer for every 150 words, and never three sentences in a row within 5 words of each other in length. No semicolons. Never write "the best", "guaranteed", "#1" or "number one", and never "studies show" or "experts say" unless that sentence links the real source. If the heading asks how to do something, or for steps, types, ways or tips, include a list of 5-8 items of 3-8 words each.`,
+    // REWRITTEN 2026-10-06. This line used to demand "at least one sentence of 6 words or fewer
+    // for every 150 words", and it was the direct cause of the article pipeline's 100% failure
+    // rate: it drove the model to an average sentence of 12.9 words where the customer's own
+    // site averages 33.5, and a wall of near-identical short sentences then failed the very
+    // rhythm rule this instruction was meant to satisfy. Measured over 51 of their real pages
+    // and 20 of ours — see articleReview.ts's rhythm constants for the full table.
+    //
+    // What replaces it asks for the thing that actually matters, in both directions: VARIANCE.
+    // It is what a human writer produces, what a reader experiences as rhythm, and what every
+    // AI-text detector measures as "burstiness" — the one property our drafts were failing hard.
+    `Rhythm — this matters more than any other instruction here. Vary sentence length hard and on purpose. Aim for an average of about 25-30 words, and get there by MIXING: follow a 40-word sentence that carries a full argument with a 5-word one that lands it. Never let five sentences in a row sit within a few words of the same length. Short, choppy, same-length sentences are the single clearest sign a machine wrote something — a page of 12-word sentences reads as generated even when every fact in it is right.`,
+    `No semicolons. Never write "the best", "guaranteed", "#1" or "number one", and never "studies show" or "experts say" unless that sentence links the real source. If the heading asks how to do something, or for steps, types, ways or tips, include a list of 5-8 items of 3-8 words each.`,
     // buildOutline now writes "include a table" / "include a list" straight into the goal text
     // of the sections it picks for that job (2026-09-16) — this is what actually reads that
     // instruction back out and turns it into a real markdown table/list at generation time,

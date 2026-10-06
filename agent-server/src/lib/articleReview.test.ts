@@ -51,12 +51,18 @@ function section(h2: string, opener: string, extra: string[] = [], links: (strin
   return [
     `## ${h2}`,
     ``,
+    // 5+14+25 = 44 words: still inside the 40-58 word snippet window.
     [s(5, opener), s(14, "Most"), s(25, "Crews")].join(" "),
     ``,
     ...extra,
-    [s(9, "Leeds"), s(20, "Every", links[0]), s(4, "Call"), s(17, "Some")].join(" "),
+    // Rewritten 2026-10-06 for the recalibrated rhythm rule. The old lengths (9,20,4,17 /
+    // 28,11,6,19) satisfied "no three in a row within 5 words" but had a spread of only ~7.8 —
+    // the uniform-short register the new rule exists to catch, and the one our model actually
+    // writes in. A fixture for "a draft that meets every rule" has to swing the way real
+    // writing swings.
+    [s(7, "Leeds"), s(42, "Every", links[0]), s(11, "Call"), s(5, "Some")].join(" "),
     ``,
-    [s(28, "Night"), s(11, "Our", links[1]), s(6, "Book"), s(19, "Engineers")].join(" "),
+    [s(34, "Night"), s(8, "Our", links[1]), s(48, "Book"), s(6, "Engineers")].join(" "),
   ].join("\n");
 }
 
@@ -175,13 +181,30 @@ test("a link that does not load is failed against the section it sits in", async
   assert.match(c!.detail, /gov\.uk/);
 });
 
-test("three sentences in a row of about the same length fail the rhythm rule", async () => {
+test("five sentences in a row of about the same length fail the rhythm rule", async () => {
+  // Three was the old threshold, and measured against 51 human-written pages from the
+  // customer's own site it failed every single one. Five inside a three-word band is monotony
+  // nobody writes by accident.
   cursor = 0;
-  const body = stamped([`# T`, ``, `## How long does it take?`, ``, [s(15, "First"), s(15, "Second"), s(14, "Third")].join(" ")].join("\n"));
+  const run = [s(15, "First"), s(15, "Second"), s(14, "Third"), s(16, "Fourth"), s(14, "Fifth"), s(15, "Sixth")].join(" ");
+  const body = stamped([`# T`, ``, `## How long does it take?`, ``, run].join("\n"));
   const { checks } = await checkArticle(body, INPUT, alwaysLive);
   const c = failing(checks).find((x) => x.id === "sentence-rhythm");
   assert.ok(c, describe(checks));
-  assert.match(c!.detail, /15, 15 and 14 words/);
+  assert.match(c!.detail, /within 3 words of each other|short and about the same length/);
+});
+
+test("uniformly SHORT sentences fail too — the register our model actually produces", async () => {
+  // The old rule could not see this at all: it was built to catch long uniform sentences, and
+  // our drafts average 12.9 words against the customer's own 33.5. Choppy and same-length is
+  // the most machine-detectable prose there is, and it used to sail through.
+  cursor = 0;
+  const choppy = [s(11, "First"), s(13, "Second"), s(12, "Third"), s(14, "Fourth"), s(11, "Fifth"), s(13, "Sixth"), s(12, "Seventh")].join(" ");
+  const body = stamped([`# T`, ``, `## How long does it take?`, ``, choppy].join("\n"));
+  const { checks } = await checkArticle(body, INPUT, alwaysLive);
+  const c = failing(checks).find((x) => x.id === "sentence-rhythm");
+  assert.ok(c, describe(checks));
+  assert.match(c!.detail, /short and about the same length|within 3 words/);
 });
 
 test("no real outside sources on file: the external-link rule is skipped, never met with an invented URL", async () => {

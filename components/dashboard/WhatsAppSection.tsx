@@ -256,9 +256,21 @@ function Chat({ lead, onSent, onBack, toast }: { lead: Lead; onSent: () => void;
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
+  const [dp, setDp] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const autoFor = useRef<string | null>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
   const phone = lead.whatsapp || lead.phone || "";
+
+  // Grow the compose box with its content, like WhatsApp: it starts one line tall and expands up
+  // to ~6 lines (then scrolls), so a long auto-suggested message is fully visible instead of
+  // crammed into a single scrolling row.
+  useEffect(() => {
+    const ta = taRef.current;
+    if (!ta) return;
+    ta.style.height = "0px";
+    ta.style.height = `${Math.min(140, Math.max(44, ta.scrollHeight))}px`;
+  }, [text]);
 
   const loadThread = useCallback(async () => {
     try {
@@ -269,12 +281,26 @@ function Chat({ lead, onSent, onBack, toast }: { lead: Lead; onSent: () => void;
 
   useEffect(() => {
     setThread(null);
+    setText(""); // start each conversation with a clean box (the auto-fill below repopulates it)
     loadThread();
     const id = setInterval(loadThread, 5000);
     return () => clearInterval(id);
   }, [loadThread]);
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [thread]);
+
+  // Their real WhatsApp profile photo for the chat header. Fetched once per chat (the URL is
+  // short-lived); null when there's no visible photo or the number isn't on WhatsApp → silhouette.
+  useEffect(() => {
+    setDp(null);
+    if (!phone) return;
+    let on = true;
+    fetch(`/api/whatsapp/avatar?phone=${encodeURIComponent(phone)}`)
+      .then((r) => r.json())
+      .then((d) => { if (on && d?.url) setDp(d.url); })
+      .catch(() => {});
+    return () => { on = false; };
+  }, [phone]);
 
   const suggest = async () => {
     if (!thread || thread.length === 0) {
@@ -343,7 +369,7 @@ function Chat({ lead, onSent, onBack, toast }: { lead: Lead; onSent: () => void;
         <button className="md:hidden" onClick={onBack} aria-label="Back">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M15 18l-6-6 6-6" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </button>
-        <WaAvatar size={40} />
+        <WaAvatar size={40} src={dp} />
         <div className="min-w-0">
           <b className="block truncate text-[15px] text-white">{lead.company || lead.name || "Lead"}</b>
           <span className="text-[12px]" style={{ color: "rgba(255,255,255,.8)" }}>{phone ? `+${phone.replace(/[^0-9]/g, "")}` : "no number"}</span>
@@ -374,8 +400,9 @@ function Chat({ lead, onSent, onBack, toast }: { lead: Lead; onSent: () => void;
           {suggesting ? "…" : "✨ Suggest"}
         </button>
         <textarea
-          className="flex-1 resize-none rounded-2xl px-4 py-2.5 text-[14px] outline-none"
-          style={{ background: "#fff", color: WA.text, maxHeight: 120, border: "none" }}
+          ref={taRef}
+          className="lx-wa-input flex-1 resize-none rounded-2xl px-4 py-2.5 text-[14px] leading-snug outline-none"
+          style={{ background: "#fff", color: WA.text, maxHeight: 140, minHeight: 44, border: "none", overflowY: "auto" }}
           rows={1}
           placeholder="Type a message…"
           value={text}
@@ -399,7 +426,21 @@ function Chat({ lead, onSent, onBack, toast }: { lead: Lead; onSent: () => void;
 /** WhatsApp-style default avatar: a muted circle with a white person silhouette, exactly the
  *  placeholder WhatsApp shows for a contact with no photo. (Real profile photos would be fetched
  *  from WhatsApp on the server — a follow-up; this is the clean default until then.) */
-function WaAvatar({ size = 44 }: { size?: number }) {
+function WaAvatar({ size = 44, src }: { size?: number; src?: string | null }) {
+  const [broken, setBroken] = useState(false);
+  if (src && !broken) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={src}
+        alt=""
+        referrerPolicy="no-referrer"
+        onError={() => setBroken(true)}
+        className="shrink-0 rounded-full object-cover"
+        style={{ width: size, height: size, background: "#d9e0e3" }}
+      />
+    );
+  }
   return (
     <span className="flex shrink-0 items-center justify-center rounded-full" style={{ width: size, height: size, background: "#d9e0e3" }}>
       <svg width={size * 0.62} height={size * 0.62} viewBox="0 0 212 212" aria-hidden>

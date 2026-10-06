@@ -198,6 +198,21 @@ export async function sendText(tenantId: string, phone: string, body: string): P
   return { waMessageId: sent?.key?.id ?? "" };
 }
 
+/** The real WhatsApp profile photo URL for a number, or null. Only works while connected, and
+ *  only for numbers that are on WhatsApp with a photo the privacy settings let us see — otherwise
+ *  null (the UI falls back to the default avatar). The URL WhatsApp returns is short-lived, so the
+ *  caller fetches it fresh per chat open rather than storing it. */
+export async function getProfilePicture(tenantId: string, phone: string): Promise<string | null> {
+  const s = sessions.get(tenantId);
+  if (!s || s.status !== "connected" || !s.sock) return null;
+  const jid = `${phone.replace(/[^0-9]/g, "")}@s.whatsapp.net`;
+  try {
+    return (await s.sock.profilePictureUrl(jid, "image")) ?? null;
+  } catch {
+    return null; // no photo, privacy, or not a WhatsApp number
+  }
+}
+
 /** Unlink: log the device out from our side and forget the session. The tenant's phone still has
  *  its own copy; this just ends OUR link. */
 export async function disconnect(supabase: SupabaseClient, tenantId: string): Promise<void> {

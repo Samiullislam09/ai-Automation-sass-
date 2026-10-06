@@ -10,7 +10,7 @@
 import type { Express, Request, Response } from "express";
 import { supabase } from "../../supabase.js";
 import { env } from "../../env.js";
-import { connect, disconnect, sendText, sessionStatus } from "./session.js";
+import { connect, disconnect, sendText, sessionStatus, getProfilePicture } from "./session.js";
 import { recordOutgoing } from "./store.js";
 import { suggestReply } from "./suggest.js";
 import { emitWhatsapp } from "../../socket.js";
@@ -50,6 +50,20 @@ export function mountWhatsapp(app: Express): void {
   app.get("/whatsapp/:tenantId/status", (req, res) => {
     if (!authed(req, res)) return;
     res.json({ ok: true, ...sessionStatus(req.params.tenantId) });
+  });
+
+  /** The real WhatsApp profile photo URL for a number (?phone=), or null. Read-only; the UI shows
+   *  the default avatar when it's null. */
+  app.get("/whatsapp/:tenantId/avatar", async (req, res) => {
+    if (!authed(req, res)) return;
+    const phone = String(req.query.phone ?? "");
+    if (!phone) return res.status(400).json({ ok: false, error: "phone is required" });
+    try {
+      const url = await getProfilePicture(req.params.tenantId, phone);
+      res.json({ ok: true, url });
+    } catch (e: any) {
+      res.json({ ok: true, url: null }); // never fail the UI over a missing photo
+    }
   });
 
   /** SEND ONE MESSAGE — the human pressed Send. Requires the lead id (so the message is stored

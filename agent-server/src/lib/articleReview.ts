@@ -43,9 +43,58 @@ export const REVIEW_MAX_ROUNDS = 5;
 const SNIPPET_MIN_WORDS = 40; // sections 1 and 13
 const SNIPPET_MAX_WORDS = 58;
 const MAX_PARAGRAPH_SENTENCES = 4; // section 3
-const SHORT_SENTENCE_MAX_WORDS = 6; // section 15, lever 2
-const WORDS_PER_SHORT_SENTENCE = 150;
-const UNIFORM_SPREAD_WORDS = 5; // "never three consecutive sentences within 5 words of each other"
+/* ── sentence rhythm, recalibrated 2026-10-06 against real writing ────────────────────────────
+ *
+ *  THE OLD NUMBERS FAILED EVERY ARTICLE, AND THEY WOULD HAVE FAILED THE CUSTOMER'S OWN WEBSITE
+ *  TOO. Measured: 17 of 17 articles written since 20 September were blocked, and 110 of their
+ *  ~230 violations were this one rule. So the rule was run over 51 human-written pages from the
+ *  customer's own site — professional B2B copy, written by people, already ranking:
+ *
+ *      PASSED the old rule: 0 of 51.   0%.
+ *
+ *  A rule no human page can satisfy is not a quality bar, it is a wall. And the profile showed
+ *  it was aimed at the wrong failure entirely:
+ *
+ *                              their site     our articles
+ *      mean sentence           33.5 words     12.9 words
+ *      spread (std-dev)        22.6           13.0
+ *      sentences <=12w/400w    1.96           22.24
+ *
+ *  The rule assumed the AI failure mode is "long, uniform sentences". It is the opposite: the
+ *  model writes SHORT, choppy, uniform ones — and the writer prompt was pushing it there, by
+ *  demanding a <=6 word sentence every 150 words. Prompt and rule were fighting, and the rule
+ *  had the publish authority.
+ *
+ *  WHY VARIANCE IS NOW THE RULE. Every AI-text detector keys on "burstiness" — the variance of
+ *  sentence length. Low variance is the single most machine-detectable property of machine
+ *  writing, and ours was half the human figure. Measuring variance directly therefore serves
+ *  three goals with one number: it is what the rhythm rule was always reaching for, it is what a
+ *  detector looks at, and it is what makes prose readable to a person.
+ *
+ *  The thresholds below sit where ~80% of the human corpus passes — a bar real professional
+ *  writing clears, which is the only kind of bar worth having. */
+const SHORT_SENTENCE_MAX_WORDS = 12; // was 6: human pages average 1.96 of these per 400 words
+const WORDS_PER_SHORT_SENTENCE = 400; // was 150, which asked for ~7 per page where humans write 2
+const UNIFORM_SPREAD_WORDS = 3; // was 5
+const UNIFORM_RUN_SENTENCES = 5; // was 3 — five in a row inside a 3-word band is real monotony
+/** CHOPPY = short AND uniform, and it has to be both.
+ *
+ *  Spread alone does not separate the two corpora — their distributions overlap badly, because
+ *  the human corpus includes short service and policy pages whose variance is genuinely low
+ *  (human p25 spread 10.4, our p75 13.4). Judging on spread alone at any threshold either let
+ *  our drafts through or failed a third of real pages.
+ *
+ *  The mean is what actually distinguishes them: 33.5 words a sentence against our 12.9. So the
+ *  rule fires only when BOTH are true — the sentences are short AND they are all the same
+ *  length. That is the machine signature; either one on its own is just a writing style.
+ *
+ *      measured over 71 human pages and our last 20 articles:
+ *      mean<16 AND spread<18  ->  99% of human pages pass, 0% of our choppy drafts do. */
+const CHOPPY_MEAN_WORDS = 16;
+const CHOPPY_SPREAD_WORDS = 18;
+/** Below this, a section has too few sentences for "rhythm" to mean anything — judging spread
+ *  over three sentences measures noise, not monotony. */
+const MIN_SENTENCES_FOR_RHYTHM = 6;
 const LIST_MIN_ITEMS = 5; // section 13, list snippets
 const LIST_MAX_ITEMS = 8;
 const LIST_ITEM_MIN_WORDS = 3;
@@ -734,26 +783,42 @@ function sectionChecks(split: SplitArticle): ReviewCheck[] {
       absolute.length ? absolute.map((u) => `"${prose(u).slice(0, 80).trim()}" makes an absolute claim with no cited source`).join("; ") : "no unbacked absolute claims",
     );
 
-    // Section 15, lever 2: one short sentence per 150 words, and never three in a row of about
-    // the same length.
+    // Section 15, lever 2 — rebuilt around BURSTINESS. See the constants above for the
+    // measurement that forced it: the old shape failed 51 of 51 human-written pages.
     if (!qa) {
       const lens = sentences(proseText(part.markdown)).map((s) => words(s).length);
       const total = lens.reduce((a, b) => a + b, 0);
-      if (total > 0) {
+      // Too little prose to judge rhythm on. A two-sentence section is not monotonous, it is short.
+      if (total > 0 && lens.length >= MIN_SENTENCES_FOR_RHYTHM) {
+        const mean = total / lens.length;
+        const spread = Math.sqrt(lens.reduce((a, n) => a + (n - mean) ** 2, 0) / lens.length);
+
         const needShort = Math.floor(total / WORDS_PER_SHORT_SENTENCE);
         const haveShort = lens.filter((n) => n <= SHORT_SENTENCE_MAX_WORDS).length;
+
         let uniformAt = -1;
-        for (let i = 2; i < lens.length; i++) {
-          const trio = [lens[i - 2], lens[i - 1], lens[i]];
-          if (Math.max(...trio) - Math.min(...trio) <= UNIFORM_SPREAD_WORDS) {
+        for (let i = UNIFORM_RUN_SENTENCES - 1; i < lens.length; i++) {
+          const run = lens.slice(i - UNIFORM_RUN_SENTENCES + 1, i + 1);
+          if (Math.max(...run) - Math.min(...run) <= UNIFORM_SPREAD_WORDS) {
             uniformAt = i;
             break;
           }
         }
+
         const problems: string[] = [];
+        if (mean < CHOPPY_MEAN_WORDS && spread < CHOPPY_SPREAD_WORDS) {
+          problems.push(
+            `every sentence is short and about the same length (average ${mean.toFixed(0)} words, spread ${spread.toFixed(1)}) — this is the clearest signature of machine writing. Keep some sentences short, but carry the real explanations in long ones`,
+          );
+        }
         if (haveShort < needShort) problems.push(`${haveShort} sentence(s) of ${SHORT_SENTENCE_MAX_WORDS} words or fewer in ${total} words (needs ${needShort})`);
-        if (uniformAt >= 0) problems.push(`sentences ${uniformAt - 1}-${uniformAt + 1} are ${lens[uniformAt - 2]}, ${lens[uniformAt - 1]} and ${lens[uniformAt]} words long, all within ${UNIFORM_SPREAD_WORDS} words of each other`);
-        add("sentence-rhythm", "Varied sentence rhythm", "Human voice", problems.length === 0, problems.length ? problems.join("; ") : "sentence lengths vary");
+        if (uniformAt >= 0) {
+          const run = lens.slice(uniformAt - UNIFORM_RUN_SENTENCES + 1, uniformAt + 1);
+          problems.push(
+            `sentences ${uniformAt - UNIFORM_RUN_SENTENCES + 2}-${uniformAt + 1} are ${run.join(", ")} words long, all within ${UNIFORM_SPREAD_WORDS} words of each other`,
+          );
+        }
+        add("sentence-rhythm", "Varied sentence rhythm", "Human voice", problems.length === 0, problems.length ? problems.join("; ") : `sentence lengths vary (spread ${spread.toFixed(1)}, average ${mean.toFixed(0)} words)`);
       }
     }
   });
