@@ -61,20 +61,36 @@ export async function linkIncoming(
     .select("id, stage, whatsapp, phone")
     .eq("tenant_id", tenantId);
 
-  const lead = (leads ?? []).find((l) => samePhone(l.whatsapp, msg.phone) || samePhone(l.phone, msg.phone));
+  let lead = (leads ?? []).find((l) => samePhone(l.whatsapp, msg.phone) || samePhone(l.phone, msg.phone));
 
-  // Store the message. An incoming from a number we have no lead for is still recorded (lead_id
-  // null) so nothing a person sent is silently dropped — but with the schema requiring lead_id,
-  // we only store when matched; an unmatched inbound is logged for the operator instead of lost
-  // to a constraint error.
+  // No matching lead? Don't drop the reply — CREATE a lead for this number so the conversation
+  // always appears in the inbox. This also saves anyone who messages the business first (a number
+  // we never discovered). Stage "replied" because they wrote to us; the operator can rename/qualify
+  // it later. This is why "the reply didn't show" can never be silent again.
   if (!lead) {
-    console.warn(`[whatsapp] inbound from ${inDigits} matched no lead for tenant ${tenantId} — not stored`);
-    return;
+    const { data: created, error: createErr } = await supabase
+      .from("leads")
+      .insert({
+        tenant_id: tenantId,
+        name: `+${inDigits}`,
+        phone: `+${inDigits}`,
+        whatsapp: `+${inDigits}`,
+        source: "whatsapp-inbound",
+        stage: "replied",
+        reason: "They messaged us first on WhatsApp.",
+      })
+      .select("id, stage")
+      .single();
+    if (createErr || !created) {
+      console.warn(`[whatsapp] inbound from ${inDigits}: no lead and could not create one (${createErr?.message}) — not stored`);
+      return;
+    }
+    lead = created as any;
   }
 
   await supabase.from("outreach_messages").insert({
     tenant_id: tenantId,
-    lead_id: lead.id,
+    lead_id: lead!.id,
     direction: "in",
     channel: "whatsapp",
     body: msg.text,
@@ -86,8 +102,8 @@ export async function linkIncoming(
   // there; a fresh reply from a contacted/delivered/read lead becomes `replied`.
   const advanceable = ["queued", "contacted", "delivered", "read", "approved"];
   const patch: Record<string, unknown> = { replied_at: new Date().toISOString(), updated_at: new Date().toISOString() };
-  if (advanceable.includes(String(lead.stage))) patch.stage = "replied";
-  await supabase.from("leads").update(patch).eq("id", lead.id).eq("tenant_id", tenantId);
+  if (advanceable.includes(String(lead!.stage))) patch.stage = "replied";
+  await supabase.from("leads").update(patch).eq("id", lead!.id).eq("tenant_id", tenantId);
 }
 
 /** A delivery or read receipt for a message we sent: advance its status, never regress it.

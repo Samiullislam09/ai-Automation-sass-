@@ -30,7 +30,16 @@ function fakeDb(seed: { leads?: any[]; messages?: any[] } = {}) {
         in(col: string, vals: any[]) { q._in = { col, vals }; return q; },
         maybeSingle() { return Promise.resolve({ data: rowsFor(q)[0] ?? null, error: null }); },
         then(resolve: any) { resolve({ data: rowsFor(q), error: null }); },
-        insert(row: any) { state.inserts.push({ table, row }); (table === "leads" ? state.leads : state.messages).push({ ...row }); return Promise.resolve({ error: null }); },
+        insert(row: any) {
+          const stored = { ...row, id: row.id ?? `gen-${state.leads.length + state.messages.length + 1}` };
+          state.inserts.push({ table, row: stored });
+          (table === "leads" ? state.leads : state.messages).push(stored);
+          // Awaitable AND chainable: Supabase's insert can be awaited directly, or followed by
+          // .select().single() to get the inserted row back (linkIncoming does the latter).
+          const res = { data: stored, error: null };
+          const chain: any = { select() { return chain; }, single() { return Promise.resolve(res); }, maybeSingle() { return Promise.resolve(res); }, then(resolve: any) { resolve({ error: null }); } };
+          return chain;
+        },
         update(patch: any) {
           // Real Supabase returns a filter builder from .update(), so .eq()/.in() chain AFTER
           // it. Apply on the next tick (await), reading the filters set by those chained calls.
@@ -77,10 +86,16 @@ test("an inbound number matches its lead across different phone formatting", asy
   assert.equal(lead.stage, "replied", "a contacted lead that replies moves to replied");
 });
 
-test("an inbound from an unknown number is not forced onto some other lead", async () => {
+test("an inbound from an unknown number creates its own lead (never forced onto another, never lost)", async () => {
   const { db, state } = fakeDb({ leads: [{ id: "L1", tenant_id: "t1", stage: "contacted", whatsapp: "+971500000001" }] });
   await linkIncoming(db, TENANT, { phone: "919999999999", text: "who is this", waMessageId: "W2" });
-  assert.equal(state.inserts.length, 0, "no message stored against a wrong lead");
+  const created = state.leads.find((l) => l.source === "whatsapp-inbound");
+  assert.ok(created, "a new lead was created for the unknown number");
+  assert.equal(created.stage, "replied");
+  const stored = state.inserts.find((i) => i.table === "outreach_messages");
+  assert.ok(stored, "the reply was stored, not dropped");
+  assert.notEqual(stored.row.lead_id, "L1", "and not forced onto the existing lead");
+  assert.equal(stored.row.lead_id, created.id);
 });
 
 test("a reply never drags a lead backward from a later stage", async () => {
