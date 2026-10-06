@@ -344,6 +344,12 @@ function Chat({ lead, onSent, onBack, toast }: { lead: Lead; onSent: () => void;
     const body = text.trim();
     if (!body) return;
     if (!phone) { toast("This lead has no phone number.", "error"); return; }
+    // Optimistic: show the message the instant Send is pressed (like WhatsApp), clock-ticking,
+    // and send in the background. The server round-trip no longer blocks the bubble from showing.
+    const tmpId = `tmp-${Date.now()}`;
+    const optimistic: Msg = { id: tmpId, direction: "out", status: "sending", body, answered_by: "human", created_at: new Date().toISOString() };
+    setThread((t) => [...(t ?? []), optimistic]);
+    setText("");
     setSending(true);
     try {
       const r = await fetch("/api/whatsapp/send", {
@@ -351,11 +357,17 @@ function Chat({ lead, onSent, onBack, toast }: { lead: Lead; onSent: () => void;
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ leadId: lead.id, phone, text: body }),
       }).then((x) => x.json());
-      if (!r.ok) { toast(r.error ?? "Could not send.", "error"); return; }
-      setText("");
-      await loadThread();
+      if (!r.ok) {
+        setThread((t) => (t ?? []).filter((m) => m.id !== tmpId)); // pull the optimistic bubble back
+        setText(body); // restore the text so they can fix the number or retry
+        toast(r.error ?? "Could not send.", "error");
+        return;
+      }
+      await loadThread(); // the real, stored message replaces the optimistic one
       onSent();
     } catch (e: any) {
+      setThread((t) => (t ?? []).filter((m) => m.id !== tmpId));
+      setText(body);
       toast(e?.message ?? "Network error.", "error");
     } finally {
       setSending(false);
@@ -453,7 +465,7 @@ function WaAvatar({ size = 44, src }: { size?: number; src?: string | null }) {
 
 function Bubble({ m }: { m: Msg }) {
   const out = m.direction === "out";
-  const tick = m.status === "read" || m.status === "delivered" ? "✓✓" : m.status === "sent" ? "✓" : "";
+  const tick = m.status === "sending" ? "🕓" : m.status === "read" || m.status === "delivered" ? "✓✓" : m.status === "sent" ? "✓" : "";
   const tickColor = m.status === "read" ? WA.tickBlue : WA.sub;
   return (
     <div className={`flex ${out ? "justify-end" : "justify-start"}`}>

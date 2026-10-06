@@ -194,8 +194,35 @@ export async function sendText(tenantId: string, phone: string, body: string): P
     throw new Error("WhatsApp is not connected for this workspace — pair it first.");
   }
   const jid = `${phone.replace(/[^0-9]/g, "")}@s.whatsapp.net`;
-  const sent = await s.sock.sendMessage(jid, { text: body });
+
+  // Verify the number is actually on WhatsApp BEFORE sending. A landline or any non-WhatsApp
+  // number (common for the business listings leads come from) makes sendMessage hang for minutes
+  // — this was the "5–10 min to send" the owner saw. onWhatsApp answers in a second; if the
+  // number isn't registered we fail fast with a message a human can act on.
+  let target = jid;
+  try {
+    const results = await withTimeout(s.sock.onWhatsApp(jid), 12_000, "checking the number");
+    const info = Array.isArray(results) ? results[0] : undefined;
+    if (!info?.exists) {
+      throw new Error("This number isn't on WhatsApp — it looks like a landline or a number with no WhatsApp account. Try their mobile/WhatsApp number.");
+    }
+    if (info.jid) target = info.jid; // WhatsApp's canonical jid for this number
+  } catch (e: any) {
+    // A real "not on WhatsApp" is rethrown; a timeout on the check shouldn't block a send to a
+    // number that is fine, so fall through to the send (which has its own timeout below).
+    if (/isn't on WhatsApp/.test(String(e?.message))) throw e;
+  }
+
+  const sent = await withTimeout(s.sock.sendMessage(target, { text: body }), 25_000, "sending the message");
   return { waMessageId: sent?.key?.id ?? "" };
+}
+
+/** Race a promise against a timeout so a hung Baileys call can never freeze a request forever. */
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`WhatsApp timed out ${label}. Try again in a moment.`)), ms)),
+  ]);
 }
 
 /** The real WhatsApp profile photo URL for a number, or null. Only works while connected, and
