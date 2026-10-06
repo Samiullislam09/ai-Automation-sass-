@@ -410,9 +410,21 @@ function Chat({ lead, onSent, onBack, toast }: { lead: Lead; onSent: () => void;
         <button className="flex min-w-0 flex-1 items-center gap-2.5 text-left" onClick={() => setDetails(true)} title="View lead details">
           <WaAvatar size={40} src={dp} />
           <div className="min-w-0">
-            <b className="block truncate text-[15px] text-white">{lead.company || lead.name || "Lead"}</b>
+            <div className="flex items-center gap-2">
+              <b className="truncate text-[15px] text-white">{lead.company || lead.name || "Lead"}</b>
+              {onWa === false && (
+                <span className="flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-bold" style={{ background: "#fff", color: "#b42318" }}>
+                  <span style={{ fontSize: 10 }}>⛔</span> Not on WhatsApp
+                </span>
+              )}
+              {onWa === true && (
+                <span className="flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-bold" style={{ background: "rgba(255,255,255,.22)", color: "#fff" }}>
+                  <span className="h-1.5 w-1.5 rounded-full" style={{ background: "#9ef0b0" }} /> On WhatsApp
+                </span>
+              )}
+            </div>
             <span className="text-[12px]" style={{ color: "rgba(255,255,255,.8)" }}>
-              {onWa === false ? "not on WhatsApp" : phone ? `+${phone.replace(/[^0-9]/g, "")}` : "no number"}
+              {phone ? `+${phone.replace(/[^0-9]/g, "")}` : "no number"}
             </span>
           </div>
         </button>

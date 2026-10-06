@@ -256,10 +256,17 @@ export async function getContactInfo(tenantId: string, phone: string): Promise<{
     const info = Array.isArray(results) ? results[0] : undefined;
     onWhatsapp = !!info?.exists;
     if (info?.exists) {
-      try {
-        photo = (await withTimeout(s.sock.profilePictureUrl(info.jid ?? jid, "image"), 8_000, "fetching the photo")) ?? null;
-      } catch {
-        photo = null; // no public photo / privacy
+      const target = info.jid ?? jid;
+      // Try full-res, then the low-res preview — some contacts expose only the preview. Still null
+      // for most cold leads: WhatsApp only shows a photo when their privacy allows it (Everyone,
+      // or when they have us as a contact), which a stranger usually does not.
+      for (const kind of ["image", "preview"] as const) {
+        try {
+          photo = (await withTimeout(s.sock.profilePictureUrl(target, kind), 8_000, "fetching the photo")) ?? null;
+        } catch {
+          photo = null;
+        }
+        if (photo) break;
       }
     }
   } catch {
