@@ -104,6 +104,22 @@ const NOISE = new Set([
   "chahiye", "ke", "ki", "ka", "ko", "me", "mein", "wale", "walon", "wali", "aur", "hai",
   "for", "of", "with", "who", "that", "and", "in", "near", "around", "from", "across", "at",
   "business", "businesses",
+  // Words that describe the REQUEST, never the kind of business being looked for. Added
+  // 2026-10-06 after four real runs produced nothing: the customer asked for "new leads" and
+  // "new leads for my website", and because "new" and "website" were not listed here they
+  // survived as the vertical — so the ICP became "new" and "new website", the search went
+  // looking for businesses of that type, and the buyer-fit gate correctly rejected every
+  // result. found:0, saved:0, twice, from a request that was perfectly clear.
+  //
+  // Dropping these is safe for a real vertical because something else always remains:
+  // "new car dealers" still parses as "car dealers", "website design agencies" as "design
+  // agencies". When NOTHING remains, buildIcp falls through to the Site Brain's own audience,
+  // which is what "find me more leads" should have meant all along.
+  "new", "newer", "fresh", "another", "other", "extra", "additional", "again",
+  "website", "websites", "site", "sites", "web", "page",
+  "generate", "generated", "generating", "create", "created", "make", "add", "run",
+  "matching", "match", "our", "ours", "icp", "profile",
+  "now", "today", "ok", "okay", "theek", "thik",
 ]);
 
 /** "10+ staff", "over 20 employees", "3 branches". */

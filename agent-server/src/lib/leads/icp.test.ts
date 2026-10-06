@@ -205,3 +205,45 @@ test("describeIcp prints only fields that exist", () => {
   assert.equal(withGeo.ok && describeIcp(withGeo.icp), "5 × cafes in Lisbon [local]");
   assert.equal(withoutGeo.ok && describeIcp(withoutGeo.icp), "5 × saas companies [b2b]");
 });
+
+/* ── "find me more leads" is a request, not a vertical (2026-10-06) ──────────────────────────
+ *
+ *  Four real runs on 2026-10-05 produced found:0, saved:0 from perfectly clear asks. The cause
+ *  was here: "new" and "website" were not in NOISE, so "new leads for my website" parsed as the
+ *  vertical "new website", the search went looking for businesses of that type, and the
+ *  buyer-fit gate correctly threw every result away. The customer was told nothing was found.
+ *
+ *  These are the exact queries from `tasks.params` on that day.
+ */
+
+test("a pure request for leads yields no vertical, so the Site Brain is used instead", () => {
+  for (const q of ["new leads", "new leads for my website", "businesses matching our ICP", "top 10 leads", "20 new leads", "generate new leads", "aur leads dhundo"]) {
+    assert.equal(parseQuery(q).industry, null, `"${q}" is a request, not a kind of business`);
+  }
+});
+
+test("a real vertical still survives the same words", () => {
+  // The fix must not cost a genuine query its subject: something always remains.
+  assert.equal(parseQuery("new car dealers in Dubai").industry, "car dealers");
+  assert.equal(parseQuery("website design agencies").industry, "design agencies");
+  assert.equal(parseQuery("restaurants in Dubai").industry, "restaurants");
+  assert.equal(parseQuery("companies needing ISO certification consulting services").industry, "companies needing ISO certification consulting services");
+});
+
+test("the count is still read off a request that has no vertical", () => {
+  // "20 new leads" must still mean twenty of them, even though the vertical comes from elsewhere.
+  assert.equal(parseQuery("20 new leads").count, 20);
+  assert.equal(parseQuery("top 10 leads").count, 10);
+});
+
+test("a request with no vertical falls through to the Site Brain's audience", () => {
+  const icp = buildIcp({ profile: profileFixture({ audience: "dental clinics" }), query: "new leads for my website", count: 20 });
+  assert.equal(icp.ok, true);
+  if (icp.ok) {
+    assert.match(describeIcp(icp.icp).toLowerCase(), /dental clinics/);
+    assert.ok(
+      icp.icp.evidence.some((e) => e.field === "industry" && e.from === "site-brain"),
+      "the vertical must be recorded as coming from the Site Brain, not from the user's words",
+    );
+  }
+});

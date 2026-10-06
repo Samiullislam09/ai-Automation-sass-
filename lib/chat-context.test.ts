@@ -11,7 +11,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { agoPhrase, loadLiveWork, loadSiteIssues } from "./chat-context";
+import { agoPhrase, loadLiveWork, loadSiteIssues, resultOf } from "./chat-context";
 
 /** Minimal chainable stub — only the calls these two functions actually make. */
 function stub(table: string, rows: any, opts: { single?: boolean } = {}) {
@@ -116,4 +116,31 @@ test("agoPhrase reads the past, where untilPhrase would have said 'any moment no
   assert.equal(agoPhrase(new Date("2026-09-18T11:55:00Z"), now), "5 minutes ago");
   assert.equal(agoPhrase(new Date("2026-09-18T09:00:00Z"), now), "3 hours ago");
   assert.equal(agoPhrase(new Date("2026-09-15T12:00:00Z"), now), "3 days ago");
+});
+
+/* ── resultOf: the numbers that stop the brain inventing an explanation (2026-10-06) ──────── */
+
+test("resultOf surfaces a ZERO result, which is the whole reason it exists", () => {
+  // The real row from 2026-10-05: the run succeeded and produced nothing. Reported as "done",
+  // the brain invented a cause; reported with the zero, there is nothing left to invent.
+  const out = resultOf({ found: 0, saved: 0, strong: 0, icp: "20 × new [b2b]" });
+  assert.match(out, /found 0/);
+  assert.match(out, /saved 0/);
+  assert.match(out, /searched for: 20 × new \[b2b\]/);
+});
+
+test("resultOf reports a real result too", () => {
+  const out = resultOf({ found: 4, saved: 4, strong: 3, icp: "10 × Manufacturing Companies in United Arab Emirates [b2b]" });
+  assert.match(out, /found 4, saved 4, strong matches 3/);
+  assert.match(out, /Manufacturing Companies/);
+});
+
+test("resultOf stays silent when a job recorded no counts", () => {
+  assert.equal(resultOf({ cost: { usd: 0.01 } }), "");
+  assert.equal(resultOf(null), "");
+  assert.equal(resultOf("not an object"), "");
+});
+
+test("resultOf never invents a number from a non-numeric field", () => {
+  assert.equal(resultOf({ found: "lots", saved: null }), "");
 });

@@ -419,22 +419,27 @@ test("runPipeline: a qualified lead comes out whole, and is emitted as it is fin
   assert.equal(lead.observation_url, "https://alsafa.example");
 });
 
-test("runPipeline DROPS an unresearchable lead with a reason, at the research stage", async () => {
+test("runPipeline keeps an unresearchable lead that HAS a phone as a basic lead (never-0), drops one with no contact", async () => {
   const fetcher = fakeFetcher(GOOD_PAGES, "could not reach their site (ENOTFOUND)");
   const result = await runPipeline({
-    candidates: [candidate({ name: "Ghost Cafe", website: "https://gone.example", domain: "gone.example" }), candidate()],
+    candidates: [
+      candidate({ name: "Ghost Cafe", website: "https://gone.example", domain: "gone.example" }), // unreachable site, but has a phone
+      candidate({ name: "No Contact Co", website: "https://gone2.example", domain: "gone2.example", phone: null }), // unreachable AND no phone
+      candidate(),
+    ],
     icp: ICP,
     identity: IDENTITY,
     deps: deps({ fetchPage: fetcher.fetchPage }),
   });
 
-  assert.equal(result.leads.length, 1);
-  assert.equal(result.dropped.length, 1);
-  assert.equal(result.dropped[0].name, "Ghost Cafe");
-  assert.equal(result.dropped[0].stage, "research");
-  assert.match(result.dropped[0].reason, /could not reach their site/);
-  // …and nothing half-built leaked through.
-  assert.ok(result.leads.every((l) => l.observation && l.draft));
+  // Ghost Cafe survives as a basic lead (empty draft, scored from its listing); the real Al Safa
+  // is a full lead; only the contactless one is dropped at research.
+  const ghost = result.leads.find((l) => l.name === "Ghost Cafe");
+  assert.ok(ghost, "a business with a phone but no readable site is still a lead");
+  assert.equal(ghost!.draft, ""); // no draft — the human writes it on WhatsApp
+  assert.ok(ghost!.score > 0);
+  assert.ok(result.dropped.some((d) => d.name === "No Contact Co" && d.stage === "research"));
+  assert.ok(result.leads.some((l) => l.name === "Al Safa Restaurant" && l.draft));
 });
 
 test("runPipeline honours suppression, duplicates and the per-domain ceiling before spending anything", async () => {

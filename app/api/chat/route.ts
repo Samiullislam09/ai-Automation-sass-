@@ -259,6 +259,8 @@ function buildMessages(
               `Answer in AT MOST TWO SENTENCES. Do not add totals, counts or anything else that was not asked for.`,
               `Every row above is FINISHED HISTORY. Never say something is "now", "currently" or "in progress" unless a row literally ends in "running" — the model that wrote "the writer is now drafting the article" from a finished keyword row invented that, and inventing it is the one thing forbidden here.`,
               `Answer about progress from these rows and nothing else. Say what the newest one or two show, IN YOUR OWN WORDS — never paste the rows, never list them all. If a row FAILED, lead with that and its reason in plain words.`,
+              `A row that says "done" WITH NUMBERS is finished work and those numbers are the result. "done — found 0, saved 0" means it RAN and produced nothing; it does NOT mean it never ran. Report the zero plainly, and if the row names what it searched for, say that too — that is usually the explanation.`,
+              `NEVER INVENT A REASON WHY SOMETHING DID NOT HAPPEN. Asked "why didn't X run" or "why are there none", answer only from what these rows actually say. If they do not say why, reply that you can see it ran and what it returned but not the reason — and stop there. A made-up cause ("there is no queued record", "the pipeline has nothing pending") is worse than admitting you cannot see it: it sounds exactly like a real answer, and the customer has no way to tell the difference.`,
               ``,
             ]
           : []),

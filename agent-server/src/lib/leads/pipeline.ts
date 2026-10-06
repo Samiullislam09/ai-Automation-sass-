@@ -536,6 +536,67 @@ function mentionsRecentDate(text: string, now: Date): boolean {
   return new RegExp(`\\b(?:${year}|${year - 1})\\b`).test(String(text ?? ""));
 }
 
+function sourceName(s: string): string {
+  return ({ serper: "Google Maps", osm: "OpenStreetMap", places: "Google Places", jobs: "a job board", apollo: "Apollo" } as Record<string, string>)[s] ?? s;
+}
+
+/** Score a candidate from its LISTING alone — no website read — for the never-0 fallback. A Google
+ *  Maps business with a phone in the right place is a usable WhatsApp lead even if its site can't
+ *  be read; this scores it honestly (no inflated signals it never proved) so the number still
+ *  means something. Capped below "strong": a lead we couldn't verify online shouldn't outrank one
+ *  we did. */
+function listingQualify(candidate: Candidate, icp: Icp): Qualified {
+  const components: ScoreComponent[] = [];
+  const add = (id: string, group: ScoreGroup, p: number, max: number, why: string) =>
+    components.push({ id, group, points: Math.max(0, Math.min(max, Math.round(p))), max, why });
+  const listing = `${candidate.name} ${candidate.categories.join(" ")}`.toLowerCase();
+  const inListing = industryTerms(icp.industry).some((t) => listing.includes(t));
+  add("buyer-segment", "fit", inListing ? 26 : 16, 30, inListing ? `their listing marks them a ${icp.industry}` : `found while searching for ${icp.industry}`);
+  add("buying-signals", "signals", 0, 30, "their website couldn't be read, so no buying signals were checked");
+  add("phone", "reachability", candidate.phone ? 12 : 0, 12, candidate.phone ? "a phone number is listed" : "no phone number");
+  add("website", "reachability", candidate.website ? 4 : 0, 8, candidate.website ? "has a website (just not readable now)" : "no website");
+  if (!icp.geo) add("geography", "timing", 14, 20, "no geographic constraint");
+  else {
+    const inAddr = String(candidate.address ?? "").toLowerCase().includes(icp.geo.toLowerCase());
+    add("geography", "timing", inAddr ? 14 : 8, 20, inAddr ? `their address is in ${icp.geo}` : "location not confirmed from the listing");
+  }
+  const score = Math.min(72, Math.max(0, components.reduce((n, c) => n + c.points, 0))); // never "strong" without a site read
+  const band: Qualified["band"] = score >= POLICY.MIN_SCORE_BUYER ? "worth-a-look" : "below-the-line";
+  return { score, band, components, why: explainScore(components, score), disqualified: null };
+}
+
+/** A lead built from the listing only (no website) — name, phone, score, no draft. The human
+ *  writes the first message on WhatsApp. Trusted as a buyer: it came from a buyer-segment search
+ *  and cleared the competitor cue gate. */
+function basicLead(candidate: Candidate, icp: Icp, region: RegionRule, why: string): LeadRecord {
+  const scored = listingQualify(candidate, icp);
+  return {
+    name: candidate.name,
+    company: candidate.name,
+    website: candidate.website,
+    domain: candidate.domain ?? domainOf(candidate.website),
+    email: null,
+    phone: candidate.phone,
+    source: candidate.source,
+    attribution: candidate.attribution,
+    score: scored.score,
+    band: scored.band,
+    why,
+    reasons: scored.components,
+    observation: "",
+    observation_quote: "",
+    observation_url: "",
+    channel: "phone",
+    draft: "",
+    status: "draft",
+    sent: false,
+    region_note: region.note,
+    legal_basis: region.basis,
+    classification: "buyer",
+    country: candidate.country ?? null,
+  };
+}
+
 /** The ICP's vertical as searchable terms: the words themselves, plus the obvious singular of
  *  a plural ("restaurants" → "restaurant"), so "5 restaurants" in a query still matches a page
  *  that says "restaurant". Deliberately not a stemmer — a stemmer's mistakes are unreadable. */
@@ -925,6 +986,25 @@ export async function runPipeline(input: PipelineInput): Promise<PipelineResult>
     // ── 1 · research ─────────────────────────────────────────────────────────────────────
     const researchedResult = await research(candidate, deps);
     if (!researchedResult.ok) {
+      // No readable website — but this is a WhatsApp-first product, and a real business with a
+      // PHONE is a usable lead. Rather than throw it away (the #1 cause of 0-lead runs: most
+      // Google Maps listings have no site to read), keep it as a BASIC lead scored from its
+      // listing, with no draft — the human writes the first message on WhatsApp. A candidate with
+      // no phone and an unreadable site can't be contacted, so that one is still dropped.
+      if (candidate.phone) {
+        const admitted = ledger.admit(domain ?? key);
+        if (!admitted.ok) {
+          drop(candidate.name, domain, "ceiling", admitted.violation.detail);
+          if (admitted.violation.rule === "run-ceiling") break;
+          continue;
+        }
+        const lead = basicLead(candidate, icp, region, `Found on ${sourceName(candidate.source)} while looking for ${icp.industry}. Their website couldn't be read — reach them on WhatsApp or phone.`);
+        assertDraftOnly(lead);
+        stats.drafted += 1;
+        leads.push(lead);
+        input.onLead?.(lead);
+        continue;
+      }
       drop(candidate.name, domain, "research", researchedResult.reason);
       continue;
     }
@@ -971,21 +1051,25 @@ export async function runPipeline(input: PipelineInput): Promise<PipelineResult>
       continue;
     }
 
-    // ── 3 · personalise ──────────────────────────────────────────────────────────────────
+    // ── 3 · personalise + 4 · draft — BEST EFFORT ─────────────────────────────────────────
+    // This candidate already qualified: it is a real, in-geo buyer we can reach. The personalised
+    // opener and the email draft are a BONUS, not a gate — if the model can't find a quotable
+    // observation or can't write a compliant draft, we still keep the lead (empty draft) and the
+    // human writes the first message on WhatsApp. Dropping a qualified buyer for want of a draft
+    // was turning good runs into 0.
+    let channel: OutreachChannel = researched.email ? "email" : researched.summary.has_contact_form ? "contact-form" : "phone";
+    let observation = { text: "", quote: "", url: "" };
+    let draftText = "";
     const personalised = await personalise(researched, icp, deps);
-    if (!personalised.ok) {
-      drop(candidate.name, domain, "personalise", personalised.reason);
-      continue;
+    if (personalised.ok) {
+      observation = personalised.observation;
+      const drafted = await draft(researched, { icp, identity, observation: personalised.observation, channel, region }, deps);
+      if (drafted.ok) {
+        draftText = drafted.draft.text;
+        channel = drafted.draft.channel;
+        stats.drafted += 1;
+      }
     }
-
-    // ── 4 · draft ────────────────────────────────────────────────────────────────────────
-    const channel: OutreachChannel = researched.email ? "email" : researched.summary.has_contact_form ? "contact-form" : "phone";
-    const drafted = await draft(researched, { icp, identity, observation: personalised.observation, channel, region }, deps);
-    if (!drafted.ok) {
-      drop(candidate.name, domain, "draft", drafted.reason);
-      continue;
-    }
-    stats.drafted += 1;
 
     const lead: LeadRecord = {
       name: candidate.name,
@@ -1000,11 +1084,11 @@ export async function runPipeline(input: PipelineInput): Promise<PipelineResult>
       band: scored.band,
       why: scored.why,
       reasons: scored.components,
-      observation: personalised.observation.text,
-      observation_quote: personalised.observation.quote,
-      observation_url: personalised.observation.url,
-      channel: drafted.draft.channel,
-      draft: drafted.draft.text,
+      observation: observation.text,
+      observation_quote: observation.quote,
+      observation_url: observation.url,
+      channel,
+      draft: draftText,
       status: "draft",
       sent: false,
       region_note: region.note,

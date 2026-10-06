@@ -176,7 +176,7 @@ export async function loadRecentWork(supabase: SupabaseClient, tenantId: string 
         const hint = j.detail?.hint ? ` (${String(j.detail.hint).slice(0, 120)})` : "";
         const outcome =
           j.status === "error" ? `FAILED: ${String(j.detail?.message ?? "unknown error").slice(0, 120)}${hint}`
-          : j.status === "success" ? "done"
+          : j.status === "success" ? `done${resultOf(j.detail)}`
           : j.status;
         return `- ${when} · ${j.agent} · ${what} — ${outcome}`;
       })
@@ -185,6 +185,49 @@ export async function loadRecentWork(supabase: SupabaseClient, tenantId: string 
     console.error("[chat] recent work failed:", e?.message);
     return null;
   }
+}
+
+/** The numbers a finished job actually produced, read off the agent's own `detail`.
+ *
+ *  MEASURED, 2026-10-05. A customer asked for 20 leads. The job ran, and it ran SUCCESSFULLY —
+ *  Google Maps returned 20 places and the buyer-fit gate rejected all of them, so the recorded
+ *  detail was `found:0, saved:0`. This function did not exist, so `loadRecentWork` reported that
+ *  row to the brain as the single word "done".
+ *
+ *  Asked "kitne leads mile?", the brain therefore had a successful-looking job and no numbers,
+ *  and it filled the gap the way a model always will — it invented one: "aapke current outreach
+ *  pipeline mein koi pending ya queued lead creation ka record nahi hai." There was a record. A
+ *  task row and a successful job row, ninety seconds earlier. The explanation was fluent,
+ *  specific and false, which is the worst combination a product can produce.
+ *
+ *  So the real counts go in. A model cannot be trusted to say "zero" unless it has been handed
+ *  the zero — and "done, found 0" is a fact it can report, where "done" is an invitation to
+ *  guess. Only keys an agent genuinely writes are read; nothing is computed or inferred here. */
+const RESULT_KEYS: { key: string; label: string }[] = [
+  { key: "found", label: "found" },
+  { key: "saved", label: "saved" },
+  { key: "strong", label: "strong matches" },
+  { key: "published", label: "published" },
+  { key: "words", label: "words" },
+  { key: "pages", label: "pages" },
+  { key: "images", label: "images" },
+  { key: "sections", label: "sections" },
+  { key: "score", label: "score" },
+];
+
+export function resultOf(detail: unknown): string {
+  if (!detail || typeof detail !== "object") return "";
+  const d = detail as Record<string, unknown>;
+  const bits: string[] = [];
+  for (const { key, label } of RESULT_KEYS) {
+    const v = d[key];
+    // Zero is the whole point — `if (v)` would drop exactly the case this exists for.
+    if (typeof v === "number" && Number.isFinite(v)) bits.push(`${label} ${v}`);
+  }
+  // The ICP a lead run actually searched for. "found 0" with no idea WHAT was searched for is
+  // half an answer, and the half that is missing is the one that explains the zero.
+  if (typeof d.icp === "string" && d.icp.trim()) bits.push(`searched for: ${d.icp.trim().slice(0, 90)}`);
+  return bits.length ? ` — ${bits.join(", ")}` : "";
 }
 
 /** What the team is doing RIGHT NOW — the one thing Mr Lxwa could never see.
