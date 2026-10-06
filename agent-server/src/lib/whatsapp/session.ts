@@ -160,7 +160,14 @@ export async function connect(
     if (m.type !== "notify" && m.type !== "append") return;
     for (const msg of m.messages ?? []) {
       if (msg.key?.fromMe) continue; // our own outgoing echo, already recorded on send
-      const jid = msg.key?.remoteJid as string | undefined;
+      let jid = msg.key?.remoteJid as string | undefined;
+      // WhatsApp now delivers many incoming messages with a privacy LID (<id>@lid) as remoteJid
+      // instead of the phone number — the real phone jid is in remoteJidAlt. Without this, a reply
+      // from a known lead lands under a junk "+<lid>" contact instead of matching their number.
+      if (jid?.endsWith("@lid")) {
+        const alt = (msg.key?.remoteJidAlt ?? msg.key?.senderPn ?? msg.key?.participantAlt) as string | undefined;
+        if (alt && alt.includes("@s.whatsapp.net")) jid = alt;
+      }
       if (!jid || jid.endsWith("@g.us") || jid === "status@broadcast") continue; // skip groups + status
       const text =
         msg.message?.conversation ??
