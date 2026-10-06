@@ -14,6 +14,24 @@ function digits(s: string | null | undefined): string {
   return String(s ?? "").replace(/[^0-9]/g, "");
 }
 
+/** A phone's SIGNIFICANT digits for matching: digits with the leading trunk/country zeros removed.
+ *  A UAE landline stored as "02 619 9100" is "026199100", but WhatsApp delivers it as
+ *  "97126199100" (country code, no trunk 0) — a raw endsWith never matches because of that 0.
+ *  Stripping leading zeros makes "26199100" a clean suffix of "97126199100", so the two line up. */
+function sigDigits(s: string | null | undefined): string {
+  return digits(s).replace(/^0+/, "");
+}
+
+/** Do two phone numbers refer to the same line, allowing for country-code / trunk-0 differences?
+ *  Compares significant digits with a both-ways suffix test, requiring ≥7 shared trailing digits so
+ *  a short number can't false-match a long one. */
+function samePhone(a: string | null | undefined, b: string | null | undefined): boolean {
+  const x = sigDigits(a);
+  const y = sigDigits(b);
+  if (x.length < 7 || y.length < 7) return false;
+  return x.endsWith(y) || y.endsWith(x);
+}
+
 /** An incoming WhatsApp message: store it, attach it to the lead it came from, and move that
  *  lead's stage to `replied` (unless it is already further along). Nothing is auto-answered. */
 export async function linkIncoming(
@@ -24,21 +42,14 @@ export async function linkIncoming(
   const inDigits = digits(msg.phone);
 
   // Find the lead this number belongs to. Pull this tenant's leads that have any number stored
-  // and match on digits-suffix in code — PostgREST cannot do the normalisation in a filter.
+  // and match on significant-digits suffix in code — PostgREST cannot do the normalisation in a
+  // filter, and a raw suffix fails on the leading trunk 0 most local numbers carry.
   const { data: leads } = await supabase
     .from("leads")
     .select("id, stage, whatsapp, phone")
     .eq("tenant_id", tenantId);
 
-  const lead = (leads ?? []).find((l) => {
-    const a = digits(l.whatsapp);
-    const b = digits(l.phone);
-    // Suffix match both ways: one may carry a country code the other omits.
-    return (
-      (a && (a.endsWith(inDigits) || inDigits.endsWith(a))) ||
-      (b && (b.endsWith(inDigits) || inDigits.endsWith(b)))
-    );
-  });
+  const lead = (leads ?? []).find((l) => samePhone(l.whatsapp, msg.phone) || samePhone(l.phone, msg.phone));
 
   // Store the message. An incoming from a number we have no lead for is still recorded (lead_id
   // null) so nothing a person sent is silently dropped — but with the schema requiring lead_id,

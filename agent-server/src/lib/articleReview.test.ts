@@ -542,3 +542,35 @@ test("addInternalLinks matches whole words only", () => {
   const out = addInternalLinks(body, PAGES, LINK_SITE);
   assert.ok(!/coursework\]/.test(out), "'staff training courses' must not match inside 'coursework'");
 });
+
+/* ── the introduction's own paragraphs (2026-10-06) ───────────────────────────────────────── */
+
+test("capLongParagraphs DOES cut the introduction's opening paragraph", () => {
+  // The bug this covers: the fixer skipped the first prose block of EVERY part to protect the
+  // 40-58 word snippet answer — but only an H2 section has one. The intro's opener was therefore
+  // never cut and always checked, and `"Introduction": Paragraphs of 4 sentences or fewer` became
+  // the most common failure across every article written in a fortnight.
+  const long = "One two three four. Five six seven eight. Nine ten eleven twelve. Thirteen fourteen fifteen. Sixteen seventeen eighteen. Nineteen twenty twentyone.";
+  const body = `# Title\n\n${long}\n\n## A real section?\n\n${long}`;
+  const out = capLongParagraphs(body, 4);
+
+  const intro = out.split("## ")[0];
+  for (const block of intro.split(/\n{2,}/)) {
+    const t = block.trim();
+    if (!t || t.startsWith("#")) continue;
+    assert.ok(sentencesIn(t) <= 4, `intro paragraph still has ${sentencesIn(t)} sentences: ${t.slice(0, 60)}`);
+  }
+});
+
+test("a section's snippet answer is still protected", () => {
+  // The other half of the same rule: an H2's first paragraph IS the required single-paragraph
+  // 40-58 word answer, and splitting it would break that rule to satisfy this one.
+  const answer = "One two three four. Five six seven eight. Nine ten eleven twelve. Thirteen fourteen fifteen. Sixteen seventeen eighteen.";
+  const body = `# Title\n\n## What does it cost?\n\n${answer}`;
+  const out = capLongParagraphs(body, 4);
+  assert.ok(out.includes(answer), "the snippet answer must survive intact");
+});
+
+function sentencesIn(s: string): number {
+  return s.split(/(?<=[.!?])\s+/).filter((x) => x.trim()).length;
+}

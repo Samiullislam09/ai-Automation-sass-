@@ -139,12 +139,13 @@ function Inbox() {
   const [newChat, setNewChat] = useState(false);
 
   const loadList = useCallback(async () => {
-    try {
-      const [ls, ib] = await Promise.all([
-        fetch("/api/leads?stage=all").then((r) => r.json()),
-        fetch("/api/whatsapp/messages").then((r) => r.json()),
-      ]);
-      if (ls.ok) {
+    // Two INDEPENDENT fetches, not Promise.all: the chat list is the leads call, so render it the
+    // moment it returns instead of waiting on the heavier last-message query too. The message
+    // previews fold in a beat later. This is what made the page sit on "Loading…" for seconds.
+    fetch("/api/leads?stage=all")
+      .then((r) => r.json())
+      .then((ls) => {
+        if (!ls.ok) return;
         const all = ls.items as Lead[];
         const inConvo = all.filter((l) =>
           ["approved", "contacted", "delivered", "read", "replied", "in_conversation", "interested", "won", "lost"].includes(l.stage)
@@ -158,13 +159,18 @@ function Inbox() {
           if (wanted) return inConvo.find((x) => x.id === wanted) ?? all.find((x) => x.id === wanted) ?? inConvo[0] ?? null;
           return inConvo[0] ?? null;
         });
-      }
-      if (ib.ok) {
+      })
+      .catch(() => {});
+
+    fetch("/api/whatsapp/messages")
+      .then((r) => r.json())
+      .then((ib) => {
+        if (!ib.ok) return;
         const map: Record<string, any> = {};
         for (const m of ib.inbox ?? []) map[m.lead_id] = { body: m.body, direction: m.direction, created_at: m.created_at };
         setInbox(map);
-      }
-    } catch { /* transient */ }
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -205,9 +211,7 @@ function Inbox() {
                   className="flex w-full items-center gap-3 px-3.5 py-3 text-left"
                   style={{ background: on ? WA.listHover : WA.panel, borderBottom: `1px solid ${WA.divider}` }}
                 >
-                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[15px] font-bold text-white" style={{ background: WA.green }}>
-                    {(l.company || l.name || "?").slice(0, 1).toUpperCase()}
-                  </span>
+                  <WaAvatar size={44} />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[14px] font-semibold" style={{ color: WA.text }}>{l.company || l.name || "Lead"}</span>
                     <span className="block truncate text-[12.5px]" style={{ color: WA.sub }}>
@@ -253,6 +257,7 @@ function Chat({ lead, onSent, onBack, toast }: { lead: Lead; onSent: () => void;
   const [sending, setSending] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  const autoFor = useRef<string | null>(null);
   const phone = lead.whatsapp || lead.phone || "";
 
   const loadThread = useCallback(async () => {
@@ -293,6 +298,22 @@ function Chat({ lead, onSent, onBack, toast }: { lead: Lead; onSent: () => void;
     }
   };
 
+  // Auto-suggest, once per conversation opened (not on every 5s poll): the compose box fills
+  // itself so the human just reviews and presses Send. An empty chat gets the pre-written draft
+  // (free); a chat whose last message is THEIRS gets a Brain-drafted reply (one LLM call).
+  useEffect(() => {
+    if (thread === null) return; // still loading this lead's thread
+    if (autoFor.current === lead.id) return; // already handled this conversation
+    autoFor.current = lead.id;
+    if (text.trim()) return; // the human is already typing — never overwrite
+    if (thread.length === 0) {
+      if (lead.draft) setText(lead.draft);
+    } else if (thread[thread.length - 1]?.direction === "in") {
+      void suggest();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [thread, lead.id]);
+
   const send = async () => {
     const body = text.trim();
     if (!body) return;
@@ -322,9 +343,7 @@ function Chat({ lead, onSent, onBack, toast }: { lead: Lead; onSent: () => void;
         <button className="md:hidden" onClick={onBack} aria-label="Back">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M15 18l-6-6 6-6" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </button>
-        <span className="flex h-10 w-10 items-center justify-center rounded-full text-[15px] font-bold" style={{ background: "rgba(255,255,255,.25)", color: "#fff" }}>
-          {(lead.company || lead.name || "?").slice(0, 1).toUpperCase()}
-        </span>
+        <WaAvatar size={40} />
         <div className="min-w-0">
           <b className="block truncate text-[15px] text-white">{lead.company || lead.name || "Lead"}</b>
           <span className="text-[12px]" style={{ color: "rgba(255,255,255,.8)" }}>{phone ? `+${phone.replace(/[^0-9]/g, "")}` : "no number"}</span>
@@ -374,6 +393,20 @@ function Chat({ lead, onSent, onBack, toast }: { lead: Lead; onSent: () => void;
         </button>
       </div>
     </>
+  );
+}
+
+/** WhatsApp-style default avatar: a muted circle with a white person silhouette, exactly the
+ *  placeholder WhatsApp shows for a contact with no photo. (Real profile photos would be fetched
+ *  from WhatsApp on the server — a follow-up; this is the clean default until then.) */
+function WaAvatar({ size = 44 }: { size?: number }) {
+  return (
+    <span className="flex shrink-0 items-center justify-center rounded-full" style={{ width: size, height: size, background: "#d9e0e3" }}>
+      <svg width={size * 0.62} height={size * 0.62} viewBox="0 0 212 212" aria-hidden>
+        <path fill="#fff" d="M106.251.5C164.653.5 212 47.846 212 106.25S164.653 212 106.25 212 .5 164.654.5 106.25 47.846.5 106.251.5z" opacity="0" />
+        <path fill="#aebac1" d="M106.25 0C47.846 0 .5 47.346.5 105.75S47.846 211.5 106.25 211.5 212 164.154 212 105.75 164.654 0 106.25 0zm0 61c17.4 0 31.5 14.1 31.5 31.5S123.65 124 106.25 124s-31.5-14.1-31.5-31.5S88.85 61 106.25 61zm0 123c-26.25 0-49.35-13.35-62.85-33.6 6.6-18.9 44.85-29.25 62.85-29.25s56.25 10.35 62.85 29.25c-13.5 20.25-36.6 33.6-62.85 33.6z" />
+      </svg>
+    </span>
   );
 }
 

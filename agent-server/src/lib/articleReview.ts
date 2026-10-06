@@ -314,7 +314,17 @@ export function capLongParagraphs(body: string, maxSentences: number = MAX_PARAG
         out.push(block);
         continue;
       }
-      if (!seenAnswerParagraph) {
+      // The exemption protects the 40-58 word SNIPPET ANSWER, and only a section with a heading
+      // has one — `snippet-answer` is checked per-H2 and never against the introduction. The
+      // intro was being skipped anyway, so its opening paragraph was the one block in the whole
+      // article that the fixer refused to touch and the checker still judged.
+      //
+      // MEASURED 2026-10-06, across every article written since 20 September (17 of 17 failed):
+      // `"Introduction": Paragraphs of 4 sentences or fewer` is the single most common failure
+      // in the entire corpus. It could never be fixed, by any number of rounds, because the one
+      // function that fixes it had been told to leave it alone. Fixer and checker disagreed, and
+      // the checker had the publish authority.
+      if (part.h2 !== null && !seenAnswerParagraph) {
         seenAnswerParagraph = true;
         out.push(block);
         continue;

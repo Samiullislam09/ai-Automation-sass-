@@ -4770,7 +4770,7 @@ export default function MrLxwaDashboard({
         // that showed as an empty gap beside full-width pages like Leads. As a FAB it needs no
         // reserved space, so content now runs full width.
         <button
-          className="fixed bottom-5 right-5 z-40 hidden h-12 w-12 items-center justify-center rounded-full shadow-lg lg:flex"
+          className="fixed right-4 top-1/2 z-40 hidden h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full shadow-lg lg:flex"
           style={{ background: "linear-gradient(135deg,#6366f1,#22d3ee)", color: "#fff" }}
           onClick={() => setDesktopAssistantOpen(true)}
           aria-label="Open AI assistant"
