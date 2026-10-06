@@ -68,25 +68,37 @@ export type Candidate = {
   country?: string | null;
 };
 
-/** The country from a postal address, or null. Google Maps / Serper addresses reliably end with
- *  the country, so the last comma-segment is taken and common short forms (UAE, USA, UK …) are
- *  canonicalised. Conservative: a segment that is a number or too short is skipped. */
-export function countryFromAddress(address: string | null | undefined): string | null {
-  const parts = String(address ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  if (!parts.length) return null;
-  const aliases: [RegExp, string][] = [
-    [/^(uae|u\.?a\.?e\.?|united arab emirates)$/i, "United Arab Emirates"],
-    [/^(ksa|saudi arabia)$/i, "Saudi Arabia"],
-    [/^(uk|u\.?k\.?|united kingdom|england|scotland|wales|britain)$/i, "United Kingdom"],
-    [/^(usa|u\.?s\.?a\.?|united states( of america)?|america)$/i, "United States"],
-    [/^(uae?|emirates)$/i, "United Arab Emirates"],
-  ];
-  for (const seg of [parts[parts.length - 1], parts[parts.length - 2]].filter(Boolean)) {
-    for (const [re, name] of aliases) if (re.test(seg)) return name;
-  }
-  const last = parts[parts.length - 1];
-  return /^[A-Za-z][A-Za-z .'\-]{2,39}$/.test(last) ? last : null;
+/** Country from any text (a postal address, or a run's geo). STRICT: only a recognised country
+ *  or one of its well-known cities/regions is returned — never a stray address fragment (an
+ *  earlier version returned "near Emirates Steel - ICAD I - Abu Dhabi" as the "country"). A hit on
+ *  a city ("Dubai", "Mumbai") maps to its country, because Google Maps addresses often end at the
+ *  city, not the country. Unknown → null, and the caller falls back to the run's geo. */
+const COUNTRY_PATTERNS: [RegExp, string][] = [
+  [/united arab emirates|\buae\b|\bu\.?a\.?e\.?\b|\bemirates\b|dubai|abu dhabi|sharjah|ajman|fujairah|ras al khaimah|umm al quwain/i, "United Arab Emirates"],
+  [/saudi arabia|\bksa\b|riyadh|jeddah|dammam|\bmecca\b|medina/i, "Saudi Arabia"],
+  [/\bqatar\b|\bdoha\b/i, "Qatar"],
+  [/\bkuwait\b/i, "Kuwait"],
+  [/\boman\b|muscat/i, "Oman"],
+  [/bahrain|manama/i, "Bahrain"],
+  [/\bindia\b|mumbai|new delhi|\bdelhi\b|bengaluru|bangalore|\bpune\b|chennai|hyderabad|kolkata|ahmedabad|gujarat|maharashtra|noida|gurgaon|gurugram/i, "India"],
+  [/pakistan|karachi|lahore|islamabad/i, "Pakistan"],
+  [/united kingdom|\bu\.?k\.?\b|\bengland\b|\blondon\b|\bbritain\b|manchester|birmingham/i, "United Kingdom"],
+  [/united states|\bu\.?s\.?a\.?\b|new york|california|\btexas\b|\bflorida\b/i, "United States"],
+  [/\bsingapore\b/i, "Singapore"],
+  [/\bcanada\b|toronto|vancouver|ontario/i, "Canada"],
+  [/\baustralia\b|sydney|melbourne|brisbane/i, "Australia"],
+];
+export function countryFrom(text: string | null | undefined): string | null {
+  const s = String(text ?? "");
+  if (!s.trim()) return null;
+  for (const [re, name] of COUNTRY_PATTERNS) if (re.test(s)) return name;
+  return null;
 }
+/** The country a lead's address is in (back-compat name — now the strict matcher above). */
+export const countryFromAddress = countryFrom;
+/** The country a run's geo points at ("UAE"/"Dubai" → United Arab Emirates), the fallback when a
+ *  lead's own address doesn't name one. */
+export const countryForGeo = countryFrom;
 
 /** What each source did this run — printed in the agent's output so "why only 4 leads?" has an
  *  answer that names the missing key instead of shrugging. */

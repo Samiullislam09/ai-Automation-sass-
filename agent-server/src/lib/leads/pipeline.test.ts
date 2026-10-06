@@ -567,13 +567,21 @@ test("Gate B: a competitor verdict (with a real quote) classifies as competitor"
   assert.equal(v.verdict, "competitor");
 });
 
-test("Gate B: a verdict whose quote is NOT on the page is downgraded to unclear (no admitting on an unverifiable claim)", async () => {
+test("Gate B: a BUYER verdict is trusted even when its quote doesn't verify (don't bin real buyers)", async () => {
   const r = await research(candidate(), deps());
   if (!r.ok) return assert.fail("research failed");
   const d = deps({ llmJson: fakeLlm({ classify: { verdict: "buyer", quote: "this sentence is nowhere on their website at all", reason: "x" } }).llmJson });
   const v = await classifyFit(r.researched, GATE, d);
-  assert.equal(v.verdict, "unclear");
-  assert.equal(v.quote, null);
+  assert.equal(v.verdict, "buyer"); // Gate A already screened competitors; a buyer verdict stands
+  assert.equal(v.quote, null); // but the unverifiable quote is not kept as evidence
+});
+
+test("Gate B: a COMPETITOR verdict with an unverifiable quote still classifies competitor (dropped either way)", async () => {
+  const r = await research(candidate(), deps());
+  if (!r.ok) return assert.fail("research failed");
+  const d = deps({ llmJson: fakeLlm({ classify: { verdict: "competitor", quote: "nowhere on their site", reason: "peer" } }).llmJson });
+  const v = await classifyFit(r.researched, GATE, d);
+  assert.equal(v.verdict, "competitor");
 });
 
 test("runPipeline with fitGate: a cue-matching competitor is dropped before any page is fetched", async () => {

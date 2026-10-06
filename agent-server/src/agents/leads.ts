@@ -6,7 +6,7 @@ import { loadActiveProfile, saveProfile, buyerProfileUsable, type SiteProfile } 
 import { draftBuyerProfile } from "../lib/leads/buyerProfile.js";
 import { buildIcp, buildIcpFromBuyerSegment, describeIcp } from "../lib/leads/icp.js";
 import { getLeadSettings, patchLeadSettings, leadsDailyStatus } from "../lib/outreach/settings.js";
-import { discover, describeSources, fetchPageForResearch } from "../lib/leads/sources.js";
+import { discover, describeSources, fetchPageForResearch, countryForGeo } from "../lib/leads/sources.js";
 import { buildFindLeadsOutput, runPipeline, type LeadRecord, type PipelineDeps } from "../lib/leads/pipeline.js";
 import { POLICY, RunLedger, assertDraftOnly, domainOf, nameKey, phoneKey, stripWww, type SenderIdentity, type SuppressionEntry } from "../lib/leads/compliance.js";
 
@@ -255,6 +255,7 @@ export class LeadsAgent extends Agent {
     const saved = await saveLeads(tenantId, result.leads, city, {
       source_segment: sourceSegment,
       source_query: icp.searchTerms[0] ?? null,
+      country: countryForGeo(icp.geo), // run-level fallback when a lead's own address names no country
     });
 
     ctx.progress(1, `${result.leads.length} leads, ${result.leads.filter((l) => l.band === "strong").length} strong`);
@@ -422,7 +423,7 @@ async function saveLeads(
   tenantId: string,
   leads: LeadRecord[],
   city: string | null = null,
-  meta: { source_segment?: string | null; source_query?: string | null } = {},
+  meta: { source_segment?: string | null; source_query?: string | null; country?: string | null } = {},
 ): Promise<{ count: number; warning: string | null }> {
   if (!leads.length) return { count: 0, warning: null };
 
@@ -480,7 +481,7 @@ async function saveLeads(
     // Which confirmed buyer segment + query produced this lead (Phase 2), and the score detail so
     // "68/100" is explainable in the drawer (Phase 4). All nullable — migration 030 adds them, and
     // the core-insert fallback below covers a database where 030 has not run yet.
-    country: lead.country ?? null,
+    country: lead.country ?? meta.country ?? null,
     source_segment: meta.source_segment ?? null,
     source_query: meta.source_query ?? null,
     classification: lead.classification ?? null,

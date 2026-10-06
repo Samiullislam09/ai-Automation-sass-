@@ -796,17 +796,17 @@ export async function classifyFit(researched: Researched, gate: FitGate, deps: P
   const reason = cleanText(answer?.reason, 160) || "no reason given";
   const quote = cleanText(answer?.quote, 300);
 
-  // The proof rule: any decisive verdict must be backed by words actually on the page. If it is
-  // not, we do not trust it — downgrade to "unclear" so the caller drops it rather than admit a
-  // competitor on an unverifiable claim.
-  if (verdict !== "unclear") {
-    const hay = norm(researched.text);
+  // The proof rule, applied ASYMMETRICALLY (2026-10-06, after a live run dropped 8–12 real
+  // buyers per run to "unclear"). Gate A has already screened obvious competitors by cue, and the
+  // model explicitly chose "buyer" over "competitor"/"irrelevant" here — so a BUYER verdict is
+  // trusted even when its quote doesn't verify (losing a real buyer is the worse error). A
+  // competitor/irrelevant verdict is a DROP either way, so it needs no quote. The quote stays
+  // required only to keep evidence where we have it; its absence no longer bins a buyer.
+  const verified = (() => {
     const needle = norm(quote || "");
-    if (needle.length < 12 || !hay.includes(needle)) {
-      return { verdict: "unclear", quote: null, reason: `${verdict} verdict had no quote we could verify on their site` };
-    }
-  }
-  return { verdict, quote: quote || null, reason };
+    return needle.length >= 12 && norm(researched.text).includes(needle);
+  })();
+  return { verdict, quote: verified ? quote : null, reason };
 }
 
 // ── the graph ───────────────────────────────────────────────────────────────────────────────
