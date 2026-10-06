@@ -14,7 +14,7 @@ process.env.DATABASE_URL ||= "postgres://unit-test/none";
 process.env.SUPABASE_URL ||= "http://unit-test.invalid";
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= "unit-test";
 
-const { checkArticle, runArticleReview, splitArticle, assembleArticle, stampByline, capLongParagraphs, bulletizeBareLists, keepBetter, cutSemicolons, addInternalLinks, REVIEW_MAX_ROUNDS } = await import("./articleReview.js");
+const { checkArticle, runArticleReview, splitArticle, assembleArticle, stampByline, capLongParagraphs, bulletizeBareLists, keepBetter, cutSemicolons, addInternalLinks, varySentenceRhythm, REVIEW_MAX_ROUNDS } = await import("./articleReview.js");
 
 const KW = "emergency plumber in Leeds";
 const SITE = "https://example.com";
@@ -597,3 +597,52 @@ test("a section's snippet answer is still protected", () => {
 function sentencesIn(s: string): number {
   return s.split(/(?<=[.!?])\s+/).filter((x) => x.trim()).length;
 }
+
+/* ── varySentenceRhythm (2026-10-06) ──────────────────────────────────────────────────────── */
+
+test("varySentenceRhythm joins two short sentences and keeps every word", () => {
+  const body = "# T\n\n## A real section?\n\nFixed-fee packages are common here. Day-rate models appear later.";
+  const out = varySentenceRhythm(body);
+  assert.match(out, /Fixed-fee packages are common here, and day-rate models appear later\./);
+  // Only "and" is ever introduced.
+  const words = (s: string) => s.replace(/[#*]/g, " ").split(/\s+/).filter(Boolean).length;
+  assert.equal(words(out), words(body) + 1);
+});
+
+test("varySentenceRhythm never writes 'and however'", () => {
+  // A sentence that already carries its own connective must stay its own sentence.
+  const body = "# T\n\n## A real section?\n\nCosts stay low at first. However fees rise later.";
+  assert.equal(varySentenceRhythm(body), body);
+});
+
+test("varySentenceRhythm leaves long sentences alone", () => {
+  const long = "This sentence is deliberately long enough that merging it with anything else would push the result well past the point where a reader can follow it comfortably.";
+  const body = `# T\n\n## A real section?\n\n${long} ${long}`;
+  assert.equal(varySentenceRhythm(body), body);
+});
+
+test("varySentenceRhythm never touches tables, lists, headings or the byline", () => {
+  for (const block of [
+    "| Size | Fee |\n| --- | --- |\n| Small | 5000 |",
+    "- One item here.\n- Two item here.\n- Three item here.",
+    "## Is this a heading?",
+    "*Last updated: 1 January 2026 · By WCA Global*",
+  ]) {
+    const body = `# T\n\n${block}`;
+    assert.equal(varySentenceRhythm(body), body, `must not touch: ${block.slice(0, 24)}`);
+  }
+});
+
+test("varySentenceRhythm merges at most once per sentence", () => {
+  // Four short sentences become two, never one run-on of four clauses.
+  const body = "# T\n\n## A real section?\n\nCosts stay low. Fees rise later. Audits take time. Staff need training.";
+  const out = varySentenceRhythm(body);
+  const sentences = out.split("\n\n").pop()!.split(/(?<=[.!?])\s+/).filter(Boolean);
+  assert.equal(sentences.length, 2);
+});
+
+test("varySentenceRhythm is idempotent", () => {
+  const body = "# T\n\n## A real section?\n\nCosts stay low here. Fees rise later on.";
+  const once = varySentenceRhythm(body);
+  assert.equal(varySentenceRhythm(once), once);
+});

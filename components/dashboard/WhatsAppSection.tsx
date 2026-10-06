@@ -142,7 +142,7 @@ function ConnectCta({ status, onConnect }: { status: string; onConnect: () => vo
 function Inbox() {
   const { toast } = useStore();
   const [leads, setLeads] = useState<Lead[] | null>(null);
-  const [inbox, setInbox] = useState<Record<string, { body: string; direction: string; created_at: string }>>({});
+  const [inbox, setInbox] = useState<Record<string, { body: string; direction: string; created_at: string; status?: string; unanswered?: number }>>({});
   const [active, setActive] = useState<Lead | null>(null);
   const [newChat, setNewChat] = useState(false);
 
@@ -175,7 +175,7 @@ function Inbox() {
       .then((ib) => {
         if (!ib.ok) return;
         const map: Record<string, any> = {};
-        for (const m of ib.inbox ?? []) map[m.lead_id] = { body: m.body, direction: m.direction, created_at: m.created_at };
+        for (const m of ib.inbox ?? []) map[m.lead_id] = { body: m.body, direction: m.direction, created_at: m.created_at, status: m.status, unanswered: m.unanswered };
         setInbox(map);
       })
       .catch(() => {});
@@ -209,26 +209,40 @@ function Inbox() {
           <div className="flex-1 overflow-y-auto">
             {leads.length === 0 ? (
               <div className="p-5"><p className="text-[13px]" style={{ color: WA.sub }}>No chats yet. Approve a lead on the Leads page and send the first message, or start a New chat with any number.</p></div>
-            ) : leads.map((l) => {
-              const last = inbox[l.id];
-              const on = active?.id === l.id;
-              return (
-                <button
-                  key={l.id}
-                  onClick={() => setActive(l)}
-                  className="flex w-full items-center gap-3 px-3.5 py-3 text-left"
-                  style={{ background: on ? WA.listHover : WA.panel, borderBottom: `1px solid ${WA.divider}` }}
-                >
-                  <WaAvatar size={44} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[14px] font-semibold" style={{ color: WA.text }}>{l.company || l.name || "Lead"}</span>
-                    <span className="block truncate text-[12.5px]" style={{ color: WA.sub }}>
-                      {last ? (last.direction === "out" ? "✓ " : "") + last.body : "Tap to open"}
+            ) : [...leads]
+              // Most-recently-messaged on top, like WhatsApp; chats with no messages fall to the end.
+              .sort((a, b) => {
+                const ta = inbox[a.id]?.created_at ? new Date(inbox[a.id].created_at).getTime() : 0;
+                const tb = inbox[b.id]?.created_at ? new Date(inbox[b.id].created_at).getTime() : 0;
+                return tb - ta;
+              })
+              .map((l) => {
+                const last = inbox[l.id];
+                const on = active?.id === l.id;
+                const unread = !on && (last?.unanswered ?? 0) > 0 ? last!.unanswered! : 0;
+                const tick = last?.direction === "out" ? (last.status === "read" ? "✓✓" : last.status === "delivered" ? "✓✓" : "✓") : "";
+                const tickBlue = last?.status === "read";
+                return (
+                  <button
+                    key={l.id}
+                    onClick={() => setActive(l)}
+                    className="flex w-full items-center gap-3 px-3.5 py-3 text-left"
+                    style={{ background: on ? WA.listHover : WA.panel, borderBottom: `1px solid ${WA.divider}` }}
+                  >
+                    <WaAvatar size={44} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[14px]" style={{ color: WA.text, fontWeight: unread ? 700 : 600 }}>{l.company || l.name || "Lead"}</span>
+                      <span className="flex items-center gap-1 truncate text-[12.5px]" style={{ color: unread ? WA.text : WA.sub }}>
+                        {tick && <span style={{ color: tickBlue ? WA.tickBlue : WA.sub }}>{tick}</span>}
+                        <span className="truncate" style={{ fontWeight: unread ? 600 : 400 }}>{last ? last.body : "Tap to open"}</span>
+                      </span>
                     </span>
-                  </span>
-                </button>
-              );
-            })}
+                    {unread > 0 && (
+                      <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-bold text-white" style={{ background: WA.green }}>{unread}</span>
+                    )}
+                  </button>
+                );
+              })}
           </div>
         </div>
 

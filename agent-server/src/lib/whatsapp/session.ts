@@ -151,17 +151,26 @@ export async function connect(
 
   // Incoming messages. Each is stored and linked to a lead by phone number (store.ts). Nothing
   // is auto-answered here — the dashboard shows it and a human replies.
+  //
+  // We process "notify" (new, real-time) AND "append" (what Baileys delivers on reconnect for
+  // messages that arrived while we were down — every Railway deploy drops the socket, so a reply
+  // in that window ONLY ever shows up as an append). linkIncoming de-dupes by WhatsApp message id,
+  // so handling both can never store the same reply twice or re-import old history as new.
   sock.ev.on("messages.upsert", async (m: any) => {
-    if (m.type !== "notify") return;
+    if (m.type !== "notify" && m.type !== "append") return;
     for (const msg of m.messages ?? []) {
       if (msg.key?.fromMe) continue; // our own outgoing echo, already recorded on send
       const jid = msg.key?.remoteJid as string | undefined;
-      if (!jid || jid.endsWith("@g.us")) continue; // skip groups; outreach is 1:1
+      if (!jid || jid.endsWith("@g.us") || jid === "status@broadcast") continue; // skip groups + status
       const text =
         msg.message?.conversation ??
         msg.message?.extendedTextMessage?.text ??
         msg.message?.imageMessage?.caption ??
+        msg.message?.videoMessage?.caption ??
+        msg.message?.buttonsResponseMessage?.selectedDisplayText ??
+        msg.message?.listResponseMessage?.title ??
         "";
+      if (!String(text).trim()) continue; // a reaction/receipt with no body — nothing to show
       await linkIncoming(supabase, tenantId, {
         phone: jid.split("@")[0],
         text: String(text),

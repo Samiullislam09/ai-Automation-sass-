@@ -32,12 +32,26 @@ export async function GET(req: NextRequest) {
     .limit(400);
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
 
-  const seen = new Set<string>();
-  const inbox: any[] = [];
+  // Per lead: the last message (for the preview + ordering), and `unanswered` — how many of their
+  // incoming messages are newer than our last outgoing (the WhatsApp-style unread count that
+  // clears the moment you reply). Messages come newest-first, so the first row per lead is the
+  // last message, and we count leading "in" rows until an "out" appears.
+  const byLead = new Map<string, { last: any; unanswered: number; done: boolean }>();
   for (const m of data ?? []) {
-    if (!m.lead_id || seen.has(m.lead_id)) continue;
-    seen.add(m.lead_id);
-    inbox.push(m);
+    if (!m.lead_id) continue;
+    let e = byLead.get(m.lead_id);
+    if (!e) { e = { last: m, unanswered: 0, done: false }; byLead.set(m.lead_id, e); }
+    if (e.done) continue;
+    if (m.direction === "in") e.unanswered += 1;
+    else e.done = true; // reached our last outgoing — stop counting
   }
+  const inbox = Array.from(byLead.entries()).map(([lead_id, e]) => ({
+    lead_id,
+    body: e.last.body,
+    direction: e.last.direction,
+    status: e.last.status,
+    created_at: e.last.created_at,
+    unanswered: e.unanswered,
+  }));
   return NextResponse.json({ ok: true, inbox });
 }

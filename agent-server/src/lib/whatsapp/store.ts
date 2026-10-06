@@ -39,6 +39,18 @@ export async function linkIncoming(
   tenantId: string,
   msg: { phone: string; text: string; waMessageId: string | null }
 ): Promise<void> {
+  // De-dupe: the same inbound can arrive as both a real-time "notify" and a reconnect "append",
+  // so skip it if we already stored this WhatsApp message id. (Cheap: id is unique per message.)
+  if (msg.waMessageId) {
+    const { data: existing } = await supabase
+      .from("outreach_messages")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .eq("wa_message_id", msg.waMessageId)
+      .maybeSingle();
+    if (existing) return;
+  }
+
   const inDigits = digits(msg.phone);
 
   // Find the lead this number belongs to. Pull this tenant's leads that have any number stored

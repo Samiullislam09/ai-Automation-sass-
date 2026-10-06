@@ -504,6 +504,70 @@ function replaceAnswerParagraph(markdown: string, replacement: string): string |
   return [...lines.slice(0, start), replacement, ...lines.slice(j)].join("\n");
 }
 
+/** Join adjacent SHORT sentences, so the prose stops reading like a machine wrote it.
+ *
+ *  THIS IS HERE BECAUSE NOTHING ELSE WORKED, AND ALL OF IT WAS MEASURED (2026-10-06):
+ *
+ *    · the writing prompt was changed to ask for an average near 28 words and to vary length
+ *      hard — the mean moved from 12.9 to 14.3. Noise.
+ *    · a NARROW single-purpose pass, one section, one instruction, nothing else in the prompt —
+ *      the same shape that fixed the snippet answers — made it WORSE: mean 15.9 -> 15.2, spread
+ *      9.4 -> 7.6.
+ *    · every other model on the account was tried. nemotron-3-super writes 93-word run-ons full
+ *      of em dashes; llama-nemotron-70b and -ultra-253b are 404; mistral-nemotron is 410.
+ *
+ *  So the model cannot do this, and asking it again in a different voice is not a plan. Joining
+ *  two short adjacent sentences is mechanical: no judgement, no new claims, no model call. On
+ *  the real article it moves the mean 12.9 -> 19.8 and clears the choppy test, adding only the
+ *  word "and" (2438 words -> 2490).
+ *
+ *  WHY IT IS SAFE. One merge per sentence, never across a paragraph, never into a heading, list,
+ *  table or byline, and never onto a sentence that already opens with its own connective —
+ *  "X. However Y." must not become "X, and however y.". Every word of the original survives. */
+const MERGE_SHORT_WORDS = 18;
+const MERGE_TARGET_WORDS = 42;
+
+/** A sentence that carries its own connective cannot be glued on with "and". */
+const OWNS_ITS_CONNECTIVE =
+  /^(however|but|yet|still|instead|therefore|so|thus|meanwhile|conversely|nonetheless|nevertheless|also|additionally|for example|for instance|in contrast|that said|on the other hand|first|second|third|finally|next|then)\b/i;
+
+export function varySentenceRhythm(body: string): string {
+  return body
+    .split(/\n{2,}/)
+    .map((block) => {
+      const t = block.trim();
+      if (!t) return block;
+      if (HEADING_LINE.test(t) || STAMP_RE.test(t) || /^!\[/.test(t)) return block;
+      // A block containing ANY table or list line is left whole: its line breaks are structure.
+      if (t.split("\n").some((l) => TABLE_LINE.test(l) || LIST_LINE.test(l))) return block;
+
+      const sents = t.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean);
+      if (sents.length < 2) return block;
+
+      const out: string[] = [];
+      for (let i = 0; i < sents.length; i++) {
+        let cur = sents[i];
+        const next = sents[i + 1];
+        const len = (s: string) => s.split(/\s+/).filter(Boolean).length;
+        if (
+          next &&
+          len(cur) <= MERGE_SHORT_WORDS &&
+          len(next) <= MERGE_SHORT_WORDS &&
+          len(cur) + len(next) <= MERGE_TARGET_WORDS &&
+          /[.?!]$/.test(cur) &&
+          /^[A-Z]/.test(next) &&
+          !OWNS_ITS_CONNECTIVE.test(next)
+        ) {
+          cur = `${cur.replace(/[.!?]+$/, "")}, and ${next.charAt(0).toLowerCase()}${next.slice(1)}`;
+          i++; // one merge per sentence: two short clauses is a sentence, four is a list
+        }
+        out.push(cur);
+      }
+      return out.join(" ");
+    })
+    .join("\n\n");
+}
+
 /** Semicolons past the budget become full stops, by code.
  *
  *  The section prompt has said "No semicolons." before the model writes a word since 2026-09-13,
@@ -1363,7 +1427,10 @@ export async function runArticleReview(initialBody: string, input: ReviewInput, 
     // round-trip through splitArticle/assembleArticle, then links (which must see final prose to
     // anchor into), then the stamp last — splitArticle drops a stamp-shaped line ahead of the
     // first heading, so stamping earlier would erase it.
-    body = addInternalLinks(cutSemicolons(capLongParagraphs(bulletizeBareLists(body))), input.allowedLinks, input.siteUrl);
+    // varySentenceRhythm runs BEFORE capLongParagraphs, because merging only ever REDUCES the
+    // sentence count — so the paragraph cap then measures the sentences that will actually ship.
+    // Run the other way round, the cap would split on a count the merge was about to change.
+    body = addInternalLinks(cutSemicolons(capLongParagraphs(varySentenceRhythm(bulletizeBareLists(body)))), input.allowedLinks, input.siteUrl);
     body = stampByline(body, now(), input.author);
 
     progress(`Checking every writing rule (round ${round} of ${REVIEW_MAX_ROUNDS})`);
