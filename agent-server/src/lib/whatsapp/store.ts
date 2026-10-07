@@ -8,6 +8,7 @@
  *  digits-only, longest-suffix, so "+971 50 123 4567" and "971501234567" are the same person and
  *  a wrong short match cannot happen. */
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { createNotification } from "./team.js";
 
 /** How long Mr Lxwa stays quiet on a lead after a human replies in that chat (§28 P3 handoff). Six
  *  hours: long enough that the human owns the live exchange, short enough that a forgotten chat
@@ -64,7 +65,7 @@ export async function linkIncoming(
   // filter, and a raw suffix fails on the leading trunk 0 most local numbers carry.
   const { data: leads } = await supabase
     .from("leads")
-    .select("id, stage, whatsapp, phone")
+    .select("id, stage, whatsapp, phone, company, name")
     .eq("tenant_id", tenantId);
 
   // Among all leads whose number matches, pick the MOST SPECIFIC one — the longest significant
@@ -123,6 +124,11 @@ export async function linkIncoming(
   const patch: Record<string, unknown> = { replied_at: new Date().toISOString(), updated_at: new Date().toISOString(), auto_followups_done: 0 };
   if (advanceable.includes(String(lead!.stage))) patch.stage = "replied";
   await supabase.from("leads").update(patch).eq("id", lead!.id).eq("tenant_id", tenantId);
+
+  // A reply is worth surfacing on the dashboard bell (not a WhatsApp ping — replies are frequent;
+  // the team-WhatsApp alert is reserved for meetings/hot leads). Best effort.
+  const who = (lead as any).company || (lead as any).name || `+${inDigits}`;
+  await createNotification(tenantId, { type: "reply", title: `New WhatsApp reply from ${who}`, body: msg.text.slice(0, 140), leadId: lead!.id });
   return { leadId: lead!.id };
 }
 

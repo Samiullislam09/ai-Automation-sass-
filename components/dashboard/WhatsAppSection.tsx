@@ -135,9 +135,7 @@ export default function WhatsAppSection() {
               Auto replies <b>{autoReply ? "ON" : "OFF"}</b>
             </button>
             {/* alerts / settings / help */}
-            <button className="relative hidden rounded-full p-2 sm:block" style={{ color: WA.sub }} title="Alerts">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 9a6 6 0 1112 0c0 5 2 6 2 6H4s2-1 2-6zM9.5 19a2.5 2.5 0 005 0" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
-            </button>
+            <NotificationsBell />
             <button onClick={() => setSettingsOpen(true)} className="hidden rounded-full p-2 sm:block" style={{ color: WA.sub }} title="Auto-reply & timeline settings">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.8" /><path d="M19 12a7 7 0 00-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 00-2-1.2L14 2h-4l-.5 2.6a7 7 0 00-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 005 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 002 1.2L10 22h4l.5-2.6a7 7 0 002-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" /></svg>
             </button>
@@ -190,6 +188,72 @@ export default function WhatsAppSection() {
 
       <WhatsAppConnectModal open={modal} onClose={() => { setModal(false); poll(); }} onConnected={() => { setEverConnected(true); poll(); }} />
       <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} toast={toast} />
+    </div>
+  );
+}
+
+/* ── Notification bell (§29.10): replies / meeting requests / hot leads, with an unread count. ── */
+type Notif = { id: string; type: string; title: string; body: string | null; read: boolean; created_at: string };
+
+function NotificationsBell() {
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState<Notif[] | null>(null);
+  const [unread, setUnread] = useState(0);
+
+  const load = useCallback(async () => {
+    try {
+      const r = await fetch("/api/whatsapp/notifications").then((x) => x.json());
+      if (r.ok) { setItems(r.items ?? []); setUnread(r.unread ?? 0); }
+    } catch { /* ignore */ }
+  }, []);
+
+  // Poll the unread count quietly; load the full list when opened.
+  useEffect(() => { void load(); const id = setInterval(load, 20000); return () => clearInterval(id); }, [load]);
+
+  const openPanel = async () => {
+    setOpen(true);
+    await load();
+    // Mark all read on open (the bell is "seen" once you look).
+    try { await fetch("/api/whatsapp/notifications", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "read" }) }); } catch { /* ignore */ }
+    setUnread(0);
+  };
+
+  const icon = (t: string) => (t === "meeting" ? "📅" : t === "hot_lead" ? "🔥" : t === "reply" ? "💬" : "🔔");
+  const ago = (iso: string) => {
+    const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+    if (m < 1) return "now"; if (m < 60) return `${m}m`; const h = Math.floor(m / 60); if (h < 24) return `${h}h`; return `${Math.floor(h / 24)}d`;
+  };
+
+  return (
+    <div className="relative hidden sm:block">
+      <button onClick={() => (open ? setOpen(false) : void openPanel())} className="relative rounded-full p-2" style={{ color: WA.sub }} title="Alerts">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 9a6 6 0 1112 0c0 5 2 6 2 6H4s2-1 2-6zM9.5 19a2.5 2.5 0 005 0" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+        {unread > 0 && <span className="absolute right-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold text-white" style={{ background: "#e11d48" }}>{unread > 9 ? "9+" : unread}</span>}
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-[70]" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 z-[71] mt-2 w-80 overflow-hidden rounded-xl shadow-lg" style={{ background: "#fff", border: `1px solid ${WA.divider}` }}>
+            <div className="px-3 py-2 text-[13px] font-bold" style={{ borderBottom: `1px solid ${WA.divider}`, color: WA.text }}>Alerts</div>
+            <div className="wa-scroll max-h-96 overflow-y-auto">
+              {!items ? (
+                <p className="p-4 text-[12.5px]" style={{ color: WA.sub }}>Loading…</p>
+              ) : items.length === 0 ? (
+                <p className="p-4 text-[12.5px]" style={{ color: WA.sub }}>No alerts yet. Replies, meeting requests and hot leads will show up here.</p>
+              ) : items.map((n) => (
+                <div key={n.id} className="flex gap-2.5 px-3 py-2.5" style={{ borderBottom: `1px solid ${WA.divider}`, background: n.read ? "#fff" : "#f0fbf4" }}>
+                  <span className="text-[16px] leading-none">{icon(n.type)}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[12.5px] font-semibold" style={{ color: WA.text }}>{n.title}</div>
+                    {n.body && <div className="truncate text-[11.5px]" style={{ color: WA.sub }}>{n.body}</div>}
+                  </div>
+                  <span className="shrink-0 text-[10.5px]" style={{ color: WA.sub }}>{ago(n.created_at)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -281,6 +345,8 @@ function SettingsPanel({ open, onClose, toast }: { open: boolean; onClose: () =>
                 </div>
               </div>
 
+              <TeamAndAlerts toast={toast} />
+
               <div className="mt-5">
                 <div className="mb-2 flex items-center justify-between">
                   <b className="text-[13.5px]">Upcoming sends{outbox ? ` (${outbox.length})` : ""}</b>
@@ -307,6 +373,68 @@ function SettingsPanel({ open, onClose, toast }: { open: boolean; onClose: () =>
             </>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Team & Alerts (§29.5): the numbers that get meeting / hot-lead pings. ──────────────────── */
+type AdminRow = { id: string; name: string | null; phone: string; role: string; notify: boolean };
+
+function TeamAndAlerts({ toast }: { toast: (m: string, t?: "error") => void }) {
+  const [admins, setAdmins] = useState<AdminRow[] | null>(null);
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try { const r = await fetch("/api/whatsapp/admins").then((x) => x.json()); if (r.ok) setAdmins(r.admins ?? []); } catch { /* ignore */ }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  const add = async () => {
+    if (phone.replace(/[^0-9]/g, "").length < 8) { toast("Enter a full number with country code.", "error"); return; }
+    setBusy(true);
+    try {
+      const r = await fetch("/api/whatsapp/admins", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: name.trim() || null, phone }) }).then((x) => x.json());
+      if (!r.ok) toast(r.error ?? "Could not add.", "error");
+      else { setName(""); setPhone(""); await load(); }
+    } catch (e: any) { toast(e?.message ?? "Network error.", "error"); } finally { setBusy(false); }
+  };
+
+  const toggleNotify = async (a: AdminRow) => {
+    setAdmins((xs) => (xs ?? []).map((x) => (x.id === a.id ? { ...x, notify: !x.notify } : x)));
+    try { await fetch("/api/whatsapp/admins", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: a.id, name: a.name, phone: a.phone, role: a.role, notify: !a.notify }) }); } catch { void load(); }
+  };
+
+  const remove = async (id: string) => {
+    setAdmins((xs) => (xs ?? []).filter((x) => x.id !== id));
+    try { await fetch(`/api/whatsapp/admins?id=${encodeURIComponent(id)}`, { method: "DELETE" }); } catch { void load(); }
+  };
+
+  return (
+    <div className="mt-5">
+      <b className="text-[13.5px]">Team & alerts</b>
+      <div className="mb-2 text-[11.5px]" style={{ color: WA.sub }}>These WhatsApp numbers get a ping on a meeting request or a hot lead. Add yourself and your managers.</div>
+      <div className="mb-2 space-y-1.5">
+        {(admins ?? []).map((a) => (
+          <div key={a.id} className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: WA.listHover }}>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[13px] font-medium">{a.name || a.phone}{a.role === "owner" && <span className="ml-1.5 rounded px-1 text-[9.5px] font-bold" style={{ color: "#067647", background: "#e7f6ec" }}>Owner</span>}</div>
+              {a.name && <div className="text-[11.5px]" style={{ color: WA.sub }}>{a.phone}</div>}
+            </div>
+            <button onClick={() => toggleNotify(a)} title={a.notify ? "Alerts on" : "Alerts off"} className="shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-semibold" style={{ color: a.notify ? "#067647" : WA.sub, background: a.notify ? "#e7f6ec" : WA.divider }}>{a.notify ? "Alerts on" : "Muted"}</button>
+            <button onClick={() => remove(a.id)} className="shrink-0 rounded-full p-1" style={{ color: "#b42318" }} aria-label="Remove">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
+            </button>
+          </div>
+        ))}
+        {admins && admins.length === 0 && <div className="text-[12px]" style={{ color: WA.sub }}>No team numbers yet.</div>}
+      </div>
+      <div className="flex gap-2">
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (optional)" autoComplete="off" className="wa-input wa-search w-28 rounded-lg px-2.5 py-1.5 text-[12.5px]" style={{ background: WA.listHover, color: WA.text }} />
+        <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+971 50…" autoComplete="off" className="wa-input wa-search flex-1 rounded-lg px-2.5 py-1.5 text-[12.5px]" style={{ background: WA.listHover, color: WA.text }} />
+        <button onClick={add} disabled={busy} className="shrink-0 rounded-lg px-3 py-1.5 text-[12.5px] font-semibold text-white disabled:opacity-60" style={{ background: WA.green }}>Add</button>
       </div>
     </div>
   );

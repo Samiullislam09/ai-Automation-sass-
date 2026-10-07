@@ -2089,3 +2089,27 @@ create index if not exists wa_outbound_due
 
 -- ── 034 · WhatsApp auto-reply §28.5 Phase 4 — follow-up nudge counter (additive) ─────────────
 alter table leads add column if not exists auto_followups_done int not null default 0;
+
+-- ── 035 · §29.5/29.10 — WhatsApp team (alert admins) + notification centre ────────────────────
+create table if not exists whatsapp_admins (
+  id         uuid primary key default gen_random_uuid(),
+  tenant_id  uuid not null,
+  name       text,
+  phone      text not null,
+  role       text not null default 'manager',
+  notify     boolean not null default true,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_wa_admins_tenant on whatsapp_admins (tenant_id);
+create unique index if not exists wa_admins_tenant_phone on whatsapp_admins (tenant_id, phone);
+create table if not exists wa_notifications (
+  id         uuid primary key default gen_random_uuid(),
+  tenant_id  uuid not null,
+  type       text not null,
+  title      text not null,
+  body       text,
+  lead_id    uuid,
+  read       boolean not null default false,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_wa_notifications_feed on wa_notifications (tenant_id, read, created_at desc);

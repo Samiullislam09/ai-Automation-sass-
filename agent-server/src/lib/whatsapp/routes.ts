@@ -12,6 +12,7 @@ import { supabase } from "../../supabase.js";
 import { env } from "../../env.js";
 import { connect, disconnect, sendText, sessionStatus, getContactInfo, checkNumbers } from "./session.js";
 import { getWhatsappAutoReply, setWhatsappAutoReply, getWhatsappSettings, patchWhatsappSettings } from "../outreach/settings.js";
+import { listAdmins, upsertAdmin, deleteAdmin, listNotifications, markNotificationsRead } from "./team.js";
 import { recordOutgoing } from "./store.js";
 import { suggestReply } from "./suggest.js";
 import { emitWhatsapp } from "../../socket.js";
@@ -124,6 +125,60 @@ export function mountWhatsapp(app: Express): void {
       res.json({ ok: true });
     } catch (e: any) {
       res.status(500).json({ ok: false, error: e?.message ?? "could not cancel" });
+    }
+  });
+
+  /** The alert team: owner + managers whose numbers get meeting/hot-lead pings (§29.5). */
+  app.get("/whatsapp/:tenantId/admins", async (req, res) => {
+    if (!authed(req, res)) return;
+    try {
+      res.json({ ok: true, admins: await listAdmins(req.params.tenantId) });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message ?? "could not read admins" });
+    }
+  });
+
+  app.post("/whatsapp/:tenantId/admins", async (req, res) => {
+    if (!authed(req, res)) return;
+    try {
+      const admin = await upsertAdmin(req.params.tenantId, req.body ?? {});
+      res.json({ ok: true, admin });
+    } catch (e: any) {
+      res.status(400).json({ ok: false, error: e?.message ?? "could not save admin" });
+    }
+  });
+
+  app.delete("/whatsapp/:tenantId/admins", async (req, res) => {
+    if (!authed(req, res)) return;
+    const id = String(req.query.id ?? req.body?.id ?? "");
+    if (!id) return res.status(400).json({ ok: false, error: "id is required" });
+    try {
+      await deleteAdmin(req.params.tenantId, id);
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message ?? "could not delete admin" });
+    }
+  });
+
+  /** The dashboard bell feed (§29.10). GET lists; POST {action:'read', id?} marks read (all if no id). */
+  app.get("/whatsapp/:tenantId/notifications", async (req, res) => {
+    if (!authed(req, res)) return;
+    try {
+      const { items, unread } = await listNotifications(req.params.tenantId);
+      res.json({ ok: true, items, unread });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message ?? "could not read notifications" });
+    }
+  });
+
+  app.post("/whatsapp/:tenantId/notifications", async (req, res) => {
+    if (!authed(req, res)) return;
+    if (req.body?.action !== "read") return res.status(400).json({ ok: false, error: "action:'read' required" });
+    try {
+      await markNotificationsRead(req.params.tenantId, req.body?.id ? String(req.body.id) : undefined);
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message ?? "could not update notifications" });
     }
   });
 
