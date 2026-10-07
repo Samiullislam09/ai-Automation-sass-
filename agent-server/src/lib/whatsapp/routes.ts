@@ -11,7 +11,7 @@ import type { Express, Request, Response } from "express";
 import { supabase } from "../../supabase.js";
 import { env } from "../../env.js";
 import { connect, disconnect, sendText, sessionStatus, getContactInfo, checkNumbers } from "./session.js";
-import { getWhatsappAutoReply, setWhatsappAutoReply } from "../outreach/settings.js";
+import { getWhatsappAutoReply, setWhatsappAutoReply, getWhatsappSettings, patchWhatsappSettings } from "../outreach/settings.js";
 import { recordOutgoing } from "./store.js";
 import { suggestReply } from "./suggest.js";
 import { emitWhatsapp } from "../../socket.js";
@@ -62,6 +62,68 @@ export function mountWhatsapp(app: Express): void {
       res.json({ ok: true, autoReply: req.body?.on === true });
     } catch (e: any) {
       res.status(500).json({ ok: false, error: e?.message ?? "could not update" });
+    }
+  });
+
+  /** Read all WhatsApp engine settings (auto-reply master + outbound timeline knobs + quiet hours). */
+  app.get("/whatsapp/:tenantId/settings", async (req, res) => {
+    if (!authed(req, res)) return;
+    try {
+      const settings = await getWhatsappSettings(req.params.tenantId);
+      res.json({ ok: true, settings });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message ?? "could not read settings" });
+    }
+  });
+
+  /** Update WhatsApp engine settings. Body is a partial WhatsappSettings; returns the merged result. */
+  app.post("/whatsapp/:tenantId/settings", async (req, res) => {
+    if (!authed(req, res)) return;
+    try {
+      const settings = await patchWhatsappSettings(req.params.tenantId, req.body ?? {});
+      res.json({ ok: true, settings });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message ?? "could not update settings" });
+    }
+  });
+
+  /** The outbound timeline: pending/upcoming cold first-messages for this tenant, soonest first,
+   *  with the lead's name — read-only view for the Outbox. A POST with {action:'cancel', id} drops
+   *  one lead off the timeline. */
+  app.get("/whatsapp/:tenantId/outbox", async (req, res) => {
+    if (!authed(req, res)) return;
+    const { tenantId } = req.params;
+    try {
+      const { data: rows } = await supabase
+        .from("wa_outbound_queue")
+        .select("id, lead_id, scheduled_at, status, reason")
+        .eq("tenant_id", tenantId)
+        .in("status", ["pending", "sending"])
+        .order("scheduled_at", { ascending: true })
+        .limit(200);
+      const leadIds = [...new Set((rows ?? []).map((r: any) => r.lead_id))];
+      const names = new Map<string, string>();
+      if (leadIds.length) {
+        const { data: leads } = await supabase.from("leads").select("id, company, name, whatsapp, phone").eq("tenant_id", tenantId).in("id", leadIds);
+        for (const l of (leads ?? []) as any[]) names.set(l.id, l.company || l.name || l.whatsapp || l.phone || "Lead");
+      }
+      const items = (rows ?? []).map((r: any) => ({ id: r.id, leadId: r.lead_id, name: names.get(r.lead_id) ?? "Lead", scheduledAt: r.scheduled_at, status: r.status }));
+      res.json({ ok: true, items, pending: items.length });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message ?? "could not read outbox" });
+    }
+  });
+
+  app.post("/whatsapp/:tenantId/outbox", async (req, res) => {
+    if (!authed(req, res)) return;
+    const { tenantId } = req.params;
+    const { action, id } = req.body ?? {};
+    if (action !== "cancel" || !id) return res.status(400).json({ ok: false, error: "action:'cancel' and id are required" });
+    try {
+      await supabase.from("wa_outbound_queue").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("id", String(id)).eq("tenant_id", tenantId).in("status", ["pending", "sending"]);
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message ?? "could not cancel" });
     }
   });
 

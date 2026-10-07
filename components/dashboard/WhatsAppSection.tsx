@@ -55,6 +55,7 @@ export default function WhatsAppSection() {
   const [togglingAuto, setTogglingAuto] = useState(false);
   const [search, setSearch] = useState("");
   const [adminOpen, setAdminOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const poll = useCallback(async () => {
     try {
@@ -137,7 +138,7 @@ export default function WhatsAppSection() {
             <button className="relative hidden rounded-full p-2 sm:block" style={{ color: WA.sub }} title="Alerts">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 9a6 6 0 1112 0c0 5 2 6 2 6H4s2-1 2-6zM9.5 19a2.5 2.5 0 005 0" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
             </button>
-            <button className="hidden rounded-full p-2 sm:block" style={{ color: WA.sub }} title="Settings">
+            <button onClick={() => setSettingsOpen(true)} className="hidden rounded-full p-2 sm:block" style={{ color: WA.sub }} title="Auto-reply & timeline settings">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.8" /><path d="M19 12a7 7 0 00-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 00-2-1.2L14 2h-4l-.5 2.6a7 7 0 00-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 005 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 002 1.2L10 22h4l.5-2.6a7 7 0 002-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" /></svg>
             </button>
             <button className="hidden rounded-full p-2 sm:block" style={{ color: WA.sub }} title="Help">
@@ -188,7 +189,149 @@ export default function WhatsAppSection() {
       )}
 
       <WhatsAppConnectModal open={modal} onClose={() => { setModal(false); poll(); }} onConnected={() => { setEverConnected(true); poll(); }} />
+      <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} toast={toast} />
     </div>
+  );
+}
+
+/* ── Settings + Outbox (§28.8): auto-reply master, outbound timeline on/off, send window, and the
+ *    upcoming cold-message schedule with a cancel on each. ─────────────────────────────────────── */
+type WaSettings = { auto_reply: boolean; outbound_enabled: boolean; send_start: number; send_end: number; tz_offset: number; gap_min_min: number; gap_max_min: number };
+type OutboxItem = { id: string; leadId: string; name: string; scheduledAt: string; status: string };
+
+function SettingsPanel({ open, onClose, toast }: { open: boolean; onClose: () => void; toast: (m: string, t?: "error") => void }) {
+  const [s, setS] = useState<WaSettings | null>(null);
+  const [outbox, setOutbox] = useState<OutboxItem[] | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    const [a, b] = await Promise.all([
+      fetch("/api/whatsapp/settings").then((r) => r.json()).catch(() => null),
+      fetch("/api/whatsapp/outbox").then((r) => r.json()).catch(() => null),
+    ]);
+    if (a?.ok) setS(a.settings);
+    if (b?.ok) setOutbox(b.items ?? []);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    setS(null); setOutbox(null);
+    void load();
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, load, onClose]);
+
+  if (!open) return null;
+
+  const save = async (patch: Partial<WaSettings>) => {
+    if (!s) return;
+    const next = { ...s, ...patch };
+    setS(next); // optimistic
+    setSaving(true);
+    try {
+      const r = await fetch("/api/whatsapp/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) }).then((x) => x.json());
+      if (!r.ok) { toast(r.error ?? "Could not save settings.", "error"); void load(); }
+      else if (r.settings) setS(r.settings);
+    } catch (e: any) { toast(e?.message ?? "Network error.", "error"); }
+    finally { setSaving(false); }
+  };
+
+  const cancelSend = async (id: string) => {
+    setOutbox((o) => (o ?? []).filter((x) => x.id !== id)); // optimistic
+    try {
+      const r = await fetch("/api/whatsapp/outbox", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "cancel", id }) }).then((x) => x.json());
+      if (!r.ok) { toast(r.error ?? "Could not cancel.", "error"); void load(); }
+    } catch { void load(); }
+  };
+
+  const whenLabel = (iso: string) => {
+    const d = new Date(iso);
+    const day = d.toLocaleDateString([], { day: "2-digit", month: "short" });
+    const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return `${day}, ${time}`;
+  };
+
+  return (
+    <div className="fixed inset-0 z-[90] flex justify-end" style={{ background: "rgba(0,0,0,.4)" }} onClick={onClose}>
+      <div className="flex h-full w-full max-w-md flex-col" style={{ background: "#fff", color: WA.text }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex shrink-0 items-center justify-between px-5 py-4" style={{ borderBottom: `1px solid ${WA.divider}` }}>
+          <b className="text-[15px]">Auto-reply & timeline</b>
+          <button onClick={onClose} className="rounded-full p-1.5" style={{ color: WA.sub }} aria-label="Close">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
+          </button>
+        </div>
+
+        <div className="wa-scroll flex-1 overflow-y-auto p-5">
+          {!s ? (
+            <p className="text-[13px]" style={{ color: WA.sub }}>Loading…</p>
+          ) : (
+            <>
+              <Toggle label="Auto-replies" sub="Mr Lxwa answers incoming messages and runs the outbound timeline. Off = everything pauses." on={s.auto_reply} onChange={(v) => save({ auto_reply: v })} disabled={saving} />
+              <Toggle label="Outbound timeline" sub="Send the first message to new approved leads, one at a time, on a random schedule. Pauses while a conversation is active." on={s.outbound_enabled} onChange={(v) => save({ outbound_enabled: v })} disabled={saving || !s.auto_reply} />
+
+              <div className="mt-4 rounded-xl p-3" style={{ background: WA.listHover }}>
+                <div className="mb-1 text-[12.5px] font-semibold">Sending hours</div>
+                <div className="mb-2 text-[11.5px]" style={{ color: WA.sub }}>Cold messages only go out between these hours (local). Replies to a live message are always allowed.</div>
+                <div className="flex items-center gap-2 text-[13px]">
+                  <HourInput value={s.send_start} onChange={(v) => save({ send_start: v })} />
+                  <span style={{ color: WA.sub }}>to</span>
+                  <HourInput value={s.send_end} onChange={(v) => save({ send_end: v })} />
+                </div>
+              </div>
+
+              <div className="mt-5">
+                <div className="mb-2 flex items-center justify-between">
+                  <b className="text-[13.5px]">Upcoming sends{outbox ? ` (${outbox.length})` : ""}</b>
+                  <button onClick={() => void load()} className="text-[12px]" style={{ color: WA.green }}>Refresh</button>
+                </div>
+                {!outbox ? (
+                  <p className="text-[12.5px]" style={{ color: WA.sub }}>Loading…</p>
+                ) : outbox.length === 0 ? (
+                  <p className="text-[12.5px]" style={{ color: WA.sub }}>No cold messages scheduled. New approved leads with WhatsApp will appear here on a timeline.</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {outbox.map((o) => (
+                      <div key={o.id} className="flex items-center justify-between rounded-lg px-3 py-2" style={{ background: WA.listHover }}>
+                        <div className="min-w-0">
+                          <div className="truncate text-[13px] font-medium">{o.name}</div>
+                          <div className="text-[11.5px]" style={{ color: WA.sub }}>{whenLabel(o.scheduledAt)}</div>
+                        </div>
+                        <button onClick={() => cancelSend(o.id)} className="shrink-0 rounded-full px-2.5 py-1 text-[11.5px] font-semibold" style={{ color: "#b42318", background: "#fdeaea" }}>Cancel</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Toggle({ label, sub, on, onChange, disabled }: { label: string; sub: string; on: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+  return (
+    <button onClick={() => !disabled && onChange(!on)} disabled={disabled} className="mb-2 flex w-full items-start justify-between gap-3 rounded-xl p-3 text-left disabled:opacity-60" style={{ background: WA.listHover }}>
+      <span className="min-w-0">
+        <span className="block text-[13.5px] font-semibold">{label}</span>
+        <span className="block text-[11.5px]" style={{ color: WA.sub }}>{sub}</span>
+      </span>
+      <span className="mt-0.5 flex h-6 w-10 shrink-0 items-center rounded-full p-0.5 transition" style={{ background: on ? WA.green : "#c4ccd1", justifyContent: on ? "flex-end" : "flex-start" }}>
+        <span className="h-5 w-5 rounded-full bg-white" />
+      </span>
+    </button>
+  );
+}
+
+function HourInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  return (
+    <select value={value} onChange={(e) => onChange(Number(e.target.value))} className="rounded-lg px-2 py-1.5 text-[13px]" style={{ background: "#fff", border: `1px solid ${WA.divider}`, color: WA.text }}>
+      {Array.from({ length: 24 }, (_, h) => (
+        <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>
+      ))}
+    </select>
   );
 }
 
