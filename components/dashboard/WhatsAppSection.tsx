@@ -112,6 +112,11 @@ export default function WhatsAppSection() {
         .wa-scroll::-webkit-scrollbar-track{background:transparent}
         .wa-scroll::-webkit-scrollbar-thumb{background:#c4ccd1;border-radius:9999px;border:2px solid transparent;background-clip:padding-box}
         .wa-scroll::-webkit-scrollbar-thumb:hover{background:#9aa6ac;background-clip:padding-box}
+        .wa-search{border:1.5px solid transparent;transition:border-color .15s ease,box-shadow .15s ease}
+        .wa-search:focus-within{border-color:#00a884 !important;box-shadow:0 0 0 3px rgba(0,168,132,.14)}
+        .wa-input:focus-visible{outline:none !important}
+        .lx-wa-input{border:1.5px solid #e4e7e9 !important}
+        .lx-wa-input:focus{border-color:#00a884 !important;box-shadow:0 0 0 3px rgba(0,168,132,.12) !important;outline:none !important}
       `}</style>
       {/* TOP BAR — Auto replies, alerts, settings, help and the admin, all on the right (matches the
           reference; chat search lives in the list, not here). Only shown once connected. */}
@@ -348,8 +353,8 @@ function Inbox({ search, setSearch }: { search: string; setSearch: (v: string) =
           </div>
           {/* search */}
           <div className="px-3 pb-2 pt-1">
-            <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: WA.listHover }}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke={WA.sub} strokeWidth="2" /><path d="M21 21l-4-4" stroke={WA.sub} strokeWidth="2" strokeLinecap="round" /></svg>
+            <div className="wa-search flex items-center gap-2 rounded-lg px-3 py-1.5" style={{ background: WA.listHover }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke={WA.sub} strokeWidth="2" /><path d="M21 21l-4-4" stroke={WA.sub} strokeWidth="2" strokeLinecap="round" /></svg>
               <input value={q} onChange={(e) => setSearch(e.target.value)} placeholder="Search or start new chat" autoComplete="off" spellCheck={false} className="wa-input w-full text-[13px] outline-none" style={{ color: WA.text }} />
             </div>
           </div>
@@ -399,12 +404,6 @@ function Inbox({ search, setSearch }: { search: string; setSearch: (v: string) =
             <div className="flex h-full items-center justify-center"><p className="text-[13px]" style={{ color: WA.sub }}>Select a chat</p></div>
           )}
         </div>
-      </div>
-
-      {/* full-width bottom status bar, like the reference */}
-      <div className="flex shrink-0 items-center justify-between px-4 py-2 text-[11.5px]" style={{ borderTop: `1px solid ${WA.divider}`, color: WA.sub }}>
-        <span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full" style={{ background: "#17c964" }} /> WhatsApp Business Connected</span>
-        <span>{leads ? `${leads.length} chat${leads.length === 1 ? "" : "s"}` : ""}</span>
       </div>
 
       <NewChatModal
@@ -633,8 +632,8 @@ function Chat({ lead, onSent, onBack, onDeleted, toast }: { lead: Lead; onSent: 
           step through hits with the arrows, matches highlighted in the bubbles below. */}
       {searchOpen && (
         <div className="flex items-center gap-2 px-3 py-2" style={{ background: "#fff", borderBottom: `1px solid ${WA.divider}` }}>
-          <div className="flex flex-1 items-center gap-2 rounded-lg px-3 py-2" style={{ background: WA.listHover }}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke={WA.sub} strokeWidth="2" /><path d="M21 21l-4-4" stroke={WA.sub} strokeWidth="2" strokeLinecap="round" /></svg>
+          <div className="wa-search flex flex-1 items-center gap-2 rounded-lg px-3 py-1.5" style={{ background: WA.listHover }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke={WA.sub} strokeWidth="2" /><path d="M21 21l-4-4" stroke={WA.sub} strokeWidth="2" strokeLinecap="round" /></svg>
             <input
               ref={searchRef}
               value={searchQ}
@@ -726,7 +725,7 @@ function Chat({ lead, onSent, onBack, onDeleted, toast }: { lead: Lead; onSent: 
         <textarea
           ref={taRef}
           className="lx-wa-input flex-1 resize-none rounded-2xl px-4 py-2.5 text-[14px] leading-snug outline-none"
-          style={{ background: "#fff", color: WA.text, maxHeight: 140, minHeight: 44, border: "none", overflowY: "auto" }}
+          style={{ background: "#fff", color: WA.text, maxHeight: 140, minHeight: 44, overflowY: "auto" }}
           rows={1}
           placeholder="Type a message…"
           value={text}
