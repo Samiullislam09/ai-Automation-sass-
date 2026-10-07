@@ -138,6 +138,75 @@ export async function setWhatsappAutoReply(tenantId: string, on: boolean): Promi
   }
 }
 
+/** All of a tenant's WhatsApp engine knobs, stored in the SAME agent_settings(agent='whatsapp')
+ *  jsonb bag as auto_reply. Defaults are conservative and Dubai-timed (the main tenant); the
+ *  per-tenant IANA timezone lands in P6, until then `tz_offset` is a plain UTC offset in hours. */
+export type WhatsappSettings = {
+  auto_reply: boolean;      // master switch — gates BOTH lanes (§28.9)
+  outbound_enabled: boolean; // Lane 2 (cold first-message timeline) on/off, under auto_reply
+  send_start: number;        // allowed-hours window start (local hour, 0-23) — outside = quiet
+  send_end: number;          // allowed-hours window end (local hour, 0-23)
+  tz_offset: number;         // hours from UTC (Dubai = +4) until per-tenant TZ (P6)
+  gap_min_min: number;       // minimum minutes between two outbound sends
+  gap_max_min: number;       // maximum minutes between two outbound sends
+};
+
+export const DEFAULT_WHATSAPP_SETTINGS: WhatsappSettings = {
+  auto_reply: false,
+  outbound_enabled: true,
+  send_start: 9,
+  send_end: 21,
+  tz_offset: 4,
+  gap_min_min: 4,
+  gap_max_min: 14,
+};
+
+export async function getWhatsappSettings(tenantId: string): Promise<WhatsappSettings> {
+  try {
+    const { data } = await supabase.from("agent_settings").select("settings").eq("tenant_id", tenantId).eq("agent", "whatsapp").maybeSingle();
+    return mergeWhatsapp(data?.settings);
+  } catch {
+    return { ...DEFAULT_WHATSAPP_SETTINGS };
+  }
+}
+
+export async function patchWhatsappSettings(tenantId: string, patch: Partial<WhatsappSettings>): Promise<WhatsappSettings> {
+  const current = await getWhatsappSettings(tenantId);
+  const next = mergeWhatsapp({ ...current, ...patch });
+  try {
+    await supabase.from("agent_settings").upsert(
+      { tenant_id: tenantId, agent: "whatsapp", settings: next, enabled: next.auto_reply, updated_at: new Date().toISOString() },
+      { onConflict: "tenant_id,agent" },
+    );
+  } catch (e) {
+    console.error("[whatsapp-settings] write failed:", (e as Error).message);
+  }
+  return next;
+}
+
+function clampHour(v: unknown, fallback: number): number {
+  const n = Math.floor(Number(v));
+  return Number.isFinite(n) && n >= 0 && n <= 23 ? n : fallback;
+}
+
+export function mergeWhatsapp(raw: unknown): WhatsappSettings {
+  const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const d = DEFAULT_WHATSAPP_SETTINGS;
+  const gapMin = Number.isFinite(Number(o.gap_min_min)) && Number(o.gap_min_min) > 0 ? Math.floor(Number(o.gap_min_min)) : d.gap_min_min;
+  let gapMax = Number.isFinite(Number(o.gap_max_min)) && Number(o.gap_max_min) > 0 ? Math.floor(Number(o.gap_max_min)) : d.gap_max_min;
+  if (gapMax < gapMin) gapMax = gapMin; // a max below the min is nonsense — clamp it up
+  const tz = Number(o.tz_offset);
+  return {
+    auto_reply: o.auto_reply === true,
+    outbound_enabled: o.outbound_enabled !== false, // default true
+    send_start: clampHour(o.send_start, d.send_start),
+    send_end: clampHour(o.send_end, d.send_end),
+    tz_offset: Number.isFinite(tz) && tz >= -12 && tz <= 14 ? tz : d.tz_offset,
+    gap_min_min: gapMin,
+    gap_max_min: gapMax,
+  };
+}
+
 function mergeSettings(raw: unknown): LeadSettings {
   const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   return {

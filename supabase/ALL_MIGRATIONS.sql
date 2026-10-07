@@ -2069,3 +2069,20 @@ alter table leads add column if not exists needs_attention_reason  text;
 create index if not exists idx_leads_needs_attention
   on leads (tenant_id)
   where needs_attention = true;
+
+-- ── 033 · WhatsApp outbound timeline (§28.8, Lane 2) — rolling cold-first-message queue ───────
+create table if not exists wa_outbound_queue (
+  id            uuid primary key default gen_random_uuid(),
+  tenant_id     uuid not null,
+  lead_id       uuid not null,
+  scheduled_at  timestamptz not null,
+  status        text not null default 'pending',
+  attempt       int  not null default 0,
+  reason        text,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+create unique index if not exists wa_outbound_one_open_per_lead
+  on wa_outbound_queue (tenant_id, lead_id) where status in ('pending', 'sending');
+create index if not exists wa_outbound_due
+  on wa_outbound_queue (tenant_id, status, scheduled_at);

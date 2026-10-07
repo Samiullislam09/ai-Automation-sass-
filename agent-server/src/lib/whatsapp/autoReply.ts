@@ -83,7 +83,9 @@ export async function scheduleAutoReply(job: AutoReplyJob): Promise<void> {
   }
 }
 
-async function dailyAutoSendCount(tenantId: string): Promise<number> {
+/** How many auto-sends (reactive OR outbound) this tenant has made in a rolling 24h — both lanes
+ *  share one budget, so the cap is a true ceiling on machine-sent messages. */
+export async function dailyAutoSendCount(tenantId: string): Promise<number> {
   const since = new Date(Date.now() - 86_400_000).toISOString();
   try {
     const { count } = await supabase

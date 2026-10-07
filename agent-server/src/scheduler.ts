@@ -6,6 +6,7 @@ import { logJobStart, logJobFinish } from "./jobsLog.js";
 import { brainTick } from "./brain/server.js";
 import { dataForSeoConfigured, normalizeHost } from "./lib/dataforseo.js";
 import { recordRank } from "./lib/rankTracking.js";
+import { tickOutbound } from "./lib/whatsapp/outbound.js";
 
 /** The thing that makes this product actually automatic.
  *
@@ -54,7 +55,18 @@ export function startScheduler() {
  *  everything booked before the brain existed — the old table drains, it is not migrated
  *  (plan §22 con #10). */
 async function sweep() {
-  await Promise.allSettled([tick(), tickOrders(), brainSweep(), tickAudits(), tickRanks()]);
+  await Promise.allSettled([tick(), tickOrders(), brainSweep(), tickAudits(), tickRanks(), tickOutboundSafe()]);
+}
+
+/** The WhatsApp outbound timeline (§28.8). Wrapped so a failure here can never stop the article /
+ *  audit / rank sweeps that share this tick — exactly like every other independent timetable. */
+async function tickOutboundSafe() {
+  try {
+    const sent = await tickOutbound();
+    if (sent) console.log(`[scheduler] outbound timeline: sent ${sent} first-message(s)`);
+  } catch (e: any) {
+    console.error("[scheduler] outbound tick failed:", e?.message);
+  }
 }
 
 async function brainSweep() {
