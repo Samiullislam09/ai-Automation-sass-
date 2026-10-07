@@ -107,6 +107,11 @@ export default function WhatsAppSection() {
         .wa-input:-webkit-autofill,.wa-input:-webkit-autofill:hover,.wa-input:-webkit-autofill:focus{
           -webkit-box-shadow:0 0 0 1000px #f5f6f6 inset !important;-webkit-text-fill-color:#111b21 !important;caret-color:#111b21;transition:background-color 9999s}
         .wa-input:focus{outline:none !important;box-shadow:none !important}
+        .wa-scroll{scrollbar-width:thin;scrollbar-color:#c4ccd1 transparent}
+        .wa-scroll::-webkit-scrollbar{width:7px;height:7px}
+        .wa-scroll::-webkit-scrollbar-track{background:transparent}
+        .wa-scroll::-webkit-scrollbar-thumb{background:#c4ccd1;border-radius:9999px;border:2px solid transparent;background-clip:padding-box}
+        .wa-scroll::-webkit-scrollbar-thumb:hover{background:#9aa6ac;background-clip:padding-box}
       `}</style>
       {/* TOP BAR — Auto replies, alerts, settings, help and the admin, all on the right (matches the
           reference; chat search lives in the list, not here). Only shown once connected. */}
@@ -348,7 +353,7 @@ function Inbox({ search, setSearch }: { search: string; setSearch: (v: string) =
               <input value={q} onChange={(e) => setSearch(e.target.value)} placeholder="Search or start new chat" autoComplete="off" spellCheck={false} className="wa-input w-full text-[13px] outline-none" style={{ color: WA.text }} />
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto" style={{ borderTop: `1px solid ${WA.divider}` }}>
+          <div className="wa-scroll flex-1 overflow-y-auto" style={{ borderTop: `1px solid ${WA.divider}` }}>
             {visible.length === 0 ? (
               <div className="p-5"><p className="text-[13px]" style={{ color: WA.sub }}>{tab === "unread" ? "No unread chats." : q ? "No chats match your search." : "No chats yet. Approve a lead and send the first message, or start a New chat."}</p></div>
             ) : visible.map((l) => {
@@ -432,6 +437,7 @@ function Chat({ lead, onSent, onBack, onDeleted, toast }: { lead: Lead; onSent: 
   const [searchQ, setSearchQ] = useState("");
   const [activeMatch, setActiveMatch] = useState(0);
   const endRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const bubbleRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const autoFor = useRef<string | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -484,7 +490,15 @@ function Chat({ lead, onSent, onBack, onDeleted, toast }: { lead: Lead; onSent: 
     return () => clearInterval(id);
   }, [loadThread]);
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [thread]);
+  // Stick to the bottom on new messages — but NOT while searching (the magnifier scrolls to its
+  // own hit), and NOT when you've scrolled up to read history (a 5s poll must not yank you back
+  // down). Only auto-scroll when you're already near the bottom.
+  useEffect(() => {
+    if (searchOpen) return;
+    const el = listRef.current;
+    if (el && el.scrollHeight - el.scrollTop - el.clientHeight > 160) return;
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [thread, searchOpen]);
 
   // Their real WhatsApp profile photo for the chat header. Fetched once per chat (the URL is
   // short-lived); null when there's no visible photo or the number isn't on WhatsApp → silhouette.
@@ -656,7 +670,7 @@ function Chat({ lead, onSent, onBack, onDeleted, toast }: { lead: Lead; onSent: 
       )}
 
       {/* messages */}
-      <div className="flex-1 space-y-1.5 overflow-y-auto px-4 py-4 sm:px-5" style={{ background: WA.chatBg }}>
+      <div ref={listRef} className="wa-scroll flex-1 space-y-1.5 overflow-y-auto px-4 py-4 sm:px-5" style={{ background: WA.chatBg }}>
         {thread === null ? (
           <p className="text-[13px]" style={{ color: WA.sub }}>Loading…</p>
         ) : thread.length === 0 ? (
