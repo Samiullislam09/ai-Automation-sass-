@@ -15,11 +15,16 @@
  *  (outbound timeline, follow-ups), not this one. */
 import { supabase } from "../../supabase.js";
 import { enqueueWhatsappAutoReply } from "../../queues.js";
-import { suggestReply } from "./suggest.js";
+import { decideReply, detectOptOut } from "./decide.js";
 import { sendText, simulateTyping } from "./session.js";
 import { recordOutgoing } from "./store.js";
 
-export type AutoReplyJob = { tenantId: string; leadId: string; phone: string };
+export type AutoReplyJob = { tenantId: string; leadId: string; phone: string; waitedOnce?: boolean };
+
+/** When the model says the lead is still typing ("wait"), we requeue ONCE after this short gap and
+ *  re-decide — so a half-typed "hi" + the real question become one reply. Only once, so a stream of
+ *  "wait"s can never loop forever. */
+const WAIT_REQUEUE_S = 75;
 
 /** A new message waits a random slice of this window before Mr Lxwa answers — never instant. */
 const DELAY_MIN_S = 30;
@@ -94,20 +99,20 @@ async function dailyAutoSendCount(tenantId: string): Promise<number> {
   }
 }
 
-async function lastMessageDirection(tenantId: string, leadId: string): Promise<"in" | "out" | null> {
+async function lastMessage(tenantId: string, leadId: string): Promise<{ direction: "in" | "out" | null; body: string }> {
   try {
     const { data } = await supabase
       .from("outreach_messages")
-      .select("direction")
+      .select("direction, body")
       .eq("tenant_id", tenantId)
       .eq("lead_id", leadId)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
     const d = (data as any)?.direction;
-    return d === "in" || d === "out" ? d : null;
+    return { direction: d === "in" || d === "out" ? d : null, body: String((data as any)?.body ?? "") };
   } catch {
-    return null;
+    return { direction: null, body: "" };
   }
 }
 
@@ -117,19 +122,31 @@ async function lastMessageDirection(tenantId: string, leadId: string): Promise<"
 export async function handleAutoReply(job: AutoReplyJob): Promise<void> {
   const { tenantId, leadId, phone } = job;
   try {
-    const [{ data: lead }, { data: session }, dir, count] = await Promise.all([
+    const [{ data: lead }, { data: session }, last, count] = await Promise.all([
       supabase.from("leads").select("opt_out, auto_reply_paused_until").eq("id", leadId).eq("tenant_id", tenantId).maybeSingle(),
       supabase.from("whatsapp_sessions").select("first_connected_at").eq("tenant_id", tenantId).maybeSingle(),
-      lastMessageDirection(tenantId, leadId),
+      lastMessage(tenantId, leadId),
       dailyAutoSendCount(tenantId),
     ]);
     if (!lead) return;
+
+    // Deterministic opt-out FIRST — "stop" must always stop, never the model's judgement. Set the
+    // forever flag and never message this lead again.
+    if (last.direction === "in" && detectOptOut(last.body)) {
+      await supabase
+        .from("leads")
+        .update({ opt_out: true, opt_out_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq("id", leadId)
+        .eq("tenant_id", tenantId);
+      console.log(`[whatsapp] auto-reply: ${leadId} opted out — stopping`);
+      return;
+    }
 
     const gate = autoReplyGate({
       optOut: (lead as any).opt_out === true,
       pausedUntilMs: (lead as any).auto_reply_paused_until ? Date.parse((lead as any).auto_reply_paused_until) : null,
       nowMs: Date.now(),
-      lastMessageDirection: dir,
+      lastMessageDirection: last.direction,
       dailyAutoSendCount: count,
       firstConnectedAtMs: (session as any)?.first_connected_at ? Date.parse((session as any).first_connected_at) : null,
     });
@@ -138,9 +155,37 @@ export async function handleAutoReply(job: AutoReplyJob): Promise<void> {
       return;
     }
 
-    const { reply } = await suggestReply(supabase, tenantId, leadId);
-    if (!reply || !reply.trim()) return;
+    // THE DECISION ENGINE (§28.3): one call → intent + confidence + action + a drafted reply.
+    const decision = await decideReply(supabase, tenantId, leadId);
 
+    // Record what we understood on the lead — so the Leads page / Mr Lxwa can show "kahaan tak baat
+    // hui" and flag the ones a human should look at — regardless of whether we send now.
+    await supabase
+      .from("leads")
+      .update({
+        last_intent: decision.intent,
+        needs_attention: decision.needs_human,
+        needs_attention_reason: decision.needs_human ? decision.reason || decision.intent : null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", leadId)
+      .eq("tenant_id", tenantId);
+
+    let action = decision.action;
+    // "wait" (they're mid-typing) requeues ONCE; the second time we must act, not wait again.
+    if (action === "wait" && job.waitedOnce) action = decision.reply ? "reply" : "ignore";
+
+    if (action === "ignore") {
+      console.log(`[whatsapp] auto-reply: ${leadId} intent=${decision.intent} → ignore (${decision.reason})`);
+      return;
+    }
+    if (action === "wait") {
+      await enqueueWhatsappAutoReply({ ...job, waitedOnce: true }, { startAfter: WAIT_REQUEUE_S });
+      return;
+    }
+
+    const reply = decision.reply.trim();
+    if (!reply) return;
     await simulateTyping(tenantId, phone, typingMs(reply));
     const { waMessageId } = await sendText(tenantId, phone, reply);
     await recordOutgoing(supabase, tenantId, leadId, reply, waMessageId, "brain");

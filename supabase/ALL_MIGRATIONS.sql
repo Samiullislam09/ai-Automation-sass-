@@ -2062,3 +2062,10 @@ alter table leads add column if not exists last_intent             text;
 create index if not exists idx_leads_autoreply_paused
   on leads (tenant_id, auto_reply_paused_until)
   where auto_reply_paused_until is not null;
+
+-- ── 032 · WhatsApp auto-reply §28 Phase 2 — "needs you" flag (additive) ───────────────────────
+alter table leads add column if not exists needs_attention        boolean not null default false;
+alter table leads add column if not exists needs_attention_reason  text;
+create index if not exists idx_leads_needs_attention
+  on leads (tenant_id)
+  where needs_attention = true;
