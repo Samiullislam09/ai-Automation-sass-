@@ -2086,3 +2086,6 @@ create unique index if not exists wa_outbound_one_open_per_lead
   on wa_outbound_queue (tenant_id, lead_id) where status in ('pending', 'sending');
 create index if not exists wa_outbound_due
   on wa_outbound_queue (tenant_id, status, scheduled_at);
+
+-- ── 034 · WhatsApp auto-reply §28.5 Phase 4 — follow-up nudge counter (additive) ─────────────
+alter table leads add column if not exists auto_followups_done int not null default 0;

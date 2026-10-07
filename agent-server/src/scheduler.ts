@@ -7,6 +7,7 @@ import { brainTick } from "./brain/server.js";
 import { dataForSeoConfigured, normalizeHost } from "./lib/dataforseo.js";
 import { recordRank } from "./lib/rankTracking.js";
 import { tickOutbound } from "./lib/whatsapp/outbound.js";
+import { tickFollowups } from "./lib/whatsapp/followup.js";
 
 /** The thing that makes this product actually automatic.
  *
@@ -55,7 +56,16 @@ export function startScheduler() {
  *  everything booked before the brain existed — the old table drains, it is not migrated
  *  (plan §22 con #10). */
 async function sweep() {
-  await Promise.allSettled([tick(), tickOrders(), brainSweep(), tickAudits(), tickRanks(), tickOutboundSafe()]);
+  await Promise.allSettled([tick(), tickOrders(), brainSweep(), tickAudits(), tickRanks(), tickOutboundSafe(), tickFollowupsSafe()]);
+}
+
+async function tickFollowupsSafe() {
+  try {
+    const sent = await tickFollowups();
+    if (sent) console.log(`[scheduler] follow-ups: sent ${sent} nudge(s)`);
+  } catch (e: any) {
+    console.error("[scheduler] follow-up tick failed:", e?.message);
+  }
 }
 
 /** The WhatsApp outbound timeline (§28.8). Wrapped so a failure here can never stop the article /

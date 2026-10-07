@@ -142,8 +142,9 @@ export async function setWhatsappAutoReply(tenantId: string, on: boolean): Promi
  *  jsonb bag as auto_reply. Defaults are conservative and Dubai-timed (the main tenant); the
  *  per-tenant IANA timezone lands in P6, until then `tz_offset` is a plain UTC offset in hours. */
 export type WhatsappSettings = {
-  auto_reply: boolean;      // master switch — gates BOTH lanes (§28.9)
+  auto_reply: boolean;       // master switch — gates ALL lanes (§28.9)
   outbound_enabled: boolean; // Lane 2 (cold first-message timeline) on/off, under auto_reply
+  followups_enabled: boolean; // P4 — the 24h/90h/160h nudges to a silent lead, under auto_reply
   send_start: number;        // allowed-hours window start (local hour, 0-23) — outside = quiet
   send_end: number;          // allowed-hours window end (local hour, 0-23)
   tz_offset: number;         // hours from UTC (Dubai = +4) until per-tenant TZ (P6)
@@ -154,6 +155,7 @@ export type WhatsappSettings = {
 export const DEFAULT_WHATSAPP_SETTINGS: WhatsappSettings = {
   auto_reply: false,
   outbound_enabled: true,
+  followups_enabled: true,
   send_start: 9,
   send_end: 21,
   tz_offset: 4,
@@ -199,6 +201,7 @@ export function mergeWhatsapp(raw: unknown): WhatsappSettings {
   return {
     auto_reply: o.auto_reply === true,
     outbound_enabled: o.outbound_enabled !== false, // default true
+    followups_enabled: o.followups_enabled !== false, // default true
     send_start: clampHour(o.send_start, d.send_start),
     send_end: clampHour(o.send_end, d.send_end),
     tz_offset: Number.isFinite(tz) && tz >= -12 && tz <= 14 ? tz : d.tz_offset,

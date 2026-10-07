@@ -118,7 +118,9 @@ export async function linkIncoming(
   // Move the lead forward — but never backward. A lead already in_conversation/won/etc stays
   // there; a fresh reply from a contacted/delivered/read lead becomes `replied`.
   const advanceable = ["queued", "contacted", "delivered", "read", "approved"];
-  const patch: Record<string, unknown> = { replied_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+  // A reply restarts the follow-up clock: this silence cycle is over, so the counter resets and the
+  // next silence (if any) earns a fresh set of 24h/90h/160h nudges (§28.5).
+  const patch: Record<string, unknown> = { replied_at: new Date().toISOString(), updated_at: new Date().toISOString(), auto_followups_done: 0 };
   if (advanceable.includes(String(lead!.stage))) patch.stage = "replied";
   await supabase.from("leads").update(patch).eq("id", lead!.id).eq("tenant_id", tenantId);
   return { leadId: lead!.id };
