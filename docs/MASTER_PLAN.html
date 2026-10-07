@@ -2230,5 +2230,69 @@ aur commit ke saath &mdash; taaki kal koi (aap, main, ya 10 saal baad koi employ
 </ol>
 <p>Har phase ke baad: agent-server tests + dono typecheck clean, §26 build-log entry, aur agent-server change hai to owner Railway redeploy kare (Vercel sirf UI).</p>
 
+<h2 id="lead-lifecycle">29 &middot; Lead &rarr; Meeting &rarr; Client lifecycle <span class="pill">2026-10-07 PLAN</span></h2>
+<p>§28 (auto-reply) isi lifecycle ka ek hissa hai. Owner ne poora funnel maanga: message classify &rarr; meeting &rarr; ready-to-buy &rarr; client, team/admin alerts ke saath. <strong>Owner ke 3 faisle (2026-10-07):</strong> (1) meeting <strong>pure manual</strong> &mdash; AI detect+notify, admin khud schedule; (2) alerts <strong>WhatsApp + dashboard dono</strong> admins ko; (3) client conversion <strong>fully automatic</strong> &mdash; par safety ke liye auto-convert sirf <em>explicit high-confidence</em> buy-signal pe (invoice/start/payment), vague positive pe nahi, aur admin 1-tap me revert kar sakta hai.</p>
+
+<h3>29.1 Abhi kya hai (grounded)</h3>
+<ul>
+<li>Lead stages (migration 028): new, pending_approval, approved, rejected, queued, contacted, delivered, read, replied, in_conversation, interested, won, lost, opted_out, invalid, failed. <strong>Meeting / ready_to_buy / client stage nahi; Client page nahi; team/admin table nahi.</strong></li>
+<li>New-lead auto-create maujood (<code>linkIncoming</code>): inbound match na mile to lead ban jaata hai.</li>
+</ul>
+
+<h3>29.2 Overall flow</h3>
+<pre>NEW msg &rarr; lead auto-create/match &rarr; AI classify (intent)
+  normal baat   &rarr; auto-reply (§28)
+  MEETING       &rarr; stage=meeting_requested &rarr; ADMINS alert &rarr; admin manually schedule
+  READY_TO_BUY  &rarr; stage=ready_to_buy &rarr; HOT alert + next-steps &rarr; (explicit buy &rarr; auto CLIENT)
+  stop/opt-out  &rarr; band
+Meeting schedule &rarr; meeting_scheduled &rarr; outcome mark:
+  positive &rarr; ready_to_buy | no-show &rarr; reschedule | negative &rarr; lost</pre>
+<p>Har step pe lead ka <strong>stage + timeline update</strong> hota hai (Leads page + Client page dono).</p>
+
+<h3>29.3 Stages (migration 032)</h3>
+<p>028 ke upar add: <code>meeting_requested</code> &rarr; <code>meeting_scheduled</code> &rarr; <code>meeting_done</code> &rarr; <code>ready_to_buy</code>. <code>won</code> = paying client; Client page = won leads (+ aage client fields).</p>
+
+<h3>29.4 Classify (§28 decision engine + 2 naye intent)</h3>
+<p>Intents me add: <code>meeting_request</code> (demo/call/meeting), <code>ready_to_buy</code> (price/order/&ldquo;start karte hain&rdquo;). <code>ready_to_buy</code> ka auto-convert gate <strong>explicit + high-confidence</strong> maangta hai.</p>
+
+<h3>29.5 Team &amp; admin model</h3>
+<p>Nayi table <code>whatsapp_admins</code>: <code>{tenant_id, name, phone, role(owner/manager), notify}</code>. Owner + manager + multiple numbers add kar sakte hain. UI: WhatsApp/Settings me &ldquo;Team &amp; Alerts&rdquo; panel. Yahi numbers alerts paate hain.</p>
+
+<h3>29.6 Meeting system (owner: pure manual)</h3>
+<ul>
+<li>Meeting <strong>admin khud</strong> arrange karega (WhatsApp/call/Zoom). System: detect + notify + track.</li>
+<li>Meeting-request pe: lead&rarr;<code>meeting_requested</code>, saare admins ko alert, AI lead ko polite reply (team time fix karne aayegi / kaunsa time theek?).</li>
+<li>Dashboard me lead/chat buttons: Schedule (date/time/notes&rarr;<code>meeting_scheduled</code>), Mark done (outcome), Mark ready-to-buy, Convert to Client.</li>
+<li>Nayi table <code>lead_meetings</code> (ek lead ki kai meetings).</li>
+</ul>
+
+<h3>29.7 Meeting ke baad</h3>
+<p>Admin outcome mark: positive &rarr; ready_to_buy/in_conversation; no-show &rarr; reschedule; negative &rarr; lost.</p>
+
+<h3>29.8 READY_TO_BUY automation</h3>
+<ol>
+<li>Instant HOT alert admins ko (WhatsApp + dashboard, top priority).</li>
+<li>Stage <code>ready_to_buy</code>, Leads page top pe pin.</li>
+<li>AI next-steps/confirmation message lead ko.</li>
+<li>Follow-up task banta hai.</li>
+<li>Explicit high-confidence buy-signal (invoice/start/payment) &rarr; <strong>auto Client</strong> (owner: fully automatic); admin 1-tap revert.</li>
+</ol>
+
+<h3>29.9 Client + Client page</h3>
+<p><code>ready_to_buy</code> &rarr; auto (ya admin) &rarr; stage <code>won</code> &rarr; <strong>Client page</strong> (nayi): company, kab se client, last contact (aage deal value/contract). Leads pipeline se nikal jaata hai. Leads page: naye stage badges + filter tabs + live update.</p>
+
+<h3>29.10 Alerts mechanism (WhatsApp + dashboard)</h3>
+<p>Meeting-request / ready-to-buy pe: (1) in-dashboard notification + badge, (2) admins ke WhatsApp numbers pe alert message (tenant ke linked WA se). Internal, low-volume &mdash; ban-safe.</p>
+
+<h3>29.11 Build order (§28 ke upar)</h3>
+<ol>
+<li><strong>P5</strong> &mdash; <code>whatsapp_admins</code> table + &ldquo;Team &amp; Alerts&rdquo; UI + notification center.</li>
+<li><strong>P6</strong> &mdash; meeting intents + detection + admin alert + <code>meeting_requested</code> + lead reply.</li>
+<li><strong>P7</strong> &mdash; meeting management (schedule/outcome, <code>lead_meetings</code>, stages).</li>
+<li><strong>P8</strong> &mdash; ready_to_buy automation (hot alert, next-steps, task, explicit-buy auto-convert).</li>
+<li><strong>P9</strong> &mdash; Client page + Leads stage UI.</li>
+</ol>
+<p>Migrations: <strong>032</strong> (stages), <strong>033</strong> (whatsapp_admins, lead_meetings, notifications). Har phase: tests + dono typecheck clean, §26 build-log entry, agent-server change pe owner Railway redeploy.</p>
+
 <p style="margin-top:56px"><small>Verified on 2026-08-27 against GitHub API and repo READMEs; codebase facts from commit fa22a68. Numbers in Section 12 are estimates to be replaced by one week of measured data.</small></p>
 </div>
