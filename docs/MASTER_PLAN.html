@@ -2227,6 +2227,22 @@ aur commit ke saath &mdash; taaki kal koi (aap, main, ya 10 saal baad koi employ
 <h3>28.5 Follow-ups (24h/72h) &mdash; P4, conservative</h3>
 <p>Sirf un leads pe jo interest dikha ke chup hue; max <strong>2</strong> (24h, 72h); sirf business-hours; cap me gine jaate; reply/opt-out pe turant cancel; apna toggle. Ye sabse zyada ban-risk hai, isliye code me extra tight (unsolicited hone ke bawajood owner ne scope me rakha &mdash; isliye conservative).</p>
 
+<h3>28.9 Master switch + catch-up (owner 2026-10-07)</h3>
+<p>Ek hi <strong>Auto-replies toggle</strong> poore flow ka switch hai:</p>
+<ul>
+<li><strong>OFF</strong> &rarr; dono lanes band (na auto-reply, na outbound timeline, na follow-up, na meeting-auto). Sirf human manual send chalta hai.</li>
+<li><strong>ON</strong> &rarr; pehle <strong>backlog scan</strong>: jo inbounds off-rehne ke dauran aaye, unko dekhta hai; har conversation <strong>jahaan chhodi wahaan se resume</strong>; outbound timeline + follow-ups resume. <strong>Catch-up bhi spread + capped</strong> &mdash; missed replies ek saath blast nahi, Rule #0 ke gaps/caps se ek-ek karke (warna ON karte hi ban).</li>
+</ul>
+
+<h3>28.10 Edge cases &mdash; &ldquo;jab cheezein galat/adhoori hoti hain&rdquo; (sab auto, no manual)</h3>
+<ul>
+<li><strong>Reply diya phir chup / bilkul reply nahi / sirf dekha (read)</strong> &rarr; follow-up 24h+72h (max 2) &rarr; phir bhi nahi to stage <code>lost</code> (dormant), Leads pe flag. Auto.</li>
+<li><strong>Kabhi msg gaya hi nahi (timeline error)</strong> &rarr; slot <code>pending</code> rehta, dispatcher auto-retry; permanent fail (WhatsApp nahi/technical) &rarr; <code>invalid</code>/<code>failed</code> + flag; theek/ON hote hi carryover se bhejta hai. Message gayab nahi hota.</li>
+<li><strong>Lead ne ajeeb/garbage msg bheja</strong> &rarr; decision engine <code>ignore</code> ya clarify-poochho (bakwaas paragraph nahi).</li>
+<li><strong>Meeting link bheja par lead no-show</strong> &rarr; meeting end + grace ke baad AI khud reschedule nudge + naye slots (max limit). Auto. (True attendance detect reliable nahi; time-based nudge pragmatic auto hai.)</li>
+<li><strong>AI galti &mdash; galat jawab / bina maange Meet link</strong> (e.g. &ldquo;soch ke bataata hu&rdquo; pe link): <strong>GATE</strong> &mdash; Meet/booking SIRF clear high-confidence meeting-request ya time-par-haan pe; defer/think-phrases pe AI sirf &ldquo;sure, jab ready ho batana&rdquo;, link nahi. Phir bhi galti ho to <strong>needs-you flag + owner alert + 1-tap undo</strong> (calendar event cancel, stage wapas). Roz ka kaam auto; sirf 2 irreversible (Meet book, Client-convert) pe high-confidence + alert.</li>
+</ul>
+
 <h3>28.6 Data model</h3>
 <ul>
 <li><code>leads</code>: <code>auto_reply_paused_until</code>, <code>last_intent</code>, <code>auto_followups_done</code>, <code>next_followup_at</code> (+ maujooda <code>opt_out</code>, <code>follow_up_count</code>).</li>
