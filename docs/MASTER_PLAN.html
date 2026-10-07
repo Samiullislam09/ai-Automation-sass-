@@ -2298,7 +2298,18 @@ Meeting schedule &rarr; meeting_scheduled &rarr; outcome mark:
 </ol>
 
 <h3>29.9 Client + Client page</h3>
-<p><code>ready_to_buy</code> &rarr; auto (ya admin) &rarr; stage <code>won</code> &rarr; <strong>Client page</strong> (nayi): company, kab se client, last contact (aage deal value/contract). Leads pipeline se nikal jaata hai. Leads page: naye stage badges + filter tabs + live update.</p>
+<p><code>ready_to_buy</code> &rarr; auto (ya admin) &rarr; stage <code>won</code> &rarr; <strong>Client page</strong> (nayi): company, kab se client, last contact (aage deal value/contract). Leads pipeline se nikal jaata hai.</p>
+
+<h3>29.12 Leads page &mdash; visibility (owner: &ldquo;kisse kahaan tak baat hui, simple way&rdquo;)</h3>
+<p>Chahe bahut leads hon, har lead ek nazar me padhe bina samajh aaye. Har row/card pe:</p>
+<ul>
+<li><strong>Stage badge</strong> (rang): New / Contacted / Replied / In conversation / Meeting / Ready to buy / Client.</li>
+<li><strong>&ldquo;Kahaan tak baat hui&rdquo; &mdash; ek-line AI summary</strong> (e.g. &ldquo;ISO 9001 price pooncha &mdash; Meet Fri 3pm&rdquo;). Nayi field <code>conversation_summary</code> on <code>leads</code>, jo <strong>usi reply-wale decision-engine LLM call me</strong> update hoti hai &mdash; <strong>koi extra cost nahi</strong> (wo call thread waise bhi padh raha hai).</li>
+<li><strong>Last activity</strong>: aakhri message preview + time + kisne (lead/Mr Lxwa) + <strong>needs-you</strong> flag jahan dhyaan chahiye.</li>
+<li><strong>Filter tabs</strong>: All / In conversation / Meetings / Ready to buy / Clients &mdash; ek click me hot leads ya meetings.</li>
+<li>Row click &rarr; poori chat + details drawer (WhatsApp page jaisa). Sab live update.</li>
+</ul>
+<p>Build: P9 me (Client page + Leads stage UI ke saath). <code>conversation_summary</code> migration 032 me add.</p>
 
 <h3>29.10 Alerts mechanism (WhatsApp + dashboard)</h3>
 <p>Meeting-request / ready-to-buy pe: (1) in-dashboard notification + badge, (2) admins ke WhatsApp numbers pe alert message (tenant ke linked WA se). Internal, low-volume &mdash; ban-safe.</p>
