@@ -102,19 +102,21 @@ export default function WhatsAppSection() {
     // edge-to-edge (only the sidebar remains), and fill the height.
     <div className="-m-3 flex h-[calc(100%+1.5rem)] min-h-0 flex-col sm:-m-4 sm:h-[calc(100%+2rem)]" style={{ background: "#fff", color: WA.text, colorScheme: "light" }}>
       <style>{`
-        .wa-input{background:transparent !important;color:#111b21 !important;color-scheme:light}
+        /* the input carries NO ring of its own — the ONE outline is drawn by its .wa-search wrapper,
+           so focusing never shows a second (purple) border inside the green one */
+        .wa-input,.wa-input:hover,.wa-input:focus,.wa-input:focus-visible,.wa-input:active{
+          background:transparent !important;color:#111b21 !important;color-scheme:light;
+          border:0 !important;outline:0 !important;box-shadow:none !important;padding:0 !important;margin:0 !important}
         .wa-input::placeholder{color:#8696a0}
         .wa-input:-webkit-autofill,.wa-input:-webkit-autofill:hover,.wa-input:-webkit-autofill:focus{
           -webkit-box-shadow:0 0 0 1000px #f5f6f6 inset !important;-webkit-text-fill-color:#111b21 !important;caret-color:#111b21;transition:background-color 9999s}
-        .wa-input:focus{outline:none !important;box-shadow:none !important}
         .wa-scroll{scrollbar-width:thin;scrollbar-color:#c4ccd1 transparent}
         .wa-scroll::-webkit-scrollbar{width:7px;height:7px}
         .wa-scroll::-webkit-scrollbar-track{background:transparent}
         .wa-scroll::-webkit-scrollbar-thumb{background:#c4ccd1;border-radius:9999px;border:2px solid transparent;background-clip:padding-box}
         .wa-scroll::-webkit-scrollbar-thumb:hover{background:#9aa6ac;background-clip:padding-box}
         .wa-search{border:1.5px solid transparent;transition:border-color .15s ease,box-shadow .15s ease}
-        .wa-search:focus-within{border-color:#00a884 !important;box-shadow:0 0 0 3px rgba(0,168,132,.14)}
-        .wa-input:focus-visible{outline:none !important}
+        .wa-search:focus-within{border-color:#00a884 !important;box-shadow:0 0 0 2px rgba(0,168,132,.12)}
         .lx-wa-input{border:1.5px solid #e4e7e9 !important}
         .lx-wa-input:focus{border-color:#00a884 !important;box-shadow:0 0 0 3px rgba(0,168,132,.12) !important;outline:none !important}
       `}</style>
@@ -353,7 +355,7 @@ function Inbox({ search, setSearch }: { search: string; setSearch: (v: string) =
           </div>
           {/* search */}
           <div className="px-3 pb-2 pt-1">
-            <div className="wa-search flex items-center gap-2 rounded-lg px-3 py-1.5" style={{ background: WA.listHover }}>
+            <div className="wa-search flex items-center gap-2 rounded-lg px-3 py-1" style={{ background: WA.listHover }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke={WA.sub} strokeWidth="2" /><path d="M21 21l-4-4" stroke={WA.sub} strokeWidth="2" strokeLinecap="round" /></svg>
               <input value={q} onChange={(e) => setSearch(e.target.value)} placeholder="Search or start new chat" autoComplete="off" spellCheck={false} className="wa-input w-full text-[13px] outline-none" style={{ color: WA.text }} />
             </div>
