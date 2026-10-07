@@ -42,6 +42,7 @@ type Lead = {
   source_segment?: string | null; source_query?: string | null; classification?: string | null;
   score_breakdown?: { score?: number; band?: string; components?: { id: string; group: string; points: number; max: number; why: string }[] } | null;
   evidence?: any; reject_reason?: string | null;
+  needs_attention?: boolean | null; needs_attention_reason?: string | null; last_intent?: string | null;
 };
 type Msg = { id: string; direction: "in" | "out"; status: string; body: string; answered_by?: string | null; created_at: string };
 
@@ -379,6 +380,7 @@ function Inbox({ search, setSearch }: { search: string; setSearch: (v: string) =
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-1.5">
                       <span className="truncate text-[14px]" style={{ color: WA.text, fontWeight: unread ? 700 : 600 }}>{l.company || l.name || "Lead"}</span>
+                      {l.needs_attention && <span title={l.needs_attention_reason ?? "Needs your attention"} className="flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9.5px] font-bold" style={{ background: "#fef3c7", color: "#92400e" }}>⚠ Needs you</span>}
                       {wa === true && <span className="flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9.5px] font-bold" style={{ background: "#e7f6ec", color: "#067647" }}>✓ On WhatsApp</span>}
                       {wa === false && <span className="flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9.5px] font-bold" style={{ background: "#fdeaea", color: "#b42318" }}>Not on WA</span>}
                     </span>

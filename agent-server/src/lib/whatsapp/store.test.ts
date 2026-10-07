@@ -133,3 +133,23 @@ test("a second outbound counts a follow-up instead of re-contacting", async () =
   assert.equal(state.leads[0].stage, "replied", "already-contacted lead keeps its stage");
   assert.equal(state.leads[0].follow_up_count, 1, "the follow-up is counted");
 });
+
+test("a HUMAN reply hands the chat off: auto-reply pauses and the needs-you flag clears", async () => {
+  const { db, state } = fakeDb({
+    leads: [{ id: "L1", tenant_id: "t1", stage: "replied", contacted_at: "2026-09-30T00:00:00Z", follow_up_count: 0, needs_attention: true, needs_attention_reason: "asked price" }],
+  });
+  await recordOutgoing(db, TENANT, "L1", "I'll take this one", "W11", "human");
+  assert.ok(state.leads[0].auto_reply_paused_until, "a human send sets the handoff pause");
+  assert.ok(Date.parse(state.leads[0].auto_reply_paused_until) > Date.now(), "pause is in the future");
+  assert.equal(state.leads[0].needs_attention, false, "needs-you clears once a human is on it");
+  assert.equal(state.leads[0].needs_attention_reason, null);
+});
+
+test("a BRAIN reply does NOT pause or clear the flag (only a human hands off)", async () => {
+  const { db, state } = fakeDb({
+    leads: [{ id: "L1", tenant_id: "t1", stage: "replied", contacted_at: "2026-09-30T00:00:00Z", follow_up_count: 0, needs_attention: true }],
+  });
+  await recordOutgoing(db, TENANT, "L1", "auto answer", "W12", "brain");
+  assert.equal(state.leads[0].auto_reply_paused_until ?? null, null, "brain reply never pauses auto-reply");
+  assert.equal(state.leads[0].needs_attention, true, "brain reply leaves the flag for the human");
+});

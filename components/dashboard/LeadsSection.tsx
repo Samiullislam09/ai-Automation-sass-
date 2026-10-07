@@ -35,6 +35,7 @@ type Lead = {
   approved_at?: string | null; contacted_at?: string | null; replied_at?: string | null;
   ai_messaged: boolean; human_messaged: boolean; messaged: boolean; converted: boolean; is_client: boolean;
   last_out_at: string | null; last_out_body: string | null; last_in_at: string | null; last_in_body: string | null;
+  needs_attention?: boolean | null; needs_attention_reason?: string | null; last_intent?: string | null;
 };
 type Kpis = { total: number; messaged: number; converted: number; ai_messaged: number; employee_messaged: number; not_messaged: number; new: number; engaged: number; client: number };
 type Gen = { running: boolean; running_since?: string | null; running_found?: number | null; running_label?: string | null; running_done?: number | null; running_total?: number | null; last_run_at: string | null; last_status: string | null; last_found: number | null; last_saved?: number | null; last_note: string | null; last_needs?: string[]; last_question?: string | null };
@@ -447,6 +448,7 @@ export default function LeadsSection() {
                           <div className="min-w-0">
                             <div className="flex items-center gap-1.5">
                               <span className="truncate font-semibold" style={{ color: C.ink, maxWidth: 150 }}>{l.company || l.name || "Untitled"}</span>
+                              {l.needs_attention && <span title={l.needs_attention_reason ?? "Mr Lxwa replied but flagged this for you"} className="shrink-0 rounded px-1 text-[10px] font-semibold" style={{ color: "#92400e", background: "#fef3c7" }}>⚠ Needs you</span>}
                               {l.stage === "rejected" && <span className="shrink-0 rounded px-1 text-[10px] font-semibold" style={{ color: C.red, background: C.redSoft }}>Rejected</span>}
                               {l.stage === "opted_out" && <span className="shrink-0 rounded px-1 text-[10px] font-semibold" style={{ color: C.red, background: C.redSoft }}>Opted out</span>}
                             </div>
@@ -494,6 +496,7 @@ export default function LeadsSection() {
                 <div className="mb-2.5 flex flex-wrap items-center gap-1.5">
                   <AddedCell iso={l.created_at} />
                   <MessagedCell l={l} />
+                  {l.needs_attention && <Tag tone="#92400e" soft="#fef3c7">⚠ Needs you</Tag>}
                   {l.stage === "rejected" && <Tag tone={C.red} soft={C.redSoft}>Rejected</Tag>}
                   {l.stage === "opted_out" && <Tag tone={C.red} soft={C.redSoft}>Opted out</Tag>}
                 </div>
@@ -764,7 +767,13 @@ function Drawer({ lead, onClose, setStage, busy, waLink }: { lead: Lead; onClose
         <div className="mb-4 flex items-center gap-2">
           <span className="rounded-lg px-2.5 py-1 text-[13px] font-bold" style={{ color: scoreColor(lead.icp_score), background: C.graySoft }}>{lead.icp_score ?? "—"}/100</span>
           <StageChip stage={lead.stage} />
+          {lead.needs_attention && <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11.5px] font-semibold" style={{ color: "#92400e", background: "#fef3c7" }}>⚠ Needs you</span>}
         </div>
+        {lead.needs_attention && lead.needs_attention_reason && (
+          <div className="mb-4 rounded-xl px-3 py-2 text-[12.5px]" style={{ color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a" }}>
+            Mr Lxwa replied but flagged this for you: <b>{lead.needs_attention_reason}</b>
+          </div>
+        )}
         <div className="mb-4 space-y-2 text-[13px]" style={{ color: C.ink }}>
           {(lead.whatsapp || lead.phone) && <Row icon="phone" v={lead.whatsapp || lead.phone!} />}
           {lead.email && <Row icon="mail" v={lead.email} />}

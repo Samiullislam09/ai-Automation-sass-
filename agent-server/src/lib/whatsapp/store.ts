@@ -9,6 +9,12 @@
  *  a wrong short match cannot happen. */
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+/** How long Mr Lxwa stays quiet on a lead after a human replies in that chat (§28 P3 handoff). Six
+ *  hours: long enough that the human owns the live exchange, short enough that a forgotten chat
+ *  returns to auto. The auto-reply gate re-checks this each time, so a human reply during the window
+ *  simply extends it. */
+const HUMAN_HANDOFF_PAUSE_MS = 6 * 60 * 60 * 1000;
+
 /** Digits only, for comparing two phone numbers that were written by different systems. */
 function digits(s: string | null | undefined): string {
   return String(s ?? "").replace(/[^0-9]/g, "");
@@ -192,6 +198,14 @@ export async function recordOutgoing(
     patch.contacted_at = new Date().toISOString();
   } else {
     patch.follow_up_count = (lead?.follow_up_count ?? 0) + 1;
+  }
+  // HUMAN HANDOFF (§28 P3): when a PERSON sends in this chat, Mr Lxwa steps back — auto-reply is
+  // paused for this one lead for a window, and its "needs you" flag is cleared (the human is now on
+  // it). A brain reply never does this; it is the human taking over that hands the chat to the human.
+  if (answeredBy === "human") {
+    patch.auto_reply_paused_until = new Date(Date.now() + HUMAN_HANDOFF_PAUSE_MS).toISOString();
+    patch.needs_attention = false;
+    patch.needs_attention_reason = null;
   }
   await supabase.from("leads").update(patch).eq("id", leadId).eq("tenant_id", tenantId);
 }
