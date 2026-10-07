@@ -30,7 +30,7 @@ export async function GET() {
     .eq("tenant_id", tenantId)
     .eq("stage", "pending_approval");
 
-  const [{ data: leads, error: le }, { data: msgs, error: me }, { data: genRows }] = await Promise.all([
+  const [{ data: leads, error: le }, { data: msgs, error: me }, { data: genRows }, { data: meetingRows }] = await Promise.all([
     supabase.from("leads").select("*").eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(1000),
     supabase
       .from("outreach_messages")
@@ -47,6 +47,15 @@ export async function GET() {
       .eq("agent", "leads")
       .order("created_at", { ascending: false })
       .limit(5),
+    // Scheduled/offered meetings so the drawer can show the booked time + Meet link (§29.6 P7/P9).
+    // Tolerant: a database without migration 037 just yields no meetings.
+    supabase
+      .from("lead_meetings")
+      .select("id, lead_id, status, start_at, meet_link")
+      .eq("tenant_id", tenantId)
+      .in("status", ["offered", "scheduled"])
+      .order("created_at", { ascending: false })
+      .limit(1000),
   ]);
   if (le && /column .* does not exist|relation .* does not exist/i.test(le.message)) {
     return NextResponse.json({ ok: false, error: "The CRM tables are not set up yet (migration 028)." }, { status: 409 });
@@ -71,6 +80,12 @@ export async function GET() {
     byLead.set(m.lead_id, s);
   }
 
+  // Latest scheduled/offered meeting per lead (rows already come newest-first).
+  const meetingByLead = new Map<string, any>();
+  for (const m of (meetingRows ?? []) as any[]) {
+    if (m.lead_id && !meetingByLead.has(m.lead_id)) meetingByLead.set(m.lead_id, { id: m.id, status: m.status, start_at: m.start_at, meet_link: m.meet_link });
+  }
+
   const CONVO = ["contacted", "delivered", "read", "replied", "in_conversation", "interested"];
   const enriched = (leads ?? []).map((l: any) => {
     const s = byLead.get(l.id) ?? { ai: false, human: false };
@@ -86,6 +101,7 @@ export async function GET() {
       last_out_body: s.lastOutBody ?? null,
       last_in_at: s.lastIn ?? l.replied_at ?? null,
       last_in_body: s.lastInBody ?? null,
+      meeting: meetingByLead.get(l.id) ?? null,
     };
   });
 

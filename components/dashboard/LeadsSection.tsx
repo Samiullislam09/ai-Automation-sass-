@@ -36,6 +36,7 @@ type Lead = {
   ai_messaged: boolean; human_messaged: boolean; messaged: boolean; converted: boolean; is_client: boolean;
   last_out_at: string | null; last_out_body: string | null; last_in_at: string | null; last_in_body: string | null;
   needs_attention?: boolean | null; needs_attention_reason?: string | null; last_intent?: string | null;
+  meeting?: { id: string; status: string; start_at: string | null; meet_link: string | null } | null;
 };
 type Kpis = { total: number; messaged: number; converted: number; ai_messaged: number; employee_messaged: number; not_messaged: number; new: number; engaged: number; client: number };
 type Gen = { running: boolean; running_since?: string | null; running_found?: number | null; running_label?: string | null; running_done?: number | null; running_total?: number | null; last_run_at: string | null; last_status: string | null; last_found: number | null; last_saved?: number | null; last_note: string | null; last_needs?: string[]; last_question?: string | null };
@@ -123,6 +124,8 @@ const TAB_MATCH: Record<string, (l: Lead) => boolean> = {
   // "Engaged" = leads you've started a conversation with (messaged or they replied), so the tab
   // matches the "Engaged" KPI card (kpis.messaged) — the two used to disagree (KPI 4, tab 0).
   engaged: (l) => l.messaged || ["replied", "in_conversation", "interested"].includes(l.stage),
+  meetings: (l) => ["meeting_requested", "meeting_scheduled", "meeting_done"].includes(l.stage),
+  ready_to_buy: (l) => l.stage === "ready_to_buy",
   rejected: (l) => l.stage === "rejected",
   converted: (l) => l.converted,
   client: (l) => l.is_client,
@@ -413,7 +416,9 @@ export default function LeadsSection() {
           ["all", "All Leads", kpis?.total],
           ["new", "New", kpis?.new],
           ["engaged", "Engaged", kpis?.messaged],
-          ["converted", "Converted", kpis?.converted],
+          ["meetings", "📅 Meetings", (leads ?? []).filter(TAB_MATCH.meetings).length],
+          ["ready_to_buy", "🔥 Ready to buy", (leads ?? []).filter(TAB_MATCH.ready_to_buy).length],
+          ["client", "⭐ Clients", kpis?.client],
           ["not_messaged", "Not Messaged", kpis?.not_messaged],
           ["rejected", "Rejected", (leads ?? []).filter((l) => l.stage === "rejected").length],
         ] as [string, string, number | undefined][]).map(([k, label, n]) => (
@@ -741,6 +746,30 @@ function WaGlyph({ size = 14 }: { size?: number }) {
   );
 }
 
+function MeetingCard({ meeting, onClose }: { meeting: NonNullable<Lead["meeting"]>; onClose: () => void }) {
+  const { toast } = useStore();
+  const [busy, setBusy] = useState(false);
+  const when = meeting.start_at ? new Date(meeting.start_at).toLocaleString([], { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : null;
+  const cancel = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const r = await fetch("/api/whatsapp/meeting", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "cancel", meetingId: meeting.id }) }).then((x) => x.json());
+      if (r.ok) { toast("Meeting cancelled."); onClose(); } else toast(r.error ?? "Could not cancel.", "error");
+    } catch (e: any) { toast(e?.message ?? "Network error.", "error"); } finally { setBusy(false); }
+  };
+  return (
+    <div className="mb-4 rounded-xl p-3" style={{ background: "#eef6ff", border: "1px solid #bfdbfe" }}>
+      <div className="mb-1 text-[12px] font-bold" style={{ color: "#1e40af" }}>📅 {meeting.status === "scheduled" ? "Meeting booked" : "Slots offered — awaiting reply"}</div>
+      {when && <div className="text-[13px]" style={{ color: C.ink }}>{when}</div>}
+      {meeting.meet_link && <a href={meeting.meet_link} target="_blank" rel="noreferrer" className="mt-1 block truncate text-[12.5px] font-semibold" style={{ color: C.blue }}>Join Google Meet →</a>}
+      {meeting.status === "scheduled" && (
+        <button onClick={cancel} disabled={busy} className="mt-2 rounded-lg px-2.5 py-1 text-[11.5px] font-semibold disabled:opacity-60" style={{ color: "#b42318", background: "#fdeaea" }}>{busy ? "Cancelling…" : "Cancel meeting"}</button>
+      )}
+    </div>
+  );
+}
+
 function Drawer({ lead, onClose, setStage, busy, waLink }: { lead: Lead; onClose: () => void; setStage: (l: Lead, s: string, reason?: string) => void; busy: string | null; waLink: (l: Lead) => string }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -778,6 +807,7 @@ function Drawer({ lead, onClose, setStage, busy, waLink }: { lead: Lead; onClose
             Mr Lxwa replied but flagged this for you: <b>{lead.needs_attention_reason}</b>
           </div>
         )}
+        {lead.meeting && <MeetingCard meeting={lead.meeting} onClose={onClose} />}
         <div className="mb-4 space-y-2 text-[13px]" style={{ color: C.ink }}>
           {(lead.whatsapp || lead.phone) && <Row icon="phone" v={lead.whatsapp || lead.phone!} />}
           {lead.email && <Row icon="mail" v={lead.email} />}
