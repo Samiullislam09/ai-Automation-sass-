@@ -2298,7 +2298,9 @@ Meeting schedule &rarr; meeting_scheduled &rarr; outcome mark:
 <li><strong>Slots offer</strong>: AI Google Calendar <code>freebusy</code> dekh ke 2-3 khali slot nikaalta hai (quiet-hours/business-hours-safe) aur lead ko WhatsApp pe deta hai: &ldquo;kal 3pm, 5pm, ya parso 11am?&rdquo;.</li>
 <li><strong>Lead chooses</strong>: lead reply me ek time choose karta hai &rarr; AI us slot pe calendar event banata hai <code>events.insert</code> + <code>conferenceData</code> &rarr; <strong>Google Meet link auto</strong>, admin(s) attendee, lead ko link WhatsApp pe. Stage&rarr;<code>meeting_scheduled</code>.</li>
 <li><strong>Postpone / &ldquo;abhi nahi&rdquo;</strong>: agar lead slot choose karne ke bajaye bole &ldquo;kal nahi / next time / baad me&rdquo; &rarr; AI turant dobara time poochhta hai + naye slots deta hai (meeting band nahi karta).</li>
-<li><strong>No-show</strong>: scheduled meeting ke baad lead chup &rarr; reschedule nudge 48h phir 150h (+ naye slots), phir chhod do.</li>
+<li><strong>Admin reminder</strong>: meeting se 1h + 10min pehle AI admin(s) ko reminder (WhatsApp + dashboard) &mdash; taaki apni team bhoole nahi.</li>
+<li><strong>Admin/manager no-show (apni taraf)</strong>: agar lead meeting ke baad bole &ldquo;koi aaya nahi / where are you&rdquo; &rarr; AI turant maafi + reschedule (naye slots) + admin ko <strong>urgent</strong> alert. Auto.</li>
+<li><strong>Lead no-show</strong>: scheduled meeting ke baad lead chup &rarr; reschedule nudge 48h phir 150h (+ naye slots), phir chhod do.</li>
 <li><strong>Admin override</strong>: dashboard me meeting dikhti hai; admin reschedule/cancel kar sakta hai (calendar + lead dono update). Mark done (outcome: positive/no-show/negative).</li>
 <li><strong>Double-booking nahi</strong>: har slot freebusy se verify; do leads ek hi time na pakad lein iske liye slot hold/re-check.</li>
 <li>Nayi table <code>lead_meetings</code> (lead_id, calendar_event_id, meet_link, start/end, status, outcome).</li>
@@ -2329,6 +2331,9 @@ Meeting schedule &rarr; meeting_scheduled &rarr; outcome mark:
 <li>Row click &rarr; poori chat + details drawer (WhatsApp page jaisa). Sab live update.</li>
 </ul>
 <p>Build: P9 me (Client page + Leads stage UI ke saath). <code>conversation_summary</code> migration 032 me add.</p>
+
+<h3>29.13 Mr Lxwa = control-room (owner: &ldquo;Mr Lxwa ko sab pata ho&rdquo;)</h3>
+<p>Mr Lxwa ko ek <strong>read-only status tool</strong> milega (existing <code>toolsFromRegistry</code> / <code>chat-context.ts</code> pattern). Owner natural baat me poochh sakta hai &mdash; &ldquo;WhatsApp ka kya status hai?&rdquo; / &ldquo;kaun meeting pe hai?&rdquo; / &ldquo;aaj kitne msg gaye?&rdquo; &mdash; aur Mr Lxwa live jawab deta hai: active conversations (kis-kis se kahaan tak, <code>conversation_summary</code> se), meeting pe kitne (kab), outbound timeline pe kitne pending, needs-you kitne, aaj ka send-count vs cap. Sirf read (DB se), koi side-effect nahi. AI galti safe-net: har reply poori thread history padh ke (abhi suggest.ts 30 msg + Site Brain), + confidence gates + irreversible pe alert + 1-tap undo.</p>
 
 <h3>29.10 Alerts mechanism (WhatsApp + dashboard)</h3>
 <p>Meeting-request / ready-to-buy pe: (1) in-dashboard notification + badge, (2) admins ke WhatsApp numbers pe alert message (tenant ke linked WA se). Internal, low-volume &mdash; ban-safe.</p>
