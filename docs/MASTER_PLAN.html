@@ -2247,7 +2247,7 @@ aur commit ke saath &mdash; taaki kal koi (aap, main, ya 10 saal baad koi employ
 <p>Har phase ke baad: agent-server tests + dono typecheck clean, §26 build-log entry, aur agent-server change hai to owner Railway redeploy kare (Vercel sirf UI).</p>
 
 <h2 id="lead-lifecycle">29 &middot; Lead &rarr; Meeting &rarr; Client lifecycle <span class="pill">2026-10-07 PLAN</span></h2>
-<p>§28 (auto-reply) isi lifecycle ka ek hissa hai. Owner ne poora funnel maanga: message classify &rarr; meeting &rarr; ready-to-buy &rarr; client, team/admin alerts ke saath. <strong>Owner ke 3 faisle (2026-10-07):</strong> (1) meeting <strong>pure manual</strong> &mdash; AI detect+notify, admin khud schedule; (2) alerts <strong>WhatsApp + dashboard dono</strong> admins ko; (3) client conversion <strong>fully automatic</strong> &mdash; par safety ke liye auto-convert sirf <em>explicit high-confidence</em> buy-signal pe (invoice/start/payment), vague positive pe nahi, aur admin 1-tap me revert kar sakta hai.</p>
+<p>§28 (auto-reply) isi lifecycle ka ek hissa hai. Owner ne poora funnel maanga: message classify &rarr; meeting &rarr; ready-to-buy &rarr; client, team/admin alerts ke saath. <strong>Owner ke 3 faisle (2026-10-07):</strong> (1) meeting <strong>auto Google Meet via WhatsApp options</strong> &mdash; AI calendar ka free time dekh ke 2-3 slot WhatsApp pe deta hai, lead choose karta hai, AI Google Meet link bana ke bhej deta hai + calendar event (Option B); (2) alerts <strong>WhatsApp + dashboard dono</strong> admins ko; (3) client conversion <strong>fully automatic</strong> &mdash; par safety ke liye auto-convert sirf <em>explicit high-confidence</em> buy-signal pe (invoice/start/payment), vague positive pe nahi, aur admin 1-tap me revert kar sakta hai.</p>
 
 <h3>29.1 Abhi kya hai (grounded)</h3>
 <ul>
@@ -2274,12 +2274,15 @@ Meeting schedule &rarr; meeting_scheduled &rarr; outcome mark:
 <h3>29.5 Team &amp; admin model</h3>
 <p>Nayi table <code>whatsapp_admins</code>: <code>{tenant_id, name, phone, role(owner/manager), notify}</code>. Owner + manager + multiple numbers add kar sakte hain. UI: WhatsApp/Settings me &ldquo;Team &amp; Alerts&rdquo; panel. Yahi numbers alerts paate hain.</p>
 
-<h3>29.6 Meeting system (owner: pure manual)</h3>
+<h3>29.6 Meeting system (owner: auto Google Meet via WhatsApp options &mdash; Option B)</h3>
 <ul>
-<li>Meeting <strong>admin khud</strong> arrange karega (WhatsApp/call/Zoom). System: detect + notify + track.</li>
-<li>Meeting-request pe: lead&rarr;<code>meeting_requested</code>, saare admins ko alert, AI lead ko polite reply (team time fix karne aayegi / kaunsa time theek?).</li>
-<li>Dashboard me lead/chat buttons: Schedule (date/time/notes&rarr;<code>meeting_scheduled</code>), Mark done (outcome), Mark ready-to-buy, Convert to Client.</li>
-<li>Nayi table <code>lead_meetings</code> (ek lead ki kai meetings).</li>
+<li><strong>Pre-req</strong>: tenant Google connect karega. Abhi wala Google OAuth (Search Console + GA4 + Business Profile) me <code>calendar.events</code> scope <strong>add</strong> hoga &mdash; plumbing (OAuth, refresh_token store, <code>/api/integrations/google</code>) pehle se hai. Tenant ka <strong>timezone</strong> bhi set hoga.</li>
+<li><strong>Detect</strong>: decision engine <code>meeting_request</code> pakadta hai &rarr; lead&rarr;<code>meeting_requested</code> + admins ko alert.</li>
+<li><strong>Slots offer</strong>: AI Google Calendar <code>freebusy</code> dekh ke 2-3 khali slot nikaalta hai (quiet-hours/business-hours-safe) aur lead ko WhatsApp pe deta hai: &ldquo;kal 3pm, 5pm, ya parso 11am?&rdquo;.</li>
+<li><strong>Lead chooses</strong>: lead reply me ek time choose karta hai &rarr; AI us slot pe calendar event banata hai <code>events.insert</code> + <code>conferenceData</code> &rarr; <strong>Google Meet link auto</strong>, admin(s) attendee, lead ko link WhatsApp pe. Stage&rarr;<code>meeting_scheduled</code>.</li>
+<li><strong>Admin override</strong>: dashboard me meeting dikhti hai; admin reschedule/cancel kar sakta hai (calendar + lead dono update). Mark done (outcome: positive/no-show/negative).</li>
+<li><strong>Double-booking nahi</strong>: har slot freebusy se verify; do leads ek hi time na pakad lein iske liye slot hold/re-check.</li>
+<li>Nayi table <code>lead_meetings</code> (lead_id, calendar_event_id, meet_link, start/end, status, outcome).</li>
 </ul>
 
 <h3>29.7 Meeting ke baad</h3>
@@ -2303,8 +2306,8 @@ Meeting schedule &rarr; meeting_scheduled &rarr; outcome mark:
 <h3>29.11 Build order (§28 ke upar)</h3>
 <ol>
 <li><strong>P5</strong> &mdash; <code>whatsapp_admins</code> table + &ldquo;Team &amp; Alerts&rdquo; UI + notification center.</li>
-<li><strong>P6</strong> &mdash; meeting intents + detection + admin alert + <code>meeting_requested</code> + lead reply.</li>
-<li><strong>P7</strong> &mdash; meeting management (schedule/outcome, <code>lead_meetings</code>, stages).</li>
+<li><strong>P6</strong> &mdash; meeting intents + detection + admin alert + <code>meeting_requested</code>; <strong>Google Calendar connect</strong> (calendar.events scope add) + timezone.</li>
+<li><strong>P7</strong> &mdash; Option B meeting: freebusy &rarr; WhatsApp slot options &rarr; lead picks &rarr; <code>events.insert</code>+conferenceData (Google Meet link) &rarr; <code>meeting_scheduled</code>; admin reschedule/cancel/outcome; <code>lead_meetings</code> table.</li>
 <li><strong>P8</strong> &mdash; ready_to_buy automation (hot alert, next-steps, task, explicit-buy auto-convert).</li>
 <li><strong>P9</strong> &mdash; Client page + Leads stage UI.</li>
 </ol>
