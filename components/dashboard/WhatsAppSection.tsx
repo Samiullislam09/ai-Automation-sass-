@@ -130,9 +130,7 @@ export default function WhatsAppSection() {
       ) : connected ? (
         <Inbox />
       ) : (
-        <div className="flex flex-1 items-center justify-center">
-          <ConnectCta status={status.status} onConnect={() => setModal(true)} />
-        </div>
+        <ConnectCta status={status.status} onConnect={() => setModal(true)} />
       )}
 
       <WhatsAppConnectModal open={modal} onClose={() => { setModal(false); poll(); }} onConnected={() => { setEverConnected(true); poll(); }} />
@@ -142,20 +140,52 @@ export default function WhatsAppSection() {
 
 /* ── pre-connection call to action ───────────────────────────────────────────────────────── */
 function ConnectCta({ status, onConnect }: { status: string; onConnect: () => void }) {
+  const cta = status === "logged_out" ? "Reconnect WhatsApp" : status === "banned" ? "Try another number" : "Connect WhatsApp";
+  const steps = [
+    { n: "1", t: "Scan once, like WhatsApp Web", d: "Open WhatsApp → Linked devices → scan the QR. Your number stays yours." },
+    { n: "2", t: "Every lead becomes a chat", d: "Approved leads land here as conversations — with the full context behind each one." },
+    { n: "3", t: "Reply, or let Mr Lxwa", d: "Answer yourself, use an AI-drafted reply, or switch Auto-replies on." },
+  ];
   return (
-    <div className="flex flex-col items-center gap-4 rounded-3xl p-10 text-center" style={{ background: WA.panel, color: WA.text, maxWidth: 440 }}>
-      <span className="flex h-16 w-16 items-center justify-center rounded-full" style={{ background: WA.green }}>
-        <svg width="30" height="30" viewBox="0 0 24 24" fill="none"><path d="M12 21a9 9 0 10-8-4.9L3 21l4.9-1A9 9 0 0012 21z" stroke="#fff" strokeWidth="1.7" strokeLinejoin="round" /></svg>
-      </span>
-      <div>
-        <h2 className="text-base font-bold">Connect your WhatsApp</h2>
-        <p className="text-[13px] mt-1.5" style={{ color: WA.sub }}>
-          Link it once — like WhatsApp Web — and every lead you approve becomes a chat you can reply to right here.
-        </p>
+    <div className="relative flex-1 overflow-hidden rounded-3xl" style={{ background: WA.panel, color: WA.text, border: `1px solid ${WA.divider}` }}>
+      {/* soft brand wash top-right */}
+      <div className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full" style={{ background: "radial-gradient(circle, rgba(0,128,105,.12), transparent 70%)" }} />
+      <div className="relative mx-auto flex h-full max-w-5xl flex-col justify-center px-6 py-10 sm:px-10">
+        <div className="grid items-center gap-10 lg:grid-cols-2">
+          {/* left: the pitch */}
+          <div>
+            <span className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-[12px] font-semibold" style={{ background: "#e7f6ec", color: "#067647" }}>
+              <span className="h-1.5 w-1.5 rounded-full" style={{ background: "#17c964" }} /> WhatsApp Business
+            </span>
+            <h2 className="mt-4 text-[26px] font-extrabold leading-tight sm:text-[32px]" style={{ color: WA.text }}>
+              Turn every lead into a WhatsApp conversation.
+            </h2>
+            <p className="mt-3 max-w-md text-[14px] leading-relaxed" style={{ color: WA.sub }}>
+              Link your business number once — like WhatsApp Web — and your approved leads become real chats you can
+              reply to here, with Mr Lxwa drafting the first message and the replies.
+            </p>
+            <div className="mt-6 flex flex-wrap items-center gap-3">
+              <button className="inline-flex items-center gap-2 rounded-full px-6 py-3 text-[14px] font-bold text-white shadow-sm" style={{ background: WA.green }} onClick={onConnect}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 21a9 9 0 10-8-4.9L3 21l4.9-1A9 9 0 0012 21z" stroke="#fff" strokeWidth="1.8" strokeLinejoin="round" /></svg>
+                {cta}
+              </button>
+              <span className="text-[12px]" style={{ color: WA.sub }}>Human-driven · nothing sent without you · your own number</span>
+            </div>
+          </div>
+          {/* right: the three steps as cards */}
+          <div className="grid gap-3">
+            {steps.map((s) => (
+              <div key={s.n} className="flex items-start gap-3 rounded-2xl p-4" style={{ background: "#f7faf9", border: `1px solid ${WA.divider}` }}>
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[13px] font-bold text-white" style={{ background: WA.green }}>{s.n}</span>
+                <div className="min-w-0">
+                  <div className="text-[14px] font-bold" style={{ color: WA.text }}>{s.t}</div>
+                  <div className="mt-0.5 text-[12.5px]" style={{ color: WA.sub }}>{s.d}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
-      <button className="rounded-full px-6 py-2.5 text-[14px] font-semibold text-white" style={{ background: WA.green }} onClick={onConnect}>
-        {status === "logged_out" ? "Reconnect WhatsApp" : status === "banned" ? "Try another number" : "Connect WhatsApp"}
-      </button>
     </div>
   );
 }
