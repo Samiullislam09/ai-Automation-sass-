@@ -10,7 +10,8 @@
 import type { Express, Request, Response } from "express";
 import { supabase } from "../../supabase.js";
 import { env } from "../../env.js";
-import { connect, disconnect, sendText, sessionStatus, getContactInfo } from "./session.js";
+import { connect, disconnect, sendText, sessionStatus, getContactInfo, checkNumbers } from "./session.js";
+import { getWhatsappAutoReply, setWhatsappAutoReply } from "../outreach/settings.js";
 import { recordOutgoing } from "./store.js";
 import { suggestReply } from "./suggest.js";
 import { emitWhatsapp } from "../../socket.js";
@@ -47,9 +48,21 @@ export function mountWhatsapp(app: Express): void {
 
   /** Current connection status + the QR if one is pending. Polled once by the UI on open; live
    *  updates come over the socket. */
-  app.get("/whatsapp/:tenantId/status", (req, res) => {
+  app.get("/whatsapp/:tenantId/status", async (req, res) => {
     if (!authed(req, res)) return;
-    res.json({ ok: true, ...sessionStatus(req.params.tenantId) });
+    const autoReply = await getWhatsappAutoReply(req.params.tenantId).catch(() => false);
+    res.json({ ok: true, ...sessionStatus(req.params.tenantId), autoReply });
+  });
+
+  /** Turn WhatsApp auto-reply on/off for this tenant. */
+  app.post("/whatsapp/:tenantId/auto-reply", async (req, res) => {
+    if (!authed(req, res)) return;
+    try {
+      await setWhatsappAutoReply(req.params.tenantId, req.body?.on === true);
+      res.json({ ok: true, autoReply: req.body?.on === true });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message ?? "could not update" });
+    }
   });
 
   /** Whether a number (?phone=) is on WhatsApp, plus its photo — one call the chat uses on open.
@@ -63,6 +76,18 @@ export function mountWhatsapp(app: Express): void {
       res.json({ ok: true, url: photo, onWhatsapp });
     } catch {
       res.json({ ok: true, url: null, onWhatsapp: null });
+    }
+  });
+
+  /** Which of a batch of numbers are on WhatsApp — one call for the whole chat list's badges. */
+  app.post("/whatsapp/:tenantId/check", async (req, res) => {
+    if (!authed(req, res)) return;
+    const phones = Array.isArray(req.body?.phones) ? req.body.phones.map((p: any) => String(p)) : [];
+    try {
+      const results = await checkNumbers(req.params.tenantId, phones);
+      res.json({ ok: true, results });
+    } catch {
+      res.json({ ok: true, results: {} });
     }
   });
 

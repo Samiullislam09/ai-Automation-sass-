@@ -50,18 +50,33 @@ export default function WhatsAppSection() {
   const [status, setStatus] = useState<Status & { loaded: boolean }>({ status: "checking", qr: null, phone: null, loaded: false });
   const [everConnected, setEverConnected] = useState(false);
   const [modal, setModal] = useState(false);
+  const [autoReply, setAutoReply] = useState(false);
+  const [togglingAuto, setTogglingAuto] = useState(false);
 
   const poll = useCallback(async () => {
     try {
       const r = await fetch("/api/whatsapp/status").then((x) => x.json());
       if (r.ok) {
         setStatus({ status: r.status, qr: r.qr ?? null, phone: r.phone ?? null, loaded: true });
+        if (typeof r.autoReply === "boolean") setAutoReply(r.autoReply);
         if (r.status === "connected") setEverConnected(true);
       } else setStatus((s) => ({ ...s, loaded: true }));
     } catch {
       setStatus((s) => ({ ...s, loaded: true }));
     }
   }, []);
+
+  const toggleAuto = async () => {
+    const next = !autoReply;
+    setAutoReply(next); // optimistic
+    setTogglingAuto(true);
+    try {
+      const r = await fetch("/api/whatsapp/auto-reply", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on: next }) }).then((x) => x.json());
+      if (!r.ok) { setAutoReply(!next); toast(r.error ?? "Could not update auto-reply.", "error"); }
+      else toast(next ? "Auto-reply ON — Mr Lxwa will answer incoming messages." : "Auto-reply OFF.");
+    } catch (e: any) { setAutoReply(!next); toast(e?.message ?? "Network error.", "error"); }
+    finally { setTogglingAuto(false); }
+  };
 
   useEffect(() => {
     poll();
@@ -93,7 +108,14 @@ export default function WhatsAppSection() {
           </div>
         </div>
         {connected && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
+            {/* Auto replies toggle — when ON, Mr Lxwa answers incoming messages by itself */}
+            <button onClick={toggleAuto} disabled={togglingAuto} className="inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[12.5px] font-semibold disabled:opacity-60"
+              style={{ background: autoReply ? "#e7f6ec" : "var(--lx-in)", border: `1px solid ${autoReply ? "#9ae6b4" : "var(--lx-border)"}`, color: autoReply ? "#067647" : "var(--lx-mut)" }}
+              title="When on, Mr Lxwa drafts and sends a reply to each incoming message by itself">
+              <span className="h-2 w-2 rounded-full" style={{ background: autoReply ? "#17c964" : "#98a2b3" }} />
+              Auto replies <b>{autoReply ? "ON" : "OFF"}</b>
+            </button>
             <span className="lx-10 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1" style={{ background: "var(--lx-in)", border: "1px solid var(--lx-border)" }}>
               <span className="h-2 w-2 rounded-full" style={{ background: "#25D366" }} />
               <span style={{ color: "var(--lx-text)" }}>{status.phone ? `+${status.phone}` : "Connected"}</span>
@@ -145,6 +167,26 @@ function Inbox() {
   const [inbox, setInbox] = useState<Record<string, { body: string; direction: string; created_at: string; status?: string; unanswered?: number }>>({});
   const [active, setActive] = useState<Lead | null>(null);
   const [newChat, setNewChat] = useState(false);
+  const [onWa, setOnWa] = useState<Record<string, boolean | null>>({}); // leadId → on WhatsApp?
+  const [q, setQ] = useState("");
+  const [tab, setTab] = useState<"all" | "unread">("all");
+
+  // One batch call checks every chat's number at once, so each row shows a green "On WhatsApp" /
+  // red "Not on WhatsApp" badge. Keyed back by lead id.
+  const checkOnWhatsApp = useCallback(async (list: Lead[]) => {
+    const phones = Array.from(new Set(list.map((l) => (l.whatsapp || l.phone || "").replace(/[^0-9]/g, "")).filter(Boolean)));
+    if (!phones.length) return;
+    try {
+      const r = await fetch("/api/whatsapp/check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phones }) }).then((x) => x.json());
+      if (!r.ok) return;
+      const byLead: Record<string, boolean | null> = {};
+      for (const l of list) {
+        const d = (l.whatsapp || l.phone || "").replace(/[^0-9]/g, "");
+        if (d && d in (r.results ?? {})) byLead[l.id] = r.results[d];
+      }
+      setOnWa((prev) => ({ ...prev, ...byLead }));
+    } catch { /* badges just won't show */ }
+  }, []);
 
   const loadList = useCallback(async () => {
     // Two INDEPENDENT fetches, not Promise.all: the chat list is the leads call, so render it the
@@ -159,6 +201,7 @@ function Inbox() {
           ["approved", "contacted", "delivered", "read", "replied", "in_conversation", "interested", "won", "lost"].includes(l.stage)
         );
         setLeads(inConvo);
+        void checkOnWhatsApp(inConvo);
         // ?lead=<id> deep link (the WhatsApp button on a lead row): open that conversation, even
         // if the lead is only approved and has no messages yet.
         const wanted = new URLSearchParams(window.location.search).get("lead");
@@ -179,7 +222,7 @@ function Inbox() {
         setInbox(map);
       })
       .catch(() => {});
-  }, []);
+  }, [checkOnWhatsApp]);
 
   useEffect(() => {
     loadList();
@@ -189,13 +232,25 @@ function Inbox() {
 
   if (leads === null) return <div className="flex flex-1 items-center justify-center rounded-3xl" style={{ background: WA.panel }}><p className="text-[13px]" style={{ color: WA.sub }}>Loading…</p></div>;
 
+  // Filtered + sorted (recent-first) list, with the All/Unread tab and the search box applied.
+  const unreadCount = leads.filter((l) => (inbox[l.id]?.unanswered ?? 0) > 0).length;
+  const needle = q.trim().toLowerCase();
+  const visible = leads
+    .filter((l) => (tab === "unread" ? (inbox[l.id]?.unanswered ?? 0) > 0 : true))
+    .filter((l) => !needle || [l.company, l.name, l.whatsapp, l.phone, inbox[l.id]?.body].some((v) => String(v ?? "").toLowerCase().includes(needle)))
+    .sort((a, b) => {
+      const ta = inbox[a.id]?.created_at ? new Date(inbox[a.id].created_at).getTime() : 0;
+      const tb = inbox[b.id]?.created_at ? new Date(inbox[b.id].created_at).getTime() : 0;
+      return tb - ta;
+    });
+
   return (
     <div className="min-h-0 flex-1 overflow-hidden rounded-3xl" style={{ background: WA.panel, border: `1px solid ${WA.divider}` }}>
       <div className="grid h-full grid-cols-1 md:grid-cols-[340px_1fr]">
         {/* conversation list — hidden on mobile once a chat is open */}
         <div className={`${active ? "hidden md:flex" : "flex"} h-full min-h-0 flex-col overflow-hidden`} style={{ borderRight: `1px solid ${WA.divider}` }}>
-          <div className="flex items-center justify-between px-4 py-3.5" style={{ borderBottom: `1px solid ${WA.divider}` }}>
-            <span className="text-[15px] font-semibold" style={{ color: WA.text }}>Chats</span>
+          <div className="flex items-center justify-between px-4 pt-3.5" style={{ color: WA.text }}>
+            <span className="text-[16px] font-bold">Chats</span>
             <button
               className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-semibold text-white"
               style={{ background: WA.green }}
@@ -203,46 +258,65 @@ function Inbox() {
               title="Start a chat with any number"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" /></svg>
-              New chat
+              New Chat
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto">
-            {leads.length === 0 ? (
-              <div className="p-5"><p className="text-[13px]" style={{ color: WA.sub }}>No chats yet. Approve a lead on the Leads page and send the first message, or start a New chat with any number.</p></div>
-            ) : [...leads]
-              // Most-recently-messaged on top, like WhatsApp; chats with no messages fall to the end.
-              .sort((a, b) => {
-                const ta = inbox[a.id]?.created_at ? new Date(inbox[a.id].created_at).getTime() : 0;
-                const tb = inbox[b.id]?.created_at ? new Date(inbox[b.id].created_at).getTime() : 0;
-                return tb - ta;
-              })
-              .map((l) => {
-                const last = inbox[l.id];
-                const on = active?.id === l.id;
-                const unread = !on && (last?.unanswered ?? 0) > 0 ? last!.unanswered! : 0;
-                const tick = last?.direction === "out" ? (last.status === "read" ? "✓✓" : last.status === "delivered" ? "✓✓" : "✓") : "";
-                const tickBlue = last?.status === "read";
-                return (
-                  <button
-                    key={l.id}
-                    onClick={() => setActive(l)}
-                    className="flex w-full items-center gap-3 px-3.5 py-3 text-left"
-                    style={{ background: on ? WA.listHover : WA.panel, borderBottom: `1px solid ${WA.divider}` }}
-                  >
-                    <WaAvatar size={44} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[14px]" style={{ color: WA.text, fontWeight: unread ? 700 : 600 }}>{l.company || l.name || "Lead"}</span>
-                      <span className="flex items-center gap-1 truncate text-[12.5px]" style={{ color: unread ? WA.text : WA.sub }}>
-                        {tick && <span style={{ color: tickBlue ? WA.tickBlue : WA.sub }}>{tick}</span>}
-                        <span className="truncate" style={{ fontWeight: unread ? 600 : 400 }}>{last ? last.body : "Tap to open"}</span>
-                      </span>
+          {/* All / Unread tabs */}
+          <div className="flex items-center gap-4 px-4 pt-2 text-[13px] font-semibold">
+            {([["all", "All", leads.length], ["unread", "Unread", unreadCount]] as const).map(([k, label, n]) => (
+              <button key={k} onClick={() => setTab(k)} className="flex items-center gap-1.5 pb-2" style={{ color: tab === k ? WA.green : WA.sub, borderBottom: `2px solid ${tab === k ? WA.green : "transparent"}` }}>
+                {label}
+                <span className="rounded-full px-1.5 text-[11px] font-bold" style={{ background: tab === k ? WA.green : WA.divider, color: tab === k ? "#fff" : WA.sub }}>{n}</span>
+              </button>
+            ))}
+          </div>
+          {/* search */}
+          <div className="px-3 pb-2 pt-1">
+            <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: WA.listHover }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke={WA.sub} strokeWidth="2" /><path d="M21 21l-4-4" stroke={WA.sub} strokeWidth="2" strokeLinecap="round" /></svg>
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search or start new chat" className="w-full bg-transparent text-[13px] outline-none" style={{ color: WA.text }} />
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto" style={{ borderTop: `1px solid ${WA.divider}` }}>
+            {visible.length === 0 ? (
+              <div className="p-5"><p className="text-[13px]" style={{ color: WA.sub }}>{tab === "unread" ? "No unread chats." : q ? "No chats match your search." : "No chats yet. Approve a lead and send the first message, or start a New chat."}</p></div>
+            ) : visible.map((l) => {
+              const last = inbox[l.id];
+              const on = active?.id === l.id;
+              const unread = !on && (last?.unanswered ?? 0) > 0 ? last!.unanswered! : 0;
+              const tick = last?.direction === "out" ? (last.status === "read" || last.status === "delivered" ? "✓✓" : "✓") : "";
+              const tickBlue = last?.status === "read";
+              const wa = onWa[l.id]; // true / false / undefined
+              return (
+                <button
+                  key={l.id}
+                  onClick={() => setActive(l)}
+                  className="flex w-full items-center gap-3 px-3.5 py-3 text-left"
+                  style={{ background: on ? WA.listHover : WA.panel, borderBottom: `1px solid ${WA.divider}` }}
+                >
+                  <WaAvatar size={44} />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-1.5">
+                      <span className="truncate text-[14px]" style={{ color: WA.text, fontWeight: unread ? 700 : 600 }}>{l.company || l.name || "Lead"}</span>
+                      {wa === true && <span className="flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9.5px] font-bold" style={{ background: "#e7f6ec", color: "#067647" }}>✓ On WhatsApp</span>}
+                      {wa === false && <span className="flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9.5px] font-bold" style={{ background: "#fdeaea", color: "#b42318" }}>Not on WA</span>}
                     </span>
-                    {unread > 0 && (
-                      <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-bold text-white" style={{ background: WA.green }}>{unread}</span>
-                    )}
-                  </button>
-                );
-              })}
+                    <span className="flex items-center gap-1 truncate text-[12.5px]" style={{ color: unread ? WA.text : WA.sub }}>
+                      {tick && <span style={{ color: tickBlue ? WA.tickBlue : WA.sub }}>{tick}</span>}
+                      <span className="truncate" style={{ fontWeight: unread ? 600 : 400 }}>{last ? last.body : "Tap to open"}</span>
+                    </span>
+                  </span>
+                  {unread > 0 && (
+                    <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-bold text-white" style={{ background: WA.green }}>{unread}</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          {/* connected status bar, like the reference */}
+          <div className="flex items-center gap-2 px-4 py-2.5 text-[11.5px]" style={{ borderTop: `1px solid ${WA.divider}`, color: WA.sub }}>
+            <span className="h-2 w-2 rounded-full" style={{ background: "#17c964" }} />
+            WhatsApp connected
           </div>
         </div>
 
@@ -428,8 +502,9 @@ function Chat({ lead, onSent, onBack, onDeleted, toast }: { lead: Lead; onSent: 
             </span>
           </div>
         </button>
-        <button onClick={() => setDetails(true)} className="shrink-0 rounded-full p-1.5" title="Lead details" aria-label="Lead details">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="#fff" strokeWidth="1.8" /><path d="M12 11v5M12 8h.01" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" /></svg>
+        <button onClick={() => setDetails(true)} className="flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-semibold" style={{ background: "rgba(255,255,255,.18)", color: "#fff" }} title="Lead details">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.2" stroke="#fff" strokeWidth="1.8" /><path d="M5 20a7 7 0 0114 0" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" /></svg>
+          <span className="hidden sm:inline">Contact info</span>
         </button>
       </div>
 

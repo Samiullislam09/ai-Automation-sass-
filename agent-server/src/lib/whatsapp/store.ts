@@ -38,7 +38,7 @@ export async function linkIncoming(
   supabase: SupabaseClient,
   tenantId: string,
   msg: { phone: string; text: string; waMessageId: string | null }
-): Promise<void> {
+): Promise<{ leadId: string } | null> {
   // De-dupe: the same inbound can arrive as both a real-time "notify" and a reconnect "append",
   // so skip it if we already stored this WhatsApp message id. (Cheap: id is unique per message.)
   if (msg.waMessageId) {
@@ -48,7 +48,7 @@ export async function linkIncoming(
       .eq("tenant_id", tenantId)
       .eq("wa_message_id", msg.waMessageId)
       .maybeSingle();
-    if (existing) return;
+    if (existing) return null;
   }
 
   const inDigits = digits(msg.phone);
@@ -94,7 +94,7 @@ export async function linkIncoming(
       .single();
     if (createErr || !created) {
       console.warn(`[whatsapp] inbound from ${inDigits}: no lead and could not create one (${createErr?.message}) — not stored`);
-      return;
+      return null;
     }
     lead = created as any;
   }
@@ -115,6 +115,7 @@ export async function linkIncoming(
   const patch: Record<string, unknown> = { replied_at: new Date().toISOString(), updated_at: new Date().toISOString() };
   if (advanceable.includes(String(lead!.stage))) patch.stage = "replied";
   await supabase.from("leads").update(patch).eq("id", lead!.id).eq("tenant_id", tenantId);
+  return { leadId: lead!.id };
 }
 
 /** A delivery or read receipt for a message we sent: advance its status, never regress it.

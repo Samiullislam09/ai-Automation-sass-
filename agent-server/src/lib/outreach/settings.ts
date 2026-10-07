@@ -113,6 +113,31 @@ export async function leadsDailyStatus(tenantId: string): Promise<{ cap: number 
   return { cap, used, remaining: Math.max(0, cap - used) };
 }
 
+/** Is WhatsApp auto-reply ON for this tenant? Stored in agent_settings(agent='whatsapp').
+ *  When ON, Mr Lxwa drafts AND sends a reply the moment a message comes in (session.ts). */
+export async function getWhatsappAutoReply(tenantId: string): Promise<boolean> {
+  try {
+    const { data } = await supabase.from("agent_settings").select("settings").eq("tenant_id", tenantId).eq("agent", "whatsapp").maybeSingle();
+    const s = (data?.settings && typeof data.settings === "object" ? data.settings : {}) as Record<string, unknown>;
+    return s.auto_reply === true;
+  } catch {
+    return false;
+  }
+}
+
+export async function setWhatsappAutoReply(tenantId: string, on: boolean): Promise<void> {
+  try {
+    const { data } = await supabase.from("agent_settings").select("settings").eq("tenant_id", tenantId).eq("agent", "whatsapp").maybeSingle();
+    const s = (data?.settings && typeof data.settings === "object" ? data.settings : {}) as Record<string, unknown>;
+    await supabase.from("agent_settings").upsert(
+      { tenant_id: tenantId, agent: "whatsapp", settings: { ...s, auto_reply: !!on }, enabled: !!on, updated_at: new Date().toISOString() },
+      { onConflict: "tenant_id,agent" },
+    );
+  } catch (e) {
+    console.error("[whatsapp] auto_reply write failed:", (e as Error).message);
+  }
+}
+
 function mergeSettings(raw: unknown): LeadSettings {
   const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   return {

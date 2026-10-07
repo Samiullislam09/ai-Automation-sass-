@@ -22,7 +22,9 @@
 import { makeWASocket, DisconnectReason, Browsers } from "@whiskeysockets/baileys";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { useSupabaseAuthState, clearAuthState } from "./authStore.js";
-import { linkIncoming, recordSentStatus } from "./store.js";
+import { linkIncoming, recordSentStatus, recordOutgoing } from "./store.js";
+import { suggestReply } from "./suggest.js";
+import { getWhatsappAutoReply } from "../outreach/settings.js";
 
 type Sock = ReturnType<typeof makeWASocket>;
 
@@ -158,6 +160,9 @@ export async function connect(
   // so handling both can never store the same reply twice or re-import old history as new.
   sock.ev.on("messages.upsert", async (m: any) => {
     if (m.type !== "notify" && m.type !== "append") return;
+    // Auto-reply only to LIVE messages ("notify"), never to the batch of old ones WhatsApp
+    // replays as "append" on reconnect — otherwise every deploy would fire replies at old chats.
+    const autoReply = m.type === "notify" ? await getWhatsappAutoReply(tenantId) : false;
     for (const msg of m.messages ?? []) {
       if (msg.key?.fromMe) continue; // our own outgoing echo, already recorded on send
       let jid = msg.key?.remoteJid as string | undefined;
@@ -178,11 +183,27 @@ export async function connect(
         msg.message?.listResponseMessage?.title ??
         "";
       if (!String(text).trim()) continue; // a reaction/receipt with no body — nothing to show
-      await linkIncoming(supabase, tenantId, {
-        phone: jid.split("@")[0],
+      const phone = jid.split("@")[0];
+      const linked = await linkIncoming(supabase, tenantId, {
+        phone,
         text: String(text),
         waMessageId: msg.key?.id ?? null,
       });
+
+      // Auto-reply (opt-in, "Auto replies ON"): Mr Lxwa drafts a reply and sends it, so a
+      // conversation keeps moving without the human. Still reactive only — it answers a message
+      // that came IN, it never cold-messages anyone. answered_by:"brain" marks it as the AI's.
+      if (linked && autoReply) {
+        try {
+          const { reply } = await suggestReply(supabase, tenantId, linked.leadId);
+          if (reply && reply.trim()) {
+            const { waMessageId } = await sendText(tenantId, phone, reply);
+            await recordOutgoing(supabase, tenantId, linked.leadId, reply, waMessageId, "brain");
+          }
+        } catch (e: any) {
+          console.warn("[whatsapp] auto-reply failed:", e?.message);
+        }
+      }
     }
   });
 
@@ -239,6 +260,34 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
     p,
     new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`WhatsApp timed out ${label}. Try again in a moment.`)), ms)),
   ]);
+}
+
+/** Which of these numbers are on WhatsApp — the whole chat list's badges in ONE Baileys call
+ *  (sock.onWhatsApp accepts many jids at once). Returns a map phone→true/false/null (null =
+ *  couldn't tell / not connected). Matched back by significant-digit suffix because WhatsApp may
+ *  return a normalised jid. */
+export async function checkNumbers(tenantId: string, phones: string[]): Promise<Record<string, boolean | null>> {
+  const out: Record<string, boolean | null> = {};
+  const uniq = Array.from(new Set(phones.map((p) => String(p || "")).filter(Boolean)));
+  const s = sessions.get(tenantId);
+  if (!s || s.status !== "connected" || !s.sock || !uniq.length) {
+    for (const p of uniq) out[p] = null;
+    return out;
+  }
+  const sig = (x: string) => x.replace(/[^0-9]/g, "").replace(/^0+/, "");
+  try {
+    const jids = uniq.map((p) => `${p.replace(/[^0-9]/g, "")}@s.whatsapp.net`);
+    const results = await withTimeout(s.sock.onWhatsApp(...jids), 15_000, "checking numbers");
+    const found: { d: string; exists: boolean }[] = (results ?? []).map((r: any) => ({ d: sig(String(r?.jid ?? "").split("@")[0]), exists: !!r?.exists }));
+    for (const p of uniq) {
+      const d = sig(p);
+      const hit = found.find((f) => f.d && (f.d.endsWith(d) || d.endsWith(f.d)));
+      out[p] = hit ? hit.exists : false; // in the result set but not "exists" → not on WhatsApp
+    }
+  } catch {
+    for (const p of uniq) out[p] = null;
+  }
+  return out;
 }
 
 /** Is a number on WhatsApp, and what's its photo — in ONE call (the dashboard needs both when a

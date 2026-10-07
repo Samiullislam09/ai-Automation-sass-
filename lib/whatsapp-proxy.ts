@@ -14,7 +14,7 @@ export type WaResult = { ok: boolean; status?: number; error?: string; [k: strin
 
 export async function callWhatsapp(
   tenantId: string,
-  path: "connect" | "status" | "send" | "disconnect" | "suggest" | "avatar",
+  path: "connect" | "status" | "send" | "disconnect" | "suggest" | "avatar" | "check" | "auto-reply",
   init: { method?: "GET" | "POST"; body?: unknown; query?: string } = {}
 ): Promise<WaResult> {
   const base = process.env.AGENT_SERVER_URL;
