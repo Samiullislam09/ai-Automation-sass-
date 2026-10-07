@@ -53,6 +53,7 @@ export default function WhatsAppSection() {
   const [autoReply, setAutoReply] = useState(false);
   const [togglingAuto, setTogglingAuto] = useState(false);
   const [search, setSearch] = useState("");
+  const [adminOpen, setAdminOpen] = useState(false);
 
   const poll = useCallback(async () => {
     try {
@@ -108,18 +109,54 @@ export default function WhatsAppSection() {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke={WA.sub} strokeWidth="2" /><path d="M21 21l-4-4" stroke={WA.sub} strokeWidth="2" strokeLinecap="round" /></svg>
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search chats, contacts, messages…" className="w-full bg-transparent text-[13.5px] outline-none" style={{ color: WA.text }} />
           </div>
-          <div className="flex shrink-0 items-center gap-2.5">
+          <div className="flex shrink-0 items-center gap-3">
+            {/* Auto replies toggle */}
             <button onClick={toggleAuto} disabled={togglingAuto} className="inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[12.5px] font-semibold disabled:opacity-60"
               style={{ background: autoReply ? "#e7f6ec" : WA.listHover, border: `1px solid ${autoReply ? "#9ae6b4" : WA.divider}`, color: autoReply ? "#067647" : WA.sub }}
               title="When on, Mr Lxwa drafts and sends a reply to each incoming message by itself">
               <span className="h-2 w-2 rounded-full" style={{ background: autoReply ? "#17c964" : "#98a2b3" }} />
               Auto replies <b>{autoReply ? "ON" : "OFF"}</b>
             </button>
-            <span className="hidden items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] sm:inline-flex" style={{ background: WA.listHover, color: WA.text }}>
-              <span className="h-2 w-2 rounded-full" style={{ background: "#25D366" }} />
-              {status.phone ? `+${status.phone}` : "Connected"}
-            </span>
-            <button className="rounded-full px-3 py-1.5 text-[12px] font-semibold" style={{ background: WA.listHover, color: WA.sub, border: `1px solid ${WA.divider}` }} onClick={doDisconnect}>Unlink</button>
+            {/* alerts / settings / help */}
+            <button className="relative hidden rounded-full p-2 sm:block" style={{ color: WA.sub }} title="Alerts">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 9a6 6 0 1112 0c0 5 2 6 2 6H4s2-1 2-6zM9.5 19a2.5 2.5 0 005 0" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            </button>
+            <button className="hidden rounded-full p-2 sm:block" style={{ color: WA.sub }} title="Settings">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.8" /><path d="M19 12a7 7 0 00-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 00-2-1.2L14 2h-4l-.5 2.6a7 7 0 00-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 005 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 002 1.2L10 22h4l.5-2.6a7 7 0 002-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" /></svg>
+            </button>
+            <button className="hidden rounded-full p-2 sm:block" style={{ color: WA.sub }} title="Help">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8" /><path d="M9.5 9.5a2.5 2.5 0 014 2c0 1.5-2 1.8-2 3M12 17h.01" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+            </button>
+            {/* admin dropdown — number + Unlink live in here, like the reference */}
+            <div className="relative">
+              <button onClick={() => setAdminOpen((o) => !o)} className="flex items-center gap-2 rounded-full py-1 pl-1 pr-2" style={{ background: WA.listHover }}>
+                <span className="flex h-8 w-8 items-center justify-center rounded-full text-white" style={{ background: WA.green }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.4" stroke="#fff" strokeWidth="1.8" /><path d="M5 20a7 7 0 0114 0" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" /></svg>
+                </span>
+                <span className="hidden text-left leading-tight sm:block">
+                  <span className="block text-[12.5px] font-bold" style={{ color: WA.text }}>Mr. Lxwa</span>
+                  <span className="block text-[10.5px]" style={{ color: WA.sub }}>Admin</span>
+                </span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ transform: adminOpen ? "rotate(180deg)" : undefined }}><path d="M6 9l6 6 6-6" stroke={WA.sub} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              </button>
+              {adminOpen && (
+                <>
+                  <div className="fixed inset-0 z-[70]" onClick={() => setAdminOpen(false)} />
+                  <div className="absolute right-0 z-[71] mt-2 w-56 overflow-hidden rounded-xl py-1 shadow-lg" style={{ background: "#fff", border: `1px solid ${WA.divider}` }}>
+                    <div className="px-3 py-2" style={{ borderBottom: `1px solid ${WA.divider}` }}>
+                      <div className="flex items-center gap-1.5 text-[12px]" style={{ color: WA.text }}>
+                        <span className="h-2 w-2 rounded-full" style={{ background: "#17c964" }} /> Connected
+                      </div>
+                      <div className="mt-0.5 text-[12.5px] font-semibold" style={{ color: WA.text }}>{status.phone ? `+${status.phone}` : "—"}</div>
+                    </div>
+                    <button onClick={() => { setAdminOpen(false); doDisconnect(); }} className="block w-full px-3 py-2 text-left text-[12.5px] font-semibold" style={{ color: "#b42318" }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "#fdeaea")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+                      Unlink WhatsApp
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       )}
