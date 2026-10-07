@@ -2166,6 +2166,7 @@ aur commit ke saath &mdash; taaki kal koi (aap, main, ya 10 saal baad koi employ
 
 <h2 id="whatsapp-autoreply">28 &middot; WhatsApp Auto-Reply engine &mdash; ban-safe, conversation-aware <span class="pill">2026-10-07 PLAN</span></h2>
 <p>Owner ka order: &ldquo;auto reply add karo &mdash; par naye message <strong>ek saath nahi, random time pe</strong> jaayein, reply <strong>conversation ke hisab se sahi</strong> ho, aur <strong>number kabhi ban na ho</strong> (ye #1 rule).&rdquo; Owner ne do faisle diye: <strong>(1) scope = reactive auto-reply + 24h/72h follow-ups dono</strong> (P1&ndash;P4), <strong>(2) jab AI unsure ho tab bhi khud best-guess bheje</strong> (human-handoff hold nahi). Dono maane gaye &mdash; par ban-safety ke rails style-choice nahi, safety hain, isliye &ldquo;always send&rdquo; ke baad bhi lage rahenge.</p>
+<p><strong>DO LANES (owner update 2026-10-07):</strong> ye engine ab do cheezein karta hai. <strong>Lane 1 &mdash; Reactive replies</strong> (aaye hue message ka jawab, §28.3&ndash;28.4). <strong>Lane 2 &mdash; Outbound timeline</strong> (§28.8): aaj generate hue naye, WhatsApp-verified, approved leads pe <em>pehla (cold) message</em> ek randomised timeline pe jaata hai &mdash; ek saath nahi, spread out. Ye <code>session.ts</code> ke &ldquo;never autonomous sender / human-driven only&rdquo; principle ko owner-override karta hai; isliye Lane 2 extra-conservative hai. <strong>Lane 1 ki priority Lane 2 se zyada hai</strong>: jab koi conversation active ho, poori outbound timeline ruk jaati hai.</p>
 
 <h3>28.1 Abhi kya hai (grounded, code se)</h3>
 <ul>
@@ -2173,12 +2174,13 @@ aur commit ke saath &mdash; taaki kal koi (aap, main, ya 10 saal baad koi employ
 <li><code>suggestReply</code> (suggest.ts) sirf ek draft deta hai &mdash; na intent, na &ldquo;reply karein ya nahi&rdquo; ka faisla.</li>
 <li>pg-boss <code>startAfter</code> (delay) + <code>singletonKey</code> maujood &mdash; random timing + burst-coalesce isi se.</li>
 <li>Ban detection (403&rarr;<code>banned</code>) aur warmup ke liye <code>first_connected_at</code> already stored.</li>
-<li><code>sendText</code> abhi akela sender hai; wo property rahegi &mdash; auto-reply bhi hamesha ek <em>inbound</em> se shuru hoga (cold-outreach line kahin nahi).</li>
+<li><code>sendText</code> abhi akela sender hai &mdash; dono lanes isi ek sender se guzrenge (ek jagah saare timeouts + onWhatsApp check + rate-limit). Lane 1 ek inbound se, Lane 2 outbound-dispatcher se trigger hota hai.</li>
+<li>Leads agent lead ke liye pehla message pehle hi draft kar deta hai (<code>lead.draft</code>, Site Brain se grounded) + stage <code>approved</code> set karta hai &mdash; Lane 2 wahi draft bhejta hai, naya nahi likhta.</li>
 </ul>
 
 <h3>28.2 Rule #0 &mdash; number ban na ho (safety layer, har reply isse guzrega)</h3>
 <ul>
-<li><strong>Reactive only</strong> &mdash; sirf aaye hue message ka jawab; kabhi cold message nahi.</li>
+<li><strong>Controlled outbound (not spray)</strong> &mdash; cold message sirf <em>approved + WhatsApp-verified</em> leads pe, randomised timeline pe, ek-ek karke; active conversation ke dauran poori timeline ruk jaati hai (§28.8). Kabhi bulk/ek-saath blast nahi.</li>
 <li><strong>Random delay</strong> &mdash; reply se pehle random <strong>30s&ndash;3min</strong> gap (<code>startAfter</code> + jitter).</li>
 <li><strong>Typing presence</strong> &mdash; send se pehle <code>composing</code> 2&ndash;5s.</li>
 <li><strong>Coalesce</strong> &mdash; burst (hi + &ldquo;ISO 9001 chahiye&rdquo;) &rarr; ek reply (<code>singletonKey=tenant:lead</code>).</li>
@@ -2210,6 +2212,18 @@ aur commit ke saath &mdash; taaki kal koi (aap, main, ya 10 saal baad koi employ
        action=reply &rarr; safety checks (daily cap, warmup, per-lead gap, quiet hours, never-twice)
                       &rarr; composing presence &rarr; sendText &rarr; recordOutgoing("brain")</pre>
 
+<h3>28.8 Outbound timeline (Lane 2 &mdash; cold first-message, owner 2026-10-07)</h3>
+<p>Leads generate hone ke baad jin par WhatsApp hai, un sab ke liye ek <strong>rolling timeline</strong> banti hai &mdash; har lead ko ek randomised send-slot milta hai, aur ek-ek karke pehla message jaata hai.</p>
+<ul>
+<li><strong>Eligible kaun</strong>: stage <code>approved</code> + <code>checkNumbers</code> se WhatsApp-verified + opt-out nahi + pehle kabhi message nahi gaya.</li>
+<li><strong>Slots</strong>: har eligible lead ko random gap (e.g. 3&ndash;15 min) + quiet-hours-safe waqt, taaki 7 leads = 7 alag-alag times (10:03, 10:08&hellip;), ek saath nahi.</li>
+<li><strong>Dispatcher</strong>: ek recurring tick per tenant &mdash; agle due slot ko dekhta hai; agar (a) koi conversation active nahi, (b) daily cap/warmup bacha hai, (c) quiet-hours nahi &rarr; ek message bhejta hai (composing presence &rarr; <code>sendText</code> &rarr; <code>recordOutgoing("brain")</code>, stage &rarr; contacted), phir agla slot schedule.</li>
+<li><strong>Conversation priority (owner ka core rule)</strong>: jab tak koi active conversation hai (unanswered inbound / recent reply), <strong>poori timeline PAUSE</strong> &mdash; koi naya cold message nahi. Idle hone pe resume.</li>
+<li><strong>Carryover + merge</strong>: slots ek table (<code>wa_outbound_queue</code>) me <code>pending</code> rehte hain. Aaj ke jo na gaye wo kal tak pending; kal ke naye unke saath append &mdash; <strong>ek hi timeline pe aaj ka bacha + kal ka naya saath dikhte hain</strong>, scheduled order me (owner ne yahi confirm maanga).</li>
+<li><strong>Caps</strong>: wahi Rule #0 &mdash; daily cap + warmup ramp + per-number gap + opt-out + kill-switch. Outbound aur reactive dono ek hi daily cap me gine jaate hain.</li>
+<li><strong>UI (Outbox/Timeline)</strong>: scheduled sends kab-kab jaayenge, kaunsa paused hai, pause/skip/reschedule &mdash; Leads ya WhatsApp page pe.</li>
+</ul>
+
 <h3>28.5 Follow-ups (24h/72h) &mdash; P4, conservative</h3>
 <p>Sirf un leads pe jo interest dikha ke chup hue; max <strong>2</strong> (24h, 72h); sirf business-hours; cap me gine jaate; reply/opt-out pe turant cancel; apna toggle. Ye sabse zyada ban-risk hai, isliye code me extra tight (unsolicited hone ke bawajood owner ne scope me rakha &mdash; isliye conservative).</p>
 
@@ -2217,8 +2231,9 @@ aur commit ke saath &mdash; taaki kal koi (aap, main, ya 10 saal baad koi employ
 <ul>
 <li><code>leads</code>: <code>auto_reply_paused_until</code>, <code>last_intent</code>, <code>auto_followups_done</code>, <code>next_followup_at</code> (+ maujooda <code>opt_out</code>, <code>follow_up_count</code>).</li>
 <li>Daily counter: <code>whatsapp_sessions.auto_sent_today</code> + <code>auto_sent_date</code> (warmup <code>first_connected_at</code> se compute).</li>
-<li>pg-boss queues: <code>wa-autoreply</code> (P1), <code>wa-followup</code> (P4).</li>
-<li>Migration <strong>031</strong> &mdash; auto-reply state + counters (nullable, non-destructive).</li>
+<li>Nayi table <code>wa_outbound_queue</code>: <code>{tenant_id, lead_id, scheduled_at, status(pending/sent/skipped/cancelled), attempt}</code> &mdash; Lane 2 ki timeline + carryover.</li>
+<li>pg-boss queues: <code>wa-autoreply</code> (P1), <code>wa-outbound</code> dispatcher (Lane 2), <code>wa-followup</code> (P4).</li>
+<li>Migration <strong>031</strong> &mdash; auto-reply state + counters + <code>wa_outbound_queue</code> (nullable/additive, non-destructive).</li>
 </ul>
 
 <h3>28.7 Phases (build order)</h3>
@@ -2226,6 +2241,7 @@ aur commit ke saath &mdash; taaki kal koi (aap, main, ya 10 saal baad koi employ
 <li><strong>P1</strong> &mdash; safety + delayed single reply: queue, random delay, coalesce, typing, daily cap/warmup, opt-out, never-twice. session.ts ko inline-send se queue-send me shift.</li>
 <li><strong>P2</strong> &mdash; decision engine (intent/confidence/action JSON; ignore/wait/reply gates; naya <code>decide.ts</code>).</li>
 <li><strong>P3</strong> &mdash; human handoff + UI (needs-you flag/badge, per-chat pause, Auto-replies panel me cap/quiet-hours settings).</li>
+<li><strong>P3.5</strong> &mdash; <strong>Outbound timeline (Lane 2)</strong>: <code>wa_outbound_queue</code> + dispatcher + conversation-pause + carryover + Outbox UI.</li>
 <li><strong>P4</strong> &mdash; follow-ups (24h/72h scheduler, apna toggle).</li>
 </ol>
 <p>Har phase ke baad: agent-server tests + dono typecheck clean, §26 build-log entry, aur agent-server change hai to owner Railway redeploy kare (Vercel sirf UI).</p>
