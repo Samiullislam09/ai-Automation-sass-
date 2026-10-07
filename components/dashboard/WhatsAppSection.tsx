@@ -327,7 +327,7 @@ function Inbox({ search, setSearch }: { search: string; setSearch: (v: string) =
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden" style={{ background: WA.panel }}>
-      <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[360px_1fr]">
+      <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[280px_1fr] lg:grid-cols-[300px_1fr] xl:grid-cols-[330px_1fr]">
         {/* conversation list — hidden on mobile once a chat is open */}
         <div className={`${active ? "hidden md:flex" : "flex"} h-full min-h-0 flex-col overflow-hidden`} style={{ borderRight: `1px solid ${WA.divider}` }}>
           <div className="flex items-center justify-between px-4 pt-3.5" style={{ color: WA.text }}>
@@ -365,8 +365,6 @@ function Inbox({ search, setSearch }: { search: string; setSearch: (v: string) =
               const last = inbox[l.id];
               const on = active?.id === l.id;
               const unread = !on && (last?.unanswered ?? 0) > 0 ? last!.unanswered! : 0;
-              const tick = last?.direction === "out" ? (last.status === "read" || last.status === "delivered" ? "✓✓" : "✓") : "";
-              const tickBlue = last?.status === "read";
               const wa = onWa[l.id]; // true / false / undefined
               return (
                 <button
@@ -383,7 +381,7 @@ function Inbox({ search, setSearch }: { search: string; setSearch: (v: string) =
                       {wa === false && <span className="flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9.5px] font-bold" style={{ background: "#fdeaea", color: "#b42318" }}>Not on WA</span>}
                     </span>
                     <span className="flex items-center gap-1 truncate text-[12.5px]" style={{ color: unread ? WA.text : WA.sub }}>
-                      {tick && <span style={{ color: tickBlue ? WA.tickBlue : WA.sub }}>{tick}</span>}
+                      {last?.direction === "out" && last.status && <Ticks status={last.status} />}
                       <span className="truncate" style={{ fontWeight: unread ? 600 : 400 }}>{last ? last.body : "Tap to open"}</span>
                     </span>
                   </span>
@@ -897,6 +895,29 @@ function WaAvatar({ size = 44, src }: { size?: number; src?: string | null }) {
   );
 }
 
+/** The real WhatsApp status glyphs: a clock while sending, one grey check when sent, the twin
+ *  checks when delivered, and the twin checks in blue once read. Drawn as SVG (not "✓✓" text) so
+ *  they look exactly like WhatsApp's — the two ticks overlap the way the app draws them. */
+function Ticks({ status }: { status?: string }) {
+  if (status === "sending") {
+    return (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" style={{ display: "inline-block", verticalAlign: "-2px" }}>
+        <circle cx="12" cy="12" r="8" stroke="#8696a0" strokeWidth="1.6" />
+        <path d="M12 8v4.2l2.6 1.6" stroke="#8696a0" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  const read = status === "read";
+  const color = read ? WA.tickBlue : "#8696a0";
+  const twin = status === "read" || status === "delivered";
+  return (
+    <svg width="16" height="11" viewBox="0 0 16 11" fill="none" style={{ display: "inline-block", verticalAlign: "-1px" }}>
+      {twin && <path d="M1 6.1l2.6 2.7L9.1 2.3" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />}
+      <path d={twin ? "M5.6 6.1l2.6 2.7L15 2" : "M3 6.1l2.6 2.7L11 2"} stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 /** Wrap every case-insensitive occurrence of `term` in the text with a highlight mark, so the
  *  in-chat search can show WHERE the hit is, not just which bubble. */
 function marked(body: string, term: string, active: boolean): ReactNode {
@@ -919,8 +940,6 @@ function marked(body: string, term: string, active: boolean): ReactNode {
 
 function Bubble({ m, highlight = "", active = false, innerRef }: { m: Msg; highlight?: string; active?: boolean; innerRef?: (el: HTMLDivElement | null) => void }) {
   const out = m.direction === "out";
-  const tick = m.status === "sending" ? "🕓" : m.status === "read" || m.status === "delivered" ? "✓✓" : m.status === "sent" ? "✓" : "";
-  const tickColor = m.status === "read" ? WA.tickBlue : WA.sub;
   return (
     <div ref={innerRef} className={`flex ${out ? "justify-end" : "justify-start"}`}>
       <div className="max-w-[80%] rounded-lg px-2.5 py-1.5" style={{ background: out ? WA.outBubble : WA.inBubble, color: WA.text, boxShadow: active ? "0 0 0 2px #ffb703" : "0 1px 0.5px rgba(11,20,26,.13)" }}>
@@ -928,7 +947,7 @@ function Bubble({ m, highlight = "", active = false, innerRef }: { m: Msg; highl
         <div className="mt-0.5 flex items-center justify-end gap-1">
           {m.answered_by === "brain" && out && <span className="text-[10px]" style={{ color: WA.sub }}>AI ·</span>}
           <span className="text-[10px]" style={{ color: WA.sub }}>{new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
-          {out && tick && <span className="text-[11px]" style={{ color: tickColor }}>{tick}</span>}
+          {out && m.status && <Ticks status={m.status} />}
         </div>
       </div>
     </div>
