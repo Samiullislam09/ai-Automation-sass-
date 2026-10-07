@@ -101,14 +101,17 @@ export default function WhatsAppSection() {
     // Full-bleed like the Leads page: cancel the dashboard's padding so the WhatsApp app runs
     // edge-to-edge (only the sidebar remains), and fill the height.
     <div className="-m-3 flex h-[calc(100%+1.5rem)] min-h-0 flex-col sm:-m-4 sm:h-[calc(100%+2rem)]" style={{ background: "#fff", color: WA.text, colorScheme: "light" }}>
-      {/* TOP BAR — search on the left; Auto replies, alerts, settings, help and the admin on the
-          right (matches the reference). Only shown once connected. */}
+      <style>{`
+        .wa-input{background:transparent !important;color:#111b21 !important;color-scheme:light}
+        .wa-input::placeholder{color:#8696a0}
+        .wa-input:-webkit-autofill,.wa-input:-webkit-autofill:hover,.wa-input:-webkit-autofill:focus{
+          -webkit-box-shadow:0 0 0 1000px #f5f6f6 inset !important;-webkit-text-fill-color:#111b21 !important;caret-color:#111b21;transition:background-color 9999s}
+        .wa-input:focus{outline:none !important;box-shadow:none !important}
+      `}</style>
+      {/* TOP BAR — Auto replies, alerts, settings, help and the admin, all on the right (matches the
+          reference; chat search lives in the list, not here). Only shown once connected. */}
       {connected && (
-        <div className="flex shrink-0 items-center gap-3 px-4 py-2.5" style={{ borderBottom: `1px solid ${WA.divider}` }}>
-          <div className="flex h-10 min-w-0 max-w-xl flex-1 items-center gap-2.5 rounded-xl px-3.5" style={{ background: WA.listHover }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke={WA.sub} strokeWidth="2" /><path d="M21 21l-4-4" stroke={WA.sub} strokeWidth="2" strokeLinecap="round" /></svg>
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search chats, contacts, messages…" className="w-full bg-transparent text-[13.5px] outline-none" style={{ color: WA.text }} />
-          </div>
+        <div className="flex shrink-0 items-center justify-end gap-3 px-4 py-2.5" style={{ borderBottom: `1px solid ${WA.divider}` }}>
           <div className="flex shrink-0 items-center gap-3">
             {/* Auto replies toggle */}
             <button onClick={toggleAuto} disabled={togglingAuto} className="inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[12.5px] font-semibold disabled:opacity-60"
@@ -342,7 +345,7 @@ function Inbox({ search, setSearch }: { search: string; setSearch: (v: string) =
           <div className="px-3 pb-2 pt-1">
             <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: WA.listHover }}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke={WA.sub} strokeWidth="2" /><path d="M21 21l-4-4" stroke={WA.sub} strokeWidth="2" strokeLinecap="round" /></svg>
-              <input value={q} onChange={(e) => setSearch(e.target.value)} placeholder="Search or start new chat" className="w-full bg-transparent text-[13px] outline-none" style={{ color: WA.text }} />
+              <input value={q} onChange={(e) => setSearch(e.target.value)} placeholder="Search or start new chat" autoComplete="off" spellCheck={false} className="wa-input w-full text-[13px] outline-none" style={{ color: WA.text }} />
             </div>
           </div>
           <div className="flex-1 overflow-y-auto" style={{ borderTop: `1px solid ${WA.divider}` }}>
@@ -424,6 +427,7 @@ function Chat({ lead, onSent, onBack, onDeleted, toast }: { lead: Lead; onSent: 
   const [dp, setDp] = useState<string | null>(null);
   const [onWa, setOnWa] = useState<boolean | null>(null);
   const [details, setDetails] = useState(false);
+  const [emoji, setEmoji] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const autoFor = useRef<string | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -597,15 +601,38 @@ function Chat({ lead, onSent, onBack, onDeleted, toast }: { lead: Lead; onSent: 
       </div>
 
       {/* compose */}
-      <div className="flex items-end gap-2 px-3 py-2.5" style={{ background: "#f0f2f5" }}>
+      <div className="relative flex items-end gap-1.5 px-3 py-2.5" style={{ background: "#f0f2f5" }}>
+        {emoji && (
+          <div
+            className="absolute bottom-full left-2 mb-2 grid grid-cols-8 gap-1 rounded-xl p-2 shadow-lg"
+            style={{ background: "#fff", border: `1px solid ${WA.divider}`, width: 296 }}
+          >
+            {["😀","😁","😂","🤣","😊","😍","😘","😎","👍","🙏","🙌","👏","🔥","🎉","✅","💯","❤️","😅","😉","🤝","💪","👋","🚀","⭐","😇","🤔","😢","😭","😡","😴","🙈","💡"].map((e) => (
+              <button
+                key={e}
+                className="rounded-md p-1 text-[18px] leading-none hover:bg-[#f0f2f5]"
+                onClick={() => { setText((t) => t + e); setEmoji(false); taRef.current?.focus(); }}
+              >
+                {e}
+              </button>
+            ))}
+          </div>
+        )}
         <button
-          className="shrink-0 rounded-full px-3 py-2.5 text-[12px] font-semibold disabled:opacity-50"
-          style={{ background: "#fff", color: WA.green, border: `1px solid ${WA.divider}` }}
-          onClick={suggest}
-          disabled={suggesting}
-          title="Let Mr. Lxwa draft a reply — you can edit it before sending"
+          className="flex h-11 w-9 shrink-0 items-center justify-center"
+          style={{ color: emoji ? WA.green : WA.sub }}
+          onClick={() => setEmoji((v) => !v)}
+          title="Emoji"
         >
-          {suggesting ? "…" : "✨ Mr Lxwa"}
+          <svg width="23" height="23" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8" /><circle cx="9" cy="10" r="1.2" fill="currentColor" /><circle cx="15" cy="10" r="1.2" fill="currentColor" /><path d="M8.5 14.5c1 1.2 2.1 1.8 3.5 1.8s2.5-.6 3.5-1.8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+        </button>
+        <button
+          className="flex h-11 w-9 shrink-0 items-center justify-center"
+          style={{ color: WA.sub }}
+          onClick={() => toast("Attachments are coming soon — send text for now.")}
+          title="Attach"
+        >
+          <svg width="23" height="23" viewBox="0 0 24 24" fill="none"><path d="M16.5 6.5l-7 7a2.5 2.5 0 103.5 3.5l6-6a4.5 4.5 0 10-6.4-6.4l-6.3 6.3a6.5 6.5 0 109.2 9.2l5.2-5.2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </button>
         <textarea
           ref={taRef}
@@ -615,8 +642,18 @@ function Chat({ lead, onSent, onBack, onDeleted, toast }: { lead: Lead; onSent: 
           placeholder="Type a message…"
           value={text}
           onChange={(e) => setText(e.target.value)}
+          onFocus={() => setEmoji(false)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }}
         />
+        <button
+          className="shrink-0 rounded-full px-3 py-2.5 text-[12px] font-semibold disabled:opacity-50"
+          style={{ background: "#fff", color: WA.green, border: `1px solid ${WA.divider}` }}
+          onClick={suggest}
+          disabled={suggesting}
+          title="Let Mr. Lxwa draft a reply — you can edit it before sending"
+        >
+          {suggesting ? "…" : "✨ Mr Lxwa"}
+        </button>
         <button
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full disabled:opacity-50"
           style={{ background: WA.green }}
