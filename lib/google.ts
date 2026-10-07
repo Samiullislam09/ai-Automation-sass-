@@ -15,6 +15,10 @@ import { encrypt, decrypt } from "@/lib/crypto";
 export const SCOPE_GSC = "https://www.googleapis.com/auth/webmasters.readonly";
 export const SCOPE_GA4 = "https://www.googleapis.com/auth/analytics.readonly";
 export const SCOPE_GBP = "https://www.googleapis.com/auth/business.manage";
+// §29.6 (P6): booking a Google Meet needs write access to the tenant's own calendar. Requested on
+// every connect (not gated like GBP) so meetings work the moment Google is linked; a tenant who
+// connected before this is prompted to reconnect when they first try to book (P7 checks the scope).
+export const SCOPE_CALENDAR = "https://www.googleapis.com/auth/calendar.events";
 
 export type GoogleCreds = {
   refreshToken: string;   // encrypted at rest
@@ -36,7 +40,7 @@ export function redirectUri(origin: string): string {
 }
 
 export function consentUrl(origin: string, state: string, includeGbp: boolean): string {
-  const scopes = [SCOPE_GSC, SCOPE_GA4, ...(includeGbp ? [SCOPE_GBP] : [])];
+  const scopes = [SCOPE_GSC, SCOPE_GA4, SCOPE_CALENDAR, ...(includeGbp ? [SCOPE_GBP] : [])];
   const params = new URLSearchParams({
     client_id: process.env.GOOGLE_CLIENT_ID!,
     redirect_uri: redirectUri(origin),

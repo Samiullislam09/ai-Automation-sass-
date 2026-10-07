@@ -2113,3 +2113,17 @@ create table if not exists wa_notifications (
   created_at timestamptz not null default now()
 );
 create index if not exists idx_wa_notifications_feed on wa_notifications (tenant_id, read, created_at desc);
+
+-- ── 036 · §29.3 — meeting/buying lead stages (re-create CHECK with the new values) ────────────
+do $$
+begin
+  if exists (select 1 from pg_constraint where conname = 'leads_stage_check') then
+    alter table leads drop constraint leads_stage_check;
+  end if;
+  alter table leads add constraint leads_stage_check check (stage in (
+    'new', 'pending_approval', 'approved', 'rejected', 'queued',
+    'contacted', 'delivered', 'read', 'replied', 'in_conversation', 'interested',
+    'meeting_requested', 'meeting_scheduled', 'meeting_done', 'ready_to_buy',
+    'won', 'lost', 'opted_out', 'invalid', 'failed'
+  ));
+end $$;

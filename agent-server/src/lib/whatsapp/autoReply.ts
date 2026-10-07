@@ -18,6 +18,7 @@ import { enqueueWhatsappAutoReply } from "../../queues.js";
 import { decideReply, detectOptOut } from "./decide.js";
 import { sendText, simulateTyping } from "./session.js";
 import { recordOutgoing } from "./store.js";
+import { notifyAdmins } from "./team.js";
 
 export type AutoReplyJob = { tenantId: string; leadId: string; phone: string; waitedOnce?: boolean };
 
@@ -125,7 +126,7 @@ export async function handleAutoReply(job: AutoReplyJob): Promise<void> {
   const { tenantId, leadId, phone } = job;
   try {
     const [{ data: lead }, { data: session }, last, count] = await Promise.all([
-      supabase.from("leads").select("opt_out, auto_reply_paused_until").eq("id", leadId).eq("tenant_id", tenantId).maybeSingle(),
+      supabase.from("leads").select("opt_out, auto_reply_paused_until, stage, company, name").eq("id", leadId).eq("tenant_id", tenantId).maybeSingle(),
       supabase.from("whatsapp_sessions").select("first_connected_at").eq("tenant_id", tenantId).maybeSingle(),
       lastMessage(tenantId, leadId),
       dailyAutoSendCount(tenantId),
@@ -172,6 +173,23 @@ export async function handleAutoReply(job: AutoReplyJob): Promise<void> {
       })
       .eq("id", leadId)
       .eq("tenant_id", tenantId);
+
+    // MEETING REQUEST (§29.6 P6): they asked for a call/demo. Move the lead to meeting_requested and
+    // alert the team (dashboard + their WhatsApp) — but only on the TRANSITION, so a back-and-forth
+    // about timing doesn't re-fire the alert on every message. The actual slot-offering is P7; here
+    // the normal reply still goes (the model acknowledges), and a human/P7 takes the booking from here.
+    const MEETING_PRE = ["new", "approved", "contacted", "delivered", "read", "replied", "in_conversation", "interested"];
+    if (decision.intent === "meeting" && MEETING_PRE.includes(String((lead as any).stage))) {
+      const who = (lead as any).company || (lead as any).name || phone;
+      await supabase.from("leads").update({ stage: "meeting_requested", updated_at: new Date().toISOString() }).eq("id", leadId).eq("tenant_id", tenantId);
+      await notifyAdmins(tenantId, {
+        type: "meeting",
+        title: `📅 Meeting request from ${who}`,
+        body: "A lead asked to schedule a call/demo on WhatsApp.",
+        leadId,
+        whatsappText: `Meeting request from ${who} — they want to schedule a call. Open the WhatsApp inbox to set a time.`,
+      }).catch((e: any) => console.warn("[whatsapp] meeting alert failed:", e?.message));
+    }
 
     let action = decision.action;
     // "wait" (they're mid-typing) requeues ONCE; the second time we must act, not wait again.
