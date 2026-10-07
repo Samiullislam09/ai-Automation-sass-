@@ -15,7 +15,7 @@
  *  (outbound timeline, follow-ups), not this one. */
 import { supabase } from "../../supabase.js";
 import { enqueueWhatsappAutoReply } from "../../queues.js";
-import { decideReply, detectOptOut } from "./decide.js";
+import { decideReply, detectOptOut, detectBuyIntent } from "./decide.js";
 import { sendText, simulateTyping } from "./session.js";
 import { recordOutgoing } from "./store.js";
 import { notifyAdmins } from "./team.js";
@@ -200,6 +200,29 @@ export async function handleAutoReply(job: AutoReplyJob): Promise<void> {
       // the generic one. If Calendar isn't connected/usable, offerMeeting returns false and the
       // normal reply still goes (the admins were just alerted to schedule it by hand).
       if (await offerMeeting(tenantId, leadId, phone).catch(() => false)) return;
+    }
+
+    // READY TO BUY (§29.8). Two tiers:
+    //  · EXPLICIT high-confidence buy ("send the invoice", "let's start") → auto-convert to a client
+    //    (owner: fully automatic). A human can move it back in one tap.
+    //  · softer "ready" intent → stage ready_to_buy + hot alert + next-steps, but NOT auto-converted.
+    const STAGE = String((lead as any).stage);
+    const NOT_DONE = !["won", "lost", "opted_out"].includes(STAGE);
+    const who2 = (lead as any).company || (lead as any).name || phone;
+    if (last.direction === "in" && detectBuyIntent(last.body) && NOT_DONE) {
+      await supabase.from("leads").update({ stage: "won", needs_attention: true, needs_attention_reason: "Became a client — confirm & follow up", updated_at: new Date().toISOString() }).eq("id", leadId).eq("tenant_id", tenantId);
+      await notifyAdmins(tenantId, { type: "hot_lead", title: `🎉 New client: ${who2}`, body: "An explicit buying signal — the lead was auto-converted to a client. Confirm the details.", leadId, whatsappText: `New client: ${who2} just gave a buying signal on WhatsApp. Confirm the details.` }).catch(() => {});
+      const body = "That's wonderful — thank you! I'll get everything set up and our team will send the next steps right away.";
+      try { await simulateTyping(tenantId, phone, typingMs(body)); const { waMessageId } = await sendText(tenantId, phone, body); await recordOutgoing(supabase, tenantId, leadId, body, waMessageId, "brain"); } catch { /* best effort */ }
+      return;
+    }
+    const READY_PRE = ["new", "approved", "contacted", "delivered", "read", "replied", "in_conversation", "interested", "meeting_requested", "meeting_scheduled", "meeting_done"];
+    if (decision.intent === "ready" && READY_PRE.includes(STAGE)) {
+      await supabase.from("leads").update({ stage: "ready_to_buy", needs_attention: true, needs_attention_reason: "Ready to buy — follow up", updated_at: new Date().toISOString() }).eq("id", leadId).eq("tenant_id", tenantId);
+      await notifyAdmins(tenantId, { type: "hot_lead", title: `🔥 Hot lead: ${who2} is ready to buy`, body: decision.reason || "Showed a strong buying signal on WhatsApp.", leadId, whatsappText: `Hot lead: ${who2} looks ready to buy. Open the WhatsApp inbox to close it.` }).catch(() => {});
+      const body = decision.reply?.trim() || "Great to hear! I'll line up the next steps — would you like me to send a quick summary of what's involved?";
+      try { await simulateTyping(tenantId, phone, typingMs(body)); const { waMessageId } = await sendText(tenantId, phone, body); await recordOutgoing(supabase, tenantId, leadId, body, waMessageId, "brain"); } catch { /* best effort */ }
+      return;
     }
 
     let action = decision.action;

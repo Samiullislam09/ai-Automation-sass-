@@ -11,7 +11,19 @@ process.env.DATABASE_URL ||= "postgres://unit-test/none";
 process.env.SUPABASE_URL ||= "http://unit-test.invalid";
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= "unit-test";
 
-const { parseDecision, detectOptOut } = await import("./decide.js");
+const { parseDecision, detectOptOut, detectBuyIntent } = await import("./decide.js");
+
+test("detectBuyIntent: fires only on an EXPLICIT buy signal, not a lukewarm yes", () => {
+  assert.equal(detectBuyIntent("send me the invoice please"), true);
+  assert.equal(detectBuyIntent("ok let's start"), true);
+  assert.equal(detectBuyIntent("where do I pay?"), true);
+  assert.equal(detectBuyIntent("invoice bhejo"), true);
+  assert.equal(detectBuyIntent("start karte hain"), true);
+  // not explicit → must NOT auto-convert
+  assert.equal(detectBuyIntent("sounds good, let me think"), false);
+  assert.equal(detectBuyIntent("interesting, tell me more"), false);
+  assert.equal(detectBuyIntent("ok"), false);
+});
 
 test("detectOptOut: catches English + Hinglish stop phrases, ignores normal text", () => {
   assert.equal(detectOptOut("STOP"), true);

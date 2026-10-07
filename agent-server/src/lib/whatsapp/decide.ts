@@ -33,15 +33,38 @@ export type Decision = {
 const INTENTS: Intent[] = ["greeting", "question", "affirmation", "objection", "smalltalk", "ready", "meeting", "stop", "other"];
 const ACTIONS: Action[] = ["reply", "wait", "ignore"];
 
+/** Lower-case, drop apostrophes (so "let's"→"lets", "i'll"→"ill"), turn other punctuation into
+ *  spaces, and pad with spaces so a phrase can be matched on whole-word boundaries. */
+function normalizePhrase(text: string): string {
+  return ` ${String(text).toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9ऀ-ॿ\s]/g, " ").replace(/\s+/g, " ")} `;
+}
+
 /** Deterministic opt-out: if the latest inbound is a stop request, we stop — never the model's call.
  *  Matches the common English + Hindi/Hinglish phrasings as whole words/phrases, case-insensitive. */
 export function detectOptOut(text: string): boolean {
-  const t = ` ${String(text).toLowerCase().replace(/[^a-z0-9ऀ-ॿ\s]/g, " ").replace(/\s+/g, " ")} `;
+  const t = normalizePhrase(text);
   const phrases = [
     "stop", "unsubscribe", "opt out", "optout", "remove me", "do not contact", "dont contact", "leave me alone",
     "band karo", "band kar", "mat bhejo", "mat bhej", "message mat", "msg mat", "pareshan mat", "rok do", "ruk jao",
   ];
   return phrases.some((p) => t.includes(` ${p} `));
+}
+
+/** An EXPLICIT, high-confidence buying signal — the only thing that auto-converts a lead to a paying
+ *  client (§29.8, owner: fully automatic, but only on an unmistakable signal, never a lukewarm
+ *  "sounds good"). Deterministic like detectOptOut so the model can't trigger a conversion on a
+ *  guess; a human can always move the stage back in one tap. */
+export function detectBuyIntent(text: string): boolean {
+  const t = normalizePhrase(text);
+  const phrases = [
+    "send the invoice", "send invoice", "send me the invoice", "share the invoice",
+    "where do i pay", "how do i pay", "ready to pay", "i will pay", "ill pay", "make the payment",
+    "lets start", "lets begin", "lets do it", "sign me up", "sign up now",
+    "i want to buy", "ill take it", "ill go ahead", "go ahead with it", "close the deal", "we have a deal",
+    "proceed with the order", "place the order", "confirm the order", "book it",
+    "invoice bhejo", "invoice bhej", "payment kaise", "kaise pay", "start karte hain", "start kardo", "order kardo", "le lete hain", "final kardo",
+  ];
+  return phrases.some((p) => t.includes(` ${p} `) || t.includes(p));
 }
 
 /** Turn the model's raw JSON into a safe Decision — every field validated/clamped, so a malformed
