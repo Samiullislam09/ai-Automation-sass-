@@ -92,6 +92,92 @@ export async function accessTokenFor(creds: GoogleCreds): Promise<string> {
   return access_token;
 }
 
+/* ── Calendar + Meet (§29.6 P7) ──────────────────────────────────────────────────────────────
+ *  All three take a live access token (accessTokenFor(creds)) and talk to the Calendar v3 API on
+ *  the tenant's PRIMARY calendar. The web app owns these because only it can decrypt the refresh
+ *  token; the agent-server reaches them over the internal /api/whatsapp/calendar hop. */
+
+/** A rough IANA zone for a whole-hour UTC offset (until per-tenant IANA TZ). Note Etc/GMT signs are
+ *  inverted: UTC+4 is "Etc/GMT-4". */
+export function offsetZone(tzOffset: number): string {
+  const n = Math.trunc(tzOffset);
+  return `Etc/GMT${n >= 0 ? "-" : "+"}${Math.abs(n)}`;
+}
+
+/** Offer slots: generate candidate times over the next few business days (in the tenant's window)
+ *  and drop any that clash with the calendar's busy intervals. Returns up to `want` free {start,end}
+ *  ISO pairs. Duration + window + tz are passed in (the agent-server holds the settings). */
+export async function freeBusySlots(
+  token: string,
+  opts: { tzOffset: number; sendStart: number; sendEnd: number; durationMin: number; want: number; nowMs?: number },
+): Promise<{ start: string; end: string }[]> {
+  const now = opts.nowMs ?? Date.now();
+  const dur = opts.durationMin * 60_000;
+  const H = 3_600_000;
+  // Candidate local hours to offer within the window (spread across the day).
+  const prefHours = [10, 12, 15, 17].filter((h) => h >= opts.sendStart && h + opts.durationMin / 60 <= opts.sendEnd);
+  const hours = prefHours.length ? prefHours : [Math.max(opts.sendStart, 10)];
+  const candidates: { start: number; end: number }[] = [];
+  for (let day = 0; day < 7 && candidates.length < 40; day++) {
+    for (const h of hours) {
+      // local hour h on day `day` → UTC ms
+      const dayStartUtc = Math.floor(now / 86_400_000) * 86_400_000 + day * 86_400_000;
+      const startUtc = dayStartUtc + (h - opts.tzOffset) * H;
+      if (startUtc > now + 2 * H) candidates.push({ start: startUtc, end: startUtc + dur }); // ≥2h lead time
+    }
+  }
+  candidates.sort((a, b) => a.start - b.start);
+  const windowMin = new Date(now).toISOString();
+  const windowMax = new Date(now + 8 * 86_400_000).toISOString();
+
+  let busy: { start: number; end: number }[] = [];
+  try {
+    const res = await fetch("https://www.googleapis.com/calendar/v3/freeBusy", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ timeMin: windowMin, timeMax: windowMax, items: [{ id: "primary" }] }),
+    });
+    const data: any = await res.json().catch(() => ({}));
+    const raw = data?.calendars?.primary?.busy ?? [];
+    busy = raw.map((b: any) => ({ start: Date.parse(b.start), end: Date.parse(b.end) }));
+  } catch {
+    busy = []; // couldn't read busy → offer candidates anyway (better than failing the meeting)
+  }
+  const clashes = (c: { start: number; end: number }) => busy.some((b) => c.start < b.end && c.end > b.start);
+  const free = candidates.filter((c) => !clashes(c)).slice(0, opts.want);
+  return free.map((c) => ({ start: new Date(c.start).toISOString(), end: new Date(c.end).toISOString() }));
+}
+
+/** Book one slot: create a Calendar event WITH a Google Meet link. Returns the event id + meet link. */
+export async function createMeetEvent(
+  token: string,
+  opts: { startIso: string; endIso: string; tzOffset: number; summary: string; description?: string },
+): Promise<{ eventId: string; meetLink: string | null; htmlLink: string | null }> {
+  const zone = offsetZone(opts.tzOffset);
+  const res = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      summary: opts.summary,
+      description: opts.description ?? "",
+      start: { dateTime: opts.startIso, timeZone: zone },
+      end: { dateTime: opts.endIso, timeZone: zone },
+      conferenceData: { createRequest: { requestId: `mrlxwa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, conferenceSolutionKey: { type: "hangoutsMeet" } } },
+    }),
+  });
+  const data: any = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error?.message ?? `Calendar event create failed (${res.status})`);
+  const meetLink = data?.hangoutLink ?? data?.conferenceData?.entryPoints?.find((e: any) => e.entryPointType === "video")?.uri ?? null;
+  return { eventId: data?.id ?? "", meetLink, htmlLink: data?.htmlLink ?? null };
+}
+
+export async function cancelMeetEvent(token: string, eventId: string): Promise<void> {
+  await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
 export function packCreds(refreshTokenPlain: string, scopes: string[], email: string | null, keep?: Partial<GoogleCreds>): GoogleCreds {
   return {
     refreshToken: encrypt(refreshTokenPlain),

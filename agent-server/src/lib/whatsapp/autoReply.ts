@@ -19,6 +19,7 @@ import { decideReply, detectOptOut } from "./decide.js";
 import { sendText, simulateTyping } from "./session.js";
 import { recordOutgoing } from "./store.js";
 import { notifyAdmins } from "./team.js";
+import { offerMeeting, handleMeetingReply } from "./meeting.js";
 
 export type AutoReplyJob = { tenantId: string; leadId: string; phone: string; waitedOnce?: boolean };
 
@@ -158,6 +159,11 @@ export async function handleAutoReply(job: AutoReplyJob): Promise<void> {
       return;
     }
 
+    // PENDING MEETING OFFER (§29.6 P7): if we already offered slots and they just replied, treat the
+    // reply as a slot pick / postpone BEFORE the general decision engine — booking the Meet, or
+    // re-offering. If it handled the message, we're done.
+    if (last.direction === "in" && (await handleMeetingReply(tenantId, leadId, phone, last.body))) return;
+
     // THE DECISION ENGINE (§28.3): one call → intent + confidence + action + a drafted reply.
     const decision = await decideReply(supabase, tenantId, leadId);
 
@@ -189,6 +195,11 @@ export async function handleAutoReply(job: AutoReplyJob): Promise<void> {
         leadId,
         whatsappText: `Meeting request from ${who} — they want to schedule a call. Open the WhatsApp inbox to set a time.`,
       }).catch((e: any) => console.warn("[whatsapp] meeting alert failed:", e?.message));
+
+      // Option B: offer real Google-Calendar slots on WhatsApp. If that works, it IS the reply — skip
+      // the generic one. If Calendar isn't connected/usable, offerMeeting returns false and the
+      // normal reply still goes (the admins were just alerted to schedule it by hand).
+      if (await offerMeeting(tenantId, leadId, phone).catch(() => false)) return;
     }
 
     let action = decision.action;

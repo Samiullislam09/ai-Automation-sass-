@@ -8,6 +8,7 @@ import { dataForSeoConfigured, normalizeHost } from "./lib/dataforseo.js";
 import { recordRank } from "./lib/rankTracking.js";
 import { tickOutbound } from "./lib/whatsapp/outbound.js";
 import { tickFollowups } from "./lib/whatsapp/followup.js";
+import { tickMeetingNoShows } from "./lib/whatsapp/meeting.js";
 
 /** The thing that makes this product actually automatic.
  *
@@ -56,7 +57,16 @@ export function startScheduler() {
  *  everything booked before the brain existed — the old table drains, it is not migrated
  *  (plan §22 con #10). */
 async function sweep() {
-  await Promise.allSettled([tick(), tickOrders(), brainSweep(), tickAudits(), tickRanks(), tickOutboundSafe(), tickFollowupsSafe()]);
+  await Promise.allSettled([tick(), tickOrders(), brainSweep(), tickAudits(), tickRanks(), tickOutboundSafe(), tickFollowupsSafe(), tickMeetingsSafe()]);
+}
+
+async function tickMeetingsSafe() {
+  try {
+    const n = await tickMeetingNoShows();
+    if (n) console.log(`[scheduler] meeting no-shows: sent ${n} reschedule nudge(s)`);
+  } catch (e: any) {
+    console.error("[scheduler] meeting tick failed:", e?.message);
+  }
 }
 
 async function tickFollowupsSafe() {
