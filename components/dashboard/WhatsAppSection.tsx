@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useStore } from "@/lib/store";
 import WhatsAppConnectModal from "./WhatsAppConnectModal";
 
@@ -428,10 +428,36 @@ function Chat({ lead, onSent, onBack, onDeleted, toast }: { lead: Lead; onSent: 
   const [onWa, setOnWa] = useState<boolean | null>(null);
   const [details, setDetails] = useState(false);
   const [emoji, setEmoji] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQ, setSearchQ] = useState("");
+  const [activeMatch, setActiveMatch] = useState(0);
   const endRef = useRef<HTMLDivElement>(null);
+  const bubbleRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const autoFor = useRef<string | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const phone = lead.whatsapp || lead.phone || "";
+
+  // In-conversation search, like WhatsApp's magnifier: the ids of messages whose text contains the
+  // query, newest last so stepping with the arrows walks the thread top-to-bottom.
+  const term = searchQ.trim().toLowerCase();
+  const matchIds = useMemo(() => {
+    if (!term || !thread) return [] as string[];
+    return thread.filter((m) => (m.body ?? "").toLowerCase().includes(term)).map((m) => m.id);
+  }, [term, thread]);
+
+  // Keep the active match in range as the query changes, and scroll it into view.
+  useEffect(() => { setActiveMatch(0); }, [term]);
+  useEffect(() => {
+    if (!matchIds.length) return;
+    const id = matchIds[Math.min(activeMatch, matchIds.length - 1)];
+    bubbleRefs.current[id]?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [activeMatch, matchIds]);
+  const activeMatchId = matchIds.length ? matchIds[Math.min(activeMatch, matchIds.length - 1)] : null;
+  const stepMatch = (dir: 1 | -1) => {
+    if (!matchIds.length) return;
+    setActiveMatch((i) => (i + dir + matchIds.length) % matchIds.length);
+  };
 
   // Grow the compose box with its content, like WhatsApp: it starts one line tall and expands up
   // to ~6 lines (then scrolls), so a long auto-suggested message is fully visible instead of
@@ -575,11 +601,52 @@ function Chat({ lead, onSent, onBack, onDeleted, toast }: { lead: Lead; onSent: 
             </span>
           </div>
         </button>
+        <button
+          onClick={() => { setSearchOpen((v) => { const n = !v; if (!n) setSearchQ(""); else setTimeout(() => searchRef.current?.focus(), 30); return n; }); }}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
+          style={{ background: searchOpen ? "rgba(255,255,255,.3)" : "rgba(255,255,255,.18)", color: "#fff" }}
+          title="Search this chat"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="#fff" strokeWidth="2" /><path d="M21 21l-4-4" stroke="#fff" strokeWidth="2" strokeLinecap="round" /></svg>
+        </button>
         <button onClick={() => setDetails(true)} className="flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-semibold" style={{ background: "rgba(255,255,255,.18)", color: "#fff" }} title="Lead details">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.2" stroke="#fff" strokeWidth="1.8" /><path d="M5 20a7 7 0 0114 0" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" /></svg>
           <span className="hidden sm:inline">Contact info</span>
         </button>
       </div>
+
+      {/* in-conversation search bar — WhatsApp's magnifier: type to find a message in this thread,
+          step through hits with the arrows, matches highlighted in the bubbles below. */}
+      {searchOpen && (
+        <div className="flex items-center gap-2 px-3 py-2" style={{ background: "#fff", borderBottom: `1px solid ${WA.divider}` }}>
+          <div className="flex flex-1 items-center gap-2 rounded-lg px-3 py-2" style={{ background: WA.listHover }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke={WA.sub} strokeWidth="2" /><path d="M21 21l-4-4" stroke={WA.sub} strokeWidth="2" strokeLinecap="round" /></svg>
+            <input
+              ref={searchRef}
+              value={searchQ}
+              onChange={(e) => setSearchQ(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); stepMatch(e.shiftKey ? -1 : 1); } if (e.key === "Escape") { setSearchOpen(false); setSearchQ(""); } }}
+              placeholder="Search this chat"
+              autoComplete="off"
+              spellCheck={false}
+              className="wa-input w-full text-[13px] outline-none"
+              style={{ color: WA.text }}
+            />
+          </div>
+          <span className="shrink-0 text-[12px] tabular-nums" style={{ color: WA.sub, minWidth: 54, textAlign: "center" }}>
+            {term ? (matchIds.length ? `${Math.min(activeMatch, matchIds.length - 1) + 1} of ${matchIds.length}` : "No hits") : ""}
+          </span>
+          <button onClick={() => stepMatch(-1)} disabled={!matchIds.length} className="flex h-8 w-8 items-center justify-center rounded-full disabled:opacity-40" style={{ color: WA.sub, background: WA.listHover }} title="Previous (Shift+Enter)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M6 15l6-6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          </button>
+          <button onClick={() => stepMatch(1)} disabled={!matchIds.length} className="flex h-8 w-8 items-center justify-center rounded-full disabled:opacity-40" style={{ color: WA.sub, background: WA.listHover }} title="Next (Enter)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          </button>
+          <button onClick={() => { setSearchOpen(false); setSearchQ(""); }} className="flex h-8 w-8 items-center justify-center rounded-full" style={{ color: WA.sub }} title="Close search">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
+          </button>
+        </div>
+      )}
 
       {/* a plain "not on WhatsApp" strip when the number has no WhatsApp account (e.g. a landline) */}
       {onWa === false && (
@@ -596,7 +663,15 @@ function Chat({ lead, onSent, onBack, onDeleted, toast }: { lead: Lead; onSent: 
           <div className="mx-auto mt-6 max-w-xs rounded-lg px-4 py-3 text-center" style={{ background: "#fff5c4", color: "#54656f" }}>
             <p className="text-[12.5px]">No messages yet. Send the first one below — the conversation starts here.</p>
           </div>
-        ) : thread.map((m) => <Bubble key={m.id} m={m} />)}
+        ) : thread.map((m) => (
+          <Bubble
+            key={m.id}
+            m={m}
+            highlight={term}
+            active={m.id === activeMatchId}
+            innerRef={(el) => { bubbleRefs.current[m.id] = el; }}
+          />
+        ))}
         <div ref={endRef} />
       </div>
 
@@ -809,14 +884,34 @@ function WaAvatar({ size = 44, src }: { size?: number; src?: string | null }) {
   );
 }
 
-function Bubble({ m }: { m: Msg }) {
+/** Wrap every case-insensitive occurrence of `term` in the text with a highlight mark, so the
+ *  in-chat search can show WHERE the hit is, not just which bubble. */
+function marked(body: string, term: string, active: boolean): ReactNode {
+  if (!term) return body;
+  const out: ReactNode[] = [];
+  const lc = body.toLowerCase();
+  let i = 0, k = 0;
+  for (let at = lc.indexOf(term, 0); at !== -1; at = lc.indexOf(term, i)) {
+    if (at > i) out.push(body.slice(i, at));
+    out.push(
+      <mark key={k++} style={{ background: active ? "#ffd84d" : "#fff1a8", color: "inherit", borderRadius: 2, padding: "0 1px" }}>
+        {body.slice(at, at + term.length)}
+      </mark>
+    );
+    i = at + term.length;
+  }
+  if (i < body.length) out.push(body.slice(i));
+  return out;
+}
+
+function Bubble({ m, highlight = "", active = false, innerRef }: { m: Msg; highlight?: string; active?: boolean; innerRef?: (el: HTMLDivElement | null) => void }) {
   const out = m.direction === "out";
   const tick = m.status === "sending" ? "🕓" : m.status === "read" || m.status === "delivered" ? "✓✓" : m.status === "sent" ? "✓" : "";
   const tickColor = m.status === "read" ? WA.tickBlue : WA.sub;
   return (
-    <div className={`flex ${out ? "justify-end" : "justify-start"}`}>
-      <div className="max-w-[80%] rounded-lg px-2.5 py-1.5" style={{ background: out ? WA.outBubble : WA.inBubble, color: WA.text, boxShadow: "0 1px 0.5px rgba(11,20,26,.13)" }}>
-        <p className="text-[14px]" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{m.body}</p>
+    <div ref={innerRef} className={`flex ${out ? "justify-end" : "justify-start"}`}>
+      <div className="max-w-[80%] rounded-lg px-2.5 py-1.5" style={{ background: out ? WA.outBubble : WA.inBubble, color: WA.text, boxShadow: active ? "0 0 0 2px #ffb703" : "0 1px 0.5px rgba(11,20,26,.13)" }}>
+        <p className="text-[14px]" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{marked(m.body ?? "", highlight, active)}</p>
         <div className="mt-0.5 flex items-center justify-end gap-1">
           {m.answered_by === "brain" && out && <span className="text-[10px]" style={{ color: WA.sub }}>AI ·</span>}
           <span className="text-[10px]" style={{ color: WA.sub }}>{new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
