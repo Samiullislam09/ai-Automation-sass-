@@ -2055,3 +2055,10 @@ alter table leads add column if not exists source_query    text;
 alter table leads add column if not exists classification  text;
 alter table leads add column if not exists score_breakdown jsonb;
 alter table leads add column if not exists reject_reason   text;
+
+-- ── 031 · WhatsApp auto-reply engine (§28) — Phase 1 state (additive) ────────────────────────
+alter table leads add column if not exists auto_reply_paused_until timestamptz;
+alter table leads add column if not exists last_intent             text;
+create index if not exists idx_leads_autoreply_paused
+  on leads (tenant_id, auto_reply_paused_until)
+  where auto_reply_paused_until is not null;

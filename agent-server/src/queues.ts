@@ -74,6 +74,13 @@ const LONG_RUNNING: AgentType[] = ["crawler", "analyst", "audit", "leads"];
 export const BRAIN_QUEUE = "brain-dispatch";
 const BRAIN_QUEUE_OPTIONS = { retryLimit: 0, notify: true };
 
+/** §28 — WhatsApp auto-reply. Not an agent (no cap, no office tile): a job here is "answer this
+ *  lead's message after its randomised delay". singletonKey (set by the caller, per lead) coalesces
+ *  a burst into one reply. retryLimit 1 because a transient send failure deserves one more try, but
+ *  more than that risks double-messaging a real person. */
+export const WA_AUTOREPLY_QUEUE = "wa-autoreply";
+const WA_AUTOREPLY_OPTIONS = { retryLimit: 1, retryBackoff: true, retryDelay: 10, notify: true };
+
 /** Declares each agent's queue in Postgres. Must run once before send()/work() calls
  *  (pg-boss requires a queue to exist before it's used) — called from index.ts on boot. */
 export async function initQueues() {
@@ -88,12 +95,24 @@ export async function initQueues() {
   }
   await boss.createQueue(BRAIN_QUEUE, BRAIN_QUEUE_OPTIONS);
   await boss.updateQueue(BRAIN_QUEUE, BRAIN_QUEUE_OPTIONS).catch((e: any) => console.error(`[queues] updateQueue ${BRAIN_QUEUE} failed:`, e?.message));
+  await boss.createQueue(WA_AUTOREPLY_QUEUE, WA_AUTOREPLY_OPTIONS);
+  await boss.updateQueue(WA_AUTOREPLY_QUEUE, WA_AUTOREPLY_OPTIONS).catch((e: any) => console.error(`[queues] updateQueue ${WA_AUTOREPLY_QUEUE} failed:`, e?.message));
 }
 
 /** Ask the brain to look at a task again, now or after a delay. */
 export async function enqueueBrainDispatch(data: { task_id: string; tenant_id: string }, options?: { startAfter?: number }) {
   await ensureBossStarted();
   return boss.send(BRAIN_QUEUE, data, options ?? {});
+}
+
+/** Schedule a WhatsApp auto-reply. `startAfter` (seconds) is the randomised human delay; the
+ *  per-lead `singletonKey` collapses a burst of inbounds into one pending reply job. */
+export async function enqueueWhatsappAutoReply(
+  data: { tenantId: string; leadId: string; phone: string },
+  options?: { startAfter?: number; singletonKey?: string },
+) {
+  await ensureBossStarted();
+  return boss.send(WA_AUTOREPLY_QUEUE, data, options ?? {});
 }
 
 /** `startAfter` (seconds) is how the keyword agent holds a writer job open while the human

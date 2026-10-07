@@ -22,9 +22,9 @@
 import { makeWASocket, DisconnectReason, Browsers } from "@whiskeysockets/baileys";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { useSupabaseAuthState, clearAuthState } from "./authStore.js";
-import { linkIncoming, recordSentStatus, recordOutgoing } from "./store.js";
-import { suggestReply } from "./suggest.js";
+import { linkIncoming, recordSentStatus } from "./store.js";
 import { getWhatsappAutoReply } from "../outreach/settings.js";
+import { scheduleAutoReply } from "./autoReply.js";
 
 type Sock = ReturnType<typeof makeWASocket>;
 
@@ -190,19 +190,12 @@ export async function connect(
         waMessageId: msg.key?.id ?? null,
       });
 
-      // Auto-reply (opt-in, "Auto replies ON"): Mr Lxwa drafts a reply and sends it, so a
-      // conversation keeps moving without the human. Still reactive only — it answers a message
-      // that came IN, it never cold-messages anyone. answered_by:"brain" marks it as the AI's.
+      // Auto-reply (opt-in, "Auto replies ON"): we do NOT send here. We SCHEDULE a reply (§28) with
+      // a random human delay and a per-lead singletonKey, so a burst collapses into one answer and
+      // the timing is human, not machine-instant — the property that keeps a linked number safe.
+      // The worker (autoReply.ts) re-reads the thread, runs the safety gate, types, then sends.
       if (linked && autoReply) {
-        try {
-          const { reply } = await suggestReply(supabase, tenantId, linked.leadId);
-          if (reply && reply.trim()) {
-            const { waMessageId } = await sendText(tenantId, phone, reply);
-            await recordOutgoing(supabase, tenantId, linked.leadId, reply, waMessageId, "brain");
-          }
-        } catch (e: any) {
-          console.warn("[whatsapp] auto-reply failed:", e?.message);
-        }
+        void scheduleAutoReply({ tenantId, leadId: linked.leadId, phone });
       }
     }
   });
@@ -252,6 +245,22 @@ export async function sendText(tenantId: string, phone: string, body: string): P
 
   const sent = await withTimeout(s.sock.sendMessage(target, { text: body }), 25_000, "sending the message");
   return { waMessageId: sent?.key?.id ?? "" };
+}
+
+/** Show a "typing…" indicator to the recipient for `ms`, like a person composing a reply, then
+ *  stop — used by the auto-reply worker so an AI answer doesn't appear instantly out of nowhere.
+ *  Best effort: if we're not connected or presence fails, it just returns and the send proceeds. */
+export async function simulateTyping(tenantId: string, phone: string, ms: number): Promise<void> {
+  const s = sessions.get(tenantId);
+  if (!s || s.status !== "connected" || !s.sock) return;
+  const jid = `${phone.replace(/[^0-9]/g, "")}@s.whatsapp.net`;
+  try {
+    await s.sock.sendPresenceUpdate("composing", jid);
+    await new Promise((r) => setTimeout(r, Math.max(0, ms)));
+    await s.sock.sendPresenceUpdate("paused", jid);
+  } catch {
+    /* presence is optional — never block the send that follows */
+  }
 }
 
 /** Race a promise against a timeout so a hung Baileys call can never freeze a request forever. */
