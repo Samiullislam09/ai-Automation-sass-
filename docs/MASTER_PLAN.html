@@ -2164,5 +2164,71 @@ aur commit ke saath &mdash; taaki kal koi (aap, main, ya 10 saal baad koi employ
 </ol>
 <p>Total honest ceiling: <strong>~92 of 100</strong> Semrush checks, plus everything in 27.4 except the benchmark, AMP, proprietary AI content scoring, external-host robots, and Send-to integrations. Each one lands as a real, fixture-tested check &mdash; the day a check is in the table above with &#10003;, it is measured, never estimated.</p>
 
+<h2 id="whatsapp-autoreply">28 &middot; WhatsApp Auto-Reply engine &mdash; ban-safe, conversation-aware <span class="pill">2026-10-07 PLAN</span></h2>
+<p>Owner ka order: &ldquo;auto reply add karo &mdash; par naye message <strong>ek saath nahi, random time pe</strong> jaayein, reply <strong>conversation ke hisab se sahi</strong> ho, aur <strong>number kabhi ban na ho</strong> (ye #1 rule).&rdquo; Owner ne do faisle diye: <strong>(1) scope = reactive auto-reply + 24h/72h follow-ups dono</strong> (P1&ndash;P4), <strong>(2) jab AI unsure ho tab bhi khud best-guess bheje</strong> (human-handoff hold nahi). Dono maane gaye &mdash; par ban-safety ke rails style-choice nahi, safety hain, isliye &ldquo;always send&rdquo; ke baad bhi lage rahenge.</p>
+
+<h3>28.1 Abhi kya hai (grounded, code se)</h3>
+<ul>
+<li><code>session.ts</code> <code>messages.upsert</code> me auto-reply <strong>already</strong> hai par <strong>har inbound pe turant</strong> inline send karta hai (<code>suggestReply</code>&rarr;<code>sendText</code>) &mdash; yahi spam/ban ka sabse bada risk.</li>
+<li><code>suggestReply</code> (suggest.ts) sirf ek draft deta hai &mdash; na intent, na &ldquo;reply karein ya nahi&rdquo; ka faisla.</li>
+<li>pg-boss <code>startAfter</code> (delay) + <code>singletonKey</code> maujood &mdash; random timing + burst-coalesce isi se.</li>
+<li>Ban detection (403&rarr;<code>banned</code>) aur warmup ke liye <code>first_connected_at</code> already stored.</li>
+<li><code>sendText</code> abhi akela sender hai; wo property rahegi &mdash; auto-reply bhi hamesha ek <em>inbound</em> se shuru hoga (cold-outreach line kahin nahi).</li>
+</ul>
+
+<h3>28.2 Rule #0 &mdash; number ban na ho (safety layer, har reply isse guzrega)</h3>
+<ul>
+<li><strong>Reactive only</strong> &mdash; sirf aaye hue message ka jawab; kabhi cold message nahi.</li>
+<li><strong>Random delay</strong> &mdash; reply se pehle random <strong>30s&ndash;3min</strong> gap (<code>startAfter</code> + jitter).</li>
+<li><strong>Typing presence</strong> &mdash; send se pehle <code>composing</code> 2&ndash;5s.</li>
+<li><strong>Coalesce</strong> &mdash; burst (hi + &ldquo;ISO 9001 chahiye&rdquo;) &rarr; ek reply (<code>singletonKey=tenant:lead</code>).</li>
+<li><strong>Never twice in a row</strong> &mdash; bina naye inbound ke Mr Lxwa dobara auto-send nahi karta (loop impossible).</li>
+<li><strong>Per-lead gap</strong> + <strong>daily cap + warmup ramp</strong> (first_connected_at se: din 0&ndash;3 bahut kam, phir badhta hai). Cap cross &rarr; auto-reply ruk jaata hai.</li>
+<li><strong>Opt-out hard stop</strong> &mdash; stop/unsubscribe/band karo/mat bhejo &rarr; us lead pe auto permanently off + <code>opt_out</code>.</li>
+<li><strong>Quiet hours</strong> (~10pm&ndash;8am) koi auto-reply nahi.</li>
+<li><strong>Human handoff</strong> &mdash; human ne khud reply kiya to us lead pe auto kuch der pause (<code>auto_reply_paused_until</code>).</li>
+<li><strong>Kill switch</strong> &mdash; status banned/logged_out &rarr; sab auto band.</li>
+</ul>
+
+<h3>28.3 Decision engine (MESSAGE&rarr;CONTEXT&rarr;INTENT&rarr;STAGE&rarr;CONFIDENCE&rarr;ACTION&rarr;RESPONSE)</h3>
+<p>Har coalesced inbound pe ek LLM call, JSON: <code>{ intent, stage, confidence, action, reply, reason }</code>.</p>
+<ul>
+<li><strong>intent</strong>: greeting / question / affirmation(yes,ok) / objection / smalltalk(hmm) / ready / stop / other.</li>
+<li><strong>action</strong>: <code>reply</code> | <code>wait</code> | <code>ignore</code> (owner ne handoff-hold mana kiya, isliye <code>handoff</code> ab <em>flag + phir bhi reply</em>, block nahi).
+<ul><li><code>ignore</code> &mdash; &ldquo;hmm/ok&rdquo; jaisa, jisme reply ki zaroorat nahi &rarr; kuch nahi bhejta (ye spam-bachav hai, autonomy ke khilaf nahi).</li>
+<li><code>wait</code> &mdash; lagta hai aur type ho raha &rarr; thoda ruk ke phir dekho.</li>
+<li><code>reply</code> &mdash; intent-aware short reply (suggest.ts wala grounded prompt, par &ldquo;yes&rdquo; pe pichhla sawaal dekh ke, &ldquo;hmm&rdquo; pe sales paragraph nahi).</li></ul></li>
+<li>Low-confidence/complex (pricing/legal/gussa) pe <strong>reply to jaayega</strong> (owner choice) par row ko inbox me &ldquo;needs you&rdquo; flag bhi milega taaki human dekh le.</li>
+</ul>
+
+<h3>28.4 Flow</h3>
+<pre>Incoming (notify) &rarr; linkIncoming (abhi wala)
+  &rarr; autoReply ON? opted-out? human-paused? banned?  (nahi &rarr; kuch nahi)
+  &rarr; enqueue [wa-autoreply] singletonKey=tenant:lead startAfter=random(30s&ndash;3min)   // coalesce + human delay
+  &rarr; worker: last N msgs &rarr; decision engine (1 LLM call)
+       action=ignore/wait &rarr; send nahi
+       action=reply &rarr; safety checks (daily cap, warmup, per-lead gap, quiet hours, never-twice)
+                      &rarr; composing presence &rarr; sendText &rarr; recordOutgoing("brain")</pre>
+
+<h3>28.5 Follow-ups (24h/72h) &mdash; P4, conservative</h3>
+<p>Sirf un leads pe jo interest dikha ke chup hue; max <strong>2</strong> (24h, 72h); sirf business-hours; cap me gine jaate; reply/opt-out pe turant cancel; apna toggle. Ye sabse zyada ban-risk hai, isliye code me extra tight (unsolicited hone ke bawajood owner ne scope me rakha &mdash; isliye conservative).</p>
+
+<h3>28.6 Data model</h3>
+<ul>
+<li><code>leads</code>: <code>auto_reply_paused_until</code>, <code>last_intent</code>, <code>auto_followups_done</code>, <code>next_followup_at</code> (+ maujooda <code>opt_out</code>, <code>follow_up_count</code>).</li>
+<li>Daily counter: <code>whatsapp_sessions.auto_sent_today</code> + <code>auto_sent_date</code> (warmup <code>first_connected_at</code> se compute).</li>
+<li>pg-boss queues: <code>wa-autoreply</code> (P1), <code>wa-followup</code> (P4).</li>
+<li>Migration <strong>031</strong> &mdash; auto-reply state + counters (nullable, non-destructive).</li>
+</ul>
+
+<h3>28.7 Phases (build order)</h3>
+<ol>
+<li><strong>P1</strong> &mdash; safety + delayed single reply: queue, random delay, coalesce, typing, daily cap/warmup, opt-out, never-twice. session.ts ko inline-send se queue-send me shift.</li>
+<li><strong>P2</strong> &mdash; decision engine (intent/confidence/action JSON; ignore/wait/reply gates; naya <code>decide.ts</code>).</li>
+<li><strong>P3</strong> &mdash; human handoff + UI (needs-you flag/badge, per-chat pause, Auto-replies panel me cap/quiet-hours settings).</li>
+<li><strong>P4</strong> &mdash; follow-ups (24h/72h scheduler, apna toggle).</li>
+</ol>
+<p>Har phase ke baad: agent-server tests + dono typecheck clean, §26 build-log entry, aur agent-server change hai to owner Railway redeploy kare (Vercel sirf UI).</p>
+
 <p style="margin-top:56px"><small>Verified on 2026-08-27 against GitHub API and repo READMEs; codebase facts from commit fa22a68. Numbers in Section 12 are estimates to be replaced by one week of measured data.</small></p>
 </div>
