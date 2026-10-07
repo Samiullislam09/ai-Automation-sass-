@@ -52,6 +52,7 @@ export default function WhatsAppSection() {
   const [modal, setModal] = useState(false);
   const [autoReply, setAutoReply] = useState(false);
   const [togglingAuto, setTogglingAuto] = useState(false);
+  const [search, setSearch] = useState("");
 
   const poll = useCallback(async () => {
     try {
@@ -96,41 +97,41 @@ export default function WhatsAppSection() {
   const checking = !status.loaded && !everConnected;
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: WA.green }}>
-            <svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M12 21a9 9 0 10-8-4.9L3 21l4.9-1A9 9 0 0012 21z" stroke="#fff" strokeWidth="1.7" strokeLinejoin="round" /></svg>
-          </span>
-          <div>
-            <h1 className="text-lg font-bold leading-tight">WhatsApp</h1>
-            <p className="lx-10 lx-mut">You reply, one message at a time. Nothing is ever sent on its own.</p>
+    // Full-bleed like the Leads page: cancel the dashboard's padding so the WhatsApp app runs
+    // edge-to-edge (only the sidebar remains), and fill the height.
+    <div className="-m-3 flex h-[calc(100%+1.5rem)] min-h-0 flex-col sm:-m-4 sm:h-[calc(100%+2rem)]" style={{ background: "#fff", color: WA.text, colorScheme: "light" }}>
+      {/* TOP BAR — search on the left; Auto replies, alerts, settings, help and the admin on the
+          right (matches the reference). Only shown once connected. */}
+      {connected && (
+        <div className="flex shrink-0 items-center gap-3 px-4 py-2.5" style={{ borderBottom: `1px solid ${WA.divider}` }}>
+          <div className="flex h-10 min-w-0 max-w-xl flex-1 items-center gap-2.5 rounded-xl px-3.5" style={{ background: WA.listHover }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke={WA.sub} strokeWidth="2" /><path d="M21 21l-4-4" stroke={WA.sub} strokeWidth="2" strokeLinecap="round" /></svg>
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search chats, contacts, messages…" className="w-full bg-transparent text-[13.5px] outline-none" style={{ color: WA.text }} />
           </div>
-        </div>
-        {connected && (
-          <div className="flex items-center gap-2.5">
-            {/* Auto replies toggle — when ON, Mr Lxwa answers incoming messages by itself */}
+          <div className="flex shrink-0 items-center gap-2.5">
             <button onClick={toggleAuto} disabled={togglingAuto} className="inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[12.5px] font-semibold disabled:opacity-60"
-              style={{ background: autoReply ? "#e7f6ec" : "var(--lx-in)", border: `1px solid ${autoReply ? "#9ae6b4" : "var(--lx-border)"}`, color: autoReply ? "#067647" : "var(--lx-mut)" }}
+              style={{ background: autoReply ? "#e7f6ec" : WA.listHover, border: `1px solid ${autoReply ? "#9ae6b4" : WA.divider}`, color: autoReply ? "#067647" : WA.sub }}
               title="When on, Mr Lxwa drafts and sends a reply to each incoming message by itself">
               <span className="h-2 w-2 rounded-full" style={{ background: autoReply ? "#17c964" : "#98a2b3" }} />
               Auto replies <b>{autoReply ? "ON" : "OFF"}</b>
             </button>
-            <span className="lx-10 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1" style={{ background: "var(--lx-in)", border: "1px solid var(--lx-border)" }}>
+            <span className="hidden items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] sm:inline-flex" style={{ background: WA.listHover, color: WA.text }}>
               <span className="h-2 w-2 rounded-full" style={{ background: "#25D366" }} />
-              <span style={{ color: "var(--lx-text)" }}>{status.phone ? `+${status.phone}` : "Connected"}</span>
+              {status.phone ? `+${status.phone}` : "Connected"}
             </span>
-            <button className="lx-10 rounded-full px-2.5 py-1" style={{ background: "var(--lx-in)", border: "1px solid var(--lx-border)", color: "var(--lx-mut)" }} onClick={doDisconnect}>Unlink</button>
+            <button className="rounded-full px-3 py-1.5 text-[12px] font-semibold" style={{ background: WA.listHover, color: WA.sub, border: `1px solid ${WA.divider}` }} onClick={doDisconnect}>Unlink</button>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {checking ? (
-        <div className="lx-card2 flex flex-1 items-center justify-center"><p className="lx-11 lx-mut">Checking connection…</p></div>
+        <div className="flex flex-1 items-center justify-center"><p className="text-[13px]" style={{ color: WA.sub }}>Checking connection…</p></div>
       ) : connected ? (
-        <Inbox />
+        <Inbox search={search} setSearch={setSearch} />
       ) : (
-        <ConnectCta status={status.status} onConnect={() => setModal(true)} />
+        <div className="flex-1 p-3 sm:p-4">
+          <ConnectCta status={status.status} onConnect={() => setModal(true)} />
+        </div>
       )}
 
       <WhatsAppConnectModal open={modal} onClose={() => { setModal(false); poll(); }} onConnected={() => { setEverConnected(true); poll(); }} />
@@ -191,14 +192,14 @@ function ConnectCta({ status, onConnect }: { status: string; onConnect: () => vo
 }
 
 /* ── the inbox ───────────────────────────────────────────────────────────────────────────── */
-function Inbox() {
+function Inbox({ search, setSearch }: { search: string; setSearch: (v: string) => void }) {
   const { toast } = useStore();
   const [leads, setLeads] = useState<Lead[] | null>(null);
   const [inbox, setInbox] = useState<Record<string, { body: string; direction: string; created_at: string; status?: string; unanswered?: number }>>({});
   const [active, setActive] = useState<Lead | null>(null);
   const [newChat, setNewChat] = useState(false);
   const [onWa, setOnWa] = useState<Record<string, boolean | null>>({}); // leadId → on WhatsApp?
-  const [q, setQ] = useState("");
+  const q = search;
   const [tab, setTab] = useState<"all" | "unread">("all");
 
   // One batch call checks every chat's number at once, so each row shows a green "On WhatsApp" /
@@ -275,8 +276,8 @@ function Inbox() {
     });
 
   return (
-    <div className="min-h-0 flex-1 overflow-hidden rounded-3xl" style={{ background: WA.panel, border: `1px solid ${WA.divider}` }}>
-      <div className="grid h-full grid-cols-1 md:grid-cols-[340px_1fr]">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden" style={{ background: WA.panel }}>
+      <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[360px_1fr]">
         {/* conversation list — hidden on mobile once a chat is open */}
         <div className={`${active ? "hidden md:flex" : "flex"} h-full min-h-0 flex-col overflow-hidden`} style={{ borderRight: `1px solid ${WA.divider}` }}>
           <div className="flex items-center justify-between px-4 pt-3.5" style={{ color: WA.text }}>
@@ -304,7 +305,7 @@ function Inbox() {
           <div className="px-3 pb-2 pt-1">
             <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: WA.listHover }}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke={WA.sub} strokeWidth="2" /><path d="M21 21l-4-4" stroke={WA.sub} strokeWidth="2" strokeLinecap="round" /></svg>
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search or start new chat" className="w-full bg-transparent text-[13px] outline-none" style={{ color: WA.text }} />
+              <input value={q} onChange={(e) => setSearch(e.target.value)} placeholder="Search or start new chat" className="w-full bg-transparent text-[13px] outline-none" style={{ color: WA.text }} />
             </div>
           </div>
           <div className="flex-1 overflow-y-auto" style={{ borderTop: `1px solid ${WA.divider}` }}>
@@ -343,11 +344,6 @@ function Inbox() {
               );
             })}
           </div>
-          {/* connected status bar, like the reference */}
-          <div className="flex items-center gap-2 px-4 py-2.5 text-[11.5px]" style={{ borderTop: `1px solid ${WA.divider}`, color: WA.sub }}>
-            <span className="h-2 w-2 rounded-full" style={{ background: "#17c964" }} />
-            WhatsApp connected
-          </div>
         </div>
 
         {/* chat pane — full width on mobile when a chat is open */}
@@ -358,6 +354,12 @@ function Inbox() {
             <div className="flex h-full items-center justify-center"><p className="text-[13px]" style={{ color: WA.sub }}>Select a chat</p></div>
           )}
         </div>
+      </div>
+
+      {/* full-width bottom status bar, like the reference */}
+      <div className="flex shrink-0 items-center justify-between px-4 py-2 text-[11.5px]" style={{ borderTop: `1px solid ${WA.divider}`, color: WA.sub }}>
+        <span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full" style={{ background: "#17c964" }} /> WhatsApp Business Connected</span>
+        <span>{leads ? `${leads.length} chat${leads.length === 1 ? "" : "s"}` : ""}</span>
       </div>
 
       <NewChatModal
