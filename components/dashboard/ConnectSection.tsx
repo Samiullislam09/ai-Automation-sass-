@@ -600,7 +600,7 @@ function GoogleCard({ onToast, confirmAction, onStatusChange }: {
     }
   };
 
-  const card: Card = { type: "google", name: "Google Analytics", icon: SiGoogleanalytics, markBg: "#E37400", category: "cms", blurb: "", live: true, fields: [] };
+  const card: Card = { type: "google", name: "Google", icon: SiGoogleanalytics, markBg: "#E37400", category: "cms", blurb: "", live: true, fields: [] };
 
   if (!g) {
     return (
@@ -624,15 +624,15 @@ function GoogleCard({ onToast, confirmAction, onStatusChange }: {
       <div className="flex items-center gap-2">
         <Icon card={card} />
         <div className="min-w-0 flex-1">
-          <div className="lx-11 font-bold leading-tight">Google Analytics</div>
+          <div className="lx-11 font-bold leading-tight">Google</div>
           <StatusPill connected={!!g.connected} />
         </div>
-        <button className="lx-icobtn shrink-0" aria-label="Manage Google Analytics" onClick={openModal}>
+        <button className="lx-icobtn shrink-0" aria-label="Manage Google" onClick={openModal}>
           <MoreHorizontal size={14} />
         </button>
       </div>
 
-      <p className="lx-10 lx-mut mt-1.5">Track website performance and get insights automatically.</p>
+      <p className="lx-10 lx-mut mt-1.5">Connect your Google account once — Calendar &amp; Meet (auto-book meetings), Search Console, Analytics &amp; Business Profile.</p>
 
       <div className="mt-auto pt-2.5">
         <button className="lx-grad lx-10 px-3 py-1.5" onClick={openModal}>{g.connected ? "Manage" : "Connect"}</button>
@@ -643,7 +643,7 @@ function GoogleCard({ onToast, confirmAction, onStatusChange }: {
           <div className="mb-3 flex items-center gap-2.5">
             <Icon card={card} />
             <div>
-              <div className="lx-13 font-bold">Google Analytics</div>
+              <div className="lx-13 font-bold">Google</div>
               <StatusPill connected={!!g.connected} />
             </div>
           </div>
@@ -653,7 +653,7 @@ function GoogleCard({ onToast, confirmAction, onStatusChange }: {
           {!g.configured ? (
             <p className="lx-11 lx-mut">
               Needs a one-time Google Cloud OAuth client. Enable Search Console API, Google Analytics Admin API and Data
-              API, create an OAuth client with redirect URI <code className="lx-10">{origin}/api/integrations/google/callback</code>,
+              API, and <strong>Google Calendar API</strong> (for Meet booking), create an OAuth client with redirect URI <code className="lx-10">{origin}/api/integrations/google/callback</code>,
               then set <code className="lx-10">GOOGLE_CLIENT_ID</code>/<code className="lx-10">GOOGLE_CLIENT_SECRET</code> and redeploy.
             </p>
           ) : !g.connected ? (
