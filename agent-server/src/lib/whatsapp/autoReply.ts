@@ -19,7 +19,7 @@ import { decideReply, detectOptOut, detectBuyIntent } from "./decide.js";
 import { sendText, simulateTyping } from "./session.js";
 import { recordOutgoing } from "./store.js";
 import { notifyAdmins } from "./team.js";
-import { offerMeeting, handleMeetingReply } from "./meeting.js";
+import { offerMeeting, handleMeetingReply, offerBookingLink } from "./meeting.js";
 
 export type AutoReplyJob = { tenantId: string; leadId: string; phone: string; waitedOnce?: boolean };
 
@@ -196,10 +196,12 @@ export async function handleAutoReply(job: AutoReplyJob): Promise<void> {
         whatsappText: `Meeting request from ${who} — they want to schedule a call. Open the WhatsApp inbox to set a time.`,
       }).catch((e: any) => console.warn("[whatsapp] meeting alert failed:", e?.message));
 
-      // Option B: offer real Google-Calendar slots on WhatsApp. If that works, it IS the reply — skip
-      // the generic one. If Calendar isn't connected/usable, offerMeeting returns false and the
-      // normal reply still goes (the admins were just alerted to schedule it by hand).
+      // Meeting scheduling, in order of preference:
+      //  1) Google Calendar connected → offer real free slots (Option B, auto Meet on reply).
+      //  2) else a booking link set (Calendly/Cal.com) → send it, the lead self-books (no Google).
+      //  3) else nothing sent here → the normal reply goes and the admins (just alerted) book by hand.
       if (await offerMeeting(tenantId, leadId, phone).catch(() => false)) return;
+      if (await offerBookingLink(tenantId, leadId, phone).catch(() => false)) return;
     }
 
     // READY TO BUY (§29.8). Two tiers:

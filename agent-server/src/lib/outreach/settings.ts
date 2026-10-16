@@ -150,6 +150,7 @@ export type WhatsappSettings = {
   tz_offset: number;         // hours from UTC (Dubai = +4) until per-tenant TZ (P6)
   gap_min_min: number;       // minimum minutes between two outbound sends
   gap_max_min: number;       // maximum minutes between two outbound sends
+  booking_link: string;      // Calendly/Cal.com/any booking URL — the no-Google meeting path
 };
 
 export const DEFAULT_WHATSAPP_SETTINGS: WhatsappSettings = {
@@ -161,6 +162,7 @@ export const DEFAULT_WHATSAPP_SETTINGS: WhatsappSettings = {
   tz_offset: 4,
   gap_min_min: 4,
   gap_max_min: 14,
+  booking_link: "",
 };
 
 export async function getWhatsappSettings(tenantId: string): Promise<WhatsappSettings> {
@@ -207,6 +209,7 @@ export function mergeWhatsapp(raw: unknown): WhatsappSettings {
     tz_offset: Number.isFinite(tz) && tz >= -12 && tz <= 14 ? tz : d.tz_offset,
     gap_min_min: gapMin,
     gap_max_min: gapMax,
+    booking_link: typeof o.booking_link === "string" ? o.booking_link.trim().slice(0, 500) : "",
   };
 }
 

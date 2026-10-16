@@ -69,6 +69,23 @@ export async function offerMeeting(tenantId: string, leadId: string, phone: stri
   return true;
 }
 
+/** The no-Google path (§29.6): when Calendar isn't connected but the tenant set a booking link
+ *  (Calendly/Cal.com/etc), send that so the lead self-books. Returns true if a link went out. */
+export async function offerBookingLink(tenantId: string, leadId: string, phone: string): Promise<boolean> {
+  const s = await getWhatsappSettings(tenantId);
+  const link = (s.booking_link ?? "").trim();
+  if (!link) return false;
+  const body = `Happy to set up a call — pick a time that suits you here and you'll get the details right away:\n${link}`;
+  try {
+    await simulateTyping(tenantId, phone, 2500);
+    const { waMessageId } = await sendText(tenantId, phone, body);
+    await recordOutgoing(supabase, tenantId, leadId, body, waMessageId, "brain");
+  } catch {
+    return false;
+  }
+  return true;
+}
+
 /** If the lead has a pending offer and just replied, act on it: book the chosen slot (Google Meet),
  *  re-offer on a postpone, or hand back (return false) when the reply isn't a clear choice. */
 export async function handleMeetingReply(tenantId: string, leadId: string, phone: string, inboundText: string): Promise<boolean> {

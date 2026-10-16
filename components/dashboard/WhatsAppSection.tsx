@@ -260,7 +260,7 @@ function NotificationsBell() {
 
 /* ── Settings + Outbox (§28.8): auto-reply master, outbound timeline on/off, send window, and the
  *    upcoming cold-message schedule with a cancel on each. ─────────────────────────────────────── */
-type WaSettings = { auto_reply: boolean; outbound_enabled: boolean; followups_enabled: boolean; send_start: number; send_end: number; tz_offset: number; gap_min_min: number; gap_max_min: number };
+type WaSettings = { auto_reply: boolean; outbound_enabled: boolean; followups_enabled: boolean; send_start: number; send_end: number; tz_offset: number; gap_min_min: number; gap_max_min: number; booking_link: string };
 type OutboxItem = { id: string; leadId: string; name: string; scheduledAt: string; status: string };
 
 function SettingsPanel({ open, onClose, toast }: { open: boolean; onClose: () => void; toast: (m: string, t?: "error") => void }) {
@@ -343,6 +343,12 @@ function SettingsPanel({ open, onClose, toast }: { open: boolean; onClose: () =>
                   <span style={{ color: WA.sub }}>to</span>
                   <HourInput value={s.send_end} onChange={(v) => save({ send_end: v })} />
                 </div>
+              </div>
+
+              <div className="mt-4 rounded-xl p-3" style={{ background: WA.listHover }}>
+                <div className="mb-1 text-[12.5px] font-semibold">Booking link (no Google needed)</div>
+                <div className="mb-2 text-[11.5px]" style={{ color: WA.sub }}>Paste your Calendly / Cal.com / Google appointment link. When a lead asks for a meeting and Google Calendar isn't connected, Mr Lxwa sends this link so they self-book.</div>
+                <BookingLinkRow initial={s.booking_link} onSave={(v) => save({ booking_link: v })} />
               </div>
 
               <TeamAndAlerts toast={toast} />
@@ -451,6 +457,28 @@ function Toggle({ label, sub, on, onChange, disabled }: { label: string; sub: st
         <span className="h-5 w-5 rounded-full bg-white" />
       </span>
     </button>
+  );
+}
+
+function BookingLinkRow({ initial, onSave }: { initial: string; onSave: (v: string) => void }) {
+  const [v, setV] = useState(initial);
+  useEffect(() => { setV(initial); }, [initial]);
+  return (
+    <div className="flex gap-2">
+      <input
+        value={v}
+        onChange={(e) => setV(e.target.value)}
+        onBlur={() => { if (v.trim() !== initial) onSave(v.trim()); }}
+        placeholder="https://calendly.com/your-name/30min"
+        autoComplete="off"
+        spellCheck={false}
+        className="wa-input wa-search flex-1 rounded-lg px-2.5 py-1.5 text-[12.5px]"
+        style={{ background: "#fff", color: WA.text }}
+      />
+      {v.trim() !== initial && (
+        <button onClick={() => onSave(v.trim())} className="shrink-0 rounded-lg px-3 py-1.5 text-[12.5px] font-semibold text-white" style={{ background: WA.green }}>Save</button>
+      )}
+    </div>
   );
 }
 
