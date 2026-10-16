@@ -309,12 +309,23 @@ function SettingsPanel({ open, onClose, toast }: { open: boolean; onClose: () =>
     } catch { void load(); }
   };
 
-  const whenLabel = (iso: string) => {
-    const d = new Date(iso);
-    const day = d.toLocaleDateString([], { day: "2-digit", month: "short" });
-    const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    return `${day}, ${time}`;
+  const timeLabel = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const dayLabel = (iso: string) => {
+    const d = new Date(iso); d.setHours(0, 0, 0, 0);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const diff = Math.round((d.getTime() - today.getTime()) / 86_400_000);
+    if (diff === 0) return "Today";
+    if (diff === 1) return "Tomorrow";
+    return new Date(iso).toLocaleDateString([], { weekday: "short", day: "2-digit", month: "short" });
   };
+  // Group the upcoming sends by day, each already sorted soonest-first by the API.
+  const groups: [string, OutboxItem[]][] = [];
+  for (const o of outbox ?? []) {
+    const k = dayLabel(o.scheduledAt);
+    const last = groups[groups.length - 1];
+    if (last && last[0] === k) last[1].push(o);
+    else groups.push([k, [o]]);
+  }
 
   return (
     <div className="fixed inset-0 z-[90] flex justify-end" style={{ background: "rgba(0,0,0,.4)" }} onClick={onClose}>
@@ -355,22 +366,36 @@ function SettingsPanel({ open, onClose, toast }: { open: boolean; onClose: () =>
 
               <div className="mt-5">
                 <div className="mb-2 flex items-center justify-between">
-                  <b className="text-[13.5px]">Upcoming sends{outbox ? ` (${outbox.length})` : ""}</b>
+                  <b className="text-[13.5px]">📆 Timeline{outbox ? ` · ${outbox.length} queued` : ""}</b>
                   <button onClick={() => void load()} className="text-[12px]" style={{ color: WA.green }}>Refresh</button>
                 </div>
                 {!outbox ? (
                   <p className="text-[12.5px]" style={{ color: WA.sub }}>Loading…</p>
                 ) : outbox.length === 0 ? (
-                  <p className="text-[12.5px]" style={{ color: WA.sub }}>No cold messages scheduled. New approved leads with WhatsApp will appear here on a timeline.</p>
+                  <div className="rounded-xl p-4 text-center" style={{ background: WA.listHover }}>
+                    <div className="text-[20px]">🗓️</div>
+                    <p className="mt-1 text-[12px]" style={{ color: WA.sub }}>Nothing scheduled. New approved leads with WhatsApp line up here — one at a time, at their own time.</p>
+                  </div>
                 ) : (
-                  <div className="space-y-1.5">
-                    {outbox.map((o) => (
-                      <div key={o.id} className="flex items-center justify-between rounded-lg px-3 py-2" style={{ background: WA.listHover }}>
-                        <div className="min-w-0">
-                          <div className="truncate text-[13px] font-medium">{o.name}</div>
-                          <div className="text-[11.5px]" style={{ color: WA.sub }}>{whenLabel(o.scheduledAt)}</div>
+                  <div className="space-y-3">
+                    {groups.map(([label, items]) => (
+                      <div key={label}>
+                        <div className="mb-1.5 flex items-center gap-2">
+                          <span className="rounded-full px-2 py-0.5 text-[11px] font-bold" style={{ background: label === "Today" ? WA.green : WA.divider, color: label === "Today" ? "#fff" : WA.sub }}>{label}</span>
+                          <span className="text-[11px]" style={{ color: WA.sub }}>{items.length} send{items.length === 1 ? "" : "s"}</span>
                         </div>
-                        <button onClick={() => cancelSend(o.id)} className="shrink-0 rounded-full px-2.5 py-1 text-[11.5px] font-semibold" style={{ color: "#b42318", background: "#fdeaea" }}>Cancel</button>
+                        <div className="relative pl-4" style={{ borderLeft: `2px solid ${WA.divider}` }}>
+                          {items.map((o) => (
+                            <div key={o.id} className="group relative mb-1.5 flex items-center gap-2.5 rounded-lg py-1.5 pl-2 pr-2" style={{ background: WA.listHover }}>
+                              <span className="absolute -left-[21px] h-2.5 w-2.5 rounded-full" style={{ background: WA.green, boxShadow: `0 0 0 3px #fff` }} />
+                              <span className="shrink-0 tabular-nums text-[12px] font-semibold" style={{ color: WA.green, minWidth: 58 }}>{timeLabel(o.scheduledAt)}</span>
+                              <span className="min-w-0 flex-1 truncate text-[13px]" style={{ color: WA.text }}>{o.name}</span>
+                              <button onClick={() => cancelSend(o.id)} title="Cancel this send" className="shrink-0 rounded-full p-1" style={{ color: "#b42318" }}>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
+                              </button>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     ))}
                   </div>
