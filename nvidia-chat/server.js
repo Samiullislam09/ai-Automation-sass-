@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 const PORT = process.env.PORT || 4321;
-const MODEL = process.env.NVIDIA_MODEL || 'nvidia/nemotron-3-ultra-550b-a55b';
+const MODEL = process.env.NVIDIA_MODEL || 'nvidia/nemotron-3-super-120b-a12b'; // ultra-550b persistent-503 2026-10-17
 const BASE_URL = process.env.NVIDIA_BASE_URL || 'https://integrate.api.nvidia.com/v1';
 
 // API key: env var, or read from the project's .env.local

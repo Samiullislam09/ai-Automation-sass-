@@ -53,8 +53,11 @@ export const NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
  *  ultra correctly refuses to do. That is acceptable for a fallback, because it is only reached
  *  when ultra cannot open a stream at all, and `wantsAutoPublish` in lib/chat-intent.ts is the
  *  code-side guard that stops a publish regardless of what any model decides. */
-export const CHAT_MODEL = process.env.CHAT_MODEL || "nvidia/nemotron-3-ultra-550b-a55b";
-export const CHAT_FALLBACK_MODEL = process.env.CHAT_FALLBACK_MODEL || "nvidia/nemotron-3-super-120b-a12b";
+// Default moved off ultra-550b (2026-10-17): it returns persistent HTTP 503 "Service temporarily
+// overloaded" on every call, so it had to stop being the primary. super-120b is alive and measured.
+// Set CHAT_MODEL to restore ultra once NVIDIA serves it again.
+export const CHAT_MODEL = process.env.CHAT_MODEL || "nvidia/nemotron-3-super-120b-a12b";
+export const CHAT_FALLBACK_MODEL = process.env.CHAT_FALLBACK_MODEL || "nvidia/nemotron-3.5-super-vl-120b-a12b";
 
 /** The per-model request fields that keep the answer short and the reasoning off. */
 export function modelParams(model: string): Record<string, unknown> {

@@ -20,13 +20,20 @@ import { nvidiaFetch } from "./nvidia.js";
  *  this family burns wildly variable, sometimes very large amounts of reasoning tokens even for a
  *  "reply with only JSON" instruction. 550B total, 55B active (MoE), and `nvidiaFetch`'s own 90s
  *  request timeout covers it comfortably: the slowest ultra call measured was 23s. */
+/** The agent LLM model. Env-driven so a model going EOL or into persistent 503 (as
+ *  nemotron-3-ultra-550b-a55b did — "Service temporarily overloaded" on every call, 2026-10-17) is
+ *  a Railway variable change, not a code+redeploy. Default is the alive, measured super-120b (the
+ *  same one lib/chat-model.ts already trusts as its fallback). Set NVIDIA_MODEL to restore ultra
+ *  once NVIDIA serves it again. */
+export const AGENT_MODEL = process.env.NVIDIA_MODEL || "nvidia/nemotron-3-super-120b-a12b";
+
 export async function completeJson<T = any>(prompt: string): Promise<T> {
   const res = await nvidiaFetch("https://integrate.api.nvidia.com/v1/chat/completions", {
     label: "llm",
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "nvidia/nemotron-3-ultra-550b-a55b",
+      model: AGENT_MODEL,
       chat_template_kwargs: { thinking: false },
       max_tokens: 3000,
       messages: [{ role: "user", content: prompt }],

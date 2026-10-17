@@ -95,7 +95,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         // Moved with Mr. Writer on 2026-09-18 (agent-server/src/lib/writerPipeline.ts carries
         // the measurement). This is the same job — rewriting an article — so a customer asking
         // for a revision must not get a weaker writer than the one that wrote the draft.
-        model: "nvidia/nemotron-3-ultra-550b-a55b",
+        model: process.env.NVIDIA_MODEL || "nvidia/nemotron-3-super-120b-a12b", // ultra-550b persistent-503 2026-10-17; env-driven
         stream: false,
         chat_template_kwargs: { thinking: false },
         max_tokens: 6000,
