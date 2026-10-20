@@ -109,41 +109,58 @@ const STEP_TOKENS = {
  *  shared NVIDIA_API_KEYS_BG key-pool limiter every other agent-server call respects (§18.4's
  *  rule 4: "writer ko chhote calls me todo... 40 RPM me aaram se aata hai"), which this
  *  pipeline's whole shape (5-6 short calls instead of one long one) is built to fit inside. */
-export async function nimComplete(prompt: string, opts: { maxTokens?: number; label?: string } = {}): Promise<string> {
-  let res: Response;
-  try {
-    res = await nvidiaFetch("https://integrate.api.nvidia.com/v1/chat/completions", {
-      label: opts.label ?? "writer",
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        // MEASURED, 2026-09-18, same topic and same pipeline, lightning vs ultra:
-        //   lightning  1849 words, gate score 80, 137s
-        //   ultra      2446 words, gate score 90 with ZERO block failures, 81s
-        // Better and faster, so the "judge the writer on quality, not latency" note in this
-        // file's history no longer has a trade-off to make. The word-target rule that no
-        // lightning rewrite ever satisfied (0 of 15 in range) is the one the review loop spends
-        // most of its rounds on; ultra lands most of them. Now the same model as the brain
-        // (lib/chat-model.ts) and every agent (lib/llm.ts) — one model, one place to change.
-        model: resolvedAgentModel(), // whichever model this account actually serves (resolved by lib/llm.ts)
-        stream: false,
-        chat_template_kwargs: { thinking: false }, // see lib/writer.ts — the soft prompt hint alone is not enough
-        max_tokens: opts.maxTokens ?? STEP_TOKENS.default,
-        messages: [
-          { role: "system", content: "detailed thinking off\n\nYou write only from the context you are given. If a fact is not in it, you do not state it." },
-          { role: "user", content: prompt },
-        ],
-      }),
-      signal: AbortSignal.timeout(WRITER_TIMEOUT_MS),
-    });
-  } catch (e: any) {
-    if (e?.name === "TimeoutError" || /aborted|timeout/i.test(e?.message ?? "")) {
-      throw new Error(`Mr. Writer's model did not answer within ${Math.round(WRITER_TIMEOUT_MS / 1000)}s (${opts.label ?? "writer"} step).`);
-    }
-    throw e;
-  }
+/** The WRITER gets the STRONGEST model the NVIDIA account can serve — article quality (and hitting
+ *  the 40-58 word snippet rule the review loop otherwise burns rounds on) depends on it far more
+ *  than boss/keyword do. Per-account availability varies (404 "not found for account") and models
+ *  go EOL/503, so we try a list best-first and cache the first that answers. Set WRITER_MODEL to
+ *  force one. The 503-overloaded ultra is last (nvidiaFetch retries 5xx slowly). */
+const WRITER_MODEL_CANDIDATES = [
+  process.env.WRITER_MODEL || "",
+  "nvidia/nemotron-4-340b-instruct",
+  "nvidia/llama-3.1-nemotron-ultra-253b-v1",
+  "nvidia/nemotron-3-super-120b-a12b",
+  "nvidia/nemotron-3-ultra-550b-a55b",
+].filter(Boolean).filter((m, i, a) => a.indexOf(m) === i);
+const WRITER_UNAVAILABLE = new Set([400, 404, 410, 422, 503]);
+let resolvedWriter: string | null = null;
 
-  if (!res.ok) throw new Error(`NVIDIA writer call failed (${opts.label ?? "writer"}, ${res.status}): ${(await res.text().catch(() => "")).slice(0, 300)}`);
+export async function nimComplete(prompt: string, opts: { maxTokens?: number; label?: string } = {}): Promise<string> {
+  const base = resolvedWriter ? [resolvedWriter] : [...WRITER_MODEL_CANDIDATES, resolvedAgentModel()];
+  const tryOrder = base.filter((m, i, a) => a.indexOf(m) === i);
+  let res: Response | null = null;
+  let lastErr = "";
+  for (const model of tryOrder) {
+    let r: Response;
+    try {
+      r = await nvidiaFetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+        label: opts.label ?? "writer",
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          stream: false,
+          chat_template_kwargs: { thinking: false }, // see lib/writer.ts — the soft prompt hint alone is not enough
+          max_tokens: opts.maxTokens ?? STEP_TOKENS.default,
+          messages: [
+            { role: "system", content: "detailed thinking off\n\nYou write only from the context you are given. If a fact is not in it, you do not state it." },
+            { role: "user", content: prompt },
+          ],
+        }),
+        signal: AbortSignal.timeout(WRITER_TIMEOUT_MS),
+      });
+    } catch (e: any) {
+      if (e?.name === "TimeoutError" || /aborted|timeout/i.test(e?.message ?? "")) {
+        throw new Error(`Mr. Writer's model did not answer within ${Math.round(WRITER_TIMEOUT_MS / 1000)}s (${opts.label ?? "writer"} step).`);
+      }
+      throw e;
+    }
+    if (r.ok) { res = r; if (resolvedWriter !== model) { resolvedWriter = model; console.log(`[writer] using model: ${model}`); } break; }
+    lastErr = `${model} → ${r.status}`;
+    if (!WRITER_UNAVAILABLE.has(r.status)) throw new Error(`NVIDIA writer call failed (${opts.label ?? "writer"}, ${r.status}): ${(await r.text().catch(() => "")).slice(0, 300)}`);
+    await r.text().catch(() => "");
+    console.warn(`[writer] model unavailable, trying next: ${lastErr}`);
+  }
+  if (!res) throw new Error(`NVIDIA writer: no candidate model is available for this account. Last: ${lastErr}`);
   const data: any = await res.json();
   const choice = data?.choices?.[0];
   const text = choice?.message?.content;

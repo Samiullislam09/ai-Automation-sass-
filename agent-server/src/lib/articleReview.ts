@@ -36,7 +36,12 @@ import { reviseArticle, auditHumanization, type Completer, type HumanizeAudit } 
  *  exist for this article: a rule that could only be met by inventing a URL is reported as
  *  skipped, not silently waived and not satisfied with a fake. */
 
-export const REVIEW_MAX_ROUNDS = 5;
+// 5 → 3 (2026-10-20): the review loop spent most of its time in rounds 4-5 re-trying the same
+// sections a weak model could not fix, so the article took minutes and often still failed. With a
+// stronger writer model (see writerPipeline.ts) most fixes land in the first rounds; 3 keeps it
+// fast and the article still ships with its best version of any section that didn't fully pass.
+// Env-overridable for calibration without a redeploy.
+export const REVIEW_MAX_ROUNDS = Math.max(1, Number(process.env.REVIEW_MAX_ROUNDS) || 3);
 
 // Every number below is the doc's own, in one place, so calibrating against the real model is a
 // one-line change rather than a hunt.
