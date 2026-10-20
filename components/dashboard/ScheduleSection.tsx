@@ -19,6 +19,8 @@ import { nextRunAt } from "@/lib/schedule-time";
  *
  *  Data is live: /api/schedule (+ PUT), /api/schedule/history, /api/scheduled-orders (+ DELETE),
  *  /api/integrations. Next-run instants come from the server; the page only formats and ticks.
+ *
+ *  (redeploy nudge 2026-10-21: the previous two pushes didn't trigger a Vercel build.)
  */
 
 /* ───────────────────────── icons (ported from the reference IC map) ───────────────────────── */
