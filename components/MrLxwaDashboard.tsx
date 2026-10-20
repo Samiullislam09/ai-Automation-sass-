@@ -1811,11 +1811,14 @@ const WriterDocScreen = ({
   const texts = sections.map((it) => stripLeadingHeading(String(it.payload?.text ?? "")));
   const arrived = texts.reduce((n, t) => n + t.length, 0);
 
-  // Opening a task that is ALREADY over replays nothing — there is nothing arriving, and typing
-  // out a finished article as if it were being written now would be theatre. Decided once, on
-  // mount: a writer that finishes mid-stream keeps streaming to the end rather than snapping.
+  // Opening a task that is ALREADY over replays nothing. And opening one still running does NOT
+  // retype from scratch (owner, 2026-10-20: "har bar open pe animation nahi — sirf pehli baar jab
+  // likh raha ho"): the writer stays "running" through the whole multi-round quality review, so
+  // re-opening its panel used to replay the entire article from char 0 every single time. Now we
+  // start revealed at whatever has ALREADY arrived — shown instantly — and only type the NEW text
+  // that streams in after this mount. First open sees it being written; later opens don't replay.
   const replayNothing = useRef(!running);
-  const [revealed, setRevealed] = useState(() => (replayNothing.current ? Number.MAX_SAFE_INTEGER : 0));
+  const [revealed, setRevealed] = useState(() => (replayNothing.current ? Number.MAX_SAFE_INTEGER : arrived));
   const revealedRef = useRef(revealed);
 
   useEffect(() => {
@@ -3940,11 +3943,19 @@ export default function MrLxwaDashboard({
               Sourced from `panelLines` (already scoped to `panelAgent` — see its own comment),
               never a separate feed: this is not new data, just the latest of what's already
               real, kept visible even while the eye is on the canvas above it. */}
+          {/* A small activity feed, NEWEST ON TOP (owner, 2026-10-20: "new log aaye to upar pe show
+              ho … auto scroll dikhai de"). The latest line is full-strength; older ones fade, so a
+              new line arriving at the top is obvious. Scrolls within its own box, never pushes the
+              canvas. */}
           {panelLines.length > 0 && (
-            <div className="lx-10 lx-mono lx-mut mt-2 truncate px-1">
-              <span className="lx-dim">{new Date(panelLines[panelLines.length - 1].at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
-              {"  "}
-              {panelLines[panelLines.length - 1].text}
+            <div className="lx-10 lx-mono lx-mut mt-2 px-1" style={{ maxHeight: 96, overflowY: "auto" }}>
+              {panelLines.slice(-8).reverse().map((l, i) => (
+                <div key={`${l.at}-${i}`} className="lx-live-anim truncate" style={{ padding: "1px 0", opacity: i === 0 ? 1 : 0.5 }}>
+                  <span className="lx-dim">{new Date(l.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                  {"  "}
+                  {l.text}
+                </div>
+              ))}
             </div>
           )}
         </div>
