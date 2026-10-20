@@ -4484,7 +4484,7 @@ export default function MrLxwaDashboard({
                 ? "Working…"
                 : taskActive
                   ? runningStep?.progressLabel || runningStep?.label || "Starting…"
-                  : task.status === "needs_attention" || task.status === "failed"
+                  : task.status === "needs_attention" || task.status === "failed" || task.steps.some((s) => s.status === "failed")
                     ? task.reason || "Stopped"
                     : "Done"}
             </span>
