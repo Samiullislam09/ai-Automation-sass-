@@ -20,27 +20,50 @@ import { nvidiaFetch } from "./nvidia.js";
  *  this family burns wildly variable, sometimes very large amounts of reasoning tokens even for a
  *  "reply with only JSON" instruction. 550B total, 55B active (MoE), and `nvidiaFetch`'s own 90s
  *  request timeout covers it comfortably: the slowest ultra call measured was 23s. */
-/** The agent LLM model. Env-driven so a model going EOL or into persistent 503 (as
- *  nemotron-3-ultra-550b-a55b did — "Service temporarily overloaded" on every call, 2026-10-17) is
- *  a Railway variable change, not a code+redeploy. Default is the alive, measured super-120b (the
- *  same one lib/chat-model.ts already trusts as its fallback). Set NVIDIA_MODEL to restore ultra
- *  once NVIDIA serves it again. */
-export const AGENT_MODEL = process.env.NVIDIA_MODEL || "nvidia/nemotron-3-super-120b-a12b";
+/** The agent LLM model — but WHICH models an NVIDIA account can actually serve is per-account:
+ *  one account gets 404 "Function not found for account" for a model another account serves fine,
+ *  and a model can also go EOL (410) or persistent-503 (overloaded, as ultra-550b did 2026-10-17).
+ *  So we don't hardcode one model and hope — we try a CANDIDATE LIST and cache the first that this
+ *  account+key actually answers. NVIDIA_MODEL (if set) is tried first. Self-heals when a model dies. */
+// Order matters: fast-failing 404s (model not in this account) first; the 503-overloaded ultra is
+// LAST because nvidiaFetch retries 5xx with backoff (slow), so we only wait on it as a last resort.
+const MODEL_CANDIDATES = [
+  process.env.NVIDIA_MODEL || "",
+  "nvidia/nemotron-3-super-120b-a12b",
+  "nvidia/llama-3.1-nemotron-ultra-253b-v1",
+  "nvidia/nemotron-4-340b-instruct",
+  "nvidia/llama-3.1-nemotron-70b-instruct",
+  "nvidia/nemotron-3-ultra-550b-a55b",
+].filter(Boolean).filter((m, i, a) => a.indexOf(m) === i);
+
+/** The model confirmed working for this process (set on first success), so we probe only once. */
+let resolvedModel: string | null = null;
+export function resolvedAgentModel(): string {
+  return resolvedModel ?? MODEL_CANDIDATES[0];
+}
+/** Statuses that mean "this MODEL won't work (try another)", vs a real transient to surface. */
+const MODEL_UNAVAILABLE = new Set([400, 404, 410, 422, 503]);
 
 export async function completeJson<T = any>(prompt: string): Promise<T> {
-  const res = await nvidiaFetch("https://integrate.api.nvidia.com/v1/chat/completions", {
-    label: "llm",
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: AGENT_MODEL,
-      chat_template_kwargs: { thinking: false },
-      max_tokens: 3000,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-
-  if (!res.ok) throw new Error(`NVIDIA NIM chat completion failed (${res.status}): ${(await res.text().catch(() => "")).slice(0, 300)}`);
+  const tryOrder = resolvedModel ? [resolvedModel, ...MODEL_CANDIDATES.filter((m) => m !== resolvedModel)] : MODEL_CANDIDATES;
+  let lastErr = "";
+  let res: Awaited<ReturnType<typeof nvidiaFetch>> | null = null;
+  let used = "";
+  for (const model of tryOrder) {
+    const r = await nvidiaFetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+      label: "llm",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model, chat_template_kwargs: { thinking: false }, max_tokens: 3000, messages: [{ role: "user", content: prompt }] }),
+    });
+    if (r.ok) { res = r; used = model; break; }
+    const body = (await r.text().catch(() => "")).slice(0, 200);
+    lastErr = `${model} → ${r.status} ${body}`;
+    if (!MODEL_UNAVAILABLE.has(r.status)) throw new Error(`NVIDIA NIM chat completion failed (${r.status}): ${body}`);
+    console.warn(`[llm] model unavailable, trying next: ${lastErr}`);
+  }
+  if (!res) throw new Error(`NVIDIA NIM: no candidate model is available for this account. Last: ${lastErr}`);
+  if (resolvedModel !== used) { resolvedModel = used; console.log(`[llm] using model: ${used}`); }
 
   const data: any = await res.json();
   const raw: string | undefined = data?.choices?.[0]?.message?.content;

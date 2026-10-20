@@ -1,5 +1,5 @@
 import { nvidiaFetch } from "./nvidia.js";
-import { AGENT_MODEL } from "./llm.js";
+import { resolvedAgentModel } from "./llm.js";
 import type { WriterContext } from "./writer.js";
 import { hasMarkdownTable, markdownListItemCount, questionAnswerPairCount, MIN_LIST_ITEMS, MIN_QA_PAIRS, BANNED_PHRASES } from "./qualityGate.js";
 
@@ -125,7 +125,7 @@ export async function nimComplete(prompt: string, opts: { maxTokens?: number; la
         // lightning rewrite ever satisfied (0 of 15 in range) is the one the review loop spends
         // most of its rounds on; ultra lands most of them. Now the same model as the brain
         // (lib/chat-model.ts) and every agent (lib/llm.ts) — one model, one place to change.
-        model: AGENT_MODEL, // env-driven (default super-120b) since ultra-550b went persistent-503 2026-10-17
+        model: resolvedAgentModel(), // whichever model this account actually serves (resolved by lib/llm.ts)
         stream: false,
         chat_template_kwargs: { thinking: false }, // see lib/writer.ts — the soft prompt hint alone is not enough
         max_tokens: opts.maxTokens ?? STEP_TOKENS.default,
