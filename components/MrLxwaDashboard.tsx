@@ -1012,9 +1012,16 @@ const ResearchScreen = ({ items, running }: { items: { key: string; payload: any
  *  "agent is thinking" loop. */
 function useFollowLatest<T extends { key: string }>(items: T[]) {
   const nodes = useRef<Record<string, HTMLElement | null>>({});
+  // STABLE ref callback per key. Returning a fresh `(el)=>…` every render made React detach+reattach
+  // every live-visual node on EVERY parent render — and the chat input lives in the same component,
+  // so each keystroke re-ran this and the image cards' entrance animation flashed (owner, 2026-10-20:
+  // "chat box pe input deta hu to image preview blink karta ha"). Caching the callback per key stops
+  // the thrash; typing no longer repaints the preview.
+  const cbs = useRef<Record<string, (el: HTMLElement | null) => void>>({});
   const [target, setTarget] = useState<HTMLElement | null>(null);
-  const setNodeRef = (key: string) => (el: HTMLElement | null) => {
-    nodes.current[key] = el;
+  const setNodeRef = (key: string) => {
+    if (!cbs.current[key]) cbs.current[key] = (el: HTMLElement | null) => { nodes.current[key] = el; };
+    return cbs.current[key];
   };
   useEffect(() => {
     const last = items[items.length - 1];
