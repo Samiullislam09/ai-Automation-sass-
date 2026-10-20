@@ -681,11 +681,12 @@ const CSS = `
 .sched .banner{background:var(--bads);color:var(--bad);border:1px solid var(--bad);border-radius:12px;padding:12px 14px;margin-bottom:16px;font-size:13px}
 .sched .banner code{font-family:ui-monospace,monospace;font-size:12px}
 .sched .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
-.sched .st{border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;gap:12px;align-items:center;background:var(--card)}
+.sched .st{border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;gap:12px;align-items:center;background:var(--card);min-width:0}
+.sched .st>div{min-width:0;flex:1}
 .sched .st.a{background:var(--acs);border-color:transparent}.sched .st.b{background:var(--oks);border-color:transparent}.sched .st.c{background:var(--warns);border-color:transparent}
 .sched .sbox{color:var(--mut);width:36px;height:36px;border-radius:50%;background:var(--panel);display:grid;place-items:center;flex:none}
 .sched .st.a .sbox{color:var(--ac)}.sched .st.b .sbox{color:var(--ok)}.sched .st.c .sbox{color:var(--warn)}
-.sched .sv{font-weight:500;font-size:19px;line-height:1.25;font-variant-numeric:tabular-nums}.sched .sl{font-size:12px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sched .sv{font-weight:500;font-size:19px;line-height:1.25;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.sched .sl{font-size:12px;color:var(--mut);overflow-wrap:anywhere}
 .sched .tabs{display:flex;gap:4px;margin-bottom:16px;flex-wrap:wrap;border-bottom:1px solid var(--line)}
 .sched .tab{display:inline-flex;align-items:center;gap:8px;border:0;border-bottom:3px solid transparent;background:none;color:var(--mut);padding:10px 14px;font:inherit;font-weight:500;cursor:pointer;margin-bottom:-1px}
 .sched .tab:hover{color:var(--tx)}
