@@ -694,7 +694,7 @@ export const LX_CSS = `
 .lx-kwo-mark{width:22px;height:22px;border-radius:7px;border:1px solid var(--lx-border);display:flex;align-items:center;
   justify-content:center;flex-shrink:0;color:var(--lx-dim)}
 .lx-kwo-row.best .lx-kwo-mark{border-color:rgba(139,92,246,.6);color:#b9a5ff;background:rgba(139,92,246,.14)}
-.lx-kwo-text{font-size:12.5px;color:var(--lx-text);line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.lx-kwo-text{font-size:12.5px;color:var(--lx-text);line-height:1.35;overflow-wrap:anywhere;word-break:break-word}
 .lx-kwo-cell{font-size:12px;color:var(--lx-text);text-align:center;white-space:nowrap}
 .lx-kwo-cell.mut{color:var(--lx-mut)}
 .lx-kwo-src{display:inline-block;font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:6px;

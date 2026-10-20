@@ -3270,78 +3270,23 @@ export default function MrLxwaDashboard({
       return next;
     });
 
-    // Upgrade "8 keywords ready" into a real sentence naming what was actually produced/picked
-    // (owner, 2026-09-10: "real ai answer dega ki ye keyword select kiya gaya hai, normal chat
-    // jaisa") — the template above ships immediately so the bubble is never left stale while
-    // this resolves, and this quietly replaces it if the model answers in time.
-    if (produced) {
-      const agentName = [...allAgents, bossAgent, publishAgent].find((a) => a.id === produced.agentId)?.name ?? "The team";
-      fetch("/api/chat/narrate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          agentName,
-          stepLabel: `the whole order — found ${produced.count} ${plural(produced.kind, produced.count)}`,
-          subject: produced.headline ?? undefined,
-          producedCount: produced.count,
-          message: lastOrderMessageRef.current,
-        }),
-      })
-        .then((r) => r.json())
-        .then((d) => {
-          if (!d?.ok || !d.text) return;
-          setThread((p) => {
-            const i = p.findIndex((m) => m.taskId === id);
-            if (i < 0) return p;
-            const next = [...p];
-            next[i] = { ...next[i], text: d.text };
-            return next;
-          });
-        })
-        .catch(() => {});
-    }
+    // The final summary is the deterministic `text` above (built from the task's REAL status +
+    // what it actually produced). The old model-narration "upgrade" that replaced it is gone
+    // (2026-10-20) — it added an LLM call and sometimes rewrote a true summary into a wrong one.
   }, [live.byTask]);
 
-  /** Live progress narration — a genuinely model-written sentence for every step as it finishes
-   *  ("Mr. Keyword ne apna kaam kar diya hai" style), as its own new chat bubble rather than
-   *  folded into the one running-status line above (that line still owns "what's happening
-   *  right now"; these are a stream of "X just finished" moments). The owner chose this over
-   *  the free, template-based option when asked directly about the extra cost/latency it adds —
-   *  one real call to app/api/chat/narrate per step (2026-09-09). */
+  /** Per-step narration is DISABLED (owner, 2026-10-20). The model-written "Mr. X ne ... kiya" line
+   *  per step was noisy AND frequently wrong — it read each step's produced-count off a live array
+   *  that lags when the step flips to done (so a keyword run that found 4 announced "koi keywords
+   *  nahi nikale", SEO announced "koi result nahi"). The live visual already shows the real, truthful
+   *  progress; the chat keeps only its running-status strip + one honest final summary. We still mark
+   *  steps as seen so nothing floods if this is ever turned back on. */
   useEffect(() => {
     const id = orderedTaskId.current;
     if (!id) return;
     const t = live.byTask[id];
     if (!t) return;
-
-    if (!narrationBaseline.current.has(id)) {
-      narrationBaseline.current.add(id);
-      for (const s of t.steps) if (s.status === "done") narratedStepIds.current.add(s.key);
-      return;
-    }
-
-    for (const s of t.steps) {
-      if (s.status !== "done" || narratedStepIds.current.has(s.key)) continue;
-      narratedStepIds.current.add(s.key);
-      const agentName = [...allAgents, bossAgent, publishAgent].find((a) => a.id === s.agent_id)?.name ?? s.agent_id;
-      const stepLabel = s.label || (s.action ? s.action.replace(/_/g, " ") : "a step");
-      // Whether this step actually produced anything — without this the narrator had no way to
-      // know a "finished" step came back empty, and cheerfully announced a keyword list that
-      // did not exist (owner report 2026-09-10, live: "Mr. Keyword ne aaj keywords ki list
-      // finalize kar li hai" for a run that produced zero keywords).
-      const producedCount = t.agents.find((p) => p.agent_id === s.agent_id)?.items.length ?? 0;
-      fetch("/api/chat/narrate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ agentName, stepLabel, producedCount, message: lastOrderMessageRef.current }),
-      })
-        .then((r) => r.json())
-        .then((d) => {
-          if (!d?.ok || !d.text) return; // provider unavailable/slow — say nothing this time
-          setThread((p) => [...p, { who: "ai", text: d.text, time: nowTime() }]);
-        })
-        .catch(() => {});
-    }
+    for (const s of t.steps) if (s.status === "done") narratedStepIds.current.add(s.key);
   }, [live.byTask]);
 
   /* ---------------------------------------------------------------------- */
@@ -3697,20 +3642,10 @@ export default function MrLxwaDashboard({
    *  actually read which keyword won. This holds the CANVAS (not the header — the agent name/step
    *  label above it are free to move on right away) on the keyword table for ~1.5s of real,
    *  already-decided data — not a fabricated delay, the keyword was already picked. */
-  const [holdKeywordCanvas, setHoldKeywordCanvas] = useState(false);
-  const prevCanvasAgentIdRef = useRef<string | null>(null);
-  useEffect(() => {
-    const prev = prevCanvasAgentIdRef.current;
-    const curr = panelAgent?.id ?? null;
-    prevCanvasAgentIdRef.current = curr;
-    if (prev === "keyword" && curr && curr !== "keyword") {
-      setHoldKeywordCanvas(true);
-      const t = setTimeout(() => setHoldKeywordCanvas(false), 1500);
-      return () => clearTimeout(t);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [panelAgent?.id]);
-  const canvasAgentId = holdKeywordCanvas ? "keyword" : panelAgent?.id;
+  // (Removed 2026-10-20: the "hold the keyword canvas for 1.5s when moving to the next agent" trick.
+  //  It forced the KeywordScreen onto whatever panel was open, and since keywordItems is derived
+  //  from the OPEN agent's items, every other agent's panel showed "No keywords were produced".
+  //  The keyword branch now keys on panelAgent.id like every other screen.)
   // gpt-researcher's own live events (agents/writer.ts's onProgress, forwarded verbatim — see
   // conduct_research.py) — real, while the research step runs, before the outline exists. Once
   // "research" (the researcher's own resolve) or "section" (the outline moved past it) shows
@@ -3908,11 +3843,11 @@ export default function MrLxwaDashboard({
               <div className="lx-paper flex-1">
                 {panelAgent?.id === "boss" ? (
                   <BossScreen items={producedItems} running={!!runningStep} color={panelAgent.color} label={panelAgent.name} />
-                ) : canvasAgentId === "keyword" ? (
+                ) : panelAgent?.id === "keyword" ? (
                   <KeywordScreen
                     items={keywordItems}
                     topic={taskTopic}
-                    running={holdKeywordCanvas ? false : !!runningStep}
+                    running={!!runningStep}
                     picked={keywordPicked}
                     onWriteArticle={orderArticleFor}
                   />
