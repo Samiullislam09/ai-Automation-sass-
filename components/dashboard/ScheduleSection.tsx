@@ -708,11 +708,13 @@ const CSS = `
 /* Negative margin cancels the dashboard <main>'s p-3/sm:p-4 padding so the schedule fills the
    content area edge-to-edge (owner: "ege to egde", 2026-10-21). overflow-x:hidden guards the
    negative margin from ever producing a horizontal scrollbar. */
-.sched{--bg:#f8f9fa;--panel:#fff;--card:#fff;--line:#dadce0;--tx:#202124;--mut:#5f6368;--ac:#1a73e8;--acs:#e8f0fe;--onac:#fff;--ok:#188038;--oks:#e6f4ea;--bad:#d93025;--warn:#b06000;--warns:#fef7e0;--off:#bdc1c6;--bads:#fce8e6;--pu:#8430ce;--pus:#f3e8fd;color-scheme:light;color:var(--tx);background:var(--bg);min-height:100%;margin:-12px;overflow-x:hidden;font:15px/1.5 "Google Sans",Roboto,"Segoe UI",Arial,sans-serif}
+.sched{--bg:#f8f9fa;--panel:#fff;--card:#fff;--line:#dadce0;--tx:#202124;--mut:#5f6368;--ac:#1a73e8;--acs:#e8f0fe;--onac:#fff;--ok:#188038;--oks:#e6f4ea;--bad:#d93025;--warn:#b06000;--warns:#fef7e0;--off:#bdc1c6;--bads:#fce8e6;--pu:#8430ce;--pus:#f3e8fd;color-scheme:light;color:var(--tx);background:#fff;min-height:100%;margin:-12px;overflow-x:hidden;font:15px/1.5 "Google Sans",Roboto,"Segoe UI",Arial,sans-serif}
 @media(min-width:640px){.sched{margin:-16px}}
 .sched *{box-sizing:border-box}
-.sched .wrap{max-width:none;margin:0;padding:16px 16px 48px}
-.sched .panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:24px}
+/* Full-bleed: no outer card. The whole content area is one white sheet reaching the edges
+   (owner confirmed 2026-10-21); the panel wrapper is now just a padding box. */
+.sched .wrap{max-width:none;margin:0;padding:0}
+.sched .panel{background:transparent;border:0;border-radius:0;padding:20px 20px 48px}
 .sched .top{display:flex;align-items:flex-start;gap:12px;margin-bottom:20px}
 .sched .top .t{flex:1;min-width:0}
 .sched h1{font-size:26px;font-weight:500;margin:0;color:var(--tx)}
