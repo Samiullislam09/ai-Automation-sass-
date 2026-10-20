@@ -486,11 +486,7 @@ function nextPreview(draft: Sched, nowMs: number): string {
   catch { return d.toISOString(); }
 }
 
-/* ───────────────────────── Upcoming tab (day-grouped timeline) ───────────────────────── */
-const dateParts = (d: Date, tz: string) => {
-  const f = (opt: Intl.DateTimeFormatOptions) => { try { return new Intl.DateTimeFormat("en-GB", { timeZone: tz, ...opt }).format(d); } catch { return ""; } };
-  return { day: f({ day: "numeric" }), wd: f({ weekday: "short" }), mo: f({ month: "short" }) };
-};
+/* ───────────────────────── Upcoming tab (reference table) ───────────────────────── */
 function Upcoming({ scheds, orders, pendingOrders, now, tz, uf, setUf, ud, setUd, skip, setSkip, onCancel, cancelling }: any) {
   const items = useMemo(() => {
     const out: any[] = [];
@@ -530,15 +526,6 @@ function Upcoming({ scheds, orders, pendingOrders, now, tz, uf, setUf, ud, setUd
   const pred = inRange[uf] || inRange["7"];
   const list = items.filter(pred);
 
-  // group the (already time-sorted) list by calendar day in the tenant's zone
-  const groups: { key: string; label: string; parts: ReturnType<typeof dateParts>; today: boolean; items: any[] }[] = [];
-  for (const x of list) {
-    const key = ymd(x.at, tz);
-    let g = groups[groups.length - 1];
-    if (!g || g.key !== key) { g = { key, label: dayLabel(x.at, tz, now), parts: dateParts(x.at, tz), today: dayOffset(x.at, tz, now) === 0, items: [] }; groups.push(g); }
-    g.items.push(x);
-  }
-
   return (
     <>
       <div className="chips">
@@ -549,29 +536,21 @@ function Upcoming({ scheds, orders, pendingOrders, now, tz, uf, setUf, ud, setUd
           <input type="date" value={ud} onChange={(e) => { setUd(e.target.value); setUf(e.target.value ? "date" : "7"); }} />
         </label>
       </div>
-
-      {groups.length ? groups.map((g) => (
-        <div key={g.key} className="day">
-          <div className={"dl" + (g.today ? " td" : "")}>
-            <b suppressHydrationWarning>{g.parts.day}</b>
-            <small suppressHydrationWarning>{g.parts.mo}</small>
-            <small suppressHydrationWarning>{g.today ? "Today" : g.parts.wd}</small>
+      <div className="tbl">
+        <div className="tr th up"><div className="c">Task</div><div className="c">Given by</div><div className="c">Time</div><div className="c" /></div>
+        {list.length ? list.map((x, i) => (
+          <div key={i} className="tr up">
+            <div className="c main"><span className="ico sm"><Ic n={x.icon} z={20} /></span><div className="info"><div className="name">{x.title}</div><small>{x.sub}</small></div></div>
+            <div className="c hide"><span className={"tag " + x.kind}>{x.tag}</span></div>
+            <div className="c" suppressHydrationWarning>{dayLabel(x.at, tz, now)}, {time12(x.at, tz)}</div>
+            <div className="c end">
+              {x.kind === "chat"
+                ? <button className="lnk" disabled={cancelling === x.id} onClick={() => onCancel(x.id)}>Cancel</button>
+                : <button className="lnk" onClick={() => setSkip(new Set(skip).add(x.skipKey))}>Skip</button>}
+            </div>
           </div>
-          <div className="evs">
-            {g.items.map((x, i) => (
-              <div key={i} className={"evc" + (x.kind === "chat" ? " chat" : "")}>
-                <span className="et" suppressHydrationWarning>{time12(x.at, tz)}</span>
-                <span className="ico sm"><Ic n={x.icon} z={18} /></span>
-                <div className="info"><div className="name">{x.title}</div><small>{x.sub}</small></div>
-                <span className={"tag " + x.kind}>{x.tag}</span>
-                {x.kind === "chat"
-                  ? <button className="lnk" disabled={cancelling === x.id} onClick={() => onCancel(x.id)}>Cancel</button>
-                  : <button className="lnk" onClick={() => setSkip(new Set(skip).add(x.skipKey))}>Skip</button>}
-              </div>
-            ))}
-          </div>
-        </div>
-      )) : <Empty icon="event" title="Nothing on this day" desc="Pick another day above." />}
+        )) : <Empty icon="event" title="Nothing on this day" desc="Pick another day above." />}
+      </div>
     </>
   );
 }
@@ -688,7 +667,7 @@ function orderIcon(o: any): string {
 const CSS = `
 .sched{--bg:#f8f9fa;--panel:#fff;--card:#fff;--line:#dadce0;--tx:#202124;--mut:#5f6368;--ac:#1a73e8;--acs:#e8f0fe;--onac:#fff;--ok:#188038;--oks:#e6f4ea;--bad:#d93025;--warn:#b06000;--warns:#fef7e0;--off:#bdc1c6;--bads:#fce8e6;--pu:#8430ce;--pus:#f3e8fd;color-scheme:light;color:var(--tx);background:var(--bg);min-height:100%;width:100%;border-radius:12px;font:15px/1.5 "Google Sans",Roboto,"Segoe UI",Arial,sans-serif}
 .sched *{box-sizing:border-box}
-.sched .wrap{max-width:900px;margin:0 auto;padding:20px 14px 60px}
+.sched .wrap{max-width:none;margin:0;padding:20px 20px 60px}
 .sched .panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:24px}
 .sched .top{display:flex;align-items:flex-start;gap:12px;margin-bottom:20px}
 .sched .top .t{flex:1;min-width:0}
@@ -750,17 +729,7 @@ const CSS = `
 .sched .sp.ok{background:var(--oks);color:var(--ok)}.sched .sp.pend{background:var(--warns);color:var(--warn)}.sched .sp.bad{background:var(--bads);color:var(--bad)}.sched .sp.mut{background:var(--bg);color:var(--mut)}
 .sched .lnk{background:none;border:0;color:var(--ac);font:inherit;font-size:13px;font-weight:500;cursor:pointer;padding:2px 4px;text-decoration:none}.sched .lnk:hover{text-decoration:underline}.sched .lnk:disabled{opacity:.5;cursor:not-allowed}
 .sched .tag{font-size:12px;padding:3px 10px;border-radius:99px;background:var(--bg);border:1px solid var(--line);color:var(--mut);white-space:nowrap}
-.sched .tag.auto,.sched .tag.Schedule{background:var(--acs);color:var(--ac);border-color:transparent}.sched .tag.chat{background:var(--pus);color:var(--pu);border-color:transparent}
-.sched .day{display:grid;grid-template-columns:64px 1fr;gap:14px;padding:14px 0;border-top:1px solid var(--line)}
-.sched .day:first-child{border-top:0;padding-top:4px}
-.sched .dl{display:flex;flex-direction:column;align-items:center;line-height:1.15;color:var(--tx)}
-.sched .dl b{font-size:26px;font-weight:400}.sched .dl small{font-size:11px;color:var(--mut)}
-.sched .dl.td b,.sched .dl.td small:last-child{color:var(--ac);font-weight:600}
-.sched .evs{display:flex;flex-direction:column;gap:8px;min-width:0}
-.sched .evc{display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid var(--line);border-left:4px solid var(--ac);border-radius:10px;background:var(--card)}
-.sched .evc.chat{border-left-color:var(--pu)}
-.sched .evc .ico.sm{width:30px;height:30px}
-.sched .et{width:72px;flex:none;font-weight:500;font-size:13px;color:var(--tx);font-variant-numeric:tabular-nums}
+.sched .tag.auto{background:var(--acs);color:var(--ac);border-color:transparent}.sched .tag.chat{background:var(--pus);color:var(--pu);border-color:transparent}
 .sched .empty{text-align:center;padding:36px 10px;color:var(--mut);display:flex;flex-direction:column;align-items:center;gap:6px}.sched .empty b{color:var(--tx);font-weight:500}
 .sched .box{background:var(--bg);border-radius:8px;padding:12px 14px;font-size:14px;color:var(--mut)}
 .sched input,.sched select{width:100%;background:var(--panel);color:var(--tx);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font:inherit;color-scheme:light}
@@ -803,9 +772,6 @@ const CSS = `
   .sched .row{padding:12px}.sched .ico{width:40px;height:40px}
   .sched .modal{max-width:100%}
   .sched .search{max-width:none}
-  .sched .day{grid-template-columns:1fr;gap:6px}
-  .sched .dl{flex-direction:row;gap:8px;align-items:baseline}.sched .dl b{font-size:20px}
-  .sched .evc{flex-wrap:wrap}.sched .evc .tag{display:none}.sched .et{width:auto}
 }
 @media(max-width:400px){.sched .stats{grid-template-columns:1fr}}
 `;
