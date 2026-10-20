@@ -209,16 +209,18 @@ const STYLE_PHRASE: Record<"photo" | "illustration", string> = {
 /** Never negotiable, and the reason is in each clause: no text (a diffusion model writes
  *  gibberish), no logos or signage (someone else's brand), no people (a real-looking face
  *  nobody consented to). */
-const NEGATIVE = "no text, no words, no letters, no numbers, no watermark, no logo, no signage, no people, no faces";
+const NEGATIVE = "no text, no words, no letters, no numbers, no captions, no watermark, no logo, no signage, no document, no certificate, no stamp, no seal, no badge, no chart, no graph, no diagram, no screenshot, no UI, no screen, no poster, no people, no faces, not cluttered, not busy";
 
 /** The final prompt. The model contributes `subject` and nothing else — the rest is assembled
  *  here, identically every time, from the site's own profile. */
-export function buildPrompt(subject: string, style: "photo" | "illustration", profile: SiteProfile | null): string {
+export function buildPrompt(subject: string, style: "photo" | "illustration", profile: SiteProfile | null, slot?: string): string {
   const setting: string[] = [];
   const industry = (profile?.what_they_do ?? "").split(/[.,;]/)[0].trim();
   if (industry) setting.push(`context: ${industry.slice(0, 90)}`);
   if (profile?.geo) setting.push(`set in ${String(profile.geo).slice(0, 40)}`);
-  return [subject.trim().slice(0, 220), STYLE_PHRASE[style], ...setting, NEGATIVE].filter(Boolean).join(", ");
+  // The thumbnail is the article's cover — push it harder than the inline images.
+  const premium = slot === "thumb" ? "award-winning magazine-cover composition, bold eye-catching focal subject, premium hero image, dramatic depth, striking and clean" : "";
+  return [subject.trim().slice(0, 220), premium, STYLE_PHRASE[style], ...setting, NEGATIVE].filter(Boolean).join(", ");
 }
 
 /** Same article + same slot = same picture, for ever (§19.4.3). `bump` is the user's own
@@ -266,6 +268,8 @@ function prompt(article: ArticleForImages, profile: SiteProfile | null, wantInli
     `- inline: exactly ${wantInline} entr${wantInline === 1 ? "y" : "ies"}, each for ONE of the sections above. "anchor" must be that section's heading, copied exactly.`,
     '- "depicts": what that section actually explains, in your own words, using the section\'s own vocabulary.',
     '- "subject": the picture, as a fully staged scene, specific enough that two different people describing it would draw the same thing. Name the concrete objects, materials, setting and framing that section\'s own words actually describe — not a generic stand-in for the topic. Bad: "a home repair". Good: "a close-up of a cracked ceramic roof tile with a gloved hand lifting it to show the exposed felt underlay beneath, afternoon light raking across the roof surface". A camera could photograph exactly this. No text, no logos, no people.',
+    '- CRITICAL: NEVER make the subject a document, certificate, diploma, stamp, seal, badge, award, report, chart, graph, table, screenshot, app UI, phone or computer screen, poster, sign or book cover — anything that would carry writing. The image model turns ALL text into ugly gibberish (this is the #1 thing that makes a picture look unprofessional). For a topic about certification, standards, compliance, costs, reports or software, pick a clean REAL-WORLD scene that EVOKES it instead: a modern glass office at golden hour, a calm meeting room, a city skyline, a workbench with real tools, architectural detail, abstract premium materials. Evoke the idea; never spell it out.',
+    '- "thumb" is the HERO of the whole article: the single most eye-catching, premium, magazine-cover-quality image — a bold, striking composition with a strong focal subject and real depth, so that someone grasps what the article is about at a glance from the thumbnail alone. Make it the best of the set.',
     '- "alt": one sentence describing the picture for someone who cannot see it.',
     "",
     'Reply with ONLY JSON: {"style":"photo","thumb":{"depicts":"","subject":"","alt":""},"hero":{"depicts":"","subject":"","alt":""},"inline":[{"anchor":"","depicts":"","subject":"","alt":""}]}',

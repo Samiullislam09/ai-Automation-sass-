@@ -91,11 +91,21 @@ test("the prompt is assembled by us: the model contributes the subject and nothi
   assert.match(p, /8k resolution, photorealistic/, "the quality-boosting clauses that replaced the old bare 'realistic'");
   assert.match(p, /context: A roofing contractor serving homeowners/, "the setting comes from Site Brain, not the model");
   assert.match(p, /set in Springfield, Illinois/);
-  assert.match(p, /no text, no words, no letters, no numbers, no watermark, no logo, no signage, no people, no faces$/);
+  // The negative clause forbids text AND the text-carrying objects (document/certificate/chart/
+  // screen…) that make a diffusion image look unprofessional, and ends on the clutter guard.
+  assert.match(p, /no text, no words, no letters/);
+  assert.match(p, /no document, no certificate, no stamp/, "text-carrying objects are forbidden, not just raw text");
+  assert.match(p, /no people, no faces, not cluttered, not busy$/);
 
   const noProfile = buildPrompt("a gutter", "illustration", null);
   assert.match(noProfile, /high-detail modern vector illustration/);
   assert.doesNotMatch(noProfile, /context:/, "no Site Brain, no invented setting");
+
+  // The thumbnail gets an extra premium/cover booster that the inline slots do not.
+  const thumb = buildPrompt("a gutter", "photo", null, "thumb");
+  assert.match(thumb, /magazine-cover composition/);
+  const inline = buildPrompt("a gutter", "photo", null, "inline_1");
+  assert.doesNotMatch(inline, /magazine-cover composition/);
 });
 
 test("the seed is the article and the slot, so the same image comes back for free", () => {

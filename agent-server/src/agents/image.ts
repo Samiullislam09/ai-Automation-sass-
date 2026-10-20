@@ -292,7 +292,7 @@ export class ImageAgent extends Agent {
       return { ...stored, kind: "template", note: "today's image budget is used up — this is a branded card, and the next run will make a picture" };
     }
 
-    const prompt = buildPrompt(slot.subject, input.plan.style, input.profile);
+    const prompt = buildPrompt(slot.subject, input.plan.style, input.profile, slot.slot);
     const seed = seedFor(article.id, slot.slot, input.bump);
     try {
       const image = await generateImage(prompt, seed, {
