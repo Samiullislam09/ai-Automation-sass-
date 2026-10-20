@@ -33,6 +33,11 @@ const WA = {
   tickBlue: "#53bdeb",
 };
 
+/** Poll only when this tab is actually on screen. A WhatsApp page left open in a background tab was
+ *  polling status/list/thread/alerts every few seconds forever — each hit a Supabase query and
+ *  burned the free-tier LOG INGESTION quota. Backgrounded = skip the poll (it resumes on return). */
+const pageVisible = () => typeof document === "undefined" || document.visibilityState === "visible";
+
 type Status = { status: string; qr: string | null; phone: string | null };
 type Lead = {
   id: string; company: string | null; name: string | null; whatsapp: string | null; phone: string | null;
@@ -58,6 +63,7 @@ export default function WhatsAppSection() {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const poll = useCallback(async () => {
+    if (!pageVisible()) return;
     try {
       const r = await fetch("/api/whatsapp/status").then((x) => x.json());
       if (r.ok) {
@@ -208,7 +214,7 @@ function NotificationsBell() {
   }, []);
 
   // Poll the unread count quietly; load the full list when opened.
-  useEffect(() => { void load(); const id = setInterval(load, 20000); return () => clearInterval(id); }, [load]);
+  useEffect(() => { void load(); const id = setInterval(() => { if (pageVisible()) void load(); }, 60000); return () => clearInterval(id); }, [load]);
 
   const openPanel = async () => {
     setOpen(true);
@@ -635,7 +641,7 @@ function Inbox({ search, setSearch }: { search: string; setSearch: (v: string) =
 
   useEffect(() => {
     loadList();
-    const id = setInterval(loadList, 6000);
+    const id = setInterval(() => { if (pageVisible()) void loadList(); }, 10000);
     return () => clearInterval(id);
   }, [loadList]);
 
@@ -812,7 +818,7 @@ function Chat({ lead, onSent, onBack, onDeleted, toast }: { lead: Lead; onSent: 
     setThread(null);
     setText(""); // start each conversation with a clean box (the auto-fill below repopulates it)
     loadThread();
-    const id = setInterval(loadThread, 5000);
+    const id = setInterval(() => { if (pageVisible()) void loadThread(); }, 8000);
     return () => clearInterval(id);
   }, [loadThread]);
 

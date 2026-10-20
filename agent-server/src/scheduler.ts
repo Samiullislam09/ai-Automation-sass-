@@ -60,7 +60,21 @@ async function sweep() {
   await Promise.allSettled([tick(), tickOrders(), brainSweep(), tickAudits(), tickRanks(), tickOutboundSafe(), tickFollowupsSafe(), tickMeetingsSafe()]);
 }
 
+// Supabase free tier bills LOG INGESTION (every query writes log lines). The WhatsApp sweeps don't
+// need 60s precision — a cold message's slot is minutes apart, a follow-up is hours, a no-show is
+// days — so running them every minute just burns the log quota 24/7. These throttles cut their
+// Supabase queries 5–15x with no user-visible change. (Egress's cousin — see docs/EGRESS_AUDIT.md.)
+const _lastRun: Record<string, number> = {};
+function due(key: string, intervalMs: number): boolean {
+  const now = Date.now();
+  if (now - (_lastRun[key] ?? 0) < intervalMs) return false;
+  _lastRun[key] = now;
+  return true;
+}
+const MIN = 60_000;
+
 async function tickMeetingsSafe() {
+  if (!due("meetings", 15 * MIN)) return; // no-show nudges are a 48h/150h thing — 15 min is plenty
   try {
     const n = await tickMeetingNoShows();
     if (n) console.log(`[scheduler] meeting no-shows: sent ${n} reschedule nudge(s)`);
@@ -70,6 +84,7 @@ async function tickMeetingsSafe() {
 }
 
 async function tickFollowupsSafe() {
+  if (!due("followups", 10 * MIN)) return; // 24h/90h/160h nudges — 10 min cadence is fine
   try {
     const sent = await tickFollowups();
     if (sent) console.log(`[scheduler] follow-ups: sent ${sent} nudge(s)`);
@@ -81,6 +96,7 @@ async function tickFollowupsSafe() {
 /** The WhatsApp outbound timeline (§28.8). Wrapped so a failure here can never stop the article /
  *  audit / rank sweeps that share this tick — exactly like every other independent timetable. */
 async function tickOutboundSafe() {
+  if (!due("outbound", 2 * MIN)) return; // slots are minutes apart; 2-min cadence keeps them spread
   try {
     const sent = await tickOutbound();
     if (sent) console.log(`[scheduler] outbound timeline: sent ${sent} first-message(s)`);
