@@ -486,20 +486,24 @@ function nextPreview(draft: Sched, nowMs: number): string {
   catch { return d.toISOString(); }
 }
 
-/* ───────────────────────── Upcoming tab (reference table) ───────────────────────── */
+/* ───────────────────────── Upcoming tab (one row per automation, expandable) ───────────────────────── */
 function Upcoming({ scheds, orders, pendingOrders, now, tz, uf, setUf, ud, setUd, skip, setSkip, onCancel, cancelling }: any) {
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const toggleOpen = (k: string) => setOpen((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+
   const items = useMemo(() => {
     const out: any[] = [];
     (["article", "leads", "audit"] as Kind[]).forEach((k) => {
       const c: Sched = scheds[k];
       if (!c.enabled) return;
+      const freq = (c.frequency === "weekly" ? "Every " + DAYS[c.dayOfWeek] : FREQ[c.frequency]) + " at " + hm12(c.timeOfDay);
       let cursor = new Date(now);
-      for (let i = 0; i < 40; i++) {
+      for (let i = 0; i < 60; i++) {
         const d = nextRunAt(toRow(c), cursor);
         if (!d || d.getTime() - now > 30 * 86400000) break;
         const key = `${k}|${ymd(d, tz)}|${c.timeOfDay}`;
         if (!skip.has(key)) out.push({
-          at: d, icon: META[k].icon, kind: "auto", skipKey: key, tag: "Schedule",
+          at: d, icon: META[k].icon, kind: "auto", srcKind: k, freq, skipKey: key,
           title: k === "article" ? `Write ${c.count} article${c.count > 1 ? "s" : ""}` : k === "leads" ? `Find ${c.count} leads` : "Run site audit",
           sub: k === "article" ? (c.autoPublish ? "Published directly" : "Goes to Approvals") : k === "leads" ? "Delivered after you approve" : "Report made after the run",
         });
@@ -526,6 +530,53 @@ function Upcoming({ scheds, orders, pendingOrders, now, tz, uf, setUf, ud, setUd
   const pred = inRange[uf] || inRange["7"];
   const list = items.filter(pred);
 
+  // One summary row per recurring automation (grouped by its kind) + chat one-offs as single rows,
+  // all interleaved by their earliest time so the order still reads chronologically.
+  const groups: Record<string, any[]> = {};
+  const entries: { at: number; node: any }[] = [];
+  for (const x of list) {
+    if (x.kind === "auto") (groups[x.srcKind] ||= []).push(x);
+    else entries.push({
+      at: x.at.getTime(),
+      node: (
+        <div key={"c-" + (x.id ?? x.at.getTime())} className="tr up">
+          <div className="c main"><span className="ico sm"><Ic n={x.icon} z={20} /></span><div className="info"><div className="name">{x.title}</div><small>{x.sub}</small></div></div>
+          <div className="c hide"><span className="tag chat">{x.tag}</span></div>
+          <div className="c" suppressHydrationWarning>{dayLabel(x.at, tz, now)}, {time12(x.at, tz)}</div>
+          <div className="c end"><button className="lnk" disabled={cancelling === x.id} onClick={() => onCancel(x.id)}>Cancel</button></div>
+        </div>
+      ),
+    });
+  }
+  Object.entries(groups).forEach(([k, occ]) => {
+    const first = occ[0];
+    const isOpen = open.has(k);
+    entries.push({
+      at: first.at.getTime(),
+      node: (
+        <div key={"g-" + k}>
+          <button className="tr up grp-row" onClick={() => toggleOpen(k)} aria-expanded={isOpen}>
+            <div className="c main"><span className="ico sm"><Ic n={first.icon} z={20} /></span>
+              <div className="info"><div className="name">{first.title} <span className="cnt">{occ.length}</span></div><small>{first.freq} · {first.sub}</small></div>
+            </div>
+            <div className="c hide"><span className="tag auto">Schedule</span></div>
+            <div className="c" suppressHydrationWarning>Next: {dayLabel(first.at, tz, now)}, {time12(first.at, tz)}</div>
+            <div className="c end"><span className={"chev" + (isOpen ? " open" : "")}>›</span></div>
+          </button>
+          {isOpen && occ.map((x: any, i: number) => (
+            <div key={i} className="tr up child">
+              <div className="c main"><span className="dot" /><div className="info"><div className="name" suppressHydrationWarning>{dayLabel(x.at, tz, now)}</div></div></div>
+              <div className="c hide" />
+              <div className="c" suppressHydrationWarning>{time12(x.at, tz)}</div>
+              <div className="c end"><button className="lnk" onClick={() => setSkip(new Set(skip).add(x.skipKey))}>Skip</button></div>
+            </div>
+          ))}
+        </div>
+      ),
+    });
+  });
+  entries.sort((a, b) => a.at - b.at);
+
   return (
     <>
       <div className="chips">
@@ -538,18 +589,7 @@ function Upcoming({ scheds, orders, pendingOrders, now, tz, uf, setUf, ud, setUd
       </div>
       <div className="tbl">
         <div className="tr th up"><div className="c">Task</div><div className="c">Given by</div><div className="c">Time</div><div className="c" /></div>
-        {list.length ? list.map((x, i) => (
-          <div key={i} className="tr up">
-            <div className="c main"><span className="ico sm"><Ic n={x.icon} z={20} /></span><div className="info"><div className="name">{x.title}</div><small>{x.sub}</small></div></div>
-            <div className="c hide"><span className={"tag " + x.kind}>{x.tag}</span></div>
-            <div className="c" suppressHydrationWarning>{dayLabel(x.at, tz, now)}, {time12(x.at, tz)}</div>
-            <div className="c end">
-              {x.kind === "chat"
-                ? <button className="lnk" disabled={cancelling === x.id} onClick={() => onCancel(x.id)}>Cancel</button>
-                : <button className="lnk" onClick={() => setSkip(new Set(skip).add(x.skipKey))}>Skip</button>}
-            </div>
-          </div>
-        )) : <Empty icon="event" title="Nothing on this day" desc="Pick another day above." />}
+        {entries.length ? entries.map((e) => e.node) : <Empty icon="event" title="Nothing on this day" desc="Pick another day above." />}
       </div>
     </>
   );
@@ -726,6 +766,12 @@ const CSS = `
 .sched .tr.th{background:var(--bg);color:var(--mut);font-size:13px;font-weight:500}
 .sched .tr .c{min-width:0;font-size:14px;color:var(--tx)}.sched .tr .c small{display:block;color:var(--mut);font-size:12px}.sched .tr .c.bad{color:var(--bad)}
 .sched .c.main{display:flex;align-items:center;gap:12px}.sched .c.end{text-align:right}
+.sched .grp-row{width:100%;border:0;background:none;font:inherit;color:inherit;text-align:left;cursor:pointer}
+.sched .grp-row:hover{background:var(--bg)}
+.sched .chev.open{display:inline-block;transform:rotate(90deg)}
+.sched .tr.child{background:var(--bg)}
+.sched .tr.child .c.main{padding-left:6px}
+.sched .dot{width:7px;height:7px;border-radius:50%;background:var(--off);flex:none;margin:0 20px 0 14px}
 .sched .sp{font-size:12px;font-weight:500;padding:3px 10px;border-radius:99px;white-space:nowrap}
 .sched .sp.ok{background:var(--oks);color:var(--ok)}.sched .sp.pend{background:var(--warns);color:var(--warn)}.sched .sp.bad{background:var(--bads);color:var(--bad)}.sched .sp.mut{background:var(--bg);color:var(--mut)}
 .sched .lnk{background:none;border:0;color:var(--ac);font:inherit;font-size:13px;font-weight:500;cursor:pointer;padding:2px 4px;text-decoration:none}.sched .lnk:hover{text-decoration:underline}.sched .lnk:disabled{opacity:.5;cursor:not-allowed}
