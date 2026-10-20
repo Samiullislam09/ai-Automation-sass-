@@ -109,11 +109,14 @@ const STEP_TOKENS = {
  *  shared NVIDIA_API_KEYS_BG key-pool limiter every other agent-server call respects (§18.4's
  *  rule 4: "writer ko chhote calls me todo... 40 RPM me aaram se aata hai"), which this
  *  pipeline's whole shape (5-6 short calls instead of one long one) is built to fit inside. */
-/** The WRITER gets the STRONGEST model the NVIDIA account can serve — article quality (and hitting
- *  the 40-58 word snippet rule the review loop otherwise burns rounds on) depends on it far more
- *  than boss/keyword do. Per-account availability varies (404 "not found for account") and models
- *  go EOL/503, so we try a list best-first and cache the first that answers. Set WRITER_MODEL to
- *  force one. The 503-overloaded ultra is last (nvidiaFetch retries 5xx slowly). */
+/** TWO model tiers (per-account availability varies — 404 "not found for account" — and models go
+ *  EOL/503, so each is a best-first list and we cache the first that answers):
+ *   · WRITER — the STRONGEST the account serves. Article prose + hitting the 40-58 word snippet
+ *     rule depend on it. nemotron-4-340b first, ultra-550b last (503-slow).
+ *   · FAST (review/fixes) — a quick model. The review loop's rewrites are "a tiny, single-constraint
+ *     task a weak model can do" (articleReview's own note), and 340b is slow, so running the many
+ *     small review calls on a fast model cuts the biggest remaining chunk of wall-time WITHOUT
+ *     touching the main prose quality. Set WRITER_MODEL / REVIEW_MODEL to force either. */
 const WRITER_MODEL_CANDIDATES = [
   process.env.WRITER_MODEL || "",
   "nvidia/nemotron-4-340b-instruct",
@@ -121,11 +124,18 @@ const WRITER_MODEL_CANDIDATES = [
   "nvidia/nemotron-3-super-120b-a12b",
   "nvidia/nemotron-3-ultra-550b-a55b",
 ].filter(Boolean).filter((m, i, a) => a.indexOf(m) === i);
-const WRITER_UNAVAILABLE = new Set([400, 404, 410, 422, 503]);
-let resolvedWriter: string | null = null;
+const FAST_MODEL_CANDIDATES = [
+  process.env.REVIEW_MODEL || "",
+  "nvidia/nemotron-3.5-lightning-30b-a3b",
+  "nvidia/nemotron-3-super-120b-a12b",
+  "nvidia/llama-3.1-nemotron-70b-instruct",
+].filter(Boolean).filter((m, i, a) => a.indexOf(m) === i);
+const MODEL_UNAVAILABLE = new Set([400, 404, 410, 422, 503]);
+const writerCache = { model: null as string | null };
+const fastCache = { model: null as string | null };
 
-export async function nimComplete(prompt: string, opts: { maxTokens?: number; label?: string } = {}): Promise<string> {
-  const base = resolvedWriter ? [resolvedWriter] : [...WRITER_MODEL_CANDIDATES, resolvedAgentModel()];
+async function completeWith(candidates: string[], cache: { model: string | null }, tier: string, prompt: string, opts: { maxTokens?: number; label?: string }): Promise<string> {
+  const base = cache.model ? [cache.model] : [...candidates, resolvedAgentModel()];
   const tryOrder = base.filter((m, i, a) => a.indexOf(m) === i);
   let res: Response | null = null;
   let lastErr = "";
@@ -133,7 +143,7 @@ export async function nimComplete(prompt: string, opts: { maxTokens?: number; la
     let r: Response;
     try {
       r = await nvidiaFetch("https://integrate.api.nvidia.com/v1/chat/completions", {
-        label: opts.label ?? "writer",
+        label: opts.label ?? tier,
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -150,23 +160,34 @@ export async function nimComplete(prompt: string, opts: { maxTokens?: number; la
       });
     } catch (e: any) {
       if (e?.name === "TimeoutError" || /aborted|timeout/i.test(e?.message ?? "")) {
-        throw new Error(`Mr. Writer's model did not answer within ${Math.round(WRITER_TIMEOUT_MS / 1000)}s (${opts.label ?? "writer"} step).`);
+        throw new Error(`Mr. Writer's model did not answer within ${Math.round(WRITER_TIMEOUT_MS / 1000)}s (${opts.label ?? tier} step).`);
       }
       throw e;
     }
-    if (r.ok) { res = r; if (resolvedWriter !== model) { resolvedWriter = model; console.log(`[writer] using model: ${model}`); } break; }
+    if (r.ok) { res = r; if (cache.model !== model) { cache.model = model; console.log(`[${tier}] using model: ${model}`); } break; }
     lastErr = `${model} → ${r.status}`;
-    if (!WRITER_UNAVAILABLE.has(r.status)) throw new Error(`NVIDIA writer call failed (${opts.label ?? "writer"}, ${r.status}): ${(await r.text().catch(() => "")).slice(0, 300)}`);
+    if (!MODEL_UNAVAILABLE.has(r.status)) throw new Error(`NVIDIA ${tier} call failed (${opts.label ?? tier}, ${r.status}): ${(await r.text().catch(() => "")).slice(0, 300)}`);
     await r.text().catch(() => "");
-    console.warn(`[writer] model unavailable, trying next: ${lastErr}`);
+    console.warn(`[${tier}] model unavailable, trying next: ${lastErr}`);
   }
-  if (!res) throw new Error(`NVIDIA writer: no candidate model is available for this account. Last: ${lastErr}`);
+  if (!res) throw new Error(`NVIDIA ${tier}: no candidate model is available for this account. Last: ${lastErr}`);
   const data: any = await res.json();
   const choice = data?.choices?.[0];
   const text = choice?.message?.content;
-  if (!text) throw new Error(`NVIDIA writer: no content in response (${opts.label ?? "writer"} step)`);
-  if (choice?.finish_reason === "length") throw new Error(`Mr. Writer's ${opts.label ?? "writer"} step was cut off by the model's token limit.`);
+  if (!text) throw new Error(`NVIDIA ${tier}: no content in response (${opts.label ?? tier} step)`);
+  if (choice?.finish_reason === "length") throw new Error(`Mr. Writer's ${opts.label ?? tier} step was cut off by the model's token limit.`);
   return text;
+}
+
+/** Strong model — the article's actual prose (outline, sections, polish, meta). */
+export async function nimComplete(prompt: string, opts: { maxTokens?: number; label?: string } = {}): Promise<string> {
+  return completeWith(WRITER_MODEL_CANDIDATES, writerCache, "writer", prompt, opts);
+}
+
+/** Fast model — the review loop's mechanical rewrites/fixes. Same signature as nimComplete so it
+ *  drops straight into runArticleReview's `complete`. */
+export async function nimCompleteFast(prompt: string, opts: { maxTokens?: number; label?: string } = {}): Promise<string> {
+  return completeWith(FAST_MODEL_CANDIDATES, fastCache, "review", prompt, opts);
 }
 
 /** Strict-enough JSON extraction for a model that was asked for "ONLY JSON" and sometimes

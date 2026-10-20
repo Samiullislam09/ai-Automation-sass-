@@ -1,7 +1,7 @@
 import type { Job } from "pg-boss";
 import { Agent, type AgentContext, type AgentJobData } from "./base.js";
 import type { WriterContext } from "../lib/writer.js";
-import { writeArticlePipeline, nimComplete } from "../lib/writerPipeline.js";
+import { writeArticlePipeline, nimComplete, nimCompleteFast } from "../lib/writerPipeline.js";
 import { runArticleReview, checkLinkLive, type LinkRef } from "../lib/articleReview.js";
 import { researchTopic } from "../lib/research/gptResearcher.js";
 import { gateArticle, summarizeGate } from "../lib/qualityGate.js";
@@ -172,7 +172,10 @@ export class WriterAgent extends Agent {
         metaDescription: pipeline.meta.metaDescription,
       },
       {
-        complete: nimComplete,
+        // The review's rewrites/fixes are small, single-constraint tasks — run them on the FAST
+        // model so the multi-round loop doesn't wait on the slow strong model (the article's own
+        // prose was already written by nimComplete above).
+        complete: nimCompleteFast,
         checkLink: checkLinkLive,
         onEvent: (kind, payload) => ctx.data(kind, payload),
         onProgress: (label) => ctx.onProgress({ label }),
