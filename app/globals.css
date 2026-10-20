@@ -158,13 +158,17 @@ code{overflow-wrap:anywhere;word-break:break-word}
 /* The background was a hardcoded near-black while the text colour is inherited var(--ink) —
    in the light theme that was dark ink on a dark toast, i.e. invisible. Both come from the
    token set now. */
-.toast{display:flex;align-items:flex-start;gap:9px;background:var(--panel);color:var(--ink);border:1px solid var(--line2);border-left:3px solid var(--ac);border-radius:11px;padding:11px 12px 11px 14px;font-size:13px;line-height:1.45;width:min(360px,100%);box-shadow:0 14px 34px #0000004a,0 2px 8px #00000026;animation:tin .28s cubic-bezier(.2,.8,.3,1)}
-.toast-icon{flex-shrink:0;display:flex;margin-top:1px;color:var(--ac)}
-.toast-error .toast-icon{color:var(--red)}
-.toast-info .toast-icon{color:var(--mut2)}
-.toast-msg{flex:1;min-width:0}
-.toast-error{border-left-color:var(--red)}
-.toast-info{border-left-color:var(--mut2);color:var(--mut)}
+.toast{display:flex;align-items:flex-start;gap:10px;background:var(--panel);color:var(--ink);border:1px solid var(--line2);border-left:4px solid var(--ac);border-radius:12px;padding:12px 12px 12px 14px;font-size:13px;font-weight:500;line-height:1.45;width:min(360px,100%);box-shadow:0 14px 34px #0000004a,0 2px 8px #00000026;animation:tin .28s cubic-bezier(.2,.8,.3,1)}
+.toast-icon{flex-shrink:0;display:flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;margin-top:0;color:var(--ac);background:color-mix(in srgb,currentColor 16%,transparent)}
+.toast-msg{flex:1;min-width:0;align-self:center}
+/* Success = green box, error = red box: the whole toast is tinted so the tone reads at a
+   glance (owner, 2026-10-21), not just a thin left stripe. */
+.toast-ok{background:color-mix(in srgb,#22c55e 15%,var(--panel));border-color:color-mix(in srgb,#22c55e 42%,var(--line2));border-left-color:#22c55e}
+.toast-ok .toast-icon{color:#22c55e}
+.toast-error{background:color-mix(in srgb,#ef4444 15%,var(--panel));border-color:color-mix(in srgb,#ef4444 42%,var(--line2));border-left-color:#ef4444}
+.toast-error .toast-icon{color:#ef4444}
+.toast-info{background:color-mix(in srgb,var(--ac) 12%,var(--panel));border-color:color-mix(in srgb,var(--ac) 38%,var(--line2));border-left-color:var(--ac)}
+.toast-info .toast-icon{color:var(--ac)}
 .toast-act{flex-shrink:0;background:none;border:1px solid var(--line2);border-radius:7px;color:var(--ac);font:inherit;font-weight:700;font-size:12px;padding:3px 9px;cursor:pointer}
 .toast-act:hover{border-color:var(--ac)}
 .toast-close{flex-shrink:0;display:flex;align-items:center;justify-content:center;width:20px;height:20px;margin:-2px -4px -2px 0;border:none;background:none;color:var(--mut2);border-radius:6px;cursor:pointer;transition:all var(--tr)}

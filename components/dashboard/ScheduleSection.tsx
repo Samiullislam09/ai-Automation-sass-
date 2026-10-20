@@ -123,7 +123,13 @@ function countdown(ms: number): string {
 /* ═════════════════════════════════════════════════════════════════════════ */
 export default function ScheduleSection() {
   const { toast, confirmAction } = useStore();
-  const [scheds, setScheds] = useState<Record<Kind, Sched> | null>(null);
+  // Seeded with (disabled) defaults so the page paints instantly instead of flashing a
+  // full-panel "Loading…" on every visit; the real rows arrive from /api/schedule a moment
+  // later. "UTC" keeps the first paint deterministic for SSR — loadSchedule swaps in the real
+  // timezone right away.
+  const [scheds, setScheds] = useState<Record<Kind, Sched>>(() => ({
+    article: DEFAULT("article", "UTC"), leads: DEFAULT("leads", "UTC"), audit: DEFAULT("audit", "UTC"),
+  }));
   const [autoPublishAvailable, setAutoPublishAvailable] = useState(true);
   const [canPublish, setCanPublish] = useState<boolean | null>(null);
   const [publishTarget, setPublishTarget] = useState<string | null>(null);
@@ -278,14 +284,6 @@ export default function ScheduleSection() {
   const onCount = scheds ? (Object.values(scheds) as Sched[]).filter((s) => s.enabled).length : 0;
   const doneToday = (runs ?? []).filter((r) => ymd(new Date(r.firedAt), tz) === ymd(new Date(now), tz) && r.status === "finished").length;
   const failedToday = (runs ?? []).filter((r) => ymd(new Date(r.firedAt), tz) === ymd(new Date(now), tz) && r.status === "failed").length;
-
-  if (!scheds) {
-    return (
-      <div className="sched"><style dangerouslySetInnerHTML={{ __html: CSS }} />
-        <div className="wrap"><div className="panel" style={{ textAlign: "center", color: "var(--mut)" }}>Loading…</div></div>
-      </div>
-    );
-  }
 
   const anyOn = (Object.values(scheds) as Sched[]).some((s) => s.enabled);
   const summary = (k: Kind) => {
