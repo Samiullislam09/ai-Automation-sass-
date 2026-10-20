@@ -66,6 +66,17 @@ export function explainAgentError(agent: string, err: any, durationMs: number): 
     return { ...base, message: `${who} hit the provider's rate limit.`, hint: "Too many calls at once. It will retry; if it persists, slow the schedule or raise the provider quota." };
   }
 
+  // A model this NVIDIA account cannot serve (404 "Function not found for account"), or the agent's
+  // model-fallback having exhausted every candidate. Not a crash and not the user's doing — show a
+  // calm sentence, never the raw provider JSON. (The raw body stays in `cause` for debugging.)
+  if (/not found for account|no candidate model|function '[^']*'\s*:?\s*not found|\bmodel\b[^.]*not (found|available)/i.test(raw)) {
+    return {
+      ...base,
+      message: `${who} couldn't reach the AI model just now — it's temporarily unavailable. Please try again in a moment.`,
+      hint: "The AI model is overloaded or not enabled on the NVIDIA account. The system auto-tries alternatives; if it persists, enable another model (or set NVIDIA_MODEL) on agent-server.",
+    };
+  }
+
   if (/\b5\d\d\b|bad gateway|service unavailable|ECONNRESET|ENOTFOUND|EAI_AGAIN|fetch failed/i.test(raw)) {
     return { ...base, message: `${who} could not reach the provider.`, hint: "Network or provider outage — normally transient, the job retries on its own." };
   }
