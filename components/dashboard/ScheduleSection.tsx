@@ -1,30 +1,58 @@
 "use client";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  AlarmClock, CalendarClock, CalendarDays, Check, CheckCircle2, ChevronDown, Clock, Globe,
-  History, Loader2, Megaphone, Rocket, RotateCw, Send, Timer, TriangleAlert, X, Zap,
-} from "lucide-react";
 import { useStore } from "@/lib/store";
 import { startPolling } from "@/lib/poll";
-import { humanTime } from "@/lib/schedule-time";
+import { nextRunAt } from "@/lib/schedule-time";
 
-/** /dashboard/schedule — rebuilt 2026-09-05 on the same look as Approvals / Content (owner:
- *  "schedule page ka ui bhi theme se match kare, har schedule ka option ho, user friendly"):
- *  one panel, a header, a real stat strip, and three tabs — Automation (the recurring rule),
- *  Upcoming (one-off orders booked in the chat) and History (past runs).
+/** /dashboard/schedule — rebuilt 2026-10-21 to match the owner-supplied reference
+ *  (Downloads/Schedule.html): a Google-Material panel with a status pill, a four-tile stat
+ *  strip, four tabs (Automation / Upcoming / Tasks from Mr Lxwa / History) and a modal editor
+ *  per automation. Design ported 1:1 from that file; the palette is pinned to the reference's
+ *  DARK tokens because this panel always lives inside the dark dashboard shell.
  *
- *  EVERY option the backend actually supports is on this page now: on/off, frequency
- *  (daily / weekdays / weekly), day of week, time of day, timezone, articles per run (1-5) and
- *  auto-publish — the exact set app/api/schedule/route.ts validates. Nothing beyond that is
- *  offered, because the scheduler (agent-server/src/scheduler.ts) wouldn't honour it.
+ *  EVERY kind the backend honours is now a real row: article, LEADS and AUDIT — exactly what
+ *  agent-server/src/scheduler.ts runs (line ~333) and what the DB check constraint allows after
+ *  migrations 027 (audit) and 028 (leads + count ceiling 50). The web API route was extended in
+ *  the same change (app/api/schedule/route.ts: KINDS + per-kind MAX_COUNT) so these actually
+ *  save. Social stays a disabled "coming soon" row because its agent is still a stub.
  *
- *  Logic and API calls are unchanged from the previous version: /api/schedule,
- *  /api/schedule/history, /api/scheduled-orders, /api/integrations, and the rule that the
- *  next-run instant is always computed server-side and only formatted/ticked here.
+ *  Data is live: /api/schedule (+ PUT), /api/schedule/history, /api/scheduled-orders (+ DELETE),
+ *  /api/integrations. Next-run instants come from the server; the page only formats and ticks.
  */
 
+/* ───────────────────────── icons (ported from the reference IC map) ───────────────────────── */
+const IC: Record<string, string> = {
+  article: "M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z",
+  people: "M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z",
+  search: "M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z",
+  share: "M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z",
+  clock: "M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z",
+  check: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z",
+  hourglass: "M6 2v6h.01L6 8.01 10 12l-4 4 .01.01H6V22h12v-5.99h-.01L18 16l-4-4 4-3.99-.01-.01H18V2H6zm10 14.5V20H8v-3.5l4-4 4 4zm-4-5l-4-4V4h8v3.5l-4 4z",
+  bolt: "M11 21h-1l1-7H7.5c-.58 0-.57-.32-.38-.66.19-.34.05-.08.07-.12C8.48 10.94 10.42 7.54 13 3h1l-1 7h3.5c.49 0 .56.33.47.51l-.07.15C12.96 17.55 11 21 11 21z",
+  event: "M17 12h-5v5h5v-5zM16 1v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-1V1h-2zm3 18H5V8h14v11z",
+  robot: "M20 9V7c0-1.1-.9-2-2-2h-3c0-1.66-1.34-3-3-3S9 3.34 9 5H6c-1.1 0-2 .9-2 2v2c-1.66 0-3 1.34-3 3s1.34 3 3 3v4c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-4c1.66 0 3-1.34 3-3s-1.34-3-3-3zM7.5 11.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5S9.83 13 9 13s-1.5-.67-1.5-1.5zM16 17H8v-2h8v2zm-1-4c-.83 0-1.5-.67-1.5-1.5S14.17 10 15 10s1.5.67 1.5 1.5S15.83 13 15 13z",
+  history: "M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z",
+  publish: "M5 4v2h14V4H5zm0 10h4v6h6v-6h4l-7-7-7 7z",
+  idea: "M9 21c0 .55.45 1 1 1h4c.55 0 1-.45 1-1v-1H9v1zm3-19C8.14 2 5 5.14 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.86-3.14-7-7-7z",
+  error: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z",
+  refresh: "M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z",
+  close: "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z",
+};
+function Ic({ n, z = 22 }: { n: string; z?: number }) {
+  return (
+    <svg viewBox="0 0 24 24" width={z} height={z} fill="currentColor" aria-hidden="true">
+      <path d={IC[n]} />
+    </svg>
+  );
+}
+
+/* ───────────────────────── types & kind config ───────────────────────── */
+type Kind = "article" | "leads" | "audit";
+
 type Sched = {
+  kind: Kind;
   enabled: boolean;
   frequency: "daily" | "weekdays" | "weekly";
   dayOfWeek: number;
@@ -34,16 +62,6 @@ type Sched = {
   autoPublish: boolean;
   lastRunAt: string | null;
   nextRunAt: string | null;
-};
-
-type Article = {
-  id: string;
-  title: string;
-  status: string;
-  words: number | null;
-  at: string;
-  publishedUrl: string | null;
-  publishError: string | null;
 };
 
 type Run = {
@@ -56,91 +74,108 @@ type Run = {
   bossError: string | null;
   topics: string[];
   linkedBy: "run-id" | "time";
-  articles: Article[];
+  articles: { id: string; title: string; status: string; words: number | null; publishedUrl: string | null; publishError: string | null }[];
   failures: { agent: string; task: string; message: string; at: string }[];
 };
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const FREQ: Record<string, string> = { daily: "Every day", weekdays: "Mon–Fri", weekly: "Weekly" };
 
-/** A short list of common IANA zones — the field still accepts anything, this is just the
- *  shortcut. The API validates the name with Intl before it ever reaches the scheduler. */
-const TZ_COMMON = [
-  "UTC", "Asia/Dubai", "Asia/Karachi", "Asia/Kolkata", "Asia/Dhaka", "Asia/Singapore",
-  "Asia/Tokyo", "Europe/London", "Europe/Berlin", "Europe/Madrid", "America/New_York",
-  "America/Chicago", "America/Los_Angeles", "Australia/Sydney",
-];
+const TZS = ["UTC", "Asia/Dubai", "Asia/Karachi", "Asia/Kolkata", "Asia/Dhaka", "Asia/Singapore", "Asia/Tokyo", "Europe/London", "America/New_York", "Australia/Sydney"];
 
-const DEFAULTS: Sched = {
-  enabled: false,
-  frequency: "daily",
-  dayOfWeek: 1,
-  timeOfDay: "09:00",
-  timezone: "UTC",
-  count: 2,
-  autoPublish: false,
-  lastRunAt: null,
-  nextRunAt: null,
+const META: Record<Kind, { icon: string; name: string; desc: string; q: string; max: number; hasCount: boolean; hasAuto: boolean }> = {
+  article: { icon: "article", name: "Articles", desc: "The team writes articles on its own.", q: "When should the team write?", max: 5, hasCount: true, hasAuto: true },
+  leads: { icon: "people", name: "Leads", desc: "Fresh buyer leads, delivered after you approve them.", q: "When should the team find leads?", max: 50, hasCount: true, hasAuto: false },
+  audit: { icon: "search", name: "Site audit (Mr Audit)", desc: "A report on how your site is doing.", q: "When should Mr Audit check your site?", max: 5, hasCount: false, hasAuto: false },
 };
 
 const browserTz = () => {
   try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; } catch { return "UTC"; }
 };
+const DEFAULT = (kind: Kind, tz: string): Sched => ({
+  kind, enabled: false, frequency: kind === "audit" ? "weekly" : kind === "leads" ? "weekdays" : "daily",
+  dayOfWeek: 1, timeOfDay: kind === "audit" ? "08:00" : kind === "leads" ? "10:00" : "09:00",
+  timezone: tz, count: kind === "leads" ? 10 : 2, autoPublish: false, lastRunAt: null, nextRunAt: null,
+});
 
+/* ───────────────────────── tz-aware date helpers ───────────────────────── */
+const toRow = (s: Sched) => ({ frequency: s.frequency, day_of_week: s.dayOfWeek, time_of_day: s.timeOfDay, timezone: s.timezone });
+const ymd = (d: Date, tz: string) => { try { return new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(d); } catch { return d.toISOString().slice(0, 10); } };
+const dayOffset = (d: Date, tz: string, nowMs: number) => Math.round((Date.parse(ymd(d, tz)) - Date.parse(ymd(new Date(nowMs), tz))) / 86400000);
+const time12 = (d: Date, tz: string) => { try { return new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" }).format(d); } catch { return ""; } };
+/** A plain "HH:MM" turned into a 12-hour label, with no timezone shift. */
+const hm12 = (hhmm: string) => { const [h, m] = String(hhmm).split(":").map(Number); if (!Number.isFinite(h)) return hhmm; return `${h % 12 || 12}:${String(m || 0).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`; };
+function dayLabel(d: Date, tz: string, nowMs: number) {
+  const off = dayOffset(d, tz, nowMs);
+  if (off === 0) return "Today";
+  if (off === 1) return "Tomorrow";
+  if (off === -1) return "Yesterday";
+  try { return new Intl.DateTimeFormat("en-GB", { timeZone: tz, weekday: "long", day: "numeric", month: "short" }).format(d); } catch { return d.toDateString(); }
+}
+function countdown(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const days = Math.floor(total / 86400), h = Math.floor((total % 86400) / 3600), m = Math.floor((total % 3600) / 60), s = total % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  if (days > 0) return `${days}d ${h}h ${pad(m)}m`;
+  return `${h}h ${pad(m)}m ${pad(s)}s`;
+}
+
+/* ═════════════════════════════════════════════════════════════════════════ */
 export default function ScheduleSection() {
   const { toast, confirmAction } = useStore();
-  const [sched, setSched] = useState<Sched | null>(null);
-  const [saved, setSaved] = useState<Sched | null>(null);   // what the server currently holds
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [migration, setMigration] = useState(false);
+  const [scheds, setScheds] = useState<Record<Kind, Sched> | null>(null);
   const [autoPublishAvailable, setAutoPublishAvailable] = useState(true);
   const [canPublish, setCanPublish] = useState<boolean | null>(null);
   const [publishTarget, setPublishTarget] = useState<string | null>(null);
+  const [migration, setMigration] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [runs, setRuns] = useState<Run[] | null>(null);
   const [historyError, setHistoryError] = useState("");
-  const [now, setNow] = useState<number | null>(null);
   const [orders, setOrders] = useState<any[] | null>(null);
+  const [now, setNow] = useState<number>(Date.now());
+  const [tab, setTab] = useState<"auto" | "up" | "tasks" | "hist">("auto");
+
+  // modal editor
+  const [modalKind, setModalKind] = useState<Kind | null>(null);
+  const [draft, setDraft] = useState<Sched | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [modalErr, setModalErr] = useState("");
+
+  // filters / search
+  const [tf, setTf] = useState("all");
+  const [hf, setHf] = useState("all");
+  const [uf, setUf] = useState("7");
+  const [ud, setUd] = useState("");
+  const [qTasks, setQTasks] = useState("");
+  const [qHist, setQHist] = useState("");
+  const [skip, setSkip] = useState<Set<string>>(new Set());
   const [cancelling, setCancelling] = useState("");
-  const [tab, setTab] = useState<"automation" | "upcoming" | "history">("automation");
 
   const skewRef = useRef(0);
 
   const loadSchedule = useCallback(async () => {
     const tz = browserTz();
+    const blank = { article: DEFAULT("article", tz), leads: DEFAULT("leads", tz), audit: DEFAULT("audit", tz) };
     try {
       const d = await fetch("/api/schedule", { cache: "no-store" }).then((r) => r.json());
       if (d.serverNow) skewRef.current = Date.parse(d.serverNow) - Date.now();
-      if (!d.ok) {
-        setError(d.error ?? "Couldn't load the schedule.");
-        setMigration(!!d.needsMigration);
-        setSched({ ...DEFAULTS, timezone: tz });
-        setSaved({ ...DEFAULTS, timezone: tz });
-        return;
-      }
-      setError("");
-      setMigration(false);
+      if (!d.ok) { setLoadError(d.error ?? "Couldn't load the schedule."); setMigration(!!d.needsMigration); setScheds(blank); return; }
+      setLoadError(""); setMigration(false);
       setAutoPublishAvailable(d.autoPublishAvailable !== false);
-      const row = (d.schedules ?? []).find((s: any) => s.kind === "article");
-      const next: Sched = row
-        ? {
-            enabled: row.enabled,
-            frequency: row.frequency,
-            dayOfWeek: row.day_of_week,
-            timeOfDay: row.time_of_day,
-            timezone: row.timezone,
-            count: row.count,
-            autoPublish: row.auto_publish === true,
-            lastRunAt: row.last_run_at,
-            nextRunAt: row.nextRunAt ?? null,
-          }
-        : { ...DEFAULTS, timezone: tz };
-      setSched(next);
-      setSaved(next);
+      const next = { ...blank };
+      for (const row of d.schedules ?? []) {
+        const k = row.kind as Kind;
+        if (k !== "article" && k !== "leads" && k !== "audit") continue;
+        next[k] = {
+          kind: k, enabled: row.enabled, frequency: row.frequency, dayOfWeek: row.day_of_week,
+          timeOfDay: row.time_of_day, timezone: row.timezone, count: row.count,
+          autoPublish: row.auto_publish === true, lastRunAt: row.last_run_at, nextRunAt: row.nextRunAt ?? null,
+        };
+      }
+      setScheds(next);
     } catch (e: any) {
-      setError(e?.message ?? "Network error.");
-      setSched((s) => s ?? { ...DEFAULTS, timezone: tz });
-      setSaved((s) => s ?? { ...DEFAULTS, timezone: tz });
+      setLoadError(e?.message ?? "Network error.");
+      setScheds((s) => s ?? blank);
     }
   }, []);
 
@@ -148,675 +183,581 @@ export default function ScheduleSection() {
     try {
       const d = await fetch("/api/schedule/history", { cache: "no-store" }).then((r) => r.json());
       if (!d.ok) { setHistoryError(d.error ?? "Couldn't load run history."); return; }
-      setHistoryError("");
-      setRuns(d.runs ?? []);
-    } catch (e: any) {
-      setHistoryError(e?.message ?? "Network error.");
-    }
+      setHistoryError(""); setRuns(d.runs ?? []);
+    } catch (e: any) { setHistoryError(e?.message ?? "Network error."); }
   }, []);
 
   const loadOrders = useCallback(async () => {
     try {
       const d = await fetch("/api/scheduled-orders", { cache: "no-store" }).then((r) => r.json());
       setOrders(d.ok ? [...(d.pending ?? []), ...(d.recent ?? [])] : []);
-    } catch {
-      setOrders([]);
-    }
+    } catch { setOrders([]); }
   }, []);
 
-  const cancel = async (id: string) => {
-    const ok = await confirmAction({
-      title: "Cancel this order?",
-      body: "It will not run. You can book it again in the chat.",
-      confirmLabel: "Cancel order",
-      danger: true,
-    });
+  useEffect(() => {
+    void loadSchedule(); void loadHistory(); void loadOrders();
+    fetch("/api/integrations", { cache: "no-store" }).then((r) => r.json()).then((d) => {
+      if (!d.ok) { setCanPublish(false); return; }
+      const t = (d.items ?? []).find((i: any) => (i.type === "wordpress" || i.type === "webhook") && i.status === "connected");
+      setCanPublish(!!t); setPublishTarget(t ? (t.type === "wordpress" ? "WordPress" : "Webhook") : null);
+    }).catch(() => setCanPublish(false));
+  }, [loadSchedule, loadHistory, loadOrders]);
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now() + skewRef.current), 1000);
+    setNow(Date.now() + skewRef.current);
+    return () => clearInterval(t);
+  }, []);
+
+  const anyRunning = !!runs?.some((r) => r.status === "running");
+  useEffect(() => startPolling(() => void loadHistory(), anyRunning ? 20_000 : 120_000), [anyRunning, loadHistory]);
+  useEffect(() => startPolling(() => void loadOrders(), 30_000), [loadOrders]);
+
+  /* ---- save (PUT) ---- */
+  const put = useCallback(async (s: Sched): Promise<boolean> => {
+    const body = {
+      kind: s.kind, enabled: s.enabled, frequency: s.frequency, dayOfWeek: s.dayOfWeek,
+      timeOfDay: s.timeOfDay, timezone: s.timezone, count: s.count, autoPublish: s.autoPublish,
+    };
+    const res = await fetch("/api/schedule", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const d = await res.json();
+    if (!d.ok) { setModalErr(d.error ?? "Couldn't save."); toast(d.error ?? "Couldn't save.", "error"); return false; }
+    if (d.autoPublishAvailable === false) setAutoPublishAvailable(false);
+    await loadSchedule();
+    return true;
+  }, [loadSchedule, toast]);
+
+  const toggleRow = async (k: Kind) => {
+    if (!scheds) return;
+    const next = { ...scheds[k], enabled: !scheds[k].enabled };
+    setScheds({ ...scheds, [k]: next });            // optimistic
+    const ok = await put(next);
+    if (ok) toast(next.enabled ? `${META[k].name} schedule is on.` : `${META[k].name} schedule turned off.`);
+  };
+
+  const cancelOrder = async (id: string) => {
+    const ok = await confirmAction({ title: "Cancel this task?", body: "It will not run. You can ask Mr Lxwa again in the chat.", confirmLabel: "Cancel task", danger: true });
     if (!ok) return;
     setCancelling(id);
     try {
       const d = await fetch(`/api/scheduled-orders?id=${encodeURIComponent(id)}`, { method: "DELETE" }).then((r) => r.json());
       await loadOrders();
-      toast(d.ok ? "Cancelled — this will no longer run." : d.error ?? "Couldn't cancel.", d.ok ? "ok" : "error");
-    } catch (e: any) {
-      toast(e?.message ?? "Network error.", "error");
-    } finally {
-      setCancelling("");
-    }
+      toast(d.ok ? "Task cancelled." : d.error ?? "Couldn't cancel.", d.ok ? "ok" : "error");
+    } catch (e: any) { toast(e?.message ?? "Network error.", "error"); }
+    finally { setCancelling(""); }
+  };
+
+  /* ---- modal ---- */
+  const openModal = (k: Kind) => { if (!scheds) return; setModalKind(k); setDraft({ ...scheds[k] }); setModalErr(""); };
+  const closeModal = () => { setModalKind(null); setDraft(null); };
+  const saveModal = async () => {
+    if (!draft) return;
+    setSaving(true); setModalErr("");
+    const ok = await put(draft);
+    setSaving(false);
+    if (ok) { toast("Saved."); closeModal(); }
   };
 
   useEffect(() => {
-    void loadSchedule();
-    void loadHistory();
-    void loadOrders();
-
-    fetch("/api/integrations", { cache: "no-store" })
-      .then((r) => r.json())
-      .then((d) => {
-        if (!d.ok) { setCanPublish(false); return; }
-        const target = (d.items ?? []).find(
-          (i: any) => (i.type === "wordpress" || i.type === "webhook") && i.status === "connected"
-        );
-        setCanPublish(!!target);
-        setPublishTarget(target ? (target.type === "wordpress" ? "WordPress" : "Webhook") : null);
-      })
-      .catch(() => setCanPublish(false));
-  }, [loadSchedule, loadHistory, loadOrders]);
-
-  useEffect(() => {
-    setNow(Date.now() + skewRef.current);
-    const t = setInterval(() => setNow(Date.now() + skewRef.current), 1000);
-    return () => clearInterval(t);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeModal(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const anyRunning = !!runs?.some((r) => r.status === "running");
-  useEffect(() => {
-    const t = startPolling(() => void loadHistory(), anyRunning ? 20_000 : 120_000);
-    return t;
-  }, [anyRunning, loadHistory]);
-
-  useEffect(() => {
-    const t = startPolling(() => void loadOrders(), 30_000);
-    return t;
-  }, [loadOrders]);
-
-  const set = (patch: Partial<Sched>) => setSched((s) => (s ? { ...s, ...patch } : s));
-
-  const save = async (override?: Partial<Sched>) => {
-    const body = { ...sched, ...override, kind: "article" };
-    setSaving(true);
-    setError("");
-    try {
-      const res = await fetch("/api/schedule", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (!data.ok) { setError(data.error ?? "Couldn't save."); return; }
-      if (override) set(override);
-      if (data.autoPublishAvailable === false) setAutoPublishAvailable(false);
-      await loadSchedule();
-      toast(body.enabled ? "Schedule is on — the team will now work automatically." : "Schedule turned off.");
-    } catch (e: any) {
-      setError(e?.message ?? "Network error.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
+  /* ---- derived ---- */
+  const tz = scheds?.article.timezone || browserTz();
   const pendingOrders = useMemo(() => (orders ?? []).filter((o) => o.status === "pending"), [orders]);
 
-  if (!sched || !saved) {
+  const nextInfo = useMemo(() => {
+    if (!scheds) return null;
+    const cands = (Object.values(scheds) as Sched[]).filter((s) => s.enabled && s.nextRunAt).map((s) => ({ s, at: new Date(s.nextRunAt!) }));
+    cands.sort((a, b) => a.at.getTime() - b.at.getTime());
+    return cands[0] ?? null;
+  }, [scheds]);
+
+  const onCount = scheds ? (Object.values(scheds) as Sched[]).filter((s) => s.enabled).length : 0;
+  const doneToday = (runs ?? []).filter((r) => ymd(new Date(r.firedAt), tz) === ymd(new Date(now), tz) && r.status === "finished").length;
+  const failedToday = (runs ?? []).filter((r) => ymd(new Date(r.firedAt), tz) === ymd(new Date(now), tz) && r.status === "failed").length;
+
+  if (!scheds) {
     return (
-      <div className="sc-panel flex items-center justify-center p-10">
-        <style dangerouslySetInnerHTML={{ __html: CSS }} />
-        <Loader2 size={18} className="sc-spin lx-mut" /><span className="lx-11 lx-mut ml-2">Loading…</span>
+      <div className="sched"><style dangerouslySetInnerHTML={{ __html: CSS }} />
+        <div className="wrap"><div className="panel" style={{ textAlign: "center", color: "var(--mut)" }}>Loading…</div></div>
       </div>
     );
   }
 
-  const nextAt = sched.nextRunAt ? new Date(sched.nextRunAt) : null;
-  const remaining = nextAt && now != null ? nextAt.getTime() - now : null;
-  const autoPublishOn = sched.autoPublish && autoPublishAvailable;
-  const autoPublishBlocked = !autoPublishAvailable || canPublish === false;
-  // Only the form fields matter here — lastRunAt/nextRunAt come from the server.
-  const dirty =
-    sched.frequency !== saved.frequency || sched.dayOfWeek !== saved.dayOfWeek ||
-    sched.timeOfDay !== saved.timeOfDay || sched.timezone !== saved.timezone || sched.count !== saved.count;
+  const anyOn = (Object.values(scheds) as Sched[]).some((s) => s.enabled);
+  const summary = (k: Kind) => {
+    const c = scheds[k];
+    if (!c.enabled) return "Off";
+    const f = c.frequency === "weekly" ? "Every " + DAYS[c.dayOfWeek] : FREQ[c.frequency];
+    const extra = k === "article" ? ` · ${c.count} article${c.count > 1 ? "s" : ""}` : k === "leads" ? ` · ${c.count} leads` : "";
+    return `${f} · ${hm12(c.timeOfDay)}${extra}`;
+  };
 
   return (
-    <div className="sc-wrap">
+    <div className="sched">
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
-
-      <section className="sc-panel flex min-w-0 flex-1 flex-col">
-        {/* ---------- header ---------- */}
-        <header className="flex flex-wrap items-center gap-3 px-4 pt-4 pb-3" style={{ borderBottom: "1px solid var(--lx-border)" }}>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <h1 className="sc-h1">Schedule</h1>
-              <CalendarClock size={18} style={{ color: "#3b82f6" }} />
+      <div className="wrap">
+        <div className="panel">
+          {/* header */}
+          <div className="top">
+            <div className="t">
+              <h1>Schedule</h1>
+              <p className="sub">Set it once and the team works on its own. Tap any item to change it.</p>
             </div>
-            <p className="lx-mut mt-0.5" style={{ fontSize: 12 }}>
-              Set it once and the team writes on its own — {autoPublishOn ? "straight to your site" : "into Approvals for you to okay"}.
-            </p>
+            <button className="icobtn" title="Refresh" onClick={() => { void loadSchedule(); void loadHistory(); void loadOrders(); }}><Ic n="refresh" z={18} /></button>
+            <div className={"pill" + (anyOn ? "" : " off")}><i /><span>{anyOn ? "Schedule is ON" : "Schedule is OFF"}</span></div>
           </div>
-          <div className="flex items-center gap-2">
-            <button className="sc-icobtn" onClick={() => { void loadSchedule(); void loadHistory(); void loadOrders(); }} title="Refresh">
-              <RotateCw size={15} />
-            </button>
-            <button
-              className={`sc-power ${sched.enabled ? "on" : ""}`}
-              disabled={saving}
-              onClick={() => save({ enabled: !sched.enabled })}
-              title={sched.enabled ? "Turn the schedule off" : "Turn the schedule on"}
-            >
-              <span className="sc-power-dot" />
-              {sched.enabled ? "Schedule is ON" : "Schedule is OFF"}
-            </button>
-          </div>
-        </header>
 
-        <div className="lx-scroll flex-1 overflow-y-auto px-4 pb-4">
           {migration && (
-            <div className="sc-alert mt-3">
-              <TriangleAlert size={15} style={{ color: "#f87171", flexShrink: 0 }} />
-              <div>
-                <b className="lx-12">Database migration required</b>
-                <p className="lx-11 lx-mut mt-1">
-                  Run <code className="lx-mono">supabase/migrations/006_schedules.sql</code> in the Supabase SQL editor — nothing here will save until you do.
-                </p>
-              </div>
-            </div>
+            <div className="banner">Database migration required — run <code>supabase/migrations/006_schedules.sql</code> in the Supabase SQL editor. Nothing will save until you do.</div>
           )}
+          {loadError && !migration && <div className="banner">{loadError}</div>}
 
-          {/* ---------- stat strip (all real) ---------- */}
-          <div className="sc-stats mt-3">
-            <Stat
-              color="#8b5cf6" Icon={Timer} label="Next automatic run"
-              value={!sched.enabled ? "Off" : remaining == null ? "—" : remaining <= 0 ? "now" : countdown(remaining)}
-              sub={sched.enabled && nextAt ? humanTime(nextAt, sched.timezone) : "switch it on to schedule"}
-            />
-            <Stat
-              color="#3b82f6" Icon={CalendarDays} label="How often"
-              value={sched.frequency === "weekly" ? `Weekly` : sched.frequency === "weekdays" ? "Mon–Fri" : "Daily"}
-              sub={`${sched.timeOfDay} · ${sched.frequency === "weekly" ? DAYS[sched.dayOfWeek] : sched.timezone}`}
-            />
-            <Stat
-              color="#f59e0b" Icon={Rocket} label="Articles per run"
-              value={String(sched.count)}
-              sub={autoPublishOn ? "published automatically" : "sent to Approvals"}
-            />
-            <Stat
-              color={pendingOrders.length ? "#22c55e" : "#8b8ba0"} Icon={AlarmClock} label="One-off orders"
-              value={orders === null ? "…" : String(pendingOrders.length)}
-              sub={pendingOrders.length ? "booked in the chat" : "nothing booked"}
-            />
+          {/* stats */}
+          <div className="stats">
+            <div className="st a"><span className="sbox"><Ic n="clock" /></span><div>
+              <div className="sv" suppressHydrationWarning>{!nextInfo ? "Paused" : countdown(nextInfo.at.getTime() - now)}</div>
+              <div className="sl">Next task</div>
+              <div className="sl" suppressHydrationWarning>{nextInfo ? `${nextInfo.s.kind === "article" ? "Articles" : nextInfo.s.kind === "leads" ? "Leads" : "Site audit"} · ${dayLabel(nextInfo.at, tz, now)} ${time12(nextInfo.at, tz)}` : "nothing scheduled"}</div>
+            </div></div>
+            <div className="st b"><span className="sbox"><Ic n="check" /></span><div>
+              <div className="sv">{runs === null ? "…" : doneToday}</div>
+              <div className="sl">Completed today</div>
+              <div className="sl">{failedToday ? `${failedToday} failed, check History` : "all went well"}</div>
+            </div></div>
+            <div className="st c"><span className="sbox"><Ic n="hourglass" /></span><div>
+              <div className="sv">{orders === null ? "…" : pendingOrders.length}</div>
+              <div className="sl">Tasks from Mr Lxwa</div>
+              <div className="sl">{pendingOrders.length ? "waiting to run" : "nothing booked"}</div>
+            </div></div>
+            <div className="st"><span className="sbox"><Ic n="bolt" /></span><div>
+              <div className="sv">{onCount} of 3</div>
+              <div className="sl">Automations on</div>
+              <div className="sl">article · leads · audit</div>
+            </div></div>
           </div>
 
-          {/* ---------- tabs ---------- */}
-          <div className="sc-tabs mt-3">
-            <button className={`sc-tab ${tab === "automation" ? "on" : ""}`} onClick={() => setTab("automation")}>
-              <Zap size={13} /> Automation
-            </button>
-            <button className={`sc-tab ${tab === "upcoming" ? "on" : ""}`} onClick={() => setTab("upcoming")}>
-              <AlarmClock size={13} /> Upcoming{pendingOrders.length ? ` (${pendingOrders.length})` : ""}
-            </button>
-            <button className={`sc-tab ${tab === "history" ? "on" : ""}`} onClick={() => setTab("history")}>
-              <History size={13} /> History{runs?.length ? ` (${runs.length})` : ""}
-            </button>
+          {/* tabs */}
+          <div className="tabs">
+            {([["auto", "Automation", 0], ["up", "Upcoming", 0], ["tasks", "Tasks from Mr Lxwa", pendingOrders.length], ["hist", "History", runs?.length ?? 0]] as [string, string, number][]).map(([k, l, c]) => (
+              <button key={k} className={"tab" + (tab === k ? " a" : "")} onClick={() => setTab(k as any)}>
+                {l}{c ? <span className={"cnt" + (k === "tasks" ? " hi" : "")}>{c}</span> : null}
+              </button>
+            ))}
           </div>
 
-          {/* ================= AUTOMATION ================= */}
-          {tab === "automation" && (
-            <div className="mt-3 space-y-3">
-              <div className="sc-card">
-                <div className="sc-card-h">
-                  <Clock size={14} style={{ color: "#a78bfa" }} />
-                  <span>When should the team write?</span>
-                </div>
-
-                <div className="sc-fields">
-                  <Field label="How often">
-                    <div className="sc-seg">
-                      {(["daily", "weekdays", "weekly"] as const).map((f) => (
-                        <button key={f} className={sched.frequency === f ? "on" : ""} onClick={() => set({ frequency: f })}>
-                          {f === "daily" ? "Every day" : f === "weekdays" ? "Mon–Fri" : "Weekly"}
-                        </button>
-                      ))}
-                    </div>
-                  </Field>
-
-                  {sched.frequency === "weekly" && (
-                    <Field label="Which day">
-                      <div className="sc-days">
-                        {DAY_SHORT.map((d, i) => (
-                          <button key={d} className={sched.dayOfWeek === i ? "on" : ""} onClick={() => set({ dayOfWeek: i })} title={DAYS[i]}>
-                            {d}
-                          </button>
-                        ))}
-                      </div>
-                    </Field>
-                  )}
-
-                  <div className="sc-row2">
-                    <Field label="Time of day">
-                      <input type="time" value={sched.timeOfDay} onChange={(e) => set({ timeOfDay: e.target.value })} className="sc-in" />
-                    </Field>
-                    <Field label="Articles per run">
-                      <div className="sc-seg">
-                        {[1, 2, 3, 4, 5].map((n) => (
-                          <button key={n} className={sched.count === n ? "on" : ""} onClick={() => set({ count: n })}>{n}</button>
-                        ))}
-                      </div>
-                    </Field>
-                  </div>
-
-                  <Field label="Timezone">
-                    <div className="sc-tz">
-                      <span className="sc-select">
-                        <Globe size={13} className="lx-mut" />
-                        <select
-                          value={TZ_COMMON.includes(sched.timezone) ? sched.timezone : "__custom"}
-                          onChange={(e) => { if (e.target.value !== "__custom") set({ timezone: e.target.value }); }}
-                        >
-                          {!TZ_COMMON.includes(sched.timezone) && <option value="__custom">{sched.timezone || "Custom…"}</option>}
-                          {TZ_COMMON.map((z) => <option key={z} value={z}>{z}</option>)}
-                        </select>
-                        <ChevronDown size={13} className="lx-mut" />
+          <div className="view">
+            {tab === "auto" && (
+              <div className="list">
+                {(["article", "leads", "audit"] as Kind[]).map((k) => {
+                  const c = scheds[k];
+                  const nAt = c.nextRunAt ? new Date(c.nextRunAt) : null;
+                  return (
+                    <div key={k} className="row" role="button" tabIndex={0} onClick={() => openModal(k)}
+                      onKeyDown={(e) => { if (e.key === "Enter" && e.currentTarget === e.target) openModal(k); }}>
+                      <span className="ico"><Ic n={META[k].icon} /></span>
+                      <span className="info">
+                        <div className="name">{META[k].name}</div>
+                        <div className="desc">{META[k].desc}</div>
+                        <div className={"meta" + (c.enabled ? "" : " off")}>{summary(k)}</div>
+                        {c.enabled && nAt && <small suppressHydrationWarning>Next run: {dayLabel(nAt, tz, now)}, {time12(nAt, tz)}</small>}
                       </span>
-                      <input
-                        value={sched.timezone}
-                        onChange={(e) => set({ timezone: e.target.value.trim() })}
-                        placeholder="Asia/Dubai"
-                        className="sc-in"
-                        style={{ flex: 1, minWidth: 130 }}
-                      />
-                      <button className="sc-btn" onClick={() => set({ timezone: browserTz() })} title="Use this device's timezone">
-                        Use mine
-                      </button>
+                      <button className={"tg" + (c.enabled ? " on" : "")} role="switch" aria-checked={c.enabled}
+                        aria-label={`${META[k].name} on or off`} onClick={(e) => { e.stopPropagation(); void toggleRow(k); }} />
+                      <span className="chev">›</span>
                     </div>
-                    <p className="sc-hint">Every time on this page is read in this zone — {sched.timezone || "not set"}.</p>
-                  </Field>
+                  );
+                })}
+                <div className="row dis">
+                  <span className="ico"><Ic n="share" /></span>
+                  <span className="info"><div className="name">Social posts</div><div className="desc">Post on your social channels automatically.</div></span>
+                  <span className="badge">Coming soon</span>
                 </div>
+                <div className="tip"><Ic n="bolt" z={20} /><div><b>How it runs</b><small>The schedule fires inside agent-server. If that service is down a run is skipped — missed runs are not replayed; the next scheduled time simply runs.</small></div></div>
+              </div>
+            )}
 
-                {error && <p className="lx-11 mt-3" style={{ color: "#f87171" }}>{error}</p>}
+            {tab === "up" && <Upcoming scheds={scheds} orders={orders} pendingOrders={pendingOrders} now={now} tz={tz} uf={uf} setUf={setUf} ud={ud} setUd={setUd} skip={skip} setSkip={setSkip} onCancel={cancelOrder} cancelling={cancelling} />}
 
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <button className="lx-grad sc-save" disabled={saving || !dirty} onClick={() => save()}>
-                    {saving ? <Loader2 size={14} className="sc-spin" /> : <Check size={14} />}
-                    {saving ? "Saving…" : dirty ? "Save schedule" : "Saved"}
-                  </button>
-                  {dirty && <span className="lx-11" style={{ color: "#fbbf24" }}>Unsaved changes</span>}
-                  {!dirty && sched.enabled && nextAt && (
-                    <span className="lx-11 lx-mut">Next: {humanTime(nextAt, sched.timezone)}</span>
-                  )}
-                </div>
+            {tab === "tasks" && <Tasks orders={orders} now={now} tz={tz} tf={tf} setTf={setTf} q={qTasks} setQ={setQTasks} onCancel={cancelOrder} cancelling={cancelling} />}
+
+            {tab === "hist" && <HistoryTab runs={runs} error={historyError} now={now} tz={tz} hf={hf} setHf={setHf} q={qHist} setQ={setQHist} />}
+          </div>
+        </div>
+      </div>
+
+      {/* modal */}
+      {modalKind && draft && (
+        <div className="ov open" onClick={(e) => { if ((e.target as HTMLElement).classList.contains("ov")) closeModal(); }} role="dialog" aria-modal="true">
+          <div className="modal">
+            <div className="mh"><span className="ico"><Ic n={META[modalKind].icon} /></span><h2>{META[modalKind].name}</h2><button className="x" aria-label="Close" onClick={closeModal}><Ic n="close" z={22} /></button></div>
+            <div className="mb">
+              <div className="sw">
+                <div><b>{META[modalKind].q}</b><small>{draft.enabled ? "On — runs automatically" : "Off — nothing will run"}</small></div>
+                <button className={"tg" + (draft.enabled ? " on" : "")} role="switch" aria-checked={draft.enabled} aria-label="On or off" onClick={() => setDraft({ ...draft, enabled: !draft.enabled })} />
               </div>
 
-              {/* ---------- auto-publish ---------- */}
-              <div className="sc-card">
-                <div className="sc-card-h">
-                  <Send size={14} style={{ color: autoPublishOn ? "#fbbf24" : "#a78bfa" }} />
-                  <span>Publish without asking me</span>
-                  <button
-                    className={`sc-switch ml-auto ${autoPublishOn ? "on" : ""}`}
-                    disabled={saving || autoPublishBlocked}
-                    aria-label="Toggle auto-publish"
-                    onClick={async () => {
-                      if (!sched.autoPublish) {
-                        const ok = await confirmAction({
-                          title: "Publish without review?",
-                          body: "Every scheduled article that passes the quality gate will be published to your live site without you seeing it first.",
-                          confirmLabel: "Turn on auto-publish",
-                          danger: true,
-                        });
-                        if (!ok) return;
-                      }
-                      save({ autoPublish: !sched.autoPublish });
-                    }}
-                  >
-                    <i />
-                  </button>
-                </div>
-                <p className="lx-11 lx-mut mt-1">
-                  {autoPublishOn
-                    ? <b style={{ color: "#fbbf24" }}>On: nothing waits in Approvals — an article goes live as soon as it is written.</b>
-                    : "Off: every article waits in Approvals until you approve it."}
-                </p>
-                <p className="lx-10 lx-mut mt-1.5">
-                  The quality gate still runs. If it fails — or publishing errors — the article lands in Approvals with the
-                  reason attached. A manual run is never auto-published.
-                </p>
-                {!autoPublishAvailable && (
-                  <p className="lx-11 mt-1.5" style={{ color: "#f87171" }}>
-                    This column isn't in the database yet — run{" "}
-                    <code className="lx-mono">supabase/migrations/014_schedule_auto_publish.sql</code> in the Supabase SQL editor.
-                  </p>
-                )}
-                {autoPublishAvailable && canPublish === false && (
-                  <p className="lx-11 mt-1.5" style={{ color: "#f87171" }}>
-                    Nowhere to publish yet — connect WordPress or a webhook in{" "}
-                    <Link href="/dashboard/connect" className="sc-link">Connect</Link>.
-                  </p>
-                )}
-                {autoPublishAvailable && canPublish === true && publishTarget && (
-                  <p className="lx-10 lx-mut mt-1.5">Goes to: {publishTarget}.</p>
-                )}
-              </div>
-
-              {/* ---------- the pipeline, plainly ---------- */}
-              <div className="sc-card">
-                <div className="sc-card-h"><Zap size={14} style={{ color: "#a78bfa" }} /><span>What happens on each run</span></div>
-                <div className="sc-flow">
-                  {["Mr Lxwa picks the topic", "Mr. Keyword researches", "Mr. Writer writes", "Quality gate", autoPublishOn ? "Published live" : "Waits in Approvals"].map((s, i, a) => (
-                    <span key={s} className="sc-step">
-                      <b>{i + 1}</b>{s}{i < a.length - 1 && <em>›</em>}
-                    </span>
+              <div><label className="l">How often</label>
+                <div className="seg">
+                  {(["daily", "weekdays", "weekly"] as const).map((f) => (
+                    <button key={f} type="button" className={draft.frequency === f ? "a" : ""} onClick={() => setDraft({ ...draft, frequency: f })}>{FREQ[f]}</button>
                   ))}
                 </div>
               </div>
 
-              {/* ---------- social (honest state) ---------- */}
-              <div className="sc-card">
-                <div className="sc-card-h">
-                  <Megaphone size={14} style={{ color: "#8b8ba0" }} />
-                  <span>Social posts</span>
-                  <span className="sc-tag ml-auto">Not available yet</span>
+              {draft.frequency === "weekly" && (
+                <div><label className="l">Which day</label>
+                  <select value={draft.dayOfWeek} onChange={(e) => setDraft({ ...draft, dayOfWeek: Number(e.target.value) })}>
+                    {DAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}
+                  </select>
                 </div>
-                <p className="lx-11 lx-mut mt-1">
-                  The schedule can hold a social rule, but Miss Social doesn&apos;t post anywhere yet
-                  (<code className="lx-mono">agent-server/src/agents/social.ts</code> is still a stub), so switching one on
-                  would schedule nothing. Add the relay in <Link href="/dashboard/connect" className="sc-link">Connect</Link> today;
-                  the moment the agent is live its own schedule appears here.
-                </p>
+              )}
+
+              <div><label className="l">Time of day</label><input type="time" value={draft.timeOfDay} onChange={(e) => setDraft({ ...draft, timeOfDay: e.target.value || draft.timeOfDay })} /></div>
+
+              <div><label className="l">Timezone</label>
+                <div className="tzr">
+                  <select value={draft.timezone} onChange={(e) => setDraft({ ...draft, timezone: e.target.value })}>
+                    {Array.from(new Set([draft.timezone, browserTz(), ...TZS])).map((z) => <option key={z} value={z}>{z}</option>)}
+                  </select>
+                  <button className="btn" type="button" onClick={() => setDraft({ ...draft, timezone: browserTz() })}>Use mine</button>
+                </div>
               </div>
 
-              <p className="lx-10 lx-mut">
-                This schedule runs inside agent-server (Railway). If that service is down the schedule doesn&apos;t fire, and
-                missed runs are not replayed afterwards — the next scheduled time simply runs.
-              </p>
-            </div>
-          )}
-
-          {/* ================= UPCOMING ================= */}
-          {tab === "upcoming" && (
-            <div className="mt-3 space-y-2">
-              {orders === null && <div className="sc-card lx-11 lx-mut">Loading…</div>}
-              {orders?.length === 0 && (
-                <div className="sc-empty">
-                  <AlarmClock size={20} className="lx-mut" />
-                  <b className="lx-12 mt-2">Nothing booked right now</b>
-                  <p className="lx-11 lx-mut mt-1">
-                    Ask in the chat — <b>&ldquo;30 min baad ek article publish kar do&rdquo;</b> or{" "}
-                    <b>&ldquo;kal 9 baje isko publish karna&rdquo;</b> — and it shows up here with a live countdown.
-                  </p>
-                </div>
-              )}
-              {orders?.map((o) => {
-                const at = new Date(o.run_at).getTime();
-                const left = now != null ? at - now : null;
-                const isPending = o.status === "pending";
-                // `kind === "brain"` rows (app/api/scheduled-orders/route.ts's listBrainScheduled)
-                // already carry their own finished sentence — a manifest action id like
-                // "find_keywords" has no place in this switch, which only knows the four
-                // scheduled_orders kinds.
-                const what =
-                  o.kind === "brain" ? o.label
-                  : o.kind === "publish" ? "Publish an article that is already written"
-                  : o.kind === "research" ? `Research keywords${o.topic ? ` for "${o.topic}"` : ""}`
-                  : o.kind === "plan" ? "Pick this week's topics and write them"
-                  : `Write an article${o.topic ? ` about "${o.topic}"` : ""}`;
-
-                return (
-                  <div key={o.id} className="sc-order">
-                    <div className="min-w-0 flex-1">
-                      <div className="lx-12 font-semibold" style={{ overflowWrap: "anywhere" }}>{what}</div>
-                      <div className="lx-10 lx-mut mt-0.5" style={{ overflowWrap: "anywhere" }}>
-                        {new Intl.DateTimeFormat("en-GB", {
-                          timeZone: sched.timezone, weekday: "short", day: "numeric", month: "short",
-                          hour: "2-digit", minute: "2-digit", hourCycle: "h23",
-                        }).format(new Date(at))} · {sched.timezone} ·{" "}
-                        {o.kind === "research" ? "nothing gets published"
-                          : o.auto_publish || o.kind === "publish" ? "goes straight to the site" : "lands in Approvals"}
-                      </div>
-                      {o.request && <div className="lx-10 lx-mut mt-1 italic opacity-75">&ldquo;{o.request}&rdquo;</div>}
-                      {o.error && <div className="lx-11 mt-1" style={{ color: "#f87171" }}>{o.error}</div>}
-                    </div>
-                    <div className="flex flex-none items-center gap-2">
-                      {isPending ? (
-                        <>
-                          <span className="sc-count">{left == null ? "…" : left > 0 ? countdown(left) : "starting"}</span>
-                          <button className="sc-btn danger" disabled={cancelling === o.id} onClick={() => cancel(o.id)}>
-                            {cancelling === o.id ? <Loader2 size={13} className="sc-spin" /> : <X size={13} />} Cancel
-                          </button>
-                        </>
-                      ) : (
-                        <span className={"lx-pill " + (o.status === "done" ? "green" : o.status === "cancelled" ? "mut" : o.status === "running" ? "blue" : "red")}>
-                          {o.status === "done" ? "Done" : o.status === "cancelled" ? "Cancelled" : o.status === "running" ? "Running" : "Failed"}
-                        </span>
-                      )}
-                    </div>
+              {modalKind === "article" && (
+                <>
+                  <div><label className="l">Articles per run</label>
+                    <div className="seg">{[1, 2, 3, 4, 5].map((n) => <button key={n} type="button" className={draft.count === n ? "a" : ""} onClick={() => setDraft({ ...draft, count: n })}>{n}</button>)}</div>
                   </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* ================= HISTORY ================= */}
-          {tab === "history" && (
-            <div className="mt-3 space-y-2">
-              {historyError && <p className="lx-11" style={{ color: "#f87171" }}>{historyError}</p>}
-              {!historyError && runs === null && <div className="sc-card lx-11 lx-mut">Loading…</div>}
-              {!historyError && runs?.length === 0 && (
-                <div className="sc-empty">
-                  <History size={20} className="lx-mut" />
-                  <b className="lx-12 mt-2">No automatic run yet</b>
-                  <p className="lx-11 lx-mut mt-1">
-                    As soon as the first one fires you&apos;ll see the whole account here — when it ran, how many articles it
-                    made, which ones, and anything that failed.
-                  </p>
-                </div>
+                  <div className="sw">
+                    <div><b>Publish without asking me</b><small>{draft.autoPublish ? "Articles go live once all checks pass." : "Articles wait in Approvals for you to okay."}</small></div>
+                    <button className={"tg" + (draft.autoPublish ? " on" : "")} role="switch" aria-checked={draft.autoPublish} aria-label="Publish without asking me"
+                      disabled={!autoPublishAvailable || canPublish === false}
+                      onClick={async () => {
+                        if (!draft.autoPublish) {
+                          const ok = await confirmAction({ title: "Publish without review?", body: "Every scheduled article that passes the quality gate goes live on your site without you seeing it first.", confirmLabel: "Turn on auto-publish", danger: true });
+                          if (!ok) return;
+                        }
+                        setDraft({ ...draft, autoPublish: !draft.autoPublish });
+                      }} />
+                  </div>
+                  {!autoPublishAvailable && <small className="bad">Run <code>supabase/migrations/014_schedule_auto_publish.sql</code> to enable auto-publish.</small>}
+                  {autoPublishAvailable && canPublish === false && <small className="bad">Nowhere to publish yet — connect WordPress or a webhook in <Link href="/dashboard/connect" className="lnk">Connect</Link>.</small>}
+                  {autoPublishAvailable && canPublish === true && publishTarget && <small>Goes to: {publishTarget}.</small>}
+                  <div className="box">Topics are chosen automatically, and images are made for every article.</div>
+                </>
               )}
-              {runs?.map((run) => <RunCard key={run.id} run={run} tz={sched.timezone} />)}
+
+              {modalKind === "leads" && (
+                <>
+                  <div><label className="l">Leads per run</label>
+                    <input type="number" min={1} max={META.leads.max} value={draft.count}
+                      onChange={(e) => setDraft({ ...draft, count: Math.max(1, Math.min(META.leads.max, Number(e.target.value) || 1)) })} />
+                    <small className="hint">Your plan allows up to {META.leads.max} per run.</small>
+                  </div>
+                  <div className="box">Buyer groups rotate automatically, duplicates are removed, and leads are delivered once you approve them.</div>
+                </>
+              )}
+
+              {modalKind === "audit" && (
+                <div className="box">One report is created on every run. Even without a schedule here, a weekly auto-audit keeps running on its own.</div>
+              )}
+
+              <div className="next" suppressHydrationWarning>Next: {draft.enabled ? nextPreview(draft, now) : "Paused"}</div>
+              <small className="hint">Last run: {draft.lastRunAt ? `${dayLabel(new Date(draft.lastRunAt), tz, now)}, ${time12(new Date(draft.lastRunAt), tz)}` : modalKind === "audit" ? "Weekly auto-audit is running" : "Never run"}</small>
+              {modalErr && <small className="bad">{modalErr}</small>}
             </div>
-          )}
+            <div className="mf">
+              <button className="btn" onClick={closeModal}>Cancel</button>
+              <button className="btn p" disabled={saving} onClick={saveModal}>{saving ? "Saving…" : "Save"}</button>
+            </div>
+          </div>
         </div>
-      </section>
-    </div>
-  );
-}
-
-/* ---------------------------------------------------------------------------------------- */
-
-function Stat({ color, Icon, label, value, sub }: { color: string; Icon: React.ElementType; label: string; value: string; sub: string }) {
-  return (
-    <div className="sc-stat" style={{ ["--c" as any]: color }}>
-      <span className="sc-stat-ico"><Icon size={16} /></span>
-      <div className="min-w-0">
-        <div className="sc-stat-n" suppressHydrationWarning>{value}</div>
-        <div className="lx-10 lx-mut">{label}</div>
-        <div className="sc-stat-sub" title={sub} suppressHydrationWarning>{sub}</div>
-      </div>
-    </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <label className="sc-label">{label}</label>
-      {children}
-    </div>
-  );
-}
-
-function RunCard({ run, tz }: { run: Run; tz: string }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="sc-run">
-      <button className="sc-run-h" onClick={() => setOpen((o) => !o)}>
-        <span className={"lx-pill " + RUN_PILL[run.status]}>{RUN_LABEL[run.status]}</span>
-        <span className="lx-11 font-semibold" suppressHydrationWarning>{humanTime(new Date(run.firedAt), tz)}</span>
-        <span className="lx-10 lx-mut">
-          {run.articles.length} article{run.articles.length === 1 ? "" : "s"}
-          {run.planned != null ? ` · ${run.planned} topics planned` : ""}
-          {run.autoPublish === true ? " · auto-publish" : ""}
-        </span>
-        <ChevronDown size={14} className={`lx-mut ml-auto sc-chev ${open ? "on" : ""}`} />
-      </button>
-
-      {run.bossError && <p className="lx-11 mt-1.5" style={{ color: "#f87171" }}>{run.bossError}</p>}
-      {!run.bossError && run.reason && <p className="lx-11 lx-mut mt-1.5">{run.reason}</p>}
-
-      {open && (
-        <>
-          {run.articles.length > 0 && (
-            <div className="mt-2 space-y-1.5">
-              {run.articles.map((a) => (
-                <div key={a.id} className="sc-run-item">
-                  <Link href={`/dashboard/content/${a.id}`} className="min-w-0 flex-1">
-                    <div className="lx-11 truncate" style={{ color: "#e8e8f2" }}>{a.title}</div>
-                    {a.publishError && <div className="lx-10 mt-0.5" style={{ color: "#f87171" }}>Publish failed: {a.publishError}</div>}
-                  </Link>
-                  <span className="lx-10 lx-mut whitespace-nowrap">{a.words != null ? `${a.words} words` : "—"}</span>
-                  {a.publishedUrl && (
-                    <a href={a.publishedUrl} target="_blank" rel="noreferrer" className="sc-link lx-10 whitespace-nowrap">open live</a>
-                  )}
-                  <span className={"lx-pill " + ITEM_PILL(a.status)}>{ITEM_LABEL(a.status)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-          {run.failures.map((f, i) => (
-            <p key={i} className="lx-11 mt-1.5" style={{ color: "#f87171" }}>{f.task} — {f.message}</p>
-          ))}
-          {run.linkedBy === "time" && run.articles.length > 0 && (
-            <p className="lx-10 lx-mut mt-1.5">
-              These articles are matched to the run by time (an older run with no run id), so manual work from the same
-              window can appear in this list too.
-            </p>
-          )}
-        </>
       )}
     </div>
   );
 }
 
-const RUN_LABEL: Record<Run["status"], string> = {
-  running: "Running",
-  finished: "Finished",
-  partial: "Partial",
-  failed: "Failed",
-};
-
-const RUN_PILL: Record<Run["status"], string> = {
-  running: "blue",
-  finished: "green",
-  partial: "amber",
-  failed: "red",
-};
-
-function ITEM_LABEL(status: string): string {
-  if (status === "published") return "Published";
-  if (status === "awaiting_approval") return "In Approvals";
-  if (status === "approved") return "Approved";
-  if (status === "rejected") return "Rejected";
-  if (status === "failed") return "Failed";
-  return "Draft";
+function nextPreview(draft: Sched, nowMs: number): string {
+  const d = nextRunAt(toRow(draft), new Date(nowMs));
+  if (!d) return "Paused";
+  try { return new Intl.DateTimeFormat("en-GB", { timeZone: draft.timezone, weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(d) + " " + draft.timezone; }
+  catch { return d.toISOString(); }
 }
 
-function ITEM_PILL(status: string): string {
-  if (status === "published") return "green";
-  if (status === "awaiting_approval") return "amber";
-  if (status === "failed" || status === "rejected") return "red";
-  return "mut";
+/* ───────────────────────── Upcoming tab ───────────────────────── */
+function Upcoming({ scheds, orders, pendingOrders, now, tz, uf, setUf, ud, setUd, skip, setSkip, onCancel, cancelling }: any) {
+  const items = useMemo(() => {
+    const out: any[] = [];
+    (["article", "leads", "audit"] as Kind[]).forEach((k) => {
+      const c: Sched = scheds[k];
+      if (!c.enabled) return;
+      let cursor = new Date(now);
+      for (let i = 0; i < 40; i++) {
+        const d = nextRunAt(toRow(c), cursor);
+        if (!d || d.getTime() - now > 30 * 86400000) break;
+        const key = `${k}|${ymd(d, tz)}|${c.timeOfDay}`;
+        if (!skip.has(key)) out.push({
+          at: d, icon: META[k].icon, kind: "auto", skipKey: key, tag: "Schedule",
+          title: k === "article" ? `Write ${c.count} article${c.count > 1 ? "s" : ""}` : k === "leads" ? `Find ${c.count} leads` : "Run site audit",
+          sub: k === "article" ? (c.autoPublish ? "Published directly" : "Goes to Approvals") : k === "leads" ? "Delivered after you approve" : "Report made after the run",
+        });
+        cursor = new Date(d.getTime() + 60000);
+      }
+    });
+    (pendingOrders ?? []).forEach((o: any) => out.push({
+      at: new Date(o.run_at), icon: orderIcon(o), kind: "chat", id: o.id, tag: "Mr Lxwa", title: orderWhat(o), sub: orderType(o),
+    }));
+    out.sort((a, b) => a.at.getTime() - b.at.getTime());
+    return out;
+  }, [scheds, pendingOrders, now, tz, skip, orders]);
+
+  if (!items.length) return <Empty icon="event" title="Nothing coming up" desc="Turn on an automation, or ask Mr Lxwa in Chat." />;
+
+  const inRange: Record<string, (x: any) => boolean> = {
+    today: (x) => dayOffset(x.at, tz, now) === 0,
+    tomorrow: (x) => dayOffset(x.at, tz, now) === 1,
+    "7": (x) => dayOffset(x.at, tz, now) < 7,
+    "14": (x) => dayOffset(x.at, tz, now) < 14,
+    "30": (x) => dayOffset(x.at, tz, now) < 30,
+    date: (x) => !!ud && ymd(x.at, tz) === ud,
+  };
+  const pred = inRange[uf] || inRange["7"];
+  const list = items.filter(pred);
+
+  return (
+    <>
+      <div className="chips">
+        {[["today", "Today"], ["tomorrow", "Tomorrow"], ["7", "Next 7 days"], ["14", "Next 14 days"], ["30", "Next 30 days"]].map(([k, l]) => (
+          <button key={k} className={"chip" + (uf === k ? " a" : "")} onClick={() => { setUf(k); setUd(""); }}>{l} {items.filter(inRange[k]).length}</button>
+        ))}
+        <label className={"chip dp" + (uf === "date" ? " a" : "")}>Pick a date
+          <input type="date" value={ud} onChange={(e) => { setUd(e.target.value); setUf(e.target.value ? "date" : "7"); }} />
+        </label>
+      </div>
+      <div className="tbl">
+        <div className="tr th up"><div className="c">Task</div><div className="c">Given by</div><div className="c">Time</div><div className="c" /></div>
+        {list.length ? list.map((x, i) => (
+          <div key={i} className="tr up">
+            <div className="c main"><span className="ico sm"><Ic n={x.icon} z={20} /></span><div className="info"><div className="name">{x.title}</div><small>{x.sub}</small></div></div>
+            <div className="c hide"><span className={"tag " + x.kind}>{x.tag}</span></div>
+            <div className="c" suppressHydrationWarning>{dayLabel(x.at, tz, now)}, {time12(x.at, tz)}</div>
+            <div className="c end">
+              {x.kind === "chat"
+                ? <button className="lnk" disabled={cancelling === x.id} onClick={() => onCancel(x.id)}>Cancel</button>
+                : <button className="lnk" onClick={() => setSkip(new Set(skip).add(x.skipKey))}>Skip</button>}
+            </div>
+          </div>
+        )) : <Empty icon="event" title="Nothing on this day" desc="Pick another day above." />}
+      </div>
+    </>
+  );
 }
 
-/** "3h 12m 04s" — and days once it is far enough out that seconds stop meaning anything. */
-function countdown(ms: number): string {
-  const total = Math.floor(ms / 1000);
-  const days = Math.floor(total / 86400);
-  const hours = Math.floor((total % 86400) / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const seconds = total % 60;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  if (days > 0) return `${days}d ${hours}h ${pad(minutes)}m`;
-  if (hours > 0) return `${hours}h ${pad(minutes)}m ${pad(seconds)}s`;
-  return `${minutes}m ${pad(seconds)}s`;
+/* ───────────────────────── Tasks from Mr Lxwa tab ───────────────────────── */
+function Tasks({ orders, now, tz, tf, setTf, q, setQ, onCancel, cancelling }: any) {
+  if (orders === null) return <div className="box">Loading…</div>;
+  const mapStatus = (s: string) => s === "done" ? "Done" : s === "failed" ? "Failed" : s === "cancelled" ? "Cancelled" : s === "running" ? "Running" : "Pending";
+  const list = (orders as any[])
+    .map((o) => ({ ...o, S: mapStatus(o.status) }))
+    .filter((o) => (tf === "all" || o.S === tf) && orderWhat(o).toLowerCase().includes(q.toLowerCase()))
+    .sort((a, b) => (a.S === "Pending" ? 0 : 1) - (b.S === "Pending" ? 0 : 1) || new Date(b.run_at).getTime() - new Date(a.run_at).getTime());
+  const n = (s: string) => (orders as any[]).filter((o) => mapStatus(o.status) === s).length;
+
+  return (
+    <>
+      <Search q={q} setQ={setQ} ph="Search tasks" />
+      <div className="chips">
+        {[["all", "All", orders.length], ["Pending", "Pending", n("Pending")], ["Done", "Done", n("Done")], ["Failed", "Failed", n("Failed")]].map(([k, l, c]: any) => (
+          <button key={k} className={"chip" + (tf === k ? " a" : "")} onClick={() => setTf(k)}>{l} {c}</button>
+        ))}
+      </div>
+      <div className="tbl">
+        <div className="tr th tk"><div className="c">Task</div><div className="c hide">Type</div><div className="c">Scheduled for</div><div className="c">Status</div><div className="c" /></div>
+        {list.length ? list.map((o) => {
+          const at = new Date(o.run_at);
+          const cl = o.S === "Done" ? "ok" : o.S === "Failed" ? "bad" : o.S === "Cancelled" ? "mut" : "pend";
+          return (
+            <div key={o.id} className="tr tk">
+              <div className="c main"><span className="ico sm"><Ic n={orderIcon(o)} z={20} /></span><div className="info"><div className="name">{orderWhat(o)}</div><small>Asked in Chat{o.request ? ` · “${o.request}”` : ""}</small></div></div>
+              <div className="c hide">{orderType(o)}</div>
+              <div className="c" suppressHydrationWarning>{dayLabel(at, tz, now)}, {time12(at, tz)}{o.S === "Pending" ? <small>{at.getTime() > now ? "in " + countdown(at.getTime() - now) : "starting"}</small> : null}</div>
+              <div className="c"><span className={"sp " + cl}>{o.S}</span></div>
+              <div className="c end">{o.S === "Pending" ? <button className="lnk" disabled={cancelling === o.id} onClick={() => onCancel(o.id)}>Cancel</button> : null}{o.error ? <small className="bad">{o.error}</small> : null}</div>
+            </div>
+          );
+        }) : <Empty icon="robot" title="No tasks found" desc="Try another filter, or ask Mr Lxwa in Chat." />}
+      </div>
+      <div className="tip"><Ic n="robot" z={22} /><div><b>Need something done later?</b><small>Tell Mr Lxwa in Chat, e.g. “30 min baad ye article publish kar do” or “kal 9 baje isko publish karna”.</small></div></div>
+    </>
+  );
 }
 
-/* Same visual language as Approvals / Content: one dark panel, a stat strip, compact cards.
-   Injected with dangerouslySetInnerHTML — React escapes ">" inside a <style> text child, which
-   turns every child selector into a hydration mismatch. */
+/* ───────────────────────── History tab ───────────────────────── */
+function HistoryTab({ runs, error, now, tz, hf, setHf, q, setQ }: any) {
+  if (error) return <div className="banner">{error}</div>;
+  if (runs === null) return <div className="box">Loading…</div>;
+  if (!runs.length) return <Empty icon="history" title="No automatic run yet" desc="As soon as the first run fires you'll see it here — when it ran, what it made, and anything that failed." />;
+
+  const rows = (runs as Run[]).map((r) => {
+    const failed = r.status === "failed";
+    const result = r.bossError || (failed ? (r.failures[0]?.message ?? "The run failed") : r.reason || `${r.articles.length} article${r.articles.length === 1 ? "" : "s"}${r.articles.some((a) => a.status === "awaiting_approval") ? " sent to Approvals" : ""}`);
+    return { r, failed, result, label: "Article run" };
+  }).filter((x) => (hf === "all" || (hf === "Completed" ? !x.failed : x.failed)) && (x.label + x.result).toLowerCase().includes(q.toLowerCase()))
+    .sort((a, b) => new Date(b.r.firedAt).getTime() - new Date(a.r.firedAt).getTime());
+
+  const nC = (runs as Run[]).filter((r) => r.status !== "failed").length;
+  const nF = (runs as Run[]).filter((r) => r.status === "failed").length;
+
+  return (
+    <>
+      <Search q={q} setQ={setQ} ph="Search history" />
+      <div className="chips">
+        {[["all", "All", runs.length], ["Completed", "Completed", nC], ["Failed", "Failed", nF]].map(([k, l, c]: any) => (
+          <button key={k} className={"chip" + (hf === k ? " a" : "")} onClick={() => setHf(k)}>{l} {c}</button>
+        ))}
+      </div>
+      <div className="tbl">
+        <div className="tr th hs"><div className="c">Run</div><div className="c">Result</div><div className="c">When</div><div className="c">Status</div><div className="c" /></div>
+        {rows.length ? rows.map((x) => (
+          <div key={x.r.id} className="tr hs">
+            <div className="c main"><span className={"ico sm " + (x.failed ? "bad" : "good")}><Ic n={x.failed ? "error" : "check"} z={20} /></span><div className="info"><div className="name">{x.label}</div></div></div>
+            <div className={"c" + (x.failed ? " bad" : "")}>{x.result}</div>
+            <div className="c" suppressHydrationWarning>{dayLabel(new Date(x.r.firedAt), tz, now)}, {time12(new Date(x.r.firedAt), tz)}</div>
+            <div className="c"><span className={"sp " + (x.failed ? "bad" : "ok")}>{x.failed ? "Failed" : x.r.status === "running" ? "Running" : "Completed"}</span></div>
+            <div className="c end">{x.r.articles.find((a) => a.publishedUrl) ? <a className="lnk" href={x.r.articles.find((a) => a.publishedUrl)!.publishedUrl!} target="_blank" rel="noreferrer">Open live</a> : null}</div>
+          </div>
+        )) : <Empty icon="history" title="No runs found" desc="Try another filter or search." />}
+      </div>
+    </>
+  );
+}
+
+/* ───────────────────────── small shared bits ───────────────────────── */
+function Search({ q, setQ, ph }: { q: string; setQ: (s: string) => void; ph: string }) {
+  return <div className="tools"><div className="search"><Ic n="search" z={18} /><input type="search" placeholder={ph} aria-label={ph} value={q} onChange={(e) => setQ(e.target.value)} /></div></div>;
+}
+function Empty({ icon, title, desc }: { icon: string; title: string; desc: string }) {
+  return <div className="empty"><Ic n={icon} z={36} /><b>{title}</b><small>{desc}</small></div>;
+}
+function orderWhat(o: any): string {
+  if (o.kind === "brain") return o.label || "Task";
+  if (o.kind === "publish") return "Publish an article that is already written";
+  if (o.kind === "research") return `Research keywords${o.topic ? ` for “${o.topic}”` : ""}`;
+  if (o.kind === "plan") return "Pick this week's topics and write them";
+  return `Write an article${o.topic ? ` about “${o.topic}”` : ""}`;
+}
+function orderType(o: any): string {
+  if (o.kind === "publish") return "Delayed publishing";
+  if (o.kind === "research") return "Keyword research";
+  if (o.kind === "plan") return "Topic planning";
+  if (o.kind === "write") return "Article writing";
+  return "Task";
+}
+function orderIcon(o: any): string {
+  if (o.kind === "publish") return "publish";
+  if (o.kind === "research") return "search";
+  if (o.kind === "plan") return "idea";
+  if (o.kind === "brain") return "robot";
+  return "article";
+}
+
+/* ═══════════════════ styles — ported from the reference, scoped to .sched, dark tokens ═══════════════════ */
 const CSS = `
-.sc-wrap{display:flex;height:100%;min-height:0;container-type:inline-size;container-name:sc}
-.sc-panel{background:#0a0a11;border:1px solid var(--lx-border);border-radius:16px;min-width:0;width:100%}
-.sc-h1{font-size:22px;font-weight:800;letter-spacing:-.02em;line-height:1.1;color:#fff}
-.sc-icobtn{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:9px;
-  border:1px solid var(--lx-border);background:#0d0d16;color:#9a9ab2;cursor:pointer;transition:.15s;flex-shrink:0}
-.sc-icobtn:hover{color:#fff;border-color:rgba(139,92,246,.55)}
-.sc-power{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 12px;border-radius:9px;white-space:nowrap;
-  background:#0d0d16;border:1px solid var(--lx-border);color:#8b8ba0;font-size:12px;font-weight:600;cursor:pointer;transition:.15s}
-.sc-power:hover:not(:disabled){color:#fff}
-.sc-power .sc-power-dot{width:7px;height:7px;border-radius:50%;background:#4b4b5c}
-.sc-power.on{color:#4ade80;border-color:rgba(34,197,94,.4);background:rgba(34,197,94,.08)}
-.sc-power.on .sc-power-dot{background:#22c55e;box-shadow:0 0 8px #22c55e}
-.sc-power:disabled{opacity:.5;cursor:not-allowed}
-.sc-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}
-.sc-stat{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:11px;min-width:0;
-  background:color-mix(in srgb,var(--c) 9%,#0b0b12);border:1px solid color-mix(in srgb,var(--c) 40%,transparent)}
-.sc-stat-ico{display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:9px;flex-shrink:0;
-  color:var(--c);background:color-mix(in srgb,var(--c) 14%,#0b0b12);border:1px solid color-mix(in srgb,var(--c) 45%,transparent)}
-.sc-stat-n{font-size:17px;font-weight:800;line-height:1.15;color:#fff;font-variant-numeric:tabular-nums;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sc-stat-sub{margin-top:2px;font-size:10px;color:var(--lx-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sc-tabs{display:flex;flex-wrap:wrap;gap:6px;padding-bottom:2px}
-.sc-tab{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:9px;font-size:12px;font-weight:600;
-  background:#0d0d16;border:1px solid var(--lx-border);color:#9a9ab2;cursor:pointer;transition:.15s}
-.sc-tab:hover{color:#fff}
-.sc-tab.on{color:#fff;background:linear-gradient(135deg,rgba(79,70,229,.55),rgba(124,58,237,.35));border-color:rgba(139,92,246,.6)}
-.sc-card{background:#0d0d16;border:1px solid var(--lx-border);border-radius:12px;padding:14px}
-.sc-card-h{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:#fff}
-.sc-fields{margin-top:12px;display:flex;flex-direction:column;gap:12px}
-.sc-row2{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
-.sc-label{display:block;margin-bottom:6px;font-size:11px;color:var(--lx-mut)}
-.sc-hint{margin-top:6px;font-size:10.5px;color:var(--lx-dim)}
-.sc-seg{display:inline-flex;flex-wrap:wrap;gap:4px;padding:3px;border-radius:10px;background:#0a0a11;border:1px solid var(--lx-border)}
-.sc-seg button{height:28px;padding:0 12px;border-radius:7px;border:none;background:none;color:#9a9ab2;font-size:12px;
-  font-weight:600;cursor:pointer;transition:.15s}
-.sc-seg button:hover{color:#fff}
-.sc-seg button.on{color:#fff;background:linear-gradient(135deg,#4f46e5,#7c3aed);box-shadow:0 2px 10px rgba(124,58,237,.3)}
-.sc-days{display:flex;flex-wrap:wrap;gap:4px}
-.sc-days button{width:44px;height:30px;border-radius:8px;background:#0a0a11;border:1px solid var(--lx-border);
-  color:#9a9ab2;font-size:11.5px;font-weight:600;cursor:pointer;transition:.15s}
-.sc-days button:hover{color:#fff}
-.sc-days button.on{color:#fff;background:linear-gradient(135deg,#4f46e5,#7c3aed);border-color:rgba(139,92,246,.7)}
-.sc-in{height:34px;padding:0 10px;border-radius:9px;background:#0a0a11;border:1px solid var(--lx-border);color:#e8e8f2;
-  font-size:12.5px;outline:none}
-.sc-in:focus{border-color:rgba(139,92,246,.55)}
-.sc-tz{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
-.sc-select{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 8px 0 10px;border-radius:9px;
-  background:#0a0a11;border:1px solid var(--lx-border)}
-.sc-select select{appearance:none;-webkit-appearance:none;background:none;border:none;outline:none;color:#e8e8f2;
-  font-size:12.5px;cursor:pointer;max-width:150px}
-.sc-select select option{background:#12121c;color:#e8e8f2}
-.sc-btn{display:inline-flex;align-items:center;gap:5px;height:34px;padding:0 12px;border-radius:9px;white-space:nowrap;
-  background:#12121c;border:1px solid var(--lx-border);color:#d6d6e4;font-size:12px;font-weight:600;cursor:pointer;transition:.15s}
-.sc-btn:hover:not(:disabled){color:#fff;border-color:rgba(139,92,246,.5)}
-.sc-btn:disabled{opacity:.45;cursor:not-allowed}
-.sc-btn.danger{color:#f87171;border-color:rgba(239,68,68,.4)}
-.sc-btn.danger:hover:not(:disabled){background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.6);color:#fff}
-.sc-save{display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 16px;border-radius:9px;font-size:12.5px;font-weight:600}
-.sc-save:disabled{opacity:.45;cursor:not-allowed;filter:none}
-.sc-switch{position:relative;width:42px;height:24px;flex-shrink:0;border-radius:999px;background:#1a1a26;
-  border:1px solid var(--lx-border);cursor:pointer;transition:.15s}
-.sc-switch i{position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#6b6b80;transition:.18s}
-.sc-switch.on{background:linear-gradient(135deg,#4f46e5,#7c3aed);border-color:rgba(139,92,246,.7)}
-.sc-switch.on i{left:21px;background:#fff}
-.sc-switch:disabled{opacity:.45;cursor:not-allowed}
-.sc-alert{display:flex;gap:10px;padding:12px;border-radius:12px;background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.35)}
-.sc-tag{padding:2px 7px;border-radius:6px;font-size:10px;font-weight:700;color:#8b8ba0;background:rgba(255,255,255,.05);
-  border:1px solid var(--lx-border)}
-.sc-link{color:#818cf8;text-decoration:none}
-.sc-link:hover{text-decoration:underline}
-.sc-flow{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
-.sc-step{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:#d6d6e4}
-.sc-step b{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;
-  background:rgba(139,92,246,.18);border:1px solid rgba(139,92,246,.45);color:#c4b5fd;font-size:10px}
-.sc-step em{margin-left:6px;color:var(--lx-dim);font-style:normal}
-.sc-empty{display:flex;flex-direction:column;align-items:center;text-align:center;padding:28px 20px;border-radius:12px;
-  background:#0d0d16;border:1px dashed var(--lx-border)}
-.sc-order{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px;border-radius:12px;background:#0d0d16;
-  border:1px solid var(--lx-border)}
-.sc-count{font-size:14px;font-weight:800;color:#22d3ee;font-variant-numeric:tabular-nums;white-space:nowrap}
-.sc-run{padding:12px;border-radius:12px;background:#0d0d16;border:1px solid var(--lx-border)}
-.sc-run-h{display:flex;flex-wrap:wrap;align-items:center;gap:8px;width:100%;background:none;border:none;padding:0;
-  color:inherit;cursor:pointer;text-align:left}
-.sc-chev{transition:transform .15s}
-.sc-chev.on{transform:rotate(180deg)}
-.sc-run-item{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:9px;background:#0a0a11;
-  border:1px solid var(--lx-border)}
-.sc-run-item a{text-decoration:none}
-.sc-spin{animation:scSpin 1s linear infinite}
-@keyframes scSpin{to{transform:rotate(360deg)}}
+.sched{--bg:#202124;--panel:#292a2d;--card:#303134;--line:#3c4043;--tx:#e8eaed;--mut:#9aa0a6;--ac:#8ab4f8;--acs:#2a3a55;--onac:#202124;--ok:#81c995;--oks:#1e3a2a;--bad:#f28b82;--warn:#fdd663;--warns:#3f3720;--off:#5f6368;--bads:#42221f;--pu:#d7aefb;--pus:#3b2a52;color:var(--tx);font:15px/1.5 "Google Sans",Roboto,"Segoe UI",Arial,sans-serif}
+.sched *{box-sizing:border-box}
+.sched .wrap{max-width:900px;margin:0 auto;padding:4px 2px 40px}
+.sched .panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:24px}
+.sched .top{display:flex;align-items:flex-start;gap:12px;margin-bottom:20px}
+.sched .top .t{flex:1;min-width:0}
+.sched h1{font-size:26px;font-weight:500;margin:0;color:var(--tx)}
+.sched .sub{color:var(--mut);font-size:14px;margin:2px 0 0}
+.sched .icobtn{width:38px;height:38px;border-radius:50%;border:1px solid var(--line);background:var(--card);color:var(--mut);cursor:pointer;display:grid;place-items:center;flex:none}
+.sched .icobtn:hover{color:var(--tx);border-color:var(--off)}
+.sched .pill{background:var(--oks);color:var(--ok);padding:7px 14px;border-radius:99px;font-weight:500;font-size:14px;white-space:nowrap;display:flex;align-items:center;gap:8px}
+.sched .pill i{width:8px;height:8px;border-radius:50%;background:var(--ok)}
+.sched .pill.off{background:var(--bg);color:var(--mut);border:1px solid var(--line)}.sched .pill.off i{background:var(--mut)}
+.sched .banner{background:var(--bads);color:var(--bad);border:1px solid var(--bad);border-radius:12px;padding:12px 14px;margin-bottom:16px;font-size:13px}
+.sched .banner code{font-family:ui-monospace,monospace;font-size:12px}
+.sched .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+.sched .st{border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;gap:12px;align-items:center;background:var(--card)}
+.sched .st.a{background:var(--acs);border-color:transparent}.sched .st.b{background:var(--oks);border-color:transparent}.sched .st.c{background:var(--warns);border-color:transparent}
+.sched .sbox{color:var(--mut);width:36px;height:36px;border-radius:50%;background:var(--panel);display:grid;place-items:center;flex:none}
+.sched .st.a .sbox{color:var(--ac)}.sched .st.b .sbox{color:var(--ok)}.sched .st.c .sbox{color:var(--warn)}
+.sched .sv{font-weight:500;font-size:19px;line-height:1.25;font-variant-numeric:tabular-nums}.sched .sl{font-size:12px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sched .tabs{display:flex;gap:4px;margin-bottom:16px;flex-wrap:wrap;border-bottom:1px solid var(--line)}
+.sched .tab{display:inline-flex;align-items:center;gap:8px;border:0;border-bottom:3px solid transparent;background:none;color:var(--mut);padding:10px 14px;font:inherit;font-weight:500;cursor:pointer;margin-bottom:-1px}
+.sched .tab:hover{color:var(--tx)}
+.sched .tab.a{color:var(--ac);border-bottom-color:var(--ac)}
+.sched .cnt{background:var(--bg);color:var(--mut);border-radius:99px;font-size:12px;padding:0 8px;line-height:20px;min-width:20px;text-align:center}
+.sched .cnt.hi,.sched .tab.a .cnt{background:var(--acs);color:var(--ac)}
+.sched .list{display:flex;flex-direction:column;gap:10px}
+.sched .row{display:flex;align-items:center;gap:14px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;cursor:pointer;width:100%;color:inherit;font:inherit;text-align:left}
+.sched .row:hover{background:var(--bg);border-color:var(--off)}
+.sched .row.dis{opacity:.6;cursor:default}.sched .row.dis:hover{background:var(--card);border-color:var(--line)}
+.sched :focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+.sched .ico{color:var(--ac);width:44px;height:44px;border-radius:50%;background:var(--acs);display:grid;place-items:center;flex:none}
+.sched .ico.sm{width:36px;height:36px}.sched .ico.good{background:var(--oks);color:var(--ok)}.sched .ico.bad{background:var(--bads);color:var(--bad)}
+.sched .info{flex:1;min-width:0}.sched .name{font-weight:500;color:var(--tx)}.sched .desc{color:var(--mut);font-size:13px}
+.sched .meta{font-size:13px;margin-top:4px;color:var(--ac)}.sched .meta.off{color:var(--mut)}
+.sched .info small{color:var(--mut);font-size:12px;display:block;margin-top:2px}
+.sched .badge{font-size:12px;padding:3px 10px;border-radius:99px;background:var(--warns);color:var(--warn);white-space:nowrap;font-weight:500}
+.sched .chev{color:var(--mut);font-size:22px}
+.sched .tg{width:38px;height:20px;border-radius:99px;background:var(--off);border:0;position:relative;cursor:pointer;flex:none;transition:background .15s}
+.sched .tg::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:.15s}
+.sched .tg.on{background:var(--ac)}.sched .tg.on::after{left:20px}
+.sched .tg:disabled{opacity:.5;cursor:not-allowed}
+.sched .tip{display:flex;gap:12px;align-items:center;background:var(--acs);border-radius:12px;padding:14px 16px;margin-top:16px;color:var(--ac)}.sched .tip b{color:var(--tx);font-weight:500;display:block}.sched .tip small{color:var(--mut)}
+.sched .tools{display:flex;gap:12px;align-items:center;margin-bottom:12px}
+.sched .search{position:relative;width:100%;max-width:300px;color:var(--mut)}.sched .search svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);pointer-events:none}
+.sched .search input{padding-left:38px;border-radius:99px}
+.sched .chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.sched .chip{border:1px solid var(--line);background:none;color:var(--tx);padding:6px 14px;border-radius:99px;font:inherit;font-size:14px;cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+.sched .chip:hover{background:var(--bg)}.sched .chip.a{background:var(--acs);color:var(--ac);border-color:transparent;font-weight:500}
+.sched .chip.dp input{width:auto;padding:0;border:0;background:none;color:inherit;font:inherit;cursor:pointer;color-scheme:dark}
+.sched .tbl{border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.sched .tr{display:grid;gap:14px;align-items:center;padding:12px 16px;border-top:1px solid var(--line)}
+.sched .tr:first-child{border-top:0}
+.sched .tr.tk{grid-template-columns:minmax(0,2.4fr) minmax(0,1.2fr) minmax(0,1.3fr) 100px 90px}
+.sched .tr.hs{grid-template-columns:minmax(0,1.6fr) minmax(0,2fr) minmax(0,1.3fr) 110px 90px}
+.sched .tr.up{grid-template-columns:minmax(0,2.4fr) minmax(0,1fr) minmax(0,1.4fr) 80px}
+.sched .tr.th{background:var(--bg);color:var(--mut);font-size:13px;font-weight:500}
+.sched .tr .c{min-width:0;font-size:14px;color:var(--tx)}.sched .tr .c small{display:block;color:var(--mut);font-size:12px}.sched .tr .c.bad{color:var(--bad)}
+.sched .c.main{display:flex;align-items:center;gap:12px}.sched .c.end{text-align:right}
+.sched .sp{font-size:12px;font-weight:500;padding:3px 10px;border-radius:99px;white-space:nowrap}
+.sched .sp.ok{background:var(--oks);color:var(--ok)}.sched .sp.pend{background:var(--warns);color:var(--warn)}.sched .sp.bad{background:var(--bads);color:var(--bad)}.sched .sp.mut{background:var(--bg);color:var(--mut)}
+.sched .lnk{background:none;border:0;color:var(--ac);font:inherit;font-size:13px;font-weight:500;cursor:pointer;padding:2px 4px;text-decoration:none}.sched .lnk:hover{text-decoration:underline}.sched .lnk:disabled{opacity:.5;cursor:not-allowed}
+.sched .tag{font-size:12px;padding:3px 10px;border-radius:99px;background:var(--bg);border:1px solid var(--line);color:var(--mut);white-space:nowrap}
+.sched .tag.auto{background:var(--acs);color:var(--ac);border-color:transparent}.sched .tag.chat{background:var(--pus);color:var(--pu);border-color:transparent}
+.sched .empty{text-align:center;padding:36px 10px;color:var(--mut);display:flex;flex-direction:column;align-items:center;gap:6px}.sched .empty b{color:var(--tx);font-weight:500}
+.sched .box{background:var(--bg);border-radius:8px;padding:12px 14px;font-size:14px;color:var(--mut)}
+.sched input,.sched select{width:100%;background:var(--panel);color:var(--tx);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font:inherit;color-scheme:dark}
+.sched input:hover,.sched select:hover{border-color:var(--off)}
+.sched .ov{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:14px;z-index:60}
+.sched .modal{background:var(--panel);border-radius:16px;width:100%;max-width:500px;max-height:90vh;overflow:auto;box-shadow:0 8px 30px rgba(0,0,0,.5);animation:schedpop .15s ease-out}
+@keyframes schedpop{from{transform:scale(.97);opacity:0}}
+.sched .mh{display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--line)}
+.sched .mh h2{margin:0;font-size:19px;font-weight:500;flex:1;color:var(--tx)}.sched .mh .ico{width:38px;height:38px}
+.sched .x{background:none;border:0;color:var(--mut);cursor:pointer;line-height:1;display:grid;place-items:center}.sched .x:hover{color:var(--tx)}
+.sched .mb{padding:20px;display:flex;flex-direction:column;gap:16px}
+.sched .mf{padding:14px 20px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end}
+.sched .l{display:block;font-weight:500;font-size:13px;margin-bottom:6px;color:var(--mut)}
+.sched .seg{display:flex;border:1px solid var(--line);border-radius:99px;overflow:hidden}
+.sched .seg button{flex:1;border:0;border-right:1px solid var(--line);background:none;color:var(--tx);padding:8px 6px;font:inherit;cursor:pointer}
+.sched .seg button:last-child{border-right:0}
+.sched .seg button.a{background:var(--acs);color:var(--ac);font-weight:500}
+.sched .tzr{display:flex;gap:8px}
+.sched .sw{display:flex;align-items:center;gap:12px;justify-content:space-between;border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.sched .sw b{color:var(--tx);font-weight:500}
+.sched small,.sched .hint{color:var(--mut);font-size:13px;display:block}
+.sched small.bad{color:var(--bad)}
+.sched .btn{border:1px solid var(--line);background:var(--panel);color:var(--ac);padding:9px 22px;border-radius:99px;font:inherit;font-weight:500;cursor:pointer;white-space:nowrap}
+.sched .btn:hover{background:var(--acs)}
+.sched .btn.p{background:var(--ac);border-color:var(--ac);color:var(--onac)}.sched .btn.p:hover{opacity:.9}.sched .btn:disabled{opacity:.6;cursor:not-allowed}
+.sched .next{background:var(--acs);border-radius:8px;padding:10px 14px;font-size:14px;color:var(--tx)}
+@media(max-width:720px){.sched .stats{grid-template-columns:1fr 1fr}.sched .top{flex-wrap:wrap}}
+@media(max-width:700px){.sched .tr.th{display:none}.sched .tr.tk,.sched .tr.hs,.sched .tr.up{grid-template-columns:1fr auto}.sched .tr .c.main{grid-column:1/-1}.sched .tr .c.hide{display:none}.sched .tr .c.end{text-align:left}}
 `;

@@ -15,7 +15,14 @@ import { nextRunAt } from "@/lib/schedule-time";
  *  reads — and the page only formats and ticks it. */
 
 const FREQUENCIES = ["daily", "weekdays", "weekly"];
-const KINDS = ["article", "social"];
+// Every kind the DB check constraint and the scheduler both honour. 027 added 'audit',
+// 028 added 'leads' (and lifted the count ceiling to 50). The scheduler tick in
+// agent-server/src/scheduler.ts runs exactly article / audit / leads; 'social' stays in the
+// list because 006 wrote it, but its agent is still a stub so a row does nothing.
+const KINDS = ["article", "social", "audit", "leads"];
+// Per-kind ceiling for `count` — the DB now allows 1..50 (028), but a leads run wants 10-50
+// while an article run tops out at 5. Audit ignores count entirely.
+const MAX_COUNT: Record<string, number> = { article: 5, social: 5, audit: 5, leads: 50 };
 
 // Named so the pre-migration retry below can drop exactly this one column and nothing else.
 const BASE_COLUMNS = "kind, enabled, frequency, day_of_week, time_of_day, timezone, count, last_run_at";
@@ -94,7 +101,7 @@ export async function PUT(request: NextRequest) {
     day_of_week: Math.min(6, Math.max(0, Number(body?.dayOfWeek) || 0)),
     time_of_day: timeOfDay,
     timezone,
-    count: Math.min(5, Math.max(1, Number(body?.count) || 2)),
+    count: Math.min(MAX_COUNT[kind] ?? 5, Math.max(1, Number(body?.count) || 2)),
     updated_at: new Date().toISOString(),
   };
 
