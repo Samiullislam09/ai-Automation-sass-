@@ -320,15 +320,19 @@ export default function ScheduleSection() {
           )}
           {loadError && !migration && <div className="banner">{loadError}</div>}
 
+          {/* next task — cardless banner above the stat row */}
+          <button className="nextline" onClick={() => setTab("up")} title="See upcoming tasks">
+            <span className="nl-ic"><Ic n="clock" z={20} /></span>
+            <span className="nl-head">
+              <span className="nl-label">Next task</span>
+              <span className="nl-val" suppressHydrationWarning>{!nextInfo ? "Nothing scheduled" : countdown(nextInfo.at.getTime() - now)}</span>
+            </span>
+            {nextInfo && <span className="nl-sub" suppressHydrationWarning>{`${nextInfo.s.kind === "article" ? "Articles" : nextInfo.s.kind === "leads" ? "Leads" : "Site audit"} · ${dayLabel(nextInfo.at, tz, now)}, ${time12(nextInfo.at, tz)}`}</span>}
+            <span className="nl-go">View upcoming ›</span>
+          </button>
+
           {/* stats — each tile jumps to the tab it summarises */}
           <div className="stats">
-            <button className="st a" onClick={() => setTab("up")} title="See upcoming tasks">
-              <span className="sbox"><Ic n="clock" /></span><div>
-                <div className="sv" suppressHydrationWarning>{!nextInfo ? "Paused" : countdown(nextInfo.at.getTime() - now)}</div>
-                <div className="sl">Next task</div>
-                <div className="sl" suppressHydrationWarning>{nextInfo ? `${nextInfo.s.kind === "article" ? "Articles" : nextInfo.s.kind === "leads" ? "Leads" : "Site audit"} · ${dayLabel(nextInfo.at, tz, now)} ${time12(nextInfo.at, tz)}` : "nothing scheduled"}</div>
-              </div>
-            </button>
             <button className="st b" onClick={() => { setTab("hist"); setHf("Completed"); }} title="See completed runs">
               <span className="sbox"><Ic n="check" /></span><div>
                 <div className="sv">{runs === null ? "…" : doneToday}</div>
@@ -761,7 +765,16 @@ const CSS = `
 .sched .pill.off{background:var(--bg);color:var(--mut);border:1px solid var(--line)}.sched .pill.off i{background:var(--mut)}
 .sched .banner{background:var(--bads);color:var(--bad);border:1px solid var(--bad);border-radius:12px;padding:12px 14px;margin-bottom:16px;font-size:13px}
 .sched .banner code{font-family:ui-monospace,monospace;font-size:12px}
-.sched .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:10px;margin-bottom:20px}
+.sched .nextline{display:flex;align-items:center;gap:14px;flex-wrap:wrap;width:100%;background:none;border:0;border-bottom:1px solid var(--line);cursor:pointer;padding:0 2px 16px;margin:2px 0 16px;color:inherit;font:inherit;text-align:left}
+.sched .nextline:hover .nl-go{opacity:1}
+.sched .nl-ic{display:grid;place-items:center;width:40px;height:40px;border-radius:50%;background:var(--acs);color:var(--ac);flex:none}
+.sched .nl-head{display:flex;flex-direction:column;gap:2px;min-width:0}
+.sched .nl-label{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--mut)}
+.sched .nl-val{font-size:24px;font-weight:600;color:var(--tx);font-variant-numeric:tabular-nums;line-height:1.05}
+.sched .nl-sub{font-size:13.5px;color:var(--mut)}
+.sched .nl-go{margin-left:auto;font-size:13px;font-weight:600;color:var(--ac);opacity:.65;transition:opacity .15s;white-space:nowrap}
+@media(max-width:560px){.sched .nl-go{display:none}.sched .nl-val{font-size:21px}.sched .nl-sub{width:100%}}
+.sched .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:20px}
 .sched .st{border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;gap:12px;align-items:center;background:var(--card);min-width:0;width:100%;text-align:left;font:inherit;color:inherit;cursor:pointer;transition:transform .12s,box-shadow .12s,border-color .12s}
 .sched .st:hover{box-shadow:0 4px 14px rgba(0,0,0,.08);transform:translateY(-1px)}
 .sched .st:active{transform:none}
