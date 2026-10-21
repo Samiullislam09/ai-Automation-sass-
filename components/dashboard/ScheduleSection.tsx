@@ -126,6 +126,7 @@ function countdown(ms: number): string {
 /* ═════════════════════════════════════════════════════════════════════════ */
 export default function ScheduleSection() {
   const { toast, confirmAction } = useStore();
+  const router = useRouter();
   // Seeded with (disabled) defaults so the page paints instantly instead of flashing a
   // full-panel "Loading…" on every visit; the real rows arrive from /api/schedule a moment
   // later. "UTC" keeps the first paint deterministic for SSR — loadSchedule swaps in the real
@@ -288,6 +289,7 @@ export default function ScheduleSection() {
   const doneToday = (runs ?? []).filter((r) => ymd(new Date(r.firedAt), tz) === ymd(new Date(now), tz) && r.status === "finished").length;
   const failedToday = (runs ?? []).filter((r) => ymd(new Date(r.firedAt), tz) === ymd(new Date(now), tz) && r.status === "failed").length;
   const failedTotal = (runs ?? []).filter((r) => r.status === "failed").length;
+  const articlesMade = (runs ?? []).reduce((n, r) => n + r.articles.length, 0);
 
   const anyOn = (Object.values(scheds) as Sched[]).some((s) => s.enabled);
   const summary = (k: Kind) => {
@@ -346,6 +348,13 @@ export default function ScheduleSection() {
                 <div className="sv">{runs === null ? "…" : failedTotal}</div>
                 <div className="sl">Needs attention</div>
                 <div className="sl">{failedTotal ? "failed · tap to review" : "nothing to fix"}</div>
+              </div>
+            </button>
+            <button className="st e" onClick={() => router.push("/dashboard/content")} title="See all articles">
+              <span className="sbox"><Ic n="article" /></span><div>
+                <div className="sv">{runs === null ? "…" : articlesMade}</div>
+                <div className="sl">Articles made</div>
+                <div className="sl">{articlesMade ? "tap to open library" : "none yet"}</div>
               </div>
             </button>
           </div>
@@ -753,16 +762,16 @@ const CSS = `
 .sched .pill.off{background:var(--bg);color:var(--mut);border:1px solid var(--line)}.sched .pill.off i{background:var(--mut)}
 .sched .banner{background:var(--bads);color:var(--bad);border:1px solid var(--bad);border-radius:12px;padding:12px 14px;margin-bottom:16px;font-size:13px}
 .sched .banner code{font-family:ui-monospace,monospace;font-size:12px}
-.sched .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+.sched .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:10px;margin-bottom:20px}
 .sched .st{border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;gap:12px;align-items:center;background:var(--card);min-width:0;width:100%;text-align:left;font:inherit;color:inherit;cursor:pointer;transition:transform .12s,box-shadow .12s,border-color .12s}
 .sched .st:hover{box-shadow:0 4px 14px rgba(0,0,0,.08);transform:translateY(-1px)}
 .sched .st:active{transform:none}
 .sched .st>div{min-width:0;flex:1}
-.sched .st.a{background:var(--acs);border-color:transparent}.sched .st.b{background:var(--oks);border-color:transparent}.sched .st.c{background:var(--warns);border-color:transparent}.sched .st.d{background:var(--bads);border-color:transparent}
-.sched .st.d .sbox{color:var(--bad)}
+.sched .st.a{background:var(--acs);border-color:transparent}.sched .st.b{background:var(--oks);border-color:transparent}.sched .st.c{background:var(--warns);border-color:transparent}.sched .st.d{background:var(--bads);border-color:transparent}.sched .st.e{background:var(--pus);border-color:transparent}
+.sched .st.d .sbox{color:var(--bad)}.sched .st.e .sbox{color:var(--pu)}
 .sched .sbox{color:var(--mut);width:36px;height:36px;border-radius:50%;background:var(--panel);display:grid;place-items:center;flex:none}
 .sched .st.a .sbox{color:var(--ac)}.sched .st.b .sbox{color:var(--ok)}.sched .st.c .sbox{color:var(--warn)}
-.sched .sv{font-weight:500;font-size:19px;line-height:1.25;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.sched .sl{font-size:12px;color:var(--mut);overflow-wrap:anywhere}
+.sched .sv{font-weight:500;font-size:19px;line-height:1.25;font-variant-numeric:tabular-nums;overflow-wrap:break-word}.sched .sl{font-size:12px;color:var(--mut);overflow-wrap:break-word}
 .sched .tabs{display:flex;gap:4px;margin-bottom:16px;flex-wrap:wrap;border-bottom:1px solid var(--line)}
 .sched .tab{display:inline-flex;align-items:center;gap:8px;border:0;border-bottom:3px solid transparent;background:none;color:var(--mut);padding:10px 14px;font:inherit;font-weight:500;cursor:pointer;margin-bottom:-1px}
 .sched .tab:hover{color:var(--tx)}
@@ -848,7 +857,7 @@ const CSS = `
 .sched .btn:hover{background:var(--acs)}
 .sched .btn.p{background:var(--ac);border-color:var(--ac);color:var(--onac)}.sched .btn.p:hover{opacity:.9}.sched .btn:disabled{opacity:.6;cursor:not-allowed}
 .sched .next{background:var(--acs);border-radius:8px;padding:10px 14px;font-size:14px;color:var(--tx)}
-@media(max-width:720px){.sched .stats{grid-template-columns:1fr 1fr}.sched .top{flex-wrap:wrap}}
+@media(max-width:720px){.sched .top{flex-wrap:wrap}}
 @media(max-width:700px){.sched .tr.th{display:none}.sched .tr.tk,.sched .tr.hs,.sched .tr.up{grid-template-columns:1fr auto}.sched .tr .c.main{grid-column:1/-1}.sched .tr .c.hide{display:none}.sched .tr .c.end{text-align:left}}
 @media(max-width:600px){
   .sched .wrap{padding:2px 0 32px}
@@ -865,5 +874,5 @@ const CSS = `
   .sched .modal{max-width:100%}
   .sched .search{max-width:none}
 }
-@media(max-width:400px){.sched .stats{grid-template-columns:1fr}}
+@media(max-width:360px){.sched .stats{grid-template-columns:1fr}}
 `;
