@@ -3284,26 +3284,39 @@ export default function MrLxwaDashboard({
     // whatever the order actually produced (summariseProduced), so an image, article or lead run
     // reads correctly without this branch knowing any of those words.
     const produced = summariseProduced(t.items);
-    // A clear, friendly completion line (owner, 2026-10-21: "jab task complete ho to AI bataye —
-    // 'sir aapka task ho gaya'"). Built from the task's REAL status + what it actually produced.
+    // Did the deterministic quality gate pass? A gate-FAILED article still finishes and lands in
+    // Approvals, so "✅ All done, ready" read as a success when it actually needs review (owner,
+    // 2026-10-21). The `score` item carries the real verdict.
+    const gateFailed = t.items.some((it) => it.kind === "score" && it.payload && it.payload.passed === false);
+    const isArticle = produced?.kind === "article";
+    const title = produced?.headline?.trim() || "";
+    const shortTitle = title.length > 54 ? title.slice(0, 52).replace(/\s+\S*$/, "") + "…" : title;
+    // The article's title belongs IN the sentence (quoted, trimmed), not as a giant keyword-pill
+    // under it (owner, 2026-10-21: "keyword aisa kyun hai?"). A chip is kept only for a genuinely
+    // short highlight (a keyword, a company), never a long headline.
+    const named = isArticle && shortTitle ? ` “${shortTitle}”` : "";
+
     let text: string;
     if (t.status === "cancelled") {
       text = "Cancelled — nothing was produced.";
     } else if (t.status === "failed" || t.status === "needs_attention") {
       text = `⚠️ Couldn't finish: ${summary}`;
-    } else {
-      const where =
-        t.status === "published" ? "it's now live on your site"
-        : t.status === "awaiting_approval" ? "it's waiting in Approvals for your review"
-        : "it's ready";
+    } else if (gateFailed) {
       text = produced
-        ? `✅ All done! Your ${produced.count > 1 ? `${produced.count} ` : ""}${plural(produced.kind, produced.count)} ${produced.count > 1 ? "are" : "is"} ready — ${where}.`
+        ? `📝 Your article${named} is written, but it didn't pass the quality gate — open it in Approvals to review before publishing.`
+        : `📝 Written, but it didn't pass the quality gate — review it in Approvals.`;
+    } else {
+      const verb = produced && produced.count > 1 ? "are" : "is";
+      const tail =
+        t.status === "published" ? `${verb} now live on your site`
+        : t.status === "awaiting_approval" ? `${verb} ready and waiting in Approvals for your review`
+        : `${verb} ready`;
+      text = produced
+        ? `✅ All done! Your ${produced.count > 1 ? `${produced.count} ` : ""}${plural(produced.kind, produced.count)}${produced.count > 1 ? "" : named} ${tail}.`
         : `✅ All done — ${summary}`;
     }
     if (!text) return;
-    // The highlight rides as its own chip, not glued into the sentence: it is a keyword / title,
-    // and it should look like one.
-    const chip = produced?.headline ?? undefined;
+    const chip = !isArticle && title && title.length <= 40 ? title : undefined;
     const cta = produced ? { label: "View in Live Visual", agentId: produced.agentId ?? undefined } : undefined;
     setThread((p) => {
       const i = p.findIndex((m) => m.taskId === id);
