@@ -732,6 +732,11 @@ const CSS = `
    negative margin from ever producing a horizontal scrollbar. */
 .sched{--bg:#f8f9fa;--panel:#fff;--card:#fff;--line:#dadce0;--tx:#202124;--mut:#5f6368;--ac:#1a73e8;--acs:#e8f0fe;--onac:#fff;--ok:#188038;--oks:#e6f4ea;--bad:#d93025;--warn:#b06000;--warns:#fef7e0;--off:#bdc1c6;--bads:#fce8e6;--pu:#8430ce;--pus:#f3e8fd;color-scheme:light;color:var(--tx);background:#fff;min-height:100%;margin:-12px;overflow-x:hidden;font:15px/1.5 "Google Sans",Roboto,"Segoe UI",Arial,sans-serif}
 @media(min-width:640px){.sched{margin:-16px}}
+/* Follows the app theme toggle (next-themes .dark/.light on <html>): white in light mode,
+   the dashboard's navy in dark mode — so Schedule matches whichever the two-colour toggle picks. */
+.dark .sched{--bg:#080b16;--panel:#0a0e1b;--card:#0d1220;--line:#1b2236;--tx:#f2f4fa;--mut:#9aa3b8;--ac:#8ab4f8;--acs:#1b2740;--onac:#0a0e1b;--ok:#81c995;--oks:#13331f;--bad:#f28b82;--warn:#f5c451;--warns:#3a2e12;--off:#3a4160;--bads:#3a1c1a;--pu:#c4b5fd;--pus:#2a2246;color-scheme:dark;background:#04060e}
+.dark .sched input,.dark .sched select,.dark .sched .chip.dp input{color-scheme:dark}
+.dark .sched .chip-n{background:rgba(255,255,255,.08)}
 .sched *{box-sizing:border-box}
 /* Full-bleed: no outer card. The whole content area is one white sheet reaching the edges
    (owner confirmed 2026-10-21); the panel wrapper is now just a padding box. */
@@ -814,18 +819,18 @@ const CSS = `
 .sched .tag{font-size:12px;padding:3px 10px;border-radius:99px;background:var(--bg);border:1px solid var(--line);color:var(--mut);white-space:nowrap}
 .sched .tag.auto{background:var(--acs);color:var(--ac);border-color:transparent}.sched .tag.chat{background:var(--pus);color:var(--pu);border-color:transparent}
 .sched .empty{text-align:center;padding:36px 10px;color:var(--mut);display:flex;flex-direction:column;align-items:center;gap:6px}.sched .empty b{color:var(--tx);font-weight:500}
-.sched .box{background:var(--bg);border-radius:8px;padding:12px 14px;font-size:14px;color:var(--mut)}
+.sched .box{background:var(--bg);border-radius:8px;padding:10px 12px;font-size:13px;line-height:1.5;color:var(--mut)}
 .sched input,.sched select{width:100%;background:var(--panel);color:var(--tx);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font:inherit;color-scheme:light}
 .sched input:hover,.sched select:hover{border-color:var(--off)}
 .sched .ov{position:fixed;inset:0;background:rgba(32,33,36,.55);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;padding:16px;z-index:60}
-.sched .modal{background:var(--panel);border-radius:16px;width:100%;max-width:520px;max-height:calc(100vh - 32px);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 48px rgba(0,0,0,.28),0 4px 12px rgba(0,0,0,.14);animation:schedpop .15s ease-out}
+.sched .modal{background:var(--panel);border-radius:16px;width:100%;max-width:440px;max-height:calc(100vh - 32px);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 48px rgba(0,0,0,.28),0 4px 12px rgba(0,0,0,.14);animation:schedpop .15s ease-out}
 @keyframes schedpop{from{transform:scale(.97);opacity:0}}
-.sched .mh{flex:none;display:flex;align-items:center;gap:12px;padding:18px 20px;border-bottom:1px solid var(--line)}
-.sched .mh h2{margin:0;font-size:19px;font-weight:500;flex:1;min-width:0;color:var(--tx)}.sched .mh .ico{width:40px;height:40px}
-.sched .x{flex:none;width:34px;height:34px;border-radius:8px;background:none;border:0;color:var(--mut);cursor:pointer;display:grid;place-items:center}.sched .x:hover{color:var(--tx);background:var(--bg)}
-.sched .mb{flex:1;min-height:0;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:16px}
-.sched .mf{flex:none;padding:14px 20px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end}
-.sched .l{display:block;font-weight:500;font-size:13px;margin-bottom:7px;color:var(--mut)}
+.sched .mh{flex:none;display:flex;align-items:center;gap:11px;padding:15px 18px;border-bottom:1px solid var(--line)}
+.sched .mh h2{margin:0;font-size:17px;font-weight:600;flex:1;min-width:0;color:var(--tx)}.sched .mh .ico{width:36px;height:36px}
+.sched .x{flex:none;width:32px;height:32px;border-radius:8px;background:none;border:0;color:var(--mut);cursor:pointer;display:grid;place-items:center}.sched .x:hover{color:var(--tx);background:var(--bg)}
+.sched .mb{flex:1;min-height:0;overflow-y:auto;padding:16px 18px;display:flex;flex-direction:column;gap:13px}
+.sched .mf{flex:none;padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end}
+.sched .l{display:block;font-weight:600;font-size:12px;letter-spacing:.02em;margin-bottom:6px;color:var(--mut)}
 .sched .seg{display:flex;border:1px solid var(--line);border-radius:99px;overflow:hidden}
 .sched .seg button{flex:1;border:0;border-right:1px solid var(--line);background:none;color:var(--tx);padding:8px 6px;font:inherit;cursor:pointer}
 .sched .seg button:last-child{border-right:0}
@@ -833,10 +838,10 @@ const CSS = `
 .sched .tzr{display:flex;gap:8px;align-items:stretch}
 .sched .tzr select{flex:1;width:auto;min-width:0}
 .sched .tzr .btn{flex:none}
-.sched .sw{display:flex;align-items:center;gap:12px;justify-content:space-between;border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.sched .sw{display:flex;align-items:center;gap:12px;justify-content:space-between;border:1px solid var(--line);border-radius:10px;padding:11px 13px}
 .sched .sw>div{min-width:0}
-.sched .sw b{display:block;color:var(--tx);font-weight:500}
-.sched .sw small{margin-top:2px}
+.sched .sw b{display:block;color:var(--tx);font-weight:600;font-size:14px}
+.sched .sw small{margin-top:2px;font-size:12.5px}
 .sched small,.sched .hint{color:var(--mut);font-size:13px;display:block}
 .sched small.bad{color:var(--bad)}
 .sched .btn{border:1px solid var(--line);background:var(--panel);color:var(--ac);padding:9px 22px;border-radius:99px;font:inherit;font-weight:500;cursor:pointer;white-space:nowrap}

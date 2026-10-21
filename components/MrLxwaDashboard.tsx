@@ -41,6 +41,7 @@ import { renderMarkdown } from "@/lib/md";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LxGlobalStyle } from "@/components/lx-theme";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { useLiveEvents, isTerminalTask, isTerminalStep, isFlowing, useNow, elapsedMs, clock, type TaskState } from "@/lib/live";
 import { useStore, PLANS } from "@/lib/store";
 import { startPolling } from "@/lib/poll";
@@ -3316,11 +3317,14 @@ export default function MrLxwaDashboard({
         </div>
         {/* rendered conditionally, not class-toggled: "hidden lg:inline-flex lg:hidden" is two
             lg display utilities fighting, and inline-flex wins in Tailwind's output order */}
-        {!mini && (
-          <button className="lx-icobtn ml-auto hidden lg:inline-flex" onClick={toggleMini} aria-label="Collapse sidebar" title="Collapse sidebar">
-            <PanelLeftClose size={15} />
-          </button>
-        )}
+        <div className={`flex items-center gap-1 ${mini ? "lg:hidden" : "ml-auto"}`}>
+          <ThemeToggle className="!size-8" />
+          {!mini && (
+            <button className="lx-icobtn hidden lg:inline-flex" onClick={toggleMini} aria-label="Collapse sidebar" title="Collapse sidebar">
+              <PanelLeftClose size={15} />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* nav — items with a real href (see NAV's own comment) are real next/link navigation
