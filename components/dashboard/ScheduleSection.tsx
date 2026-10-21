@@ -395,7 +395,6 @@ export default function ScheduleSection() {
                   <span className="info"><div className="name">Social posts</div><div className="desc">Post on your social channels automatically.</div></span>
                   <span className="badge">Coming soon</span>
                 </div>
-                <div className="tip"><Ic n="bolt" z={20} /><div><b>How it runs</b><small>The schedule fires inside agent-server. If that service is down a run is skipped — missed runs are not replayed; the next scheduled time simply runs.</small></div></div>
               </div>
             )}
 

@@ -47,6 +47,22 @@ export const LX_CSS = `
   --vio:var(--lx-violet); --grn:var(--lx-green); --teal:var(--lx-cyan);
   --tr:.18s ease;
 }
+/* LIGHT variant — next-themes puts .light on <html> when the sidebar toggle is flipped.
+   Every .lx-* surface reads var(--lx-*), and the /app bridge tokens (--bg/--panel/--ink…)
+   reference those same vars, so redefining the palette here flips the whole dashboard —
+   sidebar (.lx-panelL), chat panel (.lx-panelR) and cards included — to white. */
+.light .lx-root{
+  --lx-bg:#f3f6fb; --lx-panel:#ffffff; --lx-card:#ffffff; --lx-card2:#f4f7fc; --lx-in:#ffffff;
+  --lx-border:rgba(22,32,60,.12); --lx-text:#1b2440; --lx-mut:#5b6784; --lx-dim:#8a96b2;
+  --lx-purple:#7c5cff; --lx-violet:#6a45f5; --lx-blue:#2f6fe0; --lx-cyan:#0e93b0; --lx-green:#12a85f; --lx-red:#e0435f;
+  --ac:#6a45f5; --ac-d:#5436d8; --line2:rgba(22,32,60,.2);
+}
+/* The handful of surfaces painted with a white alpha (invisible on white) get a dark alpha
+   in light mode so they still read as a subtle fill. */
+.light .lx-root .lx-chat-in,
+.light .lx-root .lx-chip,
+.light .lx-root .lx-pill.mut,
+.light .lx-root .lx-listening{background:rgba(22,32,60,.04)}
 .lx-root *{box-sizing:border-box}
 .lx-root ::selection{background:rgba(139,92,246,.35)}
 
