@@ -442,22 +442,39 @@ function taskTitle(task: { kind?: string | null; echo?: string | null } | null |
 /** What an order produced, in ONE line plus one highlight — derived from whatever kinds the
  *  agents actually emitted. Keyword runs, article runs, image runs and lead runs all describe
  *  themselves through this without the chat learning any of their names. */
+// Process/intermediate events that are NOT the deliverable. A write-article run emits dozens of
+// `section_rewrite`s, so the old "biggest group wins" reported "46 section_rewrites ready" as the
+// result (owner, 2026-10-21). These are excluded so the real output is what's summarised.
+const PROCESS_KINDS = new Set([
+  "section_rewrite", "section_revised", "section", "review_round", "review_result", "review_final",
+  "research", "research_progress", "keyword", "keyword_picked", "topic_picked", "cluster",
+  "article_revise", "issue", "page", "score_category",
+]);
+// The real deliverables, best-first, and the human noun each reads as.
+const DELIVERABLE_PRIORITY = ["published", "saved", "draft", "post", "story_page", "lead", "image", "score"];
+const DELIVERABLE_NOUN: Record<string, string> = {
+  published: "article", saved: "article", draft: "article", post: "social post",
+  story_page: "web story", lead: "lead", image: "image", score: "audit report",
+};
 function summariseProduced(items: { kind: string; payload: any; agent_id: string }[]) {
   if (!items.length) return null;
-  const groups = new Map<string, typeof items>();
-  for (const it of items) {
-    const g = groups.get(it.kind) ?? [];
-    g.push(it);
-    groups.set(it.kind, g);
-  }
-  // The biggest group is what the order was really about; ties keep first-seen order.
+  const usable = items.filter((it) => !PROCESS_KINDS.has(it.kind));
+  if (!usable.length) return null;
+  // Prefer a known deliverable by priority (the article beats its own 4 images); otherwise fall
+  // back to the biggest remaining group.
   let best: { kind: string; list: typeof items } | null = null;
-  for (const [kind, list] of Array.from(groups.entries())) {
-    if (!best || list.length > best.list.length) best = { kind, list };
+  for (const k of DELIVERABLE_PRIORITY) {
+    const list = usable.filter((it) => it.kind === k);
+    if (list.length) { best = { kind: k, list }; break; }
+  }
+  if (!best) {
+    const groups = new Map<string, typeof items>();
+    for (const it of usable) { const g = groups.get(it.kind) ?? []; g.push(it); groups.set(it.kind, g); }
+    for (const [kind, list] of Array.from(groups.entries())) if (!best || list.length > best.list.length) best = { kind, list };
   }
   if (!best) return null;
   return {
-    kind: best.kind,
+    kind: DELIVERABLE_NOUN[best.kind] ?? best.kind,
     count: best.list.length,
     headline: itemHeadline(best.list[0]?.payload),
     agentId: best.list[0]?.agent_id ?? null,
@@ -3267,7 +3284,22 @@ export default function MrLxwaDashboard({
     // whatever the order actually produced (summariseProduced), so an image, article or lead run
     // reads correctly without this branch knowing any of those words.
     const produced = summariseProduced(t.items);
-    const text = produced ? `${produced.count} ${plural(produced.kind, produced.count)} ready` : summary;
+    // A clear, friendly completion line (owner, 2026-10-21: "jab task complete ho to AI bataye —
+    // 'sir aapka task ho gaya'"). Built from the task's REAL status + what it actually produced.
+    let text: string;
+    if (t.status === "cancelled") {
+      text = "Cancelled — nothing was produced.";
+    } else if (t.status === "failed" || t.status === "needs_attention") {
+      text = `⚠️ Couldn't finish: ${summary}`;
+    } else {
+      const where =
+        t.status === "published" ? "it's now live on your site"
+        : t.status === "awaiting_approval" ? "it's waiting in Approvals for your review"
+        : "it's ready";
+      text = produced
+        ? `✅ All done! Your ${produced.count > 1 ? `${produced.count} ` : ""}${plural(produced.kind, produced.count)} ${produced.count > 1 ? "are" : "is"} ready — ${where}.`
+        : `✅ All done — ${summary}`;
+    }
     if (!text) return;
     // The highlight rides as its own chip, not glued into the sentence: it is a keyword / title,
     // and it should look like one.
@@ -3625,6 +3657,16 @@ export default function MrLxwaDashboard({
   // no-agent-selected "What the team is doing" view; a specific agent's tab shows exactly, only,
   // that agent's own lines.
   const panelLines = (task?.lines ?? []).filter((ln) => (panelAgent ? ln.agent_id === panelAgent.id : true));
+  // Tail the "What X is doing" log: as new lines land, keep the newest one in view — but only
+  // when the reader is already at/near the bottom, so scrolling up to read earlier activity is
+  // never yanked back (owner, 2026-10-21: "jaise jaise log aaye waise scroll hoke focus pe rahe").
+  const logBoxRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = logBoxRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 90;
+    if (nearBottom) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, [panelLines.length, panelAgent?.id]);
   // Clicking an agent the plan hasn't reached yet still opens its screen (nothing is disabled,
   // owner 2026-09-10) — it just has no lines yet because there is genuinely nothing to show, not
   // because something is broken. "No activity yet" read as dead; an animated "Waiting…" reads as
@@ -4100,7 +4142,7 @@ export default function MrLxwaDashboard({
               earlier (owner, 2026-09-10: "analytic ka part cut jaye aisa nahi... full show
               karna, agar zyada ho to scroll pe dalo") — now it all renders, and the panel itself
               scrolls once it runs long instead of the page growing without bound. */}
-          <div className="lx-tl mt-1" style={{ maxHeight: 360, overflowY: "auto" }}>
+          <div ref={logBoxRef} className="lx-tl mt-1" style={{ maxHeight: 360, overflowY: "auto" }}>
             {panelLines.length === 0 && (
               <div className="lx-11 lx-mut py-2 flex items-center gap-2">
                 {panelAgentNotStarted ? (
