@@ -287,6 +287,7 @@ export default function ScheduleSection() {
   const onCount = scheds ? (Object.values(scheds) as Sched[]).filter((s) => s.enabled).length : 0;
   const doneToday = (runs ?? []).filter((r) => ymd(new Date(r.firedAt), tz) === ymd(new Date(now), tz) && r.status === "finished").length;
   const failedToday = (runs ?? []).filter((r) => ymd(new Date(r.firedAt), tz) === ymd(new Date(now), tz) && r.status === "failed").length;
+  const failedTotal = (runs ?? []).filter((r) => r.status === "failed").length;
 
   const anyOn = (Object.values(scheds) as Sched[]).some((s) => s.enabled);
   const summary = (k: Kind) => {
@@ -340,11 +341,11 @@ export default function ScheduleSection() {
                 <div className="sl">{pendingOrders.length ? "waiting to run" : "nothing booked"}</div>
               </div>
             </button>
-            <button className="st" onClick={() => setTab("auto")} title="Manage automations">
-              <span className="sbox"><Ic n="bolt" /></span><div>
-                <div className="sv">{onCount} of 3</div>
-                <div className="sl">Automations active</div>
-                <div className="sl">{onCount ? (["article", "leads", "audit"] as Kind[]).filter((k) => scheds[k].enabled).map((k) => k === "article" ? "Articles" : k === "leads" ? "Leads" : "Audit").join(", ") + " on" : "none on yet"}</div>
+            <button className={"st" + (failedTotal ? " d" : "")} onClick={() => { setTab("hist"); setHf("Failed"); }} title="Review failed runs">
+              <span className="sbox"><Ic n="error" /></span><div>
+                <div className="sv">{runs === null ? "…" : failedTotal}</div>
+                <div className="sl">Needs attention</div>
+                <div className="sl">{failedTotal ? "failed · tap to review" : "nothing to fix"}</div>
               </div>
             </button>
           </div>
@@ -752,7 +753,8 @@ const CSS = `
 .sched .st:hover{box-shadow:0 4px 14px rgba(0,0,0,.08);transform:translateY(-1px)}
 .sched .st:active{transform:none}
 .sched .st>div{min-width:0;flex:1}
-.sched .st.a{background:var(--acs);border-color:transparent}.sched .st.b{background:var(--oks);border-color:transparent}.sched .st.c{background:var(--warns);border-color:transparent}
+.sched .st.a{background:var(--acs);border-color:transparent}.sched .st.b{background:var(--oks);border-color:transparent}.sched .st.c{background:var(--warns);border-color:transparent}.sched .st.d{background:var(--bads);border-color:transparent}
+.sched .st.d .sbox{color:var(--bad)}
 .sched .sbox{color:var(--mut);width:36px;height:36px;border-radius:50%;background:var(--panel);display:grid;place-items:center;flex:none}
 .sched .st.a .sbox{color:var(--ac)}.sched .st.b .sbox{color:var(--ok)}.sched .st.c .sbox{color:var(--warn)}
 .sched .sv{font-weight:500;font-size:19px;line-height:1.25;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.sched .sl{font-size:12px;color:var(--mut);overflow-wrap:anywhere}
