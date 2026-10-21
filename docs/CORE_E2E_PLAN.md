@@ -70,3 +70,8 @@ Har item pe: asli tenant pe test → fail ka exact reason (evidence) → fix →
   - **Cost:** Supabase Log Ingestion throttle (WhatsApp scheduler ticks slowed; WhatsApp polls pause on hidden tab).
   - **BLOCKER:** **Railway deploys paused (trial credit ~$3.92 left)** → none of the agent-server fixes are live yet. Owner must add Railway billing, then ONE redeploy brings it all live. Web fixes already live on Vercel.
   - **2 owner decisions still open:** 💰 paid LLM + image model budget; 🔀 WhatsApp-reachable lead source.
+- 2026-10-21: **Railway redeploy DONE (owner).** Saare agent-server fixes ab **LIVE** — per-account NVIDIA model fallback (lib/llm.ts), writer strongest-available + review on fast model (rounds 5→3), image prompt fix. **Blocker 0 ka deploy-part clear.** PENDING verification (owner test → paste, main diagnose):
+  (a) **NVIDIA zinda hai?** chat/article chala ke dekho; Railway logs me `[llm] using model:` / `[writer] using model:` / `[review] using model:` lines paste karo (konsa model pick hua).
+  (b) **Item 1 — Article E2E:** chat se "write an article about <topic> and publish" → gate pass/fail + wca-global.com pe live + images. 5 article chala ke gino (pass/fail + fail reason jobs_log se).
+  (c) Jab item 4 (WhatsApp) pe aayenge: migrations 031–037 Supabase me applied confirm karna.
+  **Interim (Railway block ke dauraan) Schedule page ka UI/UX overhaul hua (reference-match, light/dark toggle, full-bleed, stat tiles, modal polish) — core se alag, override 12345 se.**
