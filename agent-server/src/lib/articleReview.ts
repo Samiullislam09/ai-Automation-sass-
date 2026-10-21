@@ -477,24 +477,53 @@ export async function rewriteSnippetAnswer(
     `Output only the rewritten paragraph. No heading, no preamble, no note about what you changed, no quotes around it.`,
   ].join("\n\n");
 
-  let text = (await complete(prompt, { maxTokens: 400, label: "writer.snippet-answer" })).trim();
-  text = text
-    .replace(/^```(?:markdown|md)?\s*/i, "")
-    .replace(/```\s*$/i, "")
-    .replace(/^<<<\s*/, "")
-    .replace(/\s*>>>$/, "")
-    .split("\n")
-    .filter((l) => !HEADING_LINE.test(l))
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim();
+  const clean = (raw: string) =>
+    raw
+      .trim()
+      .replace(/^```(?:markdown|md)?\s*/i, "")
+      .replace(/```\s*$/i, "")
+      .replace(/^<<<\s*/, "")
+      .replace(/\s*>>>$/, "")
+      .split("\n")
+      .filter((l) => !HEADING_LINE.test(l))
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
 
-  const n = words(prose(text)).length;
-  if (!text || n < SNIPPET_MIN_WORDS || n > SNIPPET_MAX_WORDS) {
-    console.warn(`[articleReview] discarded a snippet-answer rewrite at ${n} words (needs ${SNIPPET_MIN_WORDS}-${SNIPPET_MAX_WORDS})`);
-    return null;
+  // A real answer is always >= the floor, so an OVER-long one can be brought into band without
+  // the model: drop whole trailing sentences (keeps the lead answer sentence, loses only the
+  // tail elaboration) until it fits under the ceiling. This is what turned "rewrite failed: not
+  // 40-58 words" — the single most common gate failure on live runs (2026-10-21) — from a hard
+  // fail into a pass, WITHOUT loosening the 40-58 bar itself.
+  const trimToBand = (text: string): string | null => {
+    if (!text) return null;
+    const total = words(prose(text)).length;
+    if (total <= SNIPPET_MAX_WORDS) return total >= SNIPPET_MIN_WORDS ? text : null;
+    const sentences = text.split(/(?<=[.!?])\s+/).filter(Boolean);
+    while (sentences.length > 1 && words(prose(sentences.join(" "))).length > SNIPPET_MAX_WORDS) sentences.pop();
+    const trimmed = sentences.join(" ").trim();
+    const n = words(prose(trimmed)).length;
+    return n >= SNIPPET_MIN_WORDS && n <= SNIPPET_MAX_WORDS ? trimmed : null;
+  };
+
+  // Two goes at a clean in-band rewrite (the fast reviewer model counts poorly), then trim an
+  // overshoot into band rather than throwing a usable rewrite away.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const text = clean(await complete(prompt, { maxTokens: 400, label: "writer.snippet-answer" }));
+    if (!text) continue;
+    const n = words(prose(text)).length;
+    if (n >= SNIPPET_MIN_WORDS && n <= SNIPPET_MAX_WORDS) return replaceAnswerParagraph(part.markdown, text);
+    const trimmed = trimToBand(text);
+    if (trimmed) return replaceAnswerParagraph(part.markdown, trimmed);
   }
-  return replaceAnswerParagraph(part.markdown, text);
+
+  // Last resort: the model never landed in range. Trim the ORIGINAL paragraph into the band so
+  // the rule passes with no rewrite at all, instead of keeping an out-of-range paragraph.
+  const origTrim = trimToBand(current);
+  if (origTrim && origTrim !== current) return replaceAnswerParagraph(part.markdown, origTrim);
+
+  console.warn(`[articleReview] snippet-answer could not be brought into ${SNIPPET_MIN_WORDS}-${SNIPPET_MAX_WORDS} words; original kept`);
+  return null;
 }
 
 /** Swap the answer paragraph for a new one, walking the part exactly as `answerParagraph` does
