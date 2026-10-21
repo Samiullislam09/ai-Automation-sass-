@@ -75,3 +75,9 @@ Har item pe: asli tenant pe test → fail ka exact reason (evidence) → fix →
   (b) **Item 1 — Article E2E:** chat se "write an article about <topic> and publish" → gate pass/fail + wca-global.com pe live + images. 5 article chala ke gino (pass/fail + fail reason jobs_log se).
   (c) Jab item 4 (WhatsApp) pe aayenge: migrations 031–037 Supabase me applied confirm karna.
   **Interim (Railway block ke dauraan) Schedule page ka UI/UX overhaul hua (reference-match, light/dark toggle, full-bleed, stat tiles, modal polish) — core se alag, override 12345 se.**
+- 2026-10-21 (later): **NVIDIA LIVE confirm** — article poora bana (2,300 words, 12 sec, 4 images, web story). Item-1 ka asli blocker ab = **quality gate** (real model output pe over-strict). Live failures dekhe + fix kiye:
+  - **Snippet 40-58 "rewrite failed"** → `rewriteSnippetAnswer` ab 2 retry + deterministic trim (over-length answers band me). Bar same, bas reachable.
+  - **Human-voice review "cut off by token limit"** → audit budget 3000→8000 + **fail-OPEN** (reviewer na chale to article block nahi). Test intent reversed.
+  - Chat: live-log **auto-scroll**, task-complete message clear + gate-FAIL pe honest ("didn't pass the gate, review in Approvals"), "46 section_rewrites" bug fix, giant title-chip hata (title ab quoted in sentence).
+  - **NEW TOOL `fix_article`** (Mr. Writer): chat se "article fix karo / quality gate error fix karo" → sirf failing rules fix → re-grade → Approvals me wapas (auto-publish nahi). No id diya to newest failed khud resolve. Planner phrases se pick karta hai (hardcode nahi). 719/719 pass.
+  - **BACHE failures (budget/calibration):** under-length snippet (31w — words add karne padte), heading-not-a-question, sentence-rhythm. Ye prose-quality = weak free model; **fix_article + 💰 paid model** se theek honge. **AB: Railway redeploy → 1-2 article test → batao kaunse rules bache.**
