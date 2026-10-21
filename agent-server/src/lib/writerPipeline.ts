@@ -95,12 +95,13 @@ const STEP_TOKENS = {
   meta: 1500,
   polish: 4096,
   revise: 4096,
-  // 1200 → 3000 on 2026-09-18, a regression from raising the three budgets above: the audit
-  // reports one JSON issue per problem it finds across the WHOLE article, so a longer article
-  // means a longer audit, and a real 1694-word review run died with "writer.humanize-audit step
-  // was cut off by the model's token limit" — which fails the audit open and drops the one check
-  // that is not mechanical.
-  humanizeAudit: 3000,
+  // 1200 → 3000 (2026-09-18) → 8000 (2026-10-21): the audit reports one JSON issue per problem
+  // across the WHOLE article, so a longer article means a longer audit. A real 2,300-word run
+  // still died at 3000 with "writer.humanize-audit step was cut off by the model's token limit",
+  // which showed on the dashboard as a FAILED check. 8000 comfortably fits the audit JSON for the
+  // longest articles the writer produces; it also now fails OPEN in articleReview (a reviewer that
+  // cannot run is an infra issue, not an article defect) so a cutoff can never block the gate again.
+  humanizeAudit: 8000,
   /** Fallback for a caller that names no budget — never the old 800, which was a truncation. */
   default: 2000,
 } as const;

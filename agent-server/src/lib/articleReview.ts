@@ -1280,7 +1280,12 @@ function failureLine(c: ReviewCheck): string {
 
 function auditChecks(audit: HumanizeAudit | null, error: string | null, split: SplitArticle): ReviewCheck[] {
   if (error) {
-    return [{ id: "human-audit", label: "Independent human-voice review", group: "Human voice", ok: false, detail: `the review could not run: ${error}`, section: null, part: null, fix: "article" }];
+    // FAIL OPEN. The independent human-voice reviewer is a bonus pass, not a gate rule — if it
+    // can't run (model token cutoff, a provider hiccup), that's an infrastructure problem, not a
+    // defect in the article, so it must NOT fail the gate. Recorded as a passed check with a note
+    // instead of a red failure (owner, 2026-10-21: a 2,300-word article was blocked purely because
+    // this step was truncated).
+    return [{ id: "human-audit", label: "Independent human-voice review", group: "Human voice", ok: true, detail: `skipped — the reviewer could not run (${error}); not counted against the article`, section: null, part: null, fix: "article" }];
   }
   if (!audit || audit.passed) {
     return [{ id: "human-audit", label: "Independent human-voice review", group: "Human voice", ok: true, detail: "an independent reviewer found no human-voice, experience, verdict or sourcing problems", section: null, part: null, fix: "article" }];

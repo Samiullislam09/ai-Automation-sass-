@@ -370,15 +370,18 @@ test("a section the model cannot fix stops after the round cap and does not pass
   assert.equal(final.payload.passed, false);
 });
 
-test("if the independent reviewer cannot run, the article does not pass on its silence", async () => {
+test("if the independent reviewer cannot run, it fails OPEN — a clean article is not blocked by it", async () => {
+  // DESIGN CHANGE (owner, 2026-10-21): the independent human-voice reviewer is a bonus pass, not a
+  // gate rule. When it can't run (model token cutoff, provider timeout) that is an infrastructure
+  // problem, not a defect in the article — so it must not fail the gate. A clean article still
+  // passes, and the error is still recorded on `auditError` for transparency.
   const { fn } = fakeComplete({
     "writer.humanize-audit": () => {
       throw new Error("NVIDIA timed out");
     },
   });
   const out = await runArticleReview(goodArticle(), INPUT, { complete: fn, checkLink: alwaysLive, now: () => NOW });
-  assert.equal(out.passed, false);
-  assert.equal(out.rounds, 2);
+  assert.equal(out.passed, true);
   assert.match(out.auditError ?? "", /NVIDIA timed out/);
 });
 
