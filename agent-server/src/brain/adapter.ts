@@ -81,6 +81,19 @@ export function translate(agentId: string, action: string, input: Record<string,
     case "writer.research_brief":
       return { queue: "writer", data: { topic: t(input.topic), researchOnly: true, taskLabel: `Research on "${t(input.topic)}"` } };
 
+    case "writer.fix_article":
+      // Re-review an EXISTING article on the writer queue. `fixArticleId` tells WriterAgent.run to
+      // take the fix branch instead of a fresh write; it may be null here and resolved to the
+      // newest gate-failed article by the writer itself.
+      return {
+        queue: "writer",
+        data: {
+          mode: "fix",
+          fixArticleId: (input.content_item_id ?? (input.article as any)?.contentItemId ?? (input.article as any)?.id ?? null) as any,
+          taskLabel: "Fixing the quality gate",
+        },
+      };
+
     case "boss.plan_topics":
       return { queue: "boss", data: { count: input.count ?? null, taskLabel: "Planning topics" } };
 

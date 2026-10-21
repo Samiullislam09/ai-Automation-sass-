@@ -25,10 +25,130 @@ import { TRUST_PAGE_PATTERN } from "../lib/seoChecks.js";
  *  approval in advance was for good articles), and a publish that FAILS falls back to
  *  Approvals with meta.publishError set. A failed publish that looked like a success would be
  *  the worst outcome available: the customer believes an article is live, and it is nowhere. */
+/** fix_article: re-run the quality review on an article that is ALREADY written but failed the
+ *  gate, fixing only the rules it broke, then re-grade and SAVE IN PLACE (owner, 2026-10-21:
+ *  "user AI ko bol ke quality-gate error fix kara sake"). No research, no dedupe, no new row — it
+ *  updates the existing content_items row and lands it back in Approvals. When no id is given it
+ *  resolves the newest article still failing the gate, so "fix my failed article" works from chat
+ *  without the intent engine having to know the id. */
+async function fixArticle(job: Job<AgentJobData>, ctx: AgentContext) {
+  const { tenantId } = job.data as any;
+  let id = ((job.data as any).fixArticleId as string | null) || null;
+
+  if (!id) {
+    const { data: rows } = await supabase
+      .from("content_items")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .eq("type", "article")
+      .eq("status", "failed")
+      .order("updated_at", { ascending: false })
+      .limit(1);
+    id = rows?.[0]?.id ? String(rows[0].id) : null;
+  }
+  if (!id) throw new Error("There's no failed article to fix right now — nothing is stuck on the quality gate.");
+
+  const { data: row, error: loadErr } = await supabase
+    .from("content_items")
+    .select("id, title, body, primary_keyword, meta, status")
+    .eq("id", id)
+    .eq("tenant_id", tenantId)
+    .single();
+  if (loadErr || !row) throw new Error(`Couldn't load that article to fix: ${loadErr?.message ?? "not found"}`);
+
+  const title = String(row.title ?? "").trim() || "Untitled";
+  const topic = String(row.primary_keyword ?? "").trim() || title;
+  let body = String(row.body ?? "");
+  if (!body.trim()) throw new Error("That article has no body to fix.");
+  const prevMeta = (row.meta ?? {}) as Record<string, unknown>;
+
+  ctx.onProgress({ label: `Fixing the quality gate on "${title}"` });
+
+  let profile: SiteProfile | null = null;
+  try { profile = (await loadActiveProfile(tenantId))?.profile ?? null; } catch {}
+  const context = await loadWriterContext(tenantId, topic, profile);
+  const siteHost = (() => {
+    try { return context.websiteUrl ? new URL(context.websiteUrl).hostname.replace(/^www\./, "") : null; } catch { return null; }
+  })();
+
+  const review = await runArticleReview(
+    body,
+    {
+      title,
+      topic,
+      primaryKeyword: topic,
+      siteUrl: context.websiteUrl ?? null,
+      author: context.businessName ?? siteHost,
+      allowedLinks: collectAllowedLinks(context, []),
+      metaTitle: (prevMeta.metaTitle as string) ?? undefined,
+      metaDescription: (prevMeta.metaDescription as string) ?? undefined,
+    },
+    {
+      complete: nimCompleteFast,
+      checkLink: checkLinkLive,
+      onEvent: (kind, payload) => ctx.data(kind, payload),
+      onProgress: (label) => ctx.onProgress({ label }),
+    },
+  );
+  body = review.body;
+  ctx.data("draft", { title, body });
+
+  const baseGate = gateArticle(body, {
+    primaryKeyword: topic,
+    metaTitle: (prevMeta.metaTitle as string) ?? undefined,
+    metaDescription: (prevMeta.metaDescription as string) ?? undefined,
+  });
+  const gate =
+    review.passed && baseGate.passed
+      ? baseGate
+      : { ...baseGate, passed: false, reasons: [...new Set([...baseGate.reasons, ...review.failures])] };
+  console.log(`[writer] FIX "${title}" review ${review.passed ? "PASSED" : "still failed"} in ${review.rounds} round(s) · ${summarizeGate(gate)}`);
+
+  ctx.data("score", { quality: gate.score, passed: gate.passed, words: gate.wordCount, sections: gate.sections });
+  ctx.data("references", { links: gate.links });
+
+  const meta: Record<string, unknown> = {
+    ...prevMeta,
+    wordCount: gate.wordCount,
+    sections: gate.sections,
+    links: gate.links,
+    qualityGate: gate,
+    qualityScore: gate.score,
+    articleReview: {
+      passed: review.passed,
+      rounds: review.rounds,
+      sectionRewrites: review.sectionRewrites,
+      articleRevisions: review.articleRevisions,
+      failures: review.failures,
+      auditError: review.auditError,
+    },
+    humanizeAudit: review.audit ? { passed: review.audit.passed, issues: review.audit.issues, fixed: review.passed } : (prevMeta.humanizeAudit ?? null),
+    lastFixedAt: new Date().toISOString(),
+  };
+
+  const { error: updErr } = await supabase
+    .from("content_items")
+    .update({ body, status: gate.passed ? "awaiting_approval" : "failed", meta, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("tenant_id", tenantId);
+  if (updErr) throw new Error(`Couldn't save the fixed article: ${updErr.message}`);
+
+  ctx.data("saved", { contentItemId: id, title, passed: gate.passed });
+  ctx.onProgress({ label: gate.passed ? "Fixed — it now passes the quality gate." : `Still ${gate.reasons.length} issue(s) after the fix.` });
+
+  return { passed: gate.passed, qualityGate: gate, contentItemId: id, title };
+}
+
 export class WriterAgent extends Agent {
   type = "writer";
   async run(job: Job<AgentJobData>, ctx: AgentContext) {
     const { tenantId } = job.data;
+
+    // fix_article: re-review an EXISTING, gate-failed article instead of writing a new one.
+    if ((job.data as any).mode === "fix" || (job.data as any).fixArticleId) {
+      return await fixArticle(job, ctx);
+    }
+
     let topic = (job.data as any).topic as string | undefined;
     let blueprint = (job.data as any).blueprint as string | undefined;
     const choiceId = (job.data as any).choiceId as string | undefined;

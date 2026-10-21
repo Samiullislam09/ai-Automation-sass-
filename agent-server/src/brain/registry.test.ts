@@ -173,6 +173,7 @@ test("enabledActions offers every action once its agent stops being a stub", () 
     "draft_social",
     "find_keywords",
     "find_leads",
+    "fix_article",
     "make_image",
     "make_images",
     "make_story",

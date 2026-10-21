@@ -183,6 +183,27 @@ export const MANIFESTS: Manifest[] = [
         estimated_seconds: 90, // GUESS — the research step alone has never been timed on its own
         cost_units: 12,
       },
+      {
+        // Re-run the quality review on an article that is ALREADY written but failed the gate,
+        // fixing only the rules it broke, then re-grade (owner, 2026-10-21: "user AI ko bol ke
+        // quality-gate error fix kara sake"). NOT a fresh write — `needs: []` so the planner does
+        // NOT walk back and write a new article; it is a one-step pass on an existing row. The id
+        // is optional: blank means "the newest article still failing the gate" (resolved from the
+        // DB before the order is placed, like publish's findPublishable).
+        id: "fix_article",
+        phrases: [
+          "fix the article", "fix the quality gate", "quality gate error fix karo",
+          "article fix karo", "isko theek karo", "failed article fix karo",
+          "gate errors fix karo", "fix my article", "ise pass karao",
+        ],
+        input: { content_item_id: "string?" },
+        output: { passed: "boolean", qualityGate: "object" },
+        provides: "fixed_article",
+        needs: [],
+        irreversible: false,
+        estimated_seconds: 120, // measured writer review loop is ~1-3 min
+        cost_units: 20,
+      },
     ],
     office: { room: "writer", ico: "✍️", color: "#b48bff" },
   },
