@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
 import { startPolling } from "@/lib/poll";
@@ -316,28 +317,36 @@ export default function ScheduleSection() {
           )}
           {loadError && !migration && <div className="banner">{loadError}</div>}
 
-          {/* stats */}
+          {/* stats — each tile jumps to the tab it summarises */}
           <div className="stats">
-            <div className="st a"><span className="sbox"><Ic n="clock" /></span><div>
-              <div className="sv" suppressHydrationWarning>{!nextInfo ? "Paused" : countdown(nextInfo.at.getTime() - now)}</div>
-              <div className="sl">Next task</div>
-              <div className="sl" suppressHydrationWarning>{nextInfo ? `${nextInfo.s.kind === "article" ? "Articles" : nextInfo.s.kind === "leads" ? "Leads" : "Site audit"} · ${dayLabel(nextInfo.at, tz, now)} ${time12(nextInfo.at, tz)}` : "nothing scheduled"}</div>
-            </div></div>
-            <div className="st b"><span className="sbox"><Ic n="check" /></span><div>
-              <div className="sv">{runs === null ? "…" : doneToday}</div>
-              <div className="sl">Completed today</div>
-              <div className="sl">{failedToday ? `${failedToday} failed, check History` : "all went well"}</div>
-            </div></div>
-            <div className="st c"><span className="sbox"><Ic n="hourglass" /></span><div>
-              <div className="sv">{orders === null ? "…" : pendingOrders.length}</div>
-              <div className="sl">Tasks from Mr Lxwa</div>
-              <div className="sl">{pendingOrders.length ? "waiting to run" : "nothing booked"}</div>
-            </div></div>
-            <div className="st"><span className="sbox"><Ic n="bolt" /></span><div>
-              <div className="sv">{onCount} of 3</div>
-              <div className="sl">Automations on</div>
-              <div className="sl">article · leads · audit</div>
-            </div></div>
+            <button className="st a" onClick={() => setTab("up")} title="See upcoming tasks">
+              <span className="sbox"><Ic n="clock" /></span><div>
+                <div className="sv" suppressHydrationWarning>{!nextInfo ? "Paused" : countdown(nextInfo.at.getTime() - now)}</div>
+                <div className="sl">Next task</div>
+                <div className="sl" suppressHydrationWarning>{nextInfo ? `${nextInfo.s.kind === "article" ? "Articles" : nextInfo.s.kind === "leads" ? "Leads" : "Site audit"} · ${dayLabel(nextInfo.at, tz, now)} ${time12(nextInfo.at, tz)}` : "nothing scheduled"}</div>
+              </div>
+            </button>
+            <button className="st b" onClick={() => { setTab("hist"); setHf("Completed"); }} title="See completed runs">
+              <span className="sbox"><Ic n="check" /></span><div>
+                <div className="sv">{runs === null ? "…" : doneToday}</div>
+                <div className="sl">Completed today</div>
+                <div className="sl">{failedToday ? `${failedToday} failed, check History` : "all went well"}</div>
+              </div>
+            </button>
+            <button className="st c" onClick={() => setTab("tasks")} title="See tasks from Mr Lxwa">
+              <span className="sbox"><Ic n="hourglass" /></span><div>
+                <div className="sv">{orders === null ? "…" : pendingOrders.length}</div>
+                <div className="sl">Tasks from Mr Lxwa</div>
+                <div className="sl">{pendingOrders.length ? "waiting to run" : "nothing booked"}</div>
+              </div>
+            </button>
+            <button className="st" onClick={() => setTab("auto")} title="Manage automations">
+              <span className="sbox"><Ic n="bolt" /></span><div>
+                <div className="sv">{onCount} of 3</div>
+                <div className="sl">Automations active</div>
+                <div className="sl">{onCount ? (["article", "leads", "audit"] as Kind[]).filter((k) => scheds[k].enabled).map((k) => k === "article" ? "Articles" : k === "leads" ? "Leads" : "Audit").join(", ") + " on" : "none on yet"}</div>
+              </div>
+            </button>
           </div>
 
           {/* tabs */}
@@ -582,10 +591,11 @@ function Upcoming({ scheds, orders, pendingOrders, now, tz, uf, setUf, ud, setUd
   return (
     <>
       <div className="chips">
-        {[["today", "Today"], ["tomorrow", "Tomorrow"], ["7", "Next 7 days"], ["14", "Next 14 days"], ["30", "Next 30 days"]].map(([k, l]) => (
-          <button key={k} className={"chip" + (uf === k ? " a" : "")} onClick={() => { setUf(k); setUd(""); }}>{l} {items.filter(inRange[k]).length}</button>
+        {[["today", "Today"], ["7", "Next 7 days"]].map(([k, l]) => (
+          <button key={k} className={"chip" + (uf === k ? " a" : "")} onClick={() => { setUf(k); setUd(""); }}>{l} <span className="chip-n">{items.filter(inRange[k]).length}</span></button>
         ))}
-        <label className={"chip dp" + (uf === "date" ? " a" : "")}>Pick a date
+        <label className={"chip dp" + (uf === "date" ? " a" : "")} onClick={(e) => { const i = e.currentTarget.querySelector("input") as HTMLInputElement | null; try { i?.showPicker?.(); } catch {} }}>
+          <Ic n="event" z={15} /> {ud ? new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" }).format(new Date(ud + "T00:00")) : "Pick a date"}
           <input type="date" value={ud} onChange={(e) => { setUd(e.target.value); setUf(e.target.value ? "date" : "7"); }} />
         </label>
       </div>
@@ -638,6 +648,7 @@ function Tasks({ orders, now, tz, tf, setTf, q, setQ, onCancel, cancelling }: an
 
 /* ───────────────────────── History tab ───────────────────────── */
 function HistoryTab({ runs, error, now, tz, hf, setHf, q, setQ }: any) {
+  const router = useRouter();
   if (error) return <div className="banner">{error}</div>;
   if (runs === null) return <div className="box">Loading…</div>;
   if (!runs.length) return <Empty icon="history" title="No automatic run yet" desc="As soon as the first run fires you'll see it here — when it ran, what it made, and anything that failed." />;
@@ -662,15 +673,23 @@ function HistoryTab({ runs, error, now, tz, hf, setHf, q, setQ }: any) {
       </div>
       <div className="tbl">
         <div className="tr th hs"><div className="c">Run</div><div className="c">Result</div><div className="c">When</div><div className="c">Status</div><div className="c" /></div>
-        {rows.length ? rows.map((x) => (
-          <div key={x.r.id} className="tr hs">
-            <div className="c main"><span className={"ico sm " + (x.failed ? "bad" : "good")}><Ic n={x.failed ? "error" : "check"} z={20} /></span><div className="info"><div className="name">{x.label}</div></div></div>
-            <div className={"c" + (x.failed ? " bad" : "")}>{x.result}</div>
-            <div className="c" suppressHydrationWarning>{dayLabel(new Date(x.r.firedAt), tz, now)}, {time12(new Date(x.r.firedAt), tz)}</div>
-            <div className="c"><span className={"sp " + (x.failed ? "bad" : "ok")}>{x.failed ? "Failed" : x.r.status === "running" ? "Running" : "Completed"}</span></div>
-            <div className="c end">{x.r.articles.find((a) => a.publishedUrl) ? <a className="lnk" href={x.r.articles.find((a) => a.publishedUrl)!.publishedUrl!} target="_blank" rel="noreferrer">Open live</a> : null}</div>
-          </div>
-        )) : <Empty icon="history" title="No runs found" desc="Try another filter or search." />}
+        {rows.length ? rows.map((x) => {
+          const art = x.r.articles[0];
+          const live = x.r.articles.find((a: any) => a.publishedUrl);
+          const go = art ? () => router.push(`/dashboard/content/${art.id}`) : undefined;
+          return (
+            <div key={x.r.id} className={"tr hs" + (art ? " clickable" : "")} onClick={go} role={art ? "button" : undefined} tabIndex={art ? 0 : undefined}
+              onKeyDown={art ? (e) => { if (e.key === "Enter") go!(); } : undefined}>
+              <div className="c main"><span className={"ico sm " + (x.failed ? "bad" : "good")}><Ic n={x.failed ? "error" : "check"} z={20} /></span>
+                <div className="info"><div className="name">{x.label}</div>{art ? <small>Tap to open the article</small> : null}</div>
+              </div>
+              <div className={"c" + (x.failed ? " bad" : "")}>{x.result}</div>
+              <div className="c" suppressHydrationWarning>{dayLabel(new Date(x.r.firedAt), tz, now)}, {time12(new Date(x.r.firedAt), tz)}</div>
+              <div className="c"><span className={"sp " + (x.failed ? "bad" : "ok")}>{x.failed ? "Failed" : x.r.status === "running" ? "Running" : "Completed"}</span></div>
+              <div className="c end">{live ? <a className="lnk" href={live.publishedUrl!} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>Open live</a> : art ? <span className="chev">›</span> : null}</div>
+            </div>
+          );
+        }) : <Empty icon="history" title="No runs found" desc="Try another filter or search." />}
       </div>
     </>
   );
@@ -729,7 +748,9 @@ const CSS = `
 .sched .banner{background:var(--bads);color:var(--bad);border:1px solid var(--bad);border-radius:12px;padding:12px 14px;margin-bottom:16px;font-size:13px}
 .sched .banner code{font-family:ui-monospace,monospace;font-size:12px}
 .sched .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
-.sched .st{border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;gap:12px;align-items:center;background:var(--card);min-width:0}
+.sched .st{border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;gap:12px;align-items:center;background:var(--card);min-width:0;width:100%;text-align:left;font:inherit;color:inherit;cursor:pointer;transition:transform .12s,box-shadow .12s,border-color .12s}
+.sched .st:hover{box-shadow:0 4px 14px rgba(0,0,0,.08);transform:translateY(-1px)}
+.sched .st:active{transform:none}
 .sched .st>div{min-width:0;flex:1}
 .sched .st.a{background:var(--acs);border-color:transparent}.sched .st.b{background:var(--oks);border-color:transparent}.sched .st.c{background:var(--warns);border-color:transparent}
 .sched .sbox{color:var(--mut);width:36px;height:36px;border-radius:50%;background:var(--panel);display:grid;place-items:center;flex:none}
@@ -764,7 +785,10 @@ const CSS = `
 .sched .chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
 .sched .chip{border:1px solid var(--line);background:none;color:var(--tx);padding:6px 14px;border-radius:99px;font:inherit;font-size:14px;cursor:pointer;display:inline-flex;align-items:center;gap:8px}
 .sched .chip:hover{background:var(--bg)}.sched .chip.a{background:var(--acs);color:var(--ac);border-color:transparent;font-weight:500}
-.sched .chip.dp input{width:auto;padding:0;border:0;background:none;color:inherit;font:inherit;cursor:pointer;color-scheme:light}
+.sched .chip-n{background:rgba(0,0,0,.06);border-radius:99px;padding:0 7px;font-size:12px;line-height:18px;min-width:18px;text-align:center;color:var(--mut)}
+.sched .chip.a .chip-n{background:color-mix(in srgb,var(--ac) 20%,transparent);color:var(--ac)}
+.sched .chip.dp{position:relative;overflow:hidden}
+.sched .chip.dp input{position:absolute;inset:0;width:100%;height:100%;opacity:0;padding:0;border:0;margin:0;cursor:pointer;color-scheme:light}
 .sched .tbl{border:1px solid var(--line);border-radius:12px;overflow:hidden}
 .sched .tr{display:grid;gap:14px;align-items:center;padding:12px 16px;border-top:1px solid var(--line)}
 .sched .tr:first-child{border-top:0}
@@ -776,6 +800,8 @@ const CSS = `
 .sched .c.main{display:flex;align-items:center;gap:12px}.sched .c.end{text-align:right}
 .sched .grp-row{width:100%;border:0;background:none;font:inherit;color:inherit;text-align:left;cursor:pointer}
 .sched .grp-row:hover{background:var(--bg)}
+.sched .tr.clickable{cursor:pointer}
+.sched .tr.clickable:hover{background:var(--bg)}
 .sched .chev.open{display:inline-block;transform:rotate(90deg)}
 .sched .tr.child{background:var(--bg)}
 .sched .tr.child .c.main{padding-left:6px}
