@@ -3,196 +3,270 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MrLxwa — What it is, in simple words</title>
+<title>MrLxwa — Your AI-Powered Growth Company</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&display=swap" rel="stylesheet">
 <style>
   :root{
-    --ink:#161a2b; --body:#3e4663; --mut:#737c99; --line:#e6e8f0; --soft:#f3f4f8;
-    --ac:#6a45f5; --ac-soft:#eef0ff; --grn:#12a150; --grn-soft:#e9f7ef;
-    --amb:#b06000; --paper:#ffffff; --canvas:#eef0f5;
+    --ink:#141829; --body:#3d4663; --mut:#727b99; --soft-mut:#9aa2bd;
+    --line:#e7e9f1; --soft:#f4f5f9; --canvas:#eceef4; --paper:#fff;
+    --ac:#6a45f5; --ac-soft:#eef0ff;
+    --c-research:#2f73e0; --c-content:#7c42e0; --c-sales:#0f9d58; --c-publish:#e0803c; --c-quality:#d64a7c; --c-brain:#6a45f5;
+    --grn:#12a150; --grn-soft:#e9f7ef;
   }
   *{box-sizing:border-box;margin:0;padding:0}
   html{scroll-behavior:smooth}
   body{background:var(--canvas);color:var(--body);font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
-    font-size:16px;line-height:1.65;-webkit-font-smoothing:antialiased;padding:28px 16px}
-  .paper{max-width:860px;margin:0 auto;background:var(--paper);border:1px solid var(--line);border-radius:18px;
-    box-shadow:0 20px 60px rgba(30,40,80,.10);padding:52px 56px}
-  @media(max-width:620px){.paper{padding:34px 22px}}
-  h1,h2,h3{color:var(--ink);letter-spacing:-.01em;line-height:1.2}
-  .brand{display:inline-flex;align-items:center;gap:9px;font-weight:800;font-size:15px;color:var(--ink)}
-  .brand .mark{width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,#6a45f5,#22a7d8);color:#fff;
-    display:grid;place-items:center;font-weight:800;font-size:13px}
-  .doc-h1{font-size:34px;font-weight:800;margin-top:20px}
-  @media(max-width:620px){.doc-h1{font-size:27px}}
-  .lead{font-size:18px;color:var(--mut);margin-top:12px;max-width:62ch}
-  .rule{height:1px;background:var(--line);margin:34px 0}
+    font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased;padding:26px 14px}
+  .deck{max-width:900px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+  .slide{background:var(--paper);border:1px solid var(--line);border-radius:20px;box-shadow:0 18px 50px rgba(30,40,80,.09);padding:46px 52px}
+  @media(max-width:620px){.slide{padding:30px 22px}}
+  h1,h2,h3,h4{color:var(--ink);font-family:"Sora","Inter",sans-serif;letter-spacing:-.015em;line-height:1.18}
+  p{margin:0}
+  .kicker{display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--ac);background:var(--ac-soft);border:1px solid #ddd9ff;padding:6px 12px;border-radius:99px}
+  .brand{display:inline-flex;align-items:center;gap:10px;font-family:"Sora";font-weight:800;font-size:16px;color:var(--ink)}
+  .brand .mark{width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,#6a45f5,#22a7d8);color:#fff;display:grid;place-items:center;font-weight:800;font-size:13px}
 
-  .snum{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:7px;
-    background:var(--ac-soft);color:var(--ac);font-weight:800;font-size:13px;margin-right:10px;flex:none}
-  h2.sec{display:flex;align-items:center;font-size:22px;font-weight:800;margin:0 0 6px}
-  .sec-lead{color:var(--mut);margin:0 0 18px;padding-left:36px}
-  p{margin:0 0 12px}
-  .block{margin:30px 0}
+  /* cover */
+  .cover{text-align:center;padding:60px 52px}
+  .cover h1{font-size:clamp(30px,5.2vw,50px);font-weight:800;margin-top:22px}
+  .cover .sub{font-size:clamp(16px,2.3vw,20px);color:var(--mut);max-width:60ch;margin:18px auto 0}
+  .cover .tag{margin-top:26px;color:var(--soft-mut);font-size:13.5px}
 
-  /* plain-English callout */
-  .plain{background:var(--soft);border:1px solid var(--line);border-radius:12px;padding:16px 18px;color:var(--body)}
+  .s-head{margin-bottom:22px}
+  .s-head h2{font-size:clamp(22px,3.6vw,30px);font-weight:800;margin-top:12px}
+  .s-head p{color:var(--mut);font-size:16.5px;margin-top:10px;max-width:66ch}
+
+  .plain{background:var(--soft);border:1px solid var(--line);border-radius:13px;padding:17px 19px;color:var(--body)}
   .plain b{color:var(--ink)}
 
-  /* the automation list */
-  .auto{display:flex;flex-direction:column;gap:12px;margin-top:6px}
-  .ai{display:flex;gap:14px;align-items:flex-start;background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:15px 16px}
-  .ai:hover{border-color:#d6d9e6}
-  .ai .ic{flex:none;width:42px;height:42px;border-radius:11px;display:grid;place-items:center}
-  .ai .tx h4{font-size:16px;color:var(--ink);font-weight:700;margin-bottom:2px}
-  .ai .tx p{font-size:14.5px;color:var(--mut);margin:0}
-  .ai .tx .why{font-size:13px;color:var(--ac);font-weight:600;margin-top:5px}
+  /* big idea columns */
+  .vs{display:grid;grid-template-columns:1fr auto 1fr;gap:18px;align-items:center;margin-top:8px}
+  @media(max-width:640px){.vs{grid-template-columns:1fr;gap:12px}}
+  .vs .box{border:1px solid var(--line);border-radius:14px;padding:18px 20px}
+  .vs .box.old{background:#fcf6f6}
+  .vs .box.new{background:linear-gradient(135deg,#f3efff,#eef4ff);border-color:#ddd9ff}
+  .vs .box h4{font-size:15px;margin-bottom:8px}
+  .vs .box ul{margin:0;padding-left:18px;color:var(--mut);font-size:14px}
+  .vs .box.new ul{color:var(--body)}
+  .vs .arrow{font-size:26px;color:var(--ac);font-weight:800;text-align:center}
+  @media(max-width:640px){.vs .arrow{transform:rotate(90deg)}}
 
-  /* customer journey flow */
-  .flow{display:flex;gap:10px;align-items:stretch;flex-wrap:wrap;margin-top:8px}
+  /* connect step */
+  .step1{display:flex;gap:16px;align-items:center;background:linear-gradient(135deg,#eef4ff,#f3efff);border:1px solid #dde4f5;border-radius:16px;padding:22px 24px}
+  .step1 .big{font-family:"Sora";font-weight:800;font-size:40px;color:var(--ac);flex:none}
+  .step1 h3{font-size:19px;margin-bottom:4px}
+  .step1 p{color:var(--mut);font-size:14.5px}
+
+  /* ORG: manager + departments */
+  .manager{display:flex;gap:16px;align-items:center;border:1px solid #ddd9ff;background:linear-gradient(135deg,#f1ecff,#eef4ff);border-radius:16px;padding:20px 22px;margin-bottom:8px}
+  .manager .av{width:56px;height:56px;border-radius:14px;background:linear-gradient(135deg,#6a45f5,#8b5cf6);color:#fff;display:grid;place-items:center;flex:none;box-shadow:0 8px 20px rgba(106,69,245,.35)}
+  .manager h3{font-size:18px}
+  .manager .role{color:var(--ac);font-weight:700;font-size:13px}
+  .manager p{color:var(--mut);font-size:14px;margin-top:3px}
+  .downline{text-align:center;color:var(--soft-mut);font-size:12px;margin:14px 0 2px;letter-spacing:.08em;text-transform:uppercase;font-weight:700}
+
+  .dept{border:1px solid var(--line);border-radius:16px;padding:20px 22px;margin-top:14px;border-left:5px solid var(--dc,#ccc)}
+  .dept .dh{display:flex;align-items:center;gap:10px;margin-bottom:4px}
+  .dept .dh h3{font-size:16.5px}
+  .dept .dh .badge{font-size:11px;font-weight:700;color:#fff;background:var(--dc);padding:3px 9px;border-radius:99px}
+  .dept .dsum{color:var(--mut);font-size:13.5px;margin-bottom:14px}
+  .emps{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:620px){.emps{grid-template-columns:1fr}}
+  .emp{display:flex;gap:12px;align-items:flex-start;background:var(--soft);border:1px solid var(--line);border-radius:12px;padding:13px 14px}
+  .emp .ic{flex:none;width:40px;height:40px;border-radius:11px;display:grid;place-items:center;color:var(--dc);background:#fff;border:1px solid var(--line)}
+  .emp .nm{font-weight:700;color:var(--ink);font-size:14.5px}
+  .emp .rl{font-size:11.5px;color:var(--dc);font-weight:700;text-transform:uppercase;letter-spacing:.03em}
+  .emp .ds{font-size:13px;color:var(--mut);margin-top:4px}
+
+  /* customer journey */
+  .flow{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px}
   .fn{flex:1;min-width:150px;background:var(--soft);border:1px solid var(--line);border-radius:12px;padding:16px 14px;text-align:center}
   .fn .ic{width:40px;height:40px;border-radius:11px;display:grid;place-items:center;margin:0 auto 9px}
-  .fn h4{font-size:14.5px;color:var(--ink);margin-bottom:4px}
-  .fn p{font-size:12.5px;color:var(--mut);margin:0}
+  .fn h4{font-size:14px;margin-bottom:4px}
+  .fn p{font-size:12.5px;color:var(--mut)}
   .fsep{display:grid;place-items:center;color:var(--ac);font-weight:800;font-size:18px}
-  @media(max-width:640px){.fsep{transform:rotate(90deg);width:100%;height:18px}}
+  @media(max-width:660px){.fsep{transform:rotate(90deg);width:100%;height:16px}}
 
-  /* benefits */
+  /* benefits + youdo */
   .ben{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:6px}
   @media(max-width:560px){.ben{grid-template-columns:1fr}}
   .bi{display:flex;gap:11px;align-items:flex-start;padding:4px 2px}
   .bi .ck{flex:none;width:24px;height:24px;border-radius:7px;background:var(--grn-soft);color:var(--grn);display:grid;place-items:center;margin-top:1px}
-  .bi b{color:var(--ink)}
-  .bi span{color:var(--mut);font-size:14.5px}
+  .bi b{color:var(--ink)} .bi span{color:var(--mut);font-size:14px}
+  .youdo{background:var(--ac-soft);border:1px solid #dcd8ff;border-radius:14px;padding:22px 24px;margin-top:20px}
+  .youdo h3{font-size:18px;margin-bottom:10px}
+  .youdo ol{margin:0;padding-left:20px}.youdo li{margin-bottom:6px}.youdo li b{color:var(--ink)}
 
-  /* final step */
-  .youdo{background:var(--ac-soft);border:1px solid #dcd8ff;border-radius:14px;padding:22px 24px}
-  .youdo h3{font-size:18px;margin-bottom:10px;color:var(--ink)}
-  .youdo ol{margin:0;padding-left:20px}
-  .youdo li{margin-bottom:6px;color:var(--body)}
-  .youdo li b{color:var(--ink)}
-
-  .foot{color:var(--mut);font-size:13px;text-align:center;margin-top:30px}
-  @media print{body{background:#fff;padding:0}.paper{box-shadow:none;border:0;max-width:100%;padding:24px}}
+  .foot{text-align:center;color:var(--soft-mut);font-size:13px;padding:6px 0 4px}
+  .page-no{float:right;color:var(--soft-mut);font-size:12px;font-weight:600}
+  @media print{body{background:#fff;padding:0}.deck{gap:0;max-width:100%}.slide{box-shadow:none;border:0;border-radius:0;padding:28px 30px;page-break-after:always}}
 </style>
 </head>
 <body>
-<div class="paper">
+<div class="deck">
 
-  <!-- header -->
-  <div class="brand"><span class="mark">Lx</span> MrLxwa · AI Automation System</div>
-  <h1 class="doc-h1">What MrLxwa does, in simple words</h1>
-  <p class="lead">MrLxwa is an AI system that runs your digital marketing <b>for</b> you. You connect your website once — and it works like a full marketing team: finding customers, talking to them, and creating your content, automatically.</p>
+  <!-- COVER -->
+  <section class="slide cover">
+    <div class="brand"><span class="mark">Lx</span> MrLxwa · AI Automation System</div>
+    <h1>Your AI-powered<br>growth company</h1>
+    <p class="sub">One system that automates your <b>entire</b> marketing &amp; sales — from finding customers and talking to them, to writing your content and keeping your website healthy.</p>
+    <p class="tag">A simple walkthrough of what MrLxwa does for your business</p>
+  </section>
 
-  <div class="rule"></div>
-
-  <!-- 1. What is it -->
-  <div class="block">
-    <h2 class="sec"><span class="snum">1</span> What is it?</h2>
-    <p class="sec-lead">Think of it as hiring a whole marketing team — but it's software, it never sleeps, and you don't manage it.</p>
-    <div class="plain">
-      Normally a business needs a <b>content writer</b>, an <b>SEO expert</b>, a <b>designer</b>, a <b>social media person</b> and a <b>sales rep</b> to grow online. That's five hires, or an expensive agency. <b>MrLxwa replaces all of them with one AI team</b> that does the same work automatically, and far faster.
+  <!-- 1 · THE BIG IDEA -->
+  <section class="slide">
+    <div class="s-head"><span class="kicker">The big idea</span><h2>Replace a whole marketing department with one AI team.</h2>
+    <p>To grow online, a business normally needs several hires or an expensive agency. MrLxwa does all of it — automatically, around the clock.</p></div>
+    <div class="vs">
+      <div class="box old"><h4>The old way</h4><ul>
+        <li>Hire a content writer</li><li>Hire an SEO expert</li><li>Hire a designer</li>
+        <li>Hire a social media person</li><li>Hire a sales rep</li><li>…or pay an agency every month</li></ul></div>
+      <div class="arrow">→</div>
+      <div class="box new"><h4>With MrLxwa</h4><ul>
+        <li>One AI team does all of it</li><li>Works 24/7, never sleeps</li><li>No salaries, no managing</li>
+        <li>Starts the moment you connect your site</li><li>You simply approve what you like</li></ul></div>
     </div>
-  </div>
+    <span class="page-no">01</span>
+  </section>
 
-  <!-- 2. Connect -->
-  <div class="block">
-    <h2 class="sec"><span class="snum">2</span> It all starts with one step: connect your website</h2>
-    <p class="sec-lead">No setup, no technical work. Just paste your website address.</p>
-    <p>When you connect your website, MrLxwa <b>reads your whole site</b> — your services, your prices, how you talk to customers, and who your customers are. From that moment it <b>understands your business</b>, so everything it does afterwards sounds like you and fits your market.</p>
-    <div class="plain">👉 <b>You do this once.</b> After that, everything below happens on its own.</div>
-  </div>
+  <!-- 2 · CONNECT -->
+  <section class="slide">
+    <div class="s-head"><span class="kicker">How it begins</span><h2>It all starts with one step.</h2></div>
+    <div class="step1">
+      <div class="big">1</div>
+      <div><h3>Connect your website</h3>
+        <p>Just paste your website address — no technical setup. MrLxwa reads your whole site, learns your services, your prices, your tone and your customers, and from that moment <b>understands your business</b>. Everything it does afterwards sounds like you.</p></div>
+    </div>
+    <p style="margin-top:14px;color:var(--mut);font-size:14.5px">👉 You do this <b>once</b>. After that, the whole AI company below goes to work on its own.</p>
+    <span class="page-no">02</span>
+  </section>
 
-  <!-- 3. What happens automatically -->
-  <div class="block">
-    <h2 class="sec"><span class="snum">3</span> After you connect, here's everything it does — automatically</h2>
-    <p class="sec-lead">You don't ask for each task. You switch on what you want, and the AI team just does it, every day.</p>
-    <div class="auto" id="auto"></div>
-  </div>
+  <!-- 3 · MEET THE COMPANY (all agents) -->
+  <section class="slide">
+    <div class="s-head"><span class="kicker">Meet your AI company</span><h2>Your team of specialists — every one an expert.</h2>
+    <p>Just like a real company, MrLxwa is organised into departments. A manager plans the work and hands each job to the right specialist. Here is the whole team.</p></div>
 
-  <!-- 4. Customer journey -->
-  <div class="block">
-    <h2 class="sec"><span class="snum">4</span> How it turns a stranger into a paying customer</h2>
-    <p class="sec-lead">This is the part that makes you money — and it's completely hands-free.</p>
+    <!-- manager -->
+    <div class="manager">
+      <div class="av">%I_brain%</div>
+      <div><h3>Mr. Lxwa</h3><div class="role">The Manager · Command Centre</div>
+        <p>The brain of the company. Understands what you want, makes a plan, and tells each specialist below exactly what to do — then checks it all gets done.</p></div>
+    </div>
+    <div class="downline">↓ assigns work to every department ↓</div>
+
+    <div id="departments"></div>
+    <span class="page-no">03</span>
+  </section>
+
+  <!-- 4 · CUSTOMER JOURNEY -->
+  <section class="slide">
+    <div class="s-head"><span class="kicker">How it makes you money</span><h2>From a stranger to a paying customer — hands-free.</h2>
+    <p>This is the part business owners care about most. The sales department does it entirely on its own.</p></div>
     <div class="flow">
-      <div class="fn"><div class="ic" style="background:#fff2e6;color:#f97316">%I_people%</div><h4>1. Finds a real buyer</h4><p>Someone who actually needs what you sell — not a random name.</p></div>
+      <div class="fn"><div class="ic" style="background:#fff2e6;color:#f97316">%I_people%</div><h4>1. Finds a real buyer</h4><p>Someone who truly needs what you sell — not a random name.</p></div>
       <div class="fsep">→</div>
-      <div class="fn"><div class="ic" style="background:#e7f8ee;color:#12a150">%I_whatsapp%</div><h4>2. Messages them on WhatsApp</h4><p>Starts the chat, answers questions, follows up — like a real rep.</p></div>
+      <div class="fn"><div class="ic" style="background:#e7f8ee;color:#12a150">%I_whatsapp%</div><h4>2. Messages on WhatsApp</h4><p>Starts the chat, answers, follows up — like a real rep.</p></div>
       <div class="fsep">→</div>
-      <div class="fn"><div class="ic" style="background:#efeaff;color:#6a45f5">%I_calendar%</div><h4>3. Books a meeting</h4><p>Offers your real time slots and sets the appointment, then alerts you.</p></div>
+      <div class="fn"><div class="ic" style="background:#efeaff;color:#6a45f5">%I_calendar%</div><h4>3. Books a meeting</h4><p>Offers your real slots, sets it, and alerts you.</p></div>
       <div class="fsep">→</div>
-      <div class="fn"><div class="ic" style="background:#e6f6fb;color:#1596c2">%I_handshake%</div><h4>4. You close the deal</h4><p>A warm, interested customer lands in your calendar. You just show up.</p></div>
+      <div class="fn"><div class="ic" style="background:#e6f6fb;color:#1596c2">%I_handshake%</div><h4>4. You close the deal</h4><p>A warm customer lands in your calendar. You just show up.</p></div>
     </div>
-  </div>
+    <span class="page-no">04</span>
+  </section>
 
-  <!-- 5. Quality -->
-  <div class="block">
-    <h2 class="sec"><span class="snum">5</span> Nothing low-quality ever goes out</h2>
-    <p class="sec-lead">Your brand is always protected.</p>
-    <p>Every article is checked against a strict quality standard before it reaches your website — it must read like a <b>real human wrote it</b>, be properly structured, and have correct SEO. If it isn't good enough, it waits for your approval instead of going live. <b>You can approve everything yourself, or let the good ones publish on their own</b> — your choice.</p>
-  </div>
+  <!-- 5 · QUALITY + WHY + YOU DO -->
+  <section class="slide">
+    <div class="s-head"><span class="kicker">Your brand is safe</span><h2>Nothing low-quality ever goes out.</h2>
+    <p>Every article passes a strict quality check before it reaches your website — it must read like a real person wrote it, be properly structured, and have correct SEO. If it isn't good enough, it waits for your approval instead of going live.</p></div>
 
-  <!-- 6. Why it matters -->
-  <div class="block">
-    <h2 class="sec"><span class="snum">6</span> Why this matters for your business</h2>
+    <h3 style="font-size:17px;margin:26px 0 10px">Why this matters for your business</h3>
     <div class="ben">
-      <div class="bi"><span class="ck">%I_check%</span><div><b>No team to hire.</b> <span>One system does the work of five people — no salaries, no managing.</span></div></div>
+      <div class="bi"><span class="ck">%I_check%</span><div><b>No team to hire.</b> <span>One system does the work of a whole department — no salaries.</span></div></div>
       <div class="bi"><span class="ck">%I_check%</span><div><b>Works 24/7.</b> <span>It keeps finding customers and creating content while you sleep.</span></div></div>
-      <div class="bi"><span class="ck">%I_check%</span><div><b>You stay in control.</b> <span>Nothing goes live without passing quality — and you can approve it all.</span></div></div>
+      <div class="bi"><span class="ck">%I_check%</span><div><b>You stay in control.</b> <span>Nothing publishes without passing quality — and you can approve it all.</span></div></div>
       <div class="bi"><span class="ck">%I_check%</span><div><b>Set it once.</b> <span>Tell it your schedule one time; it runs on its own after that.</span></div></div>
     </div>
-  </div>
 
-  <!-- 7. What you do -->
-  <div class="block">
     <div class="youdo">
       <h3>So what do you actually have to do?</h3>
       <ol>
         <li><b>Connect your website</b> — paste your address, once.</li>
         <li><b>Switch on</b> what you want (leads, content, WhatsApp, audits…).</li>
-        <li><b>Approve</b> what you like. That's it — the AI handles the rest.</li>
+        <li><b>Approve</b> what you like. The AI company handles the rest.</li>
       </ol>
     </div>
-  </div>
+    <span class="page-no">05</span>
+  </section>
 
-  <div class="foot">MrLxwa — AI Automation System · Your marketing team, automated.</div>
+  <div class="foot">MrLxwa — AI Automation System · Your entire marketing &amp; sales, automated.</div>
 </div>
 
 <script>
-/* simple inline icons — no external dependencies, works offline */
+/* inline icons — no external dependencies, works offline + prints */
 const I = {
+  brain:'<path d="M12 4.5a3 3 0 0 0-3 3 3 3 0 0 0-1 5.8V17a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-3.7a3 3 0 0 0-1-5.8 3 3 0 0 0-3-3Z"/><path d="M9 8.5h6M10 13h4"/>',
+  globe:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/>',
+  key:'<circle cx="8" cy="15" r="4"/><path d="M11 12 20 3M17 6l2 2M14 9l2 2"/>',
+  pen:'<path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"/>',
+  image:'<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.8"/><path d="m21 16-5-5L5 21"/>',
+  gauge:'<path d="M12 13a2 2 0 1 0 0-4"/><path d="m13.5 10.5 3-3"/><path d="M4 18a9 9 0 1 1 16 0"/>',
+  book:'<path d="M4 5a2 2 0 0 1 2-2h11a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H6a2 2 0 0 1-2-2Z"/><path d="M8 3v15"/>',
+  shield:'<path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6Z"/><path d="m9 12 2 2 4-4"/>',
+  megaphone:'<path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1Z"/><path d="M15 8a4 4 0 0 1 0 8M11 6l8-3v18l-8-3"/>',
   people:'<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3 2.7-5 6-5s6 2 6 5"/><path d="M16 5.5a3 3 0 0 1 0 5.8M21 20c0-2.4-1.6-4.2-4-4.8"/>',
   whatsapp:'<path d="M12 3a9 9 0 0 0-7.7 13.6L3 21l4.6-1.2A9 9 0 1 0 12 3Z"/><path d="M8.5 9.5c0 3 2 5 5 5.5.8.1 1.3-.4 1.6-1 .1-.3 0-.6-.3-.8l-1.3-.7c-.2-.1-.5-.1-.7.1l-.4.4c-.9-.4-1.6-1.1-2-2l.4-.4c.2-.2.2-.5.1-.7l-.7-1.3c-.2-.3-.5-.4-.8-.3-.6.2-1.2.8-1.2 1.5Z"/>',
   calendar:'<rect x="3" y="4.5" width="18" height="17" rx="2"/><path d="M3 9h18M8 2.5v4M16 2.5v4"/>',
+  send:'<path d="m22 2-7 20-4-9-9-4 20-7Z"/><path d="M22 2 11 13"/>',
   handshake:'<path d="m11 17 2 2a1.4 1.4 0 0 0 2-2m-2 0 1.5 1.5a1.4 1.4 0 0 0 2-2L15 14m2 1 1.5 1.5a1.4 1.4 0 0 0 2-2L17 10l-2-2H9l-5 3"/><path d="m4 11 3 3"/>',
-  pen:'<path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"/>',
-  image:'<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.8"/><path d="m21 16-5-5L5 21"/>',
-  megaphone:'<path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1Z"/><path d="M15 8a4 4 0 0 1 0 8M11 6l8-3v18l-8-3"/>',
-  shield:'<path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6Z"/><path d="m9 12 2 2 4-4"/>',
-  search:'<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
-  clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
   check:'<path d="m4 12 5 5L20 6"/>',
 };
-const svg = (n,w=22)=>`<svg width="${w}" height="${w}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[n]||''}</svg>`;
-document.body.innerHTML = document.body.innerHTML.replace(/%I_([a-z]+)%/gi,(_,n)=>svg(n,20));
+const svg=(n,w=22)=>`<svg width="${w}" height="${w}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[n]||''}</svg>`;
+document.body.innerHTML = document.body.innerHTML.replace(/%I_([a-z]+)%/gi,(_,n)=>svg(n,24));
 
-/* the 9 automations, in plain language */
-const AUTO = [
-  {ic:'people', c:'#f97316', bg:'#fff2e6', h:'Finds high-quality customers', p:'It goes out and finds real, interested buyers for your business — not a random scraped list, but people who actually fit what you sell.'},
-  {ic:'whatsapp', c:'#12a150', bg:'#e7f8ee', h:'Talks to them on WhatsApp', p:'It opens the conversation on WhatsApp, answers their questions and follows up — exactly like a patient, polite sales rep who never forgets.'},
-  {ic:'calendar', c:'#6a45f5', bg:'#efeaff', h:'Books client meetings', p:'When a customer is interested, it offers your real available times and books the meeting for you — then sends you an alert.'},
-  {ic:'pen', c:'#8b5cf6', bg:'#f1ecff', h:'Writes articles for your website', p:'Full, researched, human-sounding blog articles about your business — written, quality-checked, and published to your site.'},
-  {ic:'image', c:'#b8860b', bg:'#fdf6e3', h:'Creates the images', p:'Every article gets its own professional pictures — a main image, a thumbnail and section visuals — created fresh, not stock photos.'},
-  {ic:'megaphone', c:'#db2777', bg:'#fce7f3', h:'Makes social media content', p:'It turns your content into ready-to-post social media posts and visuals, so your pages stay active without you lifting a finger.'},
-  {ic:'shield', c:'#9333ea', bg:'#f3e8ff', h:'Checks your website health (audit)', p:'It regularly inspects your website and tells you in plain words what is working, what is hurting your Google rankings, and what to fix.'},
-  {ic:'search', c:'#12a150', bg:'#e7f8ee', h:'Does keyword research', p:'It finds the exact words your customers are typing into Google — using real search data — so every article targets real demand.'},
-  {ic:'clock', c:'#0e9bb8', bg:'#e6f6fb', h:'Runs on a schedule, by itself', p:'Tell it once — "a new article every morning", "fresh leads on weekdays" — and it fires at the right time, every time, on its own.'},
+/* the whole AI company, by department */
+const DEPTS = [
+  { name:'Research & Strategy', color:'#2f73e0', sum:'Learns your business and your market before a single word is written.',
+    emps:[
+      {ic:'globe', nm:'Mr. Crawler', rl:'Site Reader', ds:'Reads your entire website so the team knows your business inside-out.'},
+      {ic:'brain', nm:'Mr. Analyst', rl:'Business Brain', ds:'Turns what it read into a clear profile — your services, audience and tone.'},
+      {ic:'key',   nm:'Mr. Keyword', rl:'Market Researcher', ds:'Finds the exact words your customers type into Google, using real search data.'},
+    ]},
+  { name:'Content Creation', color:'#7c42e0', sum:'Produces the articles, images and stories that bring customers to your site.',
+    emps:[
+      {ic:'pen',   nm:'Mr. Writer', rl:'Content Writer', ds:'Writes full, researched, human-sounding articles about your business.'},
+      {ic:'image', nm:'Mr. Image', rl:'Designer', ds:'Creates original images for every article — hero, thumbnail and section visuals.'},
+      {ic:'book',  nm:'Mr. Story', rl:'Web Stories Creator', ds:'Builds tappable web stories (like Google / Instagram stories) from your content.'},
+      {ic:'gauge', nm:'Mr. SEO', rl:'SEO Specialist', ds:'Makes sure every article is optimised to rank well on Google.'},
+    ]},
+  { name:'Sales & Outreach', color:'#0f9d58', sum:'Finds buyers, talks to them, and books meetings — your automatic sales floor.',
+    emps:[
+      {ic:'people',   nm:'Mr. Leads', rl:'Lead Finder', ds:'Finds real, high-fit buyers for your business — not random scraped lists.'},
+      {ic:'whatsapp', nm:'Mr. WhatsApp', rl:'Sales Rep', ds:'Chats with leads on WhatsApp, answers them, follows up, and books meetings.'},
+    ]},
+  { name:'Publishing & Social', color:'#e0803c', sum:'Puts your content live and keeps your social channels active.',
+    emps:[
+      {ic:'send',      nm:'Mr. Publish', rl:'Publisher', ds:'Puts approved articles live on your website, correctly formatted.'},
+      {ic:'megaphone', nm:'Miss Social', rl:'Social Media Manager', ds:'Turns your content into ready-to-post social media posts and visuals.'},
+    ]},
+  { name:'Quality & Health', color:'#d64a7c', sum:'Protects your brand and keeps your website in top shape.',
+    emps:[
+      {ic:'shield', nm:'Mr. Audit', rl:'Site Doctor', ds:'Regularly checks your website and tells you, in plain words, exactly what to fix.'},
+      {ic:'check',  nm:'The Quality Gate', rl:'Final Check', ds:'Inspects every article before it goes live — nothing low-quality reaches your brand.'},
+    ]},
 ];
-document.getElementById('auto').innerHTML = AUTO.map(a=>`
-  <div class="ai">
-    <div class="ic" style="background:${a.bg};color:${a.c}">${svg(a.ic,22)}</div>
-    <div class="tx"><h4>${a.h}</h4><p>${a.p}</p></div>
+document.getElementById('departments').innerHTML = DEPTS.map(d=>`
+  <div class="dept" style="--dc:${d.color}">
+    <div class="dh"><h3>${d.name}</h3><span class="badge">${d.emps.length} specialist${d.emps.length>1?'s':''}</span></div>
+    <div class="dsum">${d.sum}</div>
+    <div class="emps">${d.emps.map(e=>`
+      <div class="emp">
+        <div class="ic">${svg(e.ic,21)}</div>
+        <div><div class="nm">${e.nm}</div><div class="rl">${e.rl}</div><div class="ds">${e.ds}</div></div>
+      </div>`).join('')}
+    </div>
   </div>`).join('');
 </script>
 </body>
