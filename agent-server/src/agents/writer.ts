@@ -102,7 +102,7 @@ async function fixArticle(job: Job<AgentJobData>, ctx: AgentContext) {
     review.passed && baseGate.passed
       ? baseGate
       : { ...baseGate, passed: false, reasons: [...new Set([...baseGate.reasons, ...review.failures])] };
-  console.log(`[writer] FIX "${title}" review ${review.passed ? "PASSED" : "still failed"} in ${review.rounds} round(s) · ${summarizeGate(gate)}`);
+  console.log(`[writer] FIX "${title}" review ${review.passed ? "PASSED" : "still failed"} (score ${review.score}/100) in ${review.rounds} round(s) · ${summarizeGate(gate)}`);
 
   ctx.data("score", { quality: gate.score, passed: gate.passed, words: gate.wordCount, sections: gate.sections });
   ctx.data("references", { links: gate.links });
@@ -312,7 +312,7 @@ export class WriterAgent extends Agent {
       review.passed && baseGate.passed
         ? baseGate
         : { ...baseGate, passed: false, reasons: [...new Set([...baseGate.reasons, ...review.failures])] };
-    console.log(`[writer] "${title}" review ${review.passed ? "passed" : "FAILED"} in ${review.rounds} round(s) · ${summarizeGate(gate)}`);
+    console.log(`[writer] "${title}" review ${review.passed ? "passed" : "FAILED"} (score ${review.score}/100) in ${review.rounds} round(s) · ${summarizeGate(gate)}`);
 
     ctx.data("score", { quality: gate.score, passed: gate.passed, words: gate.wordCount, sections: gate.sections });
     // The real links the article actually contains — for the live "References" tab. Same

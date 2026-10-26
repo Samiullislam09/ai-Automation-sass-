@@ -1,4 +1,4 @@
-import { gateArticle, BANNED_PHRASES, MIN_LIST_ITEMS, MIN_QA_PAIRS, words, prose, paragraphs, sentences, FIGURE } from "./qualityGate.js";
+import { gateArticle, BANNED_PHRASES, MIN_LIST_ITEMS, MIN_QA_PAIRS, words, prose, paragraphs, sentences, FIGURE, QUALITY_PASS_THRESHOLD } from "./qualityGate.js";
 export { BANNED_PHRASES };
 import { reviseArticle, auditHumanization, type Completer, type HumanizeAudit } from "./writerPipeline.js";
 
@@ -172,6 +172,9 @@ export type ReviewOutcome = {
   failures: string[];
   sectionRewrites: number;
   articleRevisions: number;
+  /** % of the last round's checks that passed. 100 when `passed` was reached the strict way
+   *  (zero failures); below 100 only when it passed via QUALITY_PASS_THRESHOLD instead. */
+  score: number;
 };
 
 /* ---------------------------------------------------------------- text helpers ----------- */
@@ -1520,10 +1523,22 @@ export async function runArticleReview(initialBody: string, input: ReviewInput, 
     await applyFixes(failing, round);
   }
 
+  // Same threshold the deterministic gate uses (qualityGate.ts QUALITY_PASS_THRESHOLD) — a
+  // SOFT pass when the rounds ran out still a few checks short, instead of all-or-nothing.
+  // Nothing here skips or weakens a single rule: every check above still ran and still fully
+  // counts against the score; this only decides how good a score is good enough to publish.
+  let score = 100;
+  if (!passed) {
+    const total = lastChecks.length;
+    const failingNow = lastChecks.filter((c) => !c.ok).length;
+    score = total ? Math.round(((total - failingNow) / total) * 100) : 100;
+    if (score >= QUALITY_PASS_THRESHOLD) passed = true;
+  }
+
   const failures = passed
     ? []
     : lastChecks.filter((c) => !c.ok).map((c) => `${c.section ? `"${c.section}": ` : ""}${failureLine(c)}`);
-  emit("review_final", { passed, rounds, max: REVIEW_MAX_ROUNDS, failures, sectionRewrites, articleRevisions });
+  emit("review_final", { passed, rounds, max: REVIEW_MAX_ROUNDS, failures, sectionRewrites, articleRevisions, score });
 
-  return { body, passed, rounds, checks: lastChecks, audit, auditError, failures, sectionRewrites, articleRevisions };
+  return { body, passed, rounds, checks: lastChecks, audit, auditError, failures, sectionRewrites, articleRevisions, score };
 }

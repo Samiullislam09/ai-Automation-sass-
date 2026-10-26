@@ -377,6 +377,19 @@ export async function polishArticle(
       ? `7. If the draft does not already link to real evidence anywhere, add ONE natural sentence that does. ${proofLine} ${trustLine} Link whichever genuinely fits what the article already says — never force an awkward mention, and never link anything not listed here. Skip this if the draft already links one of them.`
       : "";
 
+  // Brand/authority backstop (2026-10-26, owner: "apni company ka naam promotion nahi karta
+  // hai, why?"). writeSection's per-section CTA line is deliberately soft — "if it fits here,
+  // otherwise skip" — so an article could sail through every section skipping it and never once
+  // name the business it was written for, reading as generic third-party advice instead of this
+  // business's own expertise. Same "is it already there?" pattern as eeatFixLine above: only
+  // asked for when the whole assembled draft genuinely never named the business, so a draft that
+  // already did this naturally is left alone rather than getting a second, redundant mention.
+  const businessNamed = !!context?.businessName && draft.toLowerCase().includes(context.businessName.toLowerCase());
+  const brandFixLine =
+    context?.businessName && !businessNamed
+      ? `11. This article never names "${context.businessName}" — right now it reads as generic advice, not this business's own expertise. Add ONE natural mention of "${context.businessName}" where it fits best (the opening, or the closing next step), framing the guidance as coming from their real, first-hand experience — not a sales pitch, just who is speaking.${context?.cta ? ` If a next step fits there too, point the reader at "${context.cta.name}"${context.cta.url ? ` (${context.cta.url})` : ""}.` : ""}`
+      : "";
+
   // Forced-structure backstops (documnet/Article_Writing_Rules.md sections 4 and 6, owner
   // instruction 2026-09-12: every article, not just comparative or FAQ-shaped ones) — same "is
   // it already there?" pattern as eeatFixLine above, and for the same reason: this is the one
@@ -408,6 +421,7 @@ export async function polishArticle(
     tableFixLine,
     listFixLine,
     qaFixLine,
+    brandFixLine,
     ``,
     `DRAFT:`,
     draft,

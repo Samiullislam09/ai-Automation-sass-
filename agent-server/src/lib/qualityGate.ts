@@ -74,6 +74,19 @@ const META_DESC_RANGE: [number, number] = [80, 165];
 const BLOCK_PENALTY = 25;
 const WARN_PENALTY = 5;
 
+/** How much of the checklist an article must clear to be considered good enough to publish.
+ *  Was a strict 100 (zero block-level failures) — measured live against the real free NVIDIA
+ *  model (2026-10-26), articles were landing 5-19 failing checks out of ~40-70 EVERY run, almost
+ *  all in the human-voice/style group (banned filler, repeated openings, sentence rhythm,
+ *  hedging) that a weak free model cannot reliably satisfy, round after round, even with
+ *  `fix_article` re-runs. 100% was not a quality bar at that point, it was a wall nothing ever
+ *  got through — exactly the same shape of problem the sentence-rhythm rule hit on 2026-10-06
+ *  (see its own comment above), just for the gate as a whole. Owner's explicit instruction
+ *  (2026-10-26): lower it — 80, even 70, is fine. Env-overridable for further calibration
+ *  without a redeploy; this does not remove or weaken any individual check, every one still
+ *  runs and is still reported — it only changes how many an article may fail and still publish. */
+export const QUALITY_PASS_THRESHOLD = Math.max(0, Math.min(100, Number(process.env.QUALITY_PASS_THRESHOLD) || 75));
+
 /* ---------------------------------------------------------------- word lists ------------ */
 
 /** Phrases that mark a draft as machine-written to any reader who has seen a few. Matched
@@ -537,7 +550,7 @@ export function gateArticle(body: string, opts: GateOptions = {}): QualityGate {
   const warnings = checks.filter((c) => !c.ok && c.severity === "warn").map((c) => c.detail);
   const score = Math.max(0, Math.min(100, 100 - reasons.length * BLOCK_PENALTY - warnings.length * WARN_PENALTY));
 
-  return { wordCount, sections, links, passed: reasons.length === 0, reasons, checks, score, warnings };
+  return { wordCount, sections, links, passed: score >= QUALITY_PASS_THRESHOLD, reasons, checks, score, warnings };
 }
 
 /** One line for logs: "QA 78/100 · 2 warnings: no internal links; …" */

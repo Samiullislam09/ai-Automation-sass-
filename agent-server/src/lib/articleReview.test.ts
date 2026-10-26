@@ -15,6 +15,7 @@ process.env.SUPABASE_URL ||= "http://unit-test.invalid";
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= "unit-test";
 
 const { checkArticle, runArticleReview, splitArticle, assembleArticle, stampByline, capLongParagraphs, bulletizeBareLists, keepBetter, cutSemicolons, addInternalLinks, varySentenceRhythm, REVIEW_MAX_ROUNDS } = await import("./articleReview.js");
+const { QUALITY_PASS_THRESHOLD } = await import("./qualityGate.js");
 
 const KW = "emergency plumber in Leeds";
 const SITE = "https://example.com";
@@ -348,7 +349,13 @@ test("a line the independent reviewer flags is mapped to its section and only th
   assert.match(rewrites[0].prompt, /Missing experience signal/);
 });
 
-test("a section the model cannot fix stops after the round cap and does not pass", async () => {
+test("a section the model cannot fix stops after the round cap, but passes anyway on the score threshold", async () => {
+  // DESIGN CHANGE (owner, 2026-10-26): "quality gate ko kam karo — 80% ya 70% bhi pass ho sakta
+  // hai". One stubborn, unfixable check (an em dash the fake rewrite never removes) out of an
+  // otherwise-clean article's whole checklist is a high score — comfortably over
+  // QUALITY_PASS_THRESHOLD — so this now SOFT-PASSES instead of blocking forever on one rule a
+  // weak model can't satisfy. Every check still ran, still genuinely failed; `out.score` is the
+  // honest number, well under 100 but over the bar.
   const events: { kind: string; payload: any }[] = [];
   const { fn, calls } = fakeComplete({
     "writer.section-rewrite": (p) => partOf(p),
@@ -361,13 +368,15 @@ test("a section the model cannot fix stops after the round cap and does not pass
     onEvent: (kind, payload) => events.push({ kind, payload }),
   });
 
-  assert.equal(out.passed, false);
+  assert.equal(out.passed, true);
   assert.equal(out.rounds, REVIEW_MAX_ROUNDS);
+  assert.ok(out.score < 100 && out.score >= QUALITY_PASS_THRESHOLD, `score was ${out.score}`);
   assert.equal(calls.filter((c) => c.label === "writer.section-rewrite").length, REVIEW_MAX_ROUNDS - 1);
-  assert.ok(out.failures.some((f) => f.includes("em dash")), out.failures.join("\n"));
+  assert.equal(out.failures.length, 0, "a threshold-pass reports no blocking failures");
   const final = events[events.length - 1];
   assert.equal(final.kind, "review_final");
-  assert.equal(final.payload.passed, false);
+  assert.equal(final.payload.passed, true);
+  assert.ok(final.payload.score < 100);
 });
 
 test("if the independent reviewer cannot run, it fails OPEN — a clean article is not blocked by it", async () => {
