@@ -1,0 +1,57 @@
+# fly.toml — Fly.io deploy config for agent-server, prepared 2026-10-30 (Railway trial expired,
+# took BOTH the app and its queue Postgres offline — see docs/CORE_E2E_PLAN.md / memory
+# mrlxwa-queue-on-railway-postgres). Uses the EXISTING Dockerfile unchanged (it already targets
+# port 7860 for Hugging Face Spaces — kept as-is here too, so one image works on either platform).
+#
+# WHY FLY OVER RAILWAY/HF FOR PRODUCTION: Docker-native (this exact Dockerfile, no rewrite),
+# pay-as-you-go (no trial that silently expires), scales by machine count/size as more tenants
+# sign up, and a Fly Postgres cluster lives on the SAME private network as the app — the same
+# shape Railway had (postgres.railway.internal) — so the pg-boss queue DB does NOT need to move
+# back to Supabase and reproduce the egress/log-ingestion limits that got it moved off there in
+# the first place (2026-10-01).
+#
+# WHAT'S LEFT TO DO (needs the owner's own Fly account — I cannot create one or hold its token):
+#   1. flyctl auth login
+#   2. flyctl launch --no-deploy        (from agent-server/, picks up this file + Dockerfile;
+#                                         say NO to "create a Postgres now" if doing step 3 separately)
+#   3. flyctl postgres create --name mrlxwa-queue-db   (or `fly pg create`; pick the smallest tier)
+#   4. flyctl postgres attach mrlxwa-queue-db           (wires DATABASE_URL into this app automatically,
+#                                                          same role postgres.railway.internal played)
+#   5. flyctl secrets set NVIDIA_API_KEY=... SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+#        CREDENTIALS_ENCRYPTION_KEY=... AGENT_SERVER_TOKEN=... CORS_ORIGIN=... WEB_APP_URL=...
+#        (copy every value Railway's Variables tab currently has — same list src/ reads from env)
+#   6. flyctl deploy
+#   7. Point the web app's AGENT_SERVER_URL (Vercel env var) at the new https://<app>.fly.dev
+#
+# `min_machines_running = 1` keeps it always-on (required: pg-boss LISTEN/NOTIFY + the once-a-
+# minute scheduler tick must never go to sleep, the same reason Render/Koyeb free tiers were
+# ruled out for the HF Space too — see Dockerfile's own header comment).
+
+app = "mrlxwa-agent-server"   # rename here (and re-run `flyctl launch`) if that name is taken
+primary_region = "sin"        # Singapore — closest to UAE/India without crossing to US/EU; change if the owner wants a different region
+
+[build]
+
+[env]
+  NODE_ENV = "production"
+  PORT = "7860"
+
+[http_service]
+  internal_port = 7860
+  force_https = true
+  auto_stop_machines = false   # never sleeps — same reasoning as HF's "does not sleep" requirement
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[http_service.checks]]
+  grace_period = "30s"
+  interval = "15s"
+  method = "GET"
+  timeout = "5s"
+  path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"   # start here; bump to shared-cpu-2x or add machines once concurrent
+  memory = "1gb"           # user load actually needs it — scale this, not a rewrite, per owner's
+                            # "ek saath zyada user handle kare" (WRITER_CONCURRENCY already scales
+                            # 4-8 per plan; more vCPU/RAM is what that concurrency needs to run on)
