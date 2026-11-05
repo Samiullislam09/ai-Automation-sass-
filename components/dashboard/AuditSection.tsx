@@ -1013,7 +1013,7 @@ function Kpi({ label, value, sub, color, onClick }: { label: string; value: stri
 function IssueCard({ issue: i, open, onToggle, onPages }: { issue: Issue; open: boolean; onToggle: () => void; onPages: () => void }) {
   const n = i.pages?.length ? i.count : i.count > 1 ? i.count : 0;
   return (
-    <div className={`au-issue ${open ? "open" : ""}`} style={{ borderLeftColor: SEV_COLOR[i.severity] }}>
+    <div className={`au-issue ${open ? "open" : ""}`}>
       <button className="au-issue-h" onClick={onToggle} aria-expanded={open}>
         <span className="au-sev" style={{ color: SEV_COLOR[i.severity], borderColor: SEV_COLOR[i.severity] }}>{SEV_LABEL[i.severity]}</span>
         <span className="au-issue-t">
@@ -1143,7 +1143,7 @@ function Distribution({ title, note, rows, empty, unit = "pages" }: { title: str
 
 function CompareRow({ severity, what, category, note, onClick }: { severity: Severity; what: string; category?: string; note: string; onClick?: () => void }) {
   return (
-    <div className="au-issue" style={{ borderLeftColor: SEV_COLOR[severity] }}>
+    <div className="au-issue">
       <button className="au-issue-h" onClick={onClick} style={{ cursor: onClick ? "pointer" : "default" }}>
         <span className="au-sev" style={{ color: SEV_COLOR[severity], borderColor: SEV_COLOR[severity] }}>{SEV_LABEL[severity]}</span>
         <span className="au-issue-t"><b>{what}</b><small>{note}{category ? ` · ${category}` : ""}</small></span>
@@ -1221,7 +1221,7 @@ const AUDIT_CSS = `
 .au-two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
 .au-three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
 .au-list{display:flex;flex-direction:column;gap:8px}
-.au-issue{border-radius:10px;border:1px solid var(--au-line);border-left:3px solid var(--lx-mut);background:var(--lx-in);overflow:hidden;min-width:0}
+.au-issue{border-radius:10px;border:1px solid var(--au-line);background:var(--lx-in);overflow:hidden;min-width:0}
 .au-issue-h{display:flex;align-items:center;gap:10px;width:100%;padding:11px 12px;background:none;border:none;color:inherit;text-align:left;cursor:pointer;font-family:inherit}
 .au-issue-t{display:block;flex:1;min-width:0}
 .au-issue-t b{display:block;font-size:13px;font-weight:650;line-height:1.4;color:var(--lx-text)}
