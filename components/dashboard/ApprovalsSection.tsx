@@ -478,14 +478,14 @@ export default function ApprovalsSection({
                   {/* article */}
                   <div className="ap-c-a flex min-w-0 items-center gap-4">
                     <span className="ap-tile"><Tile tile={tile} size={38} /></span>
-                    <div className="min-w-0">
+                    <div className="ap-txt min-w-0">
                       <span className="ap-type" style={{ color: tile.fg }}>{TYPE_LABEL[c.type] ?? c.type}</span>
                       <ClampTitle text={c.title || "Untitled"} />
                       <div className="ap-meta lx-10 lx-mut mt-1.5 flex items-center gap-1.5 overflow-hidden whitespace-nowrap">
                         <span className="ap-inline-status"><StatusPill s={c.status} /></span>
                         <span className="ap-m-x truncate">{categoryOf(c)}</span><i className="ap-sep ap-m-x" /><span className="ap-m-x">{agentOf(c)}</span><i className="ap-sep ap-m-x" />
                         <span className="ap-m-x">{typeof c.meta?.wordCount === "number" ? `${c.meta.wordCount.toLocaleString()} words` : "— words"}</span>
-                        <i className="ap-sep ap-inline-date" /><span className="ap-inline-date">{fmtBoth(c.updated_at ?? c.created_at)}</span>
+                        <i className="ap-sep ap-inline-date" /><span className="ap-inline-date"><span className="ap-d-full">{fmtBoth(c.updated_at ?? c.created_at)}</span><span className="ap-d-short">{fmtDate(c.updated_at ?? c.created_at)}</span></span>
                       </div>
                       {(kidsOf.get(c.id)?.length ?? 0) > 0 && (
                         <div className="ap-kids" onClick={(e) => e.stopPropagation()}>
@@ -1162,6 +1162,7 @@ const CSS = `
   box-shadow:0 2px 10px rgba(124,58,237,.3)}
 .ap-act-p:hover{color:#fff;filter:brightness(1.1)}
 .ap-inline-date{display:none}
+.ap-d-short{display:none}
 .ap-live{display:inline-flex;align-items:center;gap:4px;max-width:100%;margin-top:3px;font-size:11px;color:var(--lx-green);text-decoration:none}
 .ap-live:hover{text-decoration:underline}
 @container ap (max-width:980px){
@@ -1194,6 +1195,13 @@ const CSS = `
 @container ap (max-width:620px){
   /* phone: a compact card. Only what decides the action stays: status, date, image count. */
   .ap-m-x{display:none!important}
+  /* one line carries everything that is not the title: kind, status, date, image count */
+  .ap-txt{display:flex;flex-wrap:wrap;align-items:center;column-gap:7px;row-gap:3px}
+  .ap-txt .ap-title-wrap{order:1;flex:0 0 100%}
+  .ap-txt .ap-type{order:2;margin:0}
+  .ap-txt .ap-meta{order:3;margin-top:0!important;flex:0 1 auto;min-width:0}
+  .ap-txt .ap-kids{order:4;margin-top:0;flex:0 0 auto}
+  .ap-d-full{display:none}.ap-d-short{display:inline}
   .ap-type{font-size:9.5px!important}
   .ap-tile>span{width:32px!important;height:32px!important}
   .ap-row{padding:10px 12px}
