@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useStore } from "@/lib/store";
 import WhatsAppConnectModal from "./WhatsAppConnectModal";
 import { LxInput, LxSelect } from "./ui";
-import { Globe, LayoutGrid, Link2, Megaphone, MoreHorizontal, Monitor } from "lucide-react";
+import { Globe, LayoutGrid, Link2, Megaphone, MessageCircle, MoreHorizontal, Monitor } from "lucide-react";
 import type { IconType } from "react-icons";
 import { FaFacebookF, FaInstagram, FaLinkedinIn, FaYoutube } from "react-icons/fa";
 import { FaXTwitter } from "react-icons/fa6";
@@ -125,12 +125,13 @@ const CARDS: Card[] = [
   },
 ];
 
-const TABS: { key: "all" | Category | "marketing" | "others"; label: string; icon: React.ElementType }[] = [
+type TabKey = "all" | Category | "marketing" | "messaging";
+const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
   { key: "all", label: "All Connections", icon: LayoutGrid },
   { key: "social", label: "Social Media", icon: Link2 },
   { key: "cms", label: "CMS & Website", icon: Monitor },
   { key: "marketing", label: "Marketing", icon: Megaphone },
-  { key: "others", label: "Others", icon: MoreHorizontal },
+  { key: "messaging", label: "Messaging", icon: MessageCircle },
 ];
 
 type GoogleState = {
@@ -175,6 +176,33 @@ function Icon({ card }: { card: Card }) {
     >
       {Glyph ? <Glyph size={13} /> : <Globe size={14} />}
     </span>
+  );
+}
+
+/** The ONE card every integration uses (WhatsApp, each CMS and social tool, Google), so they all
+ *  look and behave the same: mark, name, status, one line of what it does, one clear action.
+ *  Connected cards are outlined in green and offer "Manage"; the rest offer "Connect". On a phone
+ *  the card becomes a compact row so the whole list is scannable without scrolling forever. */
+function ConnTile({ mark, name, state, blurb, detail, onAction, label }: {
+  mark: React.ReactNode; name: string; state: "connected" | "pairing" | "off"; blurb: string; detail?: string | null;
+  onAction: () => void; label: string;
+}) {
+  const on = state === "connected";
+  return (
+    <div className={`cn-card ${on ? "on" : ""}`}>
+      <span className="cn-mark">{mark}</span>
+      <div className="cn-body">
+        <div className="cn-top">
+          <b className="cn-name">{name}</b>
+          <span className={`cn-pill ${state}`}>
+            <i />{state === "connected" ? "Connected" : state === "pairing" ? "Scanning" : "Not connected"}
+          </span>
+        </div>
+        <p className="cn-blurb">{blurb}</p>
+        {detail && <p className="cn-detail">{detail}</p>}
+      </div>
+      <button className={`cn-act ${on ? "sec" : "pri"}`} onClick={onAction} aria-label={`${label} ${name}`}>{label}</button>
+    </div>
   );
 }
 
@@ -282,12 +310,11 @@ export default function ConnectSection() {
     }
   };
 
-  const totalSlots = CARDS.length + 1; // +1 = Google Analytics (Search Console + GA4 + Business Profile)
-  const connectedCount = CARDS.filter((c) => found(c.type)).length + (googleConnected ? 1 : 0);
+  const totalSlots = CARDS.length + 2; // +1 Google (Search Console, GA4, Business Profile), +1 WhatsApp
+  const connectedCount = CARDS.filter((c) => found(c.type)).length + (googleConnected ? 1 : 0) + (waStatus === "connected" ? 1 : 0);
 
   const filteredCards = CARDS.filter((c) => tab === "all" || tab === c.category);
   const showGoogle = tab === "all" || tab === "marketing";
-  const showOthersEmpty = tab === "others";
   // Mr. WhatsApp status for the card below. Its own connection (Baileys), separate from the
   // /api/integrations cards, so it has its own status read and its own pairing modal.
   useEffect(() => {
@@ -300,67 +327,32 @@ export default function ConnectSection() {
 
   const liveModalItem = modalCard ? found(modalCard.type) : null;
 
+  const waState: "connected" | "pairing" | "off" = waStatus === "connected" ? "connected" : waStatus === "pairing" ? "pairing" : "off";
+  const showWa = tab === "all" || tab === "messaging";
+
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-lg font-bold">Connect</h1>
-        <p className="lx-11 lx-mut mt-1">Connect your tools and accounts to automate and streamline your workflow.</p>
-      </div>
+    <div className="cn-page">
+      <style dangerouslySetInnerHTML={{ __html: CONNECT_CSS }} />
+      <header className="cn-head">
+        <div className="min-w-0">
+          <h1 className="text-lg font-bold">Connect</h1>
+          <p className="lx-11 lx-mut mt-1">Link your accounts once. Mr. Lxwa then publishes, replies and reports for you.</p>
+        </div>
+        <div className="cn-total" title="Connected out of all available">
+          <span className="cn-total-n">{connectedCount}<small> / {totalSlots}</small></span>
+          <span className="cn-total-l">connected</span>
+          <span className="cn-bar"><i style={{ width: `${Math.round((connectedCount / Math.max(1, totalSlots)) * 100)}%` }} /></span>
+        </div>
+      </header>
 
       <WhatsAppConnectModal open={waModal} onClose={() => setWaModal(false)} onConnected={() => setWaStatus("connected")} />
 
-      {/* Mr. WhatsApp — a first-class connect card, because pairing a WhatsApp is a bigger,
-          more visible thing than a CMS token and the owner asked for it here as well as on the
-          WhatsApp page. Opens the same modal. */}
-      <div className="lx-card2 flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3">
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl" style={{ background: "#25D366" }}>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 21a9 9 0 10-8-4.9L3 21l4.9-1A9 9 0 0012 21z" stroke="#04120a" strokeWidth="1.7" strokeLinejoin="round" /></svg>
-          </span>
-          <div>
-            <b className="lx-13 block">WhatsApp</b>
-            <span className="lx-11 lx-mut">Link your own number to message and reply to leads — one at a time, by you.</span>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="lx-10 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1" style={{ background: "var(--lx-in)", border: "1px solid var(--lx-border)" }}>
-            <span className="h-2 w-2 rounded-full" style={{ background: waStatus === "connected" ? "var(--lx-green)" : waStatus === "pairing" ? "var(--lx-cyan)" : "var(--lx-mut)" }} />
-            <span style={{ color: "var(--lx-text)" }}>{waStatus === "connected" ? "Connected" : waStatus === "pairing" ? "Scanning" : "Not connected"}</span>
-          </span>
-          <button className="lx-grad lx-11 rounded-full px-4 py-2 font-semibold" onClick={() => setWaModal(true)}>
-            {waStatus === "connected" ? "Manage" : "Connect"}
+      <div className="cn-tabs" role="tablist" aria-label="Connection categories">
+        {TABS.map((t) => (
+          <button key={t.key} role="tab" aria-selected={tab === t.key} onClick={() => setTab(t.key)} className={`cn-tab ${tab === t.key ? "on" : ""}`}>
+            <t.icon size={14} />{t.label}
           </button>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap gap-2">
-          {TABS.map((t) => {
-            const active = tab === t.key;
-            return (
-              <button
-                key={t.key}
-                onClick={() => setTab(t.key)}
-                className="lx-11 flex items-center gap-2 rounded-xl px-3.5 py-2 font-semibold transition"
-                style={
-                  active
-                    ? { background: "rgba(139,92,246,.16)", border: "1px solid rgba(139,92,246,.5)", color: "#c4b5fd" }
-                    : { background: "var(--lx-in)", border: "1px solid var(--lx-border)", color: "var(--lx-mut)" }
-                }
-              >
-                <t.icon size={15} />
-                {t.label}
-              </button>
-            );
-          })}
-        </div>
-        <div className="lx-in flex items-center gap-2 rounded-xl px-3.5 py-2">
-          <Link2 size={16} style={{ color: "var(--lx-purple)" }} />
-          <div className="leading-tight">
-            <div className="lx-10 lx-mut">Total Connections</div>
-            <div className="lx-12 font-bold">{connectedCount} / {totalSlots}</div>
-          </div>
-        </div>
+        ))}
       </div>
 
       {secret && (
@@ -379,52 +371,41 @@ export default function ConnectSection() {
         </div>
       )}
 
-      {showOthersEmpty ? (
-        <div className="lx-card2 flex flex-col items-center gap-2 p-8 text-center">
-          <MoreHorizontal size={22} className="lx-mut" />
-          <p className="lx-11 lx-mut">No integrations in this category yet.</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 md:grid-cols-3">
-          {filteredCards.map((card) => {
-            const liveItem = found(card.type);
-            return (
-              <div key={card.type} className="lx-card2 flex flex-col p-3 sm:p-3.5">
-                <div className="flex items-center gap-2">
-                  <Icon card={card} />
-                  <div className="min-w-0 flex-1">
-                    <div className="lx-11 font-bold leading-tight">{card.name}</div>
-                    <StatusPill connected={!!liveItem} />
-                  </div>
-                  <button
-                    className="lx-icobtn shrink-0"
-                    aria-label={liveItem ? `Manage ${card.name}` : `Connect ${card.name}`}
-                    onClick={() => (liveItem ? openManage(card) : openConnect(card))}
-                  >
-                    <MoreHorizontal size={14} />
-                  </button>
-                </div>
-
-                <p className="lx-10 lx-mut mt-1.5">{card.blurb}</p>
-
-                {liveItem?.label && (
-                  <p className="lx-11 mt-2 truncate" style={{ color: "var(--lx-cyan)" }}>{liveItem.label}</p>
-                )}
-
-                <div className="mt-auto pt-2.5">
-                  {liveItem ? (
-                    <button className="lx-grad lx-10 px-3 py-1.5" onClick={() => openManage(card)}>Manage</button>
-                  ) : (
-                    <button className="lx-grad lx-10 px-3 py-1.5" onClick={() => openConnect(card)}>Connect</button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-
-          {showGoogle && <GoogleCard onToast={toast} confirmAction={confirmAction} onStatusChange={setGoogleConnected} />}
-        </div>
-      )}
+      <div className="cn-grid">
+        {showWa && (
+          <ConnTile
+            name="WhatsApp"
+            state={waState}
+            blurb="Link your own number to message and reply to leads, one at a time, by you."
+            label={waState === "connected" ? "Manage" : waState === "pairing" ? "Continue" : "Connect"}
+            onAction={() => setWaModal(true)}
+            mark={
+              <span className="cn-glyph" style={{ background: "#25D366" }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 21a9 9 0 10-8-4.9L3 21l4.9-1A9 9 0 0012 21z" stroke="#04120a" strokeWidth="1.8" strokeLinejoin="round" /></svg>
+              </span>
+            }
+          />
+        )}
+        {filteredCards.map((card) => {
+          const liveItem = found(card.type);
+          return (
+            <ConnTile
+              key={card.type}
+              name={card.name}
+              state={liveItem ? "connected" : "off"}
+              blurb={card.blurb}
+              detail={liveItem?.label ?? null}
+              label={liveItem ? "Manage" : "Connect"}
+              onAction={() => (liveItem ? openManage(card) : openConnect(card))}
+              mark={<span className="cn-glyph" style={{ background: card.markBg }}>{card.icon ? <card.icon size={18} /> : <Globe size={18} />}</span>}
+            />
+          );
+        })}
+        {showGoogle && <GoogleCard onToast={toast} confirmAction={confirmAction} onStatusChange={setGoogleConnected} />}
+        {!showWa && !showGoogle && filteredCards.length === 0 && (
+          <div className="cn-empty"><MoreHorizontal size={20} /><p>No integrations in this category yet.</p></div>
+        )}
+      </div>
 
       <p className="lx-11 lx-mut">
         When things get published is controlled in{" "}
@@ -604,9 +585,8 @@ function GoogleCard({ onToast, confirmAction, onStatusChange }: {
 
   if (!g) {
     return (
-      <div className="lx-card2 flex flex-col p-3 sm:p-3.5">
-        <p className="lx-11 lx-mut">Checking Google status…</p>
-      </div>
+      <div className="cn-card"><span className="cn-mark"><span className="cn-glyph" style={{ background: "#E37400" }}><SiGoogleanalytics size={18} /></span></span>
+        <div className="cn-body"><b className="cn-name">Google</b><p className="cn-blurb">Checking status…</p></div></div>
     );
   }
 
@@ -620,23 +600,16 @@ function GoogleCard({ onToast, confirmAction, onStatusChange }: {
   const closeModal = () => { if (busy) return; setModalOpen(false); setSelecting(false); };
 
   return (
-    <div className="lx-card2 flex flex-col p-3 sm:p-3.5">
-      <div className="flex items-center gap-2">
-        <Icon card={card} />
-        <div className="min-w-0 flex-1">
-          <div className="lx-11 font-bold leading-tight">Google</div>
-          <StatusPill connected={!!g.connected} />
-        </div>
-        <button className="lx-icobtn shrink-0" aria-label="Manage Google" onClick={openModal}>
-          <MoreHorizontal size={14} />
-        </button>
-      </div>
-
-      <p className="lx-10 lx-mut mt-1.5">Connect your Google account once — Calendar &amp; Meet (auto-book meetings), Search Console, Analytics &amp; Business Profile.</p>
-
-      <div className="mt-auto pt-2.5">
-        <button className="lx-grad lx-10 px-3 py-1.5" onClick={openModal}>{g.connected ? "Manage" : "Connect"}</button>
-      </div>
+    <>
+      <ConnTile
+        name="Google"
+        state={g.connected ? "connected" : "off"}
+        blurb="Connect Google once for Calendar and Meet (auto-booked meetings), Search Console, Analytics and Business Profile."
+        detail={g.connected ? g.email ?? null : null}
+        label={g.connected ? "Manage" : "Connect"}
+        onAction={openModal}
+        mark={<span className="cn-glyph" style={{ background: "#E37400" }}><SiGoogleanalytics size={18} /></span>}
+      />
 
       {modalOpen && (
         <Modal onClose={closeModal}>
@@ -729,6 +702,66 @@ function GoogleCard({ onToast, confirmAction, onStatusChange }: {
           )}
         </Modal>
       )}
-    </div>
+    </>
   );
 }
+
+
+const CONNECT_CSS = `
+.cn-page{display:grid;gap:16px}
+.cn-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+.cn-total{display:grid;grid-template-columns:auto 1fr;column-gap:8px;align-items:baseline;min-width:150px;padding:10px 14px;border-radius:12px;
+  background:var(--lx-card);border:1px solid var(--lx-border)}
+.cn-total-n{font-size:20px;font-weight:800;line-height:1;color:var(--lx-text)}
+.cn-total-n small{font-size:12px;font-weight:600;color:var(--lx-mut)}
+.cn-total-l{font-size:11px;color:var(--lx-mut)}
+.cn-bar{grid-column:1/-1;height:4px;margin-top:8px;border-radius:99px;background:var(--lx-border);overflow:hidden}
+.cn-bar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#22c55e,#22d3ee)}
+/* categories: one scrollable strip, never a wall of wrapped pills */
+.cn-tabs{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.cn-tabs::-webkit-scrollbar{display:none}
+.cn-tab{display:inline-flex;align-items:center;gap:7px;flex:0 0 auto;height:36px;padding:0 14px;border-radius:999px;font-size:12.5px;font-weight:600;cursor:pointer;
+  color:var(--lx-mut);background:var(--lx-in);border:1px solid var(--lx-border);transition:.15s;white-space:nowrap}
+.cn-tab:hover{color:var(--lx-text)}
+.cn-tab.on{color:#c4b5fd;background:rgba(139,92,246,.16);border-color:rgba(139,92,246,.5)}
+.light .lx-root .cn-tab.on{color:#5b3fd6}
+.cn-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.cn-card{position:relative;display:grid;grid-template-columns:auto minmax(0,1fr);grid-template-areas:"m b" "a a";gap:12px 12px;align-content:start;
+  padding:14px;border-radius:14px;background:var(--lx-card);border:1px solid var(--lx-border);transition:border-color .15s,transform .15s}
+.cn-card:hover{border-color:rgba(139,92,246,.4)}
+.cn-card.on{border-color:rgba(34,197,94,.45);box-shadow:inset 3px 0 0 #22c55e}
+.cn-mark{grid-area:m}
+.cn-glyph{display:flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:11px;color:#fff;flex-shrink:0}
+.cn-body{grid-area:b;min-width:0}
+.cn-top{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}
+.cn-name{font-size:14px;font-weight:700;color:var(--lx-text)}
+.cn-pill{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:10.5px;font-weight:600;
+  color:var(--lx-mut);background:var(--ap-s1,rgba(255,255,255,.05));border:1px solid var(--lx-border);white-space:nowrap}
+.cn-pill i{width:6px;height:6px;border-radius:50%;background:var(--lx-mut)}
+.cn-pill.connected{color:#4ade80;background:rgba(34,197,94,.1);border-color:rgba(34,197,94,.4)}
+.cn-pill.connected i{background:#22c55e}
+.cn-pill.pairing{color:#22d3ee;background:rgba(34,211,238,.1);border-color:rgba(34,211,238,.4)}
+.cn-pill.pairing i{background:#22d3ee}
+.light .lx-root .cn-pill.connected{color:#15803d}
+.light .lx-root .cn-pill.pairing{color:#0e7490}
+.cn-blurb{margin:6px 0 0;font-size:12px;line-height:1.5;color:var(--lx-mut);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.cn-detail{margin:6px 0 0;font-size:12px;color:var(--lx-cyan);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cn-act{grid-area:a;height:38px;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid transparent;transition:.15s}
+.cn-act.pri{color:#fff;background:linear-gradient(135deg,#4f46e5,#7c3aed);box-shadow:0 2px 10px rgba(124,58,237,.3)}
+.cn-act.pri:hover{filter:brightness(1.1)}
+.cn-act.sec{color:var(--lx-text);background:transparent;border-color:var(--lx-border)}
+.cn-act.sec:hover{border-color:rgba(139,92,246,.55)}
+.cn-empty{grid-column:1/-1;display:flex;flex-direction:column;align-items:center;gap:8px;padding:32px;border-radius:14px;
+  background:var(--lx-card);border:1px dashed var(--lx-border);color:var(--lx-mut);font-size:12.5px;text-align:center}
+.cn-empty p{margin:0}
+/* phone: one compact row per integration, the action on the right */
+@media (max-width:639px){
+  .cn-grid{grid-template-columns:minmax(0,1fr);gap:8px}
+  .cn-card{grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"m b a";align-items:center;padding:12px;gap:10px}
+  .cn-glyph{width:38px;height:38px}
+  .cn-act{height:36px;min-width:88px;padding:0 12px}
+  .cn-blurb{margin-top:3px;-webkit-line-clamp:1}
+  .cn-head{align-items:stretch}
+  .cn-total{flex:1 1 100%}
+}
+`;
