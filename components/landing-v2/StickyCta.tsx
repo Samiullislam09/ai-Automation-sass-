@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { AuthLink } from "./AuthLink";
 import { useEffect, useState } from "react";
 import { ArrowRight } from "lucide-react";
 import { PLAN } from "./plan";
@@ -37,9 +38,7 @@ export function StickyCta() {
             </button>
           ))}
         </div>
-        <Link href="/signup" className="inline-flex h-[54px] shrink-0 items-center justify-center gap-2 rounded-full bg-[linear-gradient(180deg,#383840_0%,#0a0a0d_100%)] px-[18px] text-[14px] font-medium tracking-[-0.084px] text-[#fafafa] shadow-[0_4px_12px_-3px_rgba(13,13,26,0.22)] transition-colors hover:bg-[#3d3d3d] active:scale-[0.98] max-[360px]:h-12">
-          Get started<ArrowRight size={16} />
-        </Link>
+        <AuthLink guestHref="/signup" guestLabel="Get started" authedLabel="Go to dashboard" className="inline-flex h-[54px] shrink-0 items-center justify-center gap-2 rounded-full bg-[linear-gradient(180deg,#383840_0%,#0a0a0d_100%)] px-[18px] text-[14px] font-medium tracking-[-0.084px] text-[#fafafa] shadow-[0_4px_12px_-3px_rgba(13,13,26,0.22)] transition-colors hover:bg-[#3d3d3d] active:scale-[0.98] max-[360px]:h-12"><ArrowRight size={16} /></AuthLink>
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { AuthLink } from "./AuthLink";
 import { useState } from "react";
 import { ArrowRight } from "lucide-react";
 import { Logo } from "./Logo";
@@ -25,9 +26,7 @@ export function Nav() {
               ))}
             </nav>
             <div className="ml-auto flex items-center gap-2 lg:ml-0">
-              <Link href="/login" className="inline-flex h-10 items-center gap-2 rounded-full bg-[#262626] pl-4 pr-3 text-[14px] font-semibold leading-5 text-[#fafafa] transition-colors hover:bg-[#3d3d3d]">
-                <span>Login</span><ArrowRight size={18} />
-              </Link>
+              <AuthLink guestHref="/login" guestLabel="" authedLabel="Dashboard" className="inline-flex h-10 items-center gap-2 rounded-full bg-[#262626] pl-4 pr-3 text-[14px] font-semibold leading-5 text-[#fafafa] transition-colors hover:bg-[#3d3d3d]"><span>Login</span><ArrowRight size={18} /></AuthLink>
               <button type="button" aria-label="Open menu" aria-expanded={open} onClick={() => setOpen(o => !o)}
                 className="flex h-11 w-11 items-center justify-center rounded-full border border-[#e5e5e5] lg:hidden">
                 <span className="relative block h-[14px] w-[18px]">

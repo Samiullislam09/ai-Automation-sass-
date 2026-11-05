@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { AuthLink } from "./AuthLink";
 import { useState } from "react";
 import { Check, ShieldCheck, PenLine, Search, Share2, KeyRound, CalendarClock, Palette, Mail, BarChart3, UserRound, Building2, Megaphone, TriangleAlert, CircleCheck, Image as ImageIcon, LayoutTemplate, Link2, Users, type LucideIcon } from "lucide-react";
 
@@ -145,7 +146,7 @@ export function Pricing() {
                   </div>
                 </div>
               ))}
-              <Link href="/signup" className="mt-4 flex h-10 w-full items-center justify-center rounded-full bg-[linear-gradient(180deg,#383840_0%,#0a0a0d_100%)] text-[14px] font-medium tracking-[-0.084px] text-white shadow-[0_4px_12px_-3px_rgba(13,13,26,0.22)] transition hover:-translate-y-px hover:shadow-[0_10px_22px_-8px_rgba(13,13,26,0.28)] active:translate-y-0 active:scale-[0.99]">Get started</Link>
+              <AuthLink guestHref="/signup" guestLabel="Get started" authedLabel="Go to dashboard" className="mt-4 flex h-10 w-full items-center justify-center rounded-full bg-[linear-gradient(180deg,#383840_0%,#0a0a0d_100%)] text-[14px] font-medium tracking-[-0.084px] text-white shadow-[0_4px_12px_-3px_rgba(13,13,26,0.22)] transition hover:-translate-y-px hover:shadow-[0_10px_22px_-8px_rgba(13,13,26,0.28)] active:translate-y-0 active:scale-[0.99]" />
             </div>
           </article>
         </div>

@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { AuthLink } from "./AuthLink";
 import { useEffect, useRef, useState } from "react";
 import { ArrowRight, Search, PenLine, ShieldCheck, Send, MessageSquare, Brain, Check } from "lucide-react";
 
@@ -23,9 +24,7 @@ function Panel({ i }: { i: number }) {
         </span>
         <h3 className="text-[40px] font-medium leading-[1.1] tracking-[-0.02em] text-[#0a0a0a]">{t.title}</h3>
         <p className="max-w-[360px] text-[17px] leading-[1.5] text-[#737373]">{t.body}</p>
-        <Link href="/signup" className="inline-flex h-12 items-center gap-2 rounded-full bg-[#262626] px-6 text-[15px] font-semibold text-[#fafafa] transition-colors hover:bg-[#3d3d3d]">
-          {t.cta}<ArrowRight size={17} />
-        </Link>
+        <AuthLink guestHref="/signup" guestLabel={t.cta} authedLabel="Go to dashboard" className="inline-flex h-12 items-center gap-2 rounded-full bg-[#262626] px-6 text-[15px] font-semibold text-[#fafafa] transition-colors hover:bg-[#3d3d3d]"><ArrowRight size={17} /></AuthLink>
       </div>
       <div className="h-full overflow-hidden rounded-[24px] bg-[#161a1d] p-6 shadow-[0_20px_40px_-16px_rgba(0,0,0,0.45)]">
         <div className="mb-5 flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]" /><span className="h-2.5 w-2.5 rounded-full bg-[#febc2e]" /><span className="h-2.5 w-2.5 rounded-full bg-[#28c840]" /><span className="ml-3 rounded-md bg-[#232a2f] px-3 py-1 text-[12px] text-[#8b959c]">{t.tag}</span></div>
@@ -81,9 +80,7 @@ export function Hero() {
                 AI agents research keywords, write ranking articles and publish to your website, all while you stay in control of every approval.
               </p>
               <div className="flex items-center gap-[10px] max-sm:flex-col">
-                <Link href="/signup" className="inline-flex h-12 items-center gap-2 rounded-full bg-[#262626] pl-6 pr-[22px] text-[16px] font-semibold text-[#fafafa] transition-colors hover:bg-[#3d3d3d]">
-                  <span>Start free</span><ArrowRight size={18} />
-                </Link>
+                <AuthLink guestHref="/signup" guestLabel="" authedLabel="Go to dashboard" className="inline-flex h-12 items-center gap-2 rounded-full bg-[#262626] pl-6 pr-[22px] text-[16px] font-semibold text-[#fafafa] transition-colors hover:bg-[#3d3d3d]"><span>Start free</span><ArrowRight size={18} /></AuthLink>
                 <span className="flex h-10 items-center gap-2 px-4 text-[16px] font-semibold text-[#0a0a0a] max-[601px]:text-[14px]">
                   <span className="h-2 w-2 rounded-full bg-[#6a5af0]" />Connect your site in minutes
                 </span>

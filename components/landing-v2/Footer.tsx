@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AuthLink } from "./AuthLink";
 import { BRAND } from "@/lib/brand";
 
 const LINKS: [string, string][] = [
@@ -13,8 +14,8 @@ export function Footer() {
         <div className="flex flex-col items-center">
           <p className="text-center text-[18px] font-medium leading-[1.5]">Ready to start?</p>
           <div className="mt-3 flex items-center justify-center gap-4">
-            <Link href="/signup" className="inline-flex h-11 items-center justify-center rounded-full bg-[#262626] px-5 text-[14px] font-semibold text-[#fafafa] transition-colors hover:bg-[#3d3d3d]">Start free</Link>
-            <Link href="/login" className="inline-flex h-11 items-center justify-center rounded-full border border-[#e5e5e5] bg-white px-5 text-[14px] font-semibold text-[#0a0a0a] transition-colors hover:bg-[#fafafa]">Log in</Link>
+            <AuthLink guestHref="/signup" guestLabel="Start free" authedLabel="Go to dashboard" className="inline-flex h-11 items-center justify-center rounded-full bg-[#262626] px-5 text-[14px] font-semibold text-[#fafafa] transition-colors hover:bg-[#3d3d3d]" />
+            <AuthLink guestHref="/login" guestLabel="Log in" authedLabel={null} className="inline-flex h-11 items-center justify-center rounded-full border border-[#e5e5e5] bg-white px-5 text-[14px] font-semibold text-[#0a0a0a] transition-colors hover:bg-[#fafafa]" />
           </div>
         </div>
 
