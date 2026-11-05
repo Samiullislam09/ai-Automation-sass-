@@ -2841,13 +2841,25 @@ export default function MrLxwaDashboard({
   // remounts on navigation and re-reads the new pathname correctly) rather than synced via an
   // effect, so it never fights a click that already changed it this visit.
   const [desktopAssistantOpen, setDesktopAssistantOpen] = useState(() => pathname === "/dashboard");
-  const closeAssistant = () => { setBotOpen(false); setDesktopAssistantOpen(false); };
+  const closeAssistant = () => {
+    setBotOpen(false);
+    setDesktopAssistantOpen(false);
+    // Remembered: closing it on the Dashboard must not bring it back on the next page change.
+    try { localStorage.setItem("lx-assistant", "closed"); } catch { /* private mode: fine */ }
+  };
+  const openAssistant = () => {
+    setDesktopAssistantOpen(true);
+    try { localStorage.setItem("lx-assistant", "open"); } catch { /* fine */ }
+  };
   // The shell stays mounted while pages change, so the route-dependent bits are synced on every
   // navigation: drawers close, and the assistant opens by default only on the Dashboard home.
   useEffect(() => {
     setSideOpen(false);
     setBotOpen(false);
-    setDesktopAssistantOpen(pathname === "/dashboard");
+    let pref: string | null = null;
+    try { pref = localStorage.getItem("lx-assistant"); } catch { /* fine */ }
+    // Your own choice wins; with none, it is open on the Dashboard and tucked away elsewhere.
+    setDesktopAssistantOpen(pref === "open" ? true : pref === "closed" ? false : pathname === "/dashboard");
   }, [pathname]);
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null);
   // The chat's progress strip: one line by default, opens on the chevron (owner, 2026-08-31 —
@@ -4874,13 +4886,13 @@ export default function MrLxwaDashboard({
         // that showed as an empty gap beside full-width pages like Leads. As a FAB it needs no
         // reserved space, so content now runs full width.
         <button
-          className="fixed right-4 top-1/2 z-40 hidden h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full shadow-lg lg:flex"
-          style={{ background: "linear-gradient(135deg,#6366f1,#22d3ee)", color: "#fff" }}
-          onClick={() => setDesktopAssistantOpen(true)}
+          className="lx-assistant-tab hidden lg:flex"
+          onClick={openAssistant}
           aria-label="Open AI assistant"
-          title="Ask Mr. Lxwa"
+          title="Open the assistant (Mr. Lxwa)"
         >
-          <Bot size={20} />
+          <Bot size={18} />
+          <span>Ask Mr. Lxwa</span>
         </button>
       )}
     </div>

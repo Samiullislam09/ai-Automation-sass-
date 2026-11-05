@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Maximize2, MessageSquare, Plus, Search, Trash2, X } from "lucide-react";
 import { displayChatTitle } from "@/lib/chat-title";
@@ -49,6 +49,16 @@ export default function ChatHistory({
   const [q, setQ] = useState("");
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  // Where the popover hangs: under the history button, kept inside the screen.
+  const [anchor, setAnchor] = useState<{ top: number; right: number; width: number }>({ top: 56, right: 8, width: 320 });
+  useLayoutEffect(() => {
+    const btn = document.querySelector('[aria-label="Chat history"]') as HTMLElement | null;
+    const r = btn?.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const width = Math.min(340, vw - 16);
+    const right = Math.max(8, Math.min((r ? vw - r.right : 8), vw - width - 8));
+    setAnchor({ top: (r?.bottom ?? 48) + 8, right, width });
+  }, []);
 
   // Escape closes; a click anywhere outside closes (the backdrop below).
   useEffect(() => {
@@ -65,7 +75,13 @@ export default function ChatHistory({
   }, [convs, q]);
 
   const panel = (
-    <div className={`chh ${expanded ? "chh-big" : "chh-pop"}`} role="dialog" aria-label="Chat history" onClick={(e) => e.stopPropagation()}>
+    <div
+      className={`chh ${expanded ? "chh-big" : "chh-pop"}`}
+      role="dialog"
+      aria-label="Chat history"
+      style={{ "--chh-top": `${anchor.top}px`, "--chh-right": `${anchor.right}px`, "--chh-w": `${anchor.width}px` } as React.CSSProperties}
+      onClick={(e) => e.stopPropagation()}
+    >
       <div className="chh-head">
         <span className="chh-title">Chat history</span>
         <div className="chh-head-actions">
@@ -122,15 +138,18 @@ export default function ChatHistory({
     </div>
   );
 
-  // The backdrop and the large sheet go to <body>: the assistant panel can be a transformed
-  // drawer, and a fixed element inside a transformed parent is positioned against the parent,
-  // not the screen. The small popover stays inline so it inherits the app's theme variables.
+  // Everything goes to the dashboard root, not into the assistant panel. The panel is a drawer
+  // with its own stacking context, which put the click-away backdrop ABOVE the popover: the list
+  // could not be scrolled or clicked, because every wheel and click landed on the backdrop. At
+  // the root, the backdrop (z 60) sits under the popover (z 61), and the app's theme variables
+  // still apply.
+  const host = (document.querySelector(".lx-root") as HTMLElement | null) ?? document.body;
   const backdrop = <div className={`chh-backdrop ${expanded ? "chh-backdrop-big" : ""}`} onClick={onClose} />;
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
-      {createPortal(backdrop, document.body)}
-      {expanded ? createPortal(<div className="chh-center" onClick={onClose}>{panel}</div>, document.body) : panel}
+      {createPortal(backdrop, host)}
+      {createPortal(expanded ? <div className="chh-center" onClick={onClose}>{panel}</div> : panel, host)}
     </>
   );
 }
@@ -140,7 +159,7 @@ const CSS = `
 .chh-backdrop-big{background:rgba(10,12,24,.5);backdrop-filter:blur(2px);z-index:70}
 .chh-center{position:fixed;inset:0;z-index:71;display:flex;align-items:center;justify-content:center;padding:16px}
 .chh{display:flex;flex-direction:column;min-height:0}
-.chh-pop{position:absolute;top:calc(100% + 8px);right:0;z-index:61;width:320px;max-height:min(460px,70vh);border-radius:14px;
+.chh-pop{position:fixed;top:var(--chh-top);right:var(--chh-right);z-index:61;width:var(--chh-w);max-height:min(520px,calc(100dvh - var(--chh-top) - 12px));border-radius:14px;
   background:var(--lx-panel);border:1px solid var(--lx-border);box-shadow:0 18px 50px rgba(0,0,0,.45);color:var(--lx-text)}
 /* the large view is a white sheet, easy to read and scan whatever the app theme is */
 .chh-big{width:min(760px,94vw);height:min(80vh,720px);border-radius:16px;background:#fff;color:#1b2440;
@@ -159,7 +178,15 @@ const CSS = `
 .chh-search button{display:inline-flex;border:none;background:none;color:inherit;opacity:.6;cursor:pointer}
 .chh-new{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 12px;border-radius:9px;border:none;cursor:pointer;
   font-size:12.5px;font-weight:600;color:#fff;background:linear-gradient(135deg,#4f46e5,#7c3aed);white-space:nowrap}
-.chh-list{flex:1;min-height:0;overflow-y:auto;padding:0 8px 10px}
+.chh-list{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:0 8px 10px;
+  scrollbar-width:thin;scrollbar-color:rgba(139,92,246,.6) transparent}
+/* a slim brand-coloured thumb on a quiet track, instead of the browser's arrows and grey bar */
+.chh-list::-webkit-scrollbar{width:8px}
+.chh-list::-webkit-scrollbar-track{background:transparent;margin:6px 0}
+.chh-list::-webkit-scrollbar-thumb{border-radius:999px;border:2px solid transparent;background-clip:padding-box;
+  background-image:linear-gradient(180deg,#8b5cf6,#6366f1)}
+.chh-list::-webkit-scrollbar-thumb:hover{background-image:linear-gradient(180deg,#a78bfa,#818cf8)}
+.chh-list::-webkit-scrollbar-button{display:none;width:0;height:0}
 .chh-group{margin:10px 6px 4px;font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;opacity:.55}
 .chh-row{position:relative;display:flex;align-items:center;gap:2px;border-radius:10px}
 .chh-row:hover{background:rgba(127,127,160,.12)}
@@ -184,7 +211,7 @@ const CSS = `
 .chh-empty{margin:18px 10px;font-size:12.5px;opacity:.65;text-align:center}
 /* phone: either view is a full-screen sheet */
 @media (max-width:639px){
-  .chh-pop{position:fixed;inset:0;width:auto;max-height:none;border-radius:0;z-index:72;background:var(--lx-panel)}
+  .chh-pop{top:0;right:0;bottom:0;left:0;width:auto;max-height:none;border-radius:0;z-index:72;background:var(--lx-panel)}
   .chh-backdrop{z-index:71}
   .chh-center{padding:0}
   .chh-big{width:100vw;height:100dvh;border-radius:0}

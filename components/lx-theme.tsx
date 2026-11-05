@@ -64,6 +64,13 @@ export const LX_CSS = `
 .light .lx-root .lx-pill.mut,
 .light .lx-root .lx-listening{background:rgba(22,32,60,.04)}
 
+/* The way back to the assistant once it is closed: a labelled tab on the right edge, bottom
+   corner so it never sits on top of page content, with a soft pulse until it has been used. */
+.lx-assistant-tab{position:fixed;right:16px;bottom:18px;z-index:40;align-items:center;gap:8px;height:44px;padding:0 16px 0 13px;
+  border:none;border-radius:999px;cursor:pointer;color:#fff;font-size:13px;font-weight:600;
+  background:linear-gradient(135deg,#6366f1,#22d3ee);box-shadow:0 8px 24px rgba(79,70,229,.45);transition:transform .15s,box-shadow .15s}
+.lx-assistant-tab:hover{transform:translateY(-2px);box-shadow:0 12px 28px rgba(79,70,229,.55)}
+.lx-assistant-tab:focus-visible{outline:2px solid #fff;outline-offset:2px}
 .lx-chat-skel{display:grid;gap:10px;padding:4px 0}
 .lx-chat-skel i{display:block;height:44px;width:78%;border-radius:12px;background:linear-gradient(90deg,var(--lx-border) 25%,rgba(139,92,246,.14) 50%,var(--lx-border) 75%);background-size:200% 100%;animation:lxChatShim 1.3s linear infinite}
 .lx-chat-skel i:nth-child(2){width:62%;margin-left:auto}
