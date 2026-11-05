@@ -1,0 +1,72 @@
+.lv2{
+  --mk-h1:60px; --mk-h1-leading:.98; --mk-h2:48px; --mk-h2-leading:1.06;
+  --mk-subtitle:20px; --mk-title:24px; --mk-body:16px; --mk-body-leading:1.5; --mk-scale:1; --section-gap:120px;
+  --ease-out-soft:cubic-bezier(.22,.61,.36,1);
+  font-family:"Google Sans Flex","Plus Jakarta Sans",system-ui,sans-serif;
+  background:#fff; color:#0a0a0a; min-height:100vh;
+  -webkit-font-smoothing:antialiased;
+}
+@media (min-width:768px) and (max-width:1279px){ .lv2{ --mk-h1:48px; --mk-h2:36px; --mk-h2-leading:1.1; --mk-subtitle:18px; --mk-title:20px; --mk-scale:.64; --section-gap:96px; } }
+@media (max-width:767px){ .lv2{ --mk-h1:36px; --mk-h1-leading:1.05; --mk-h2:28px; --mk-h2-leading:1.1; --mk-subtitle:16px; --mk-title:18px; --mk-body:15px; --mk-body-leading:1.55; --mk-scale:.48; --section-gap:64px; } }
+
+.lv2 *{ box-sizing:border-box; }
+@layer base{ .lv2 h1,.lv2 h2{ letter-spacing:-.02em; font-weight:500; } }
+.lv2 button{ font-family:inherit; }
+.lv2 .lv-h2{ font-size:var(--mk-h2); line-height:var(--mk-h2-leading); color:#0a0a0a; }
+.lv2 .lv-sub{ font-size:var(--mk-subtitle); line-height:1.5; color:#737373; font-weight:400; letter-spacing:0; }
+.lv2 .lv-title{ font-size:var(--mk-title); line-height:1.2; font-weight:500; letter-spacing:-.01em; color:#0a0a0a; }
+.lv2 .lv-body{ font-size:var(--mk-body); line-height:var(--mk-body-leading); font-weight:400; color:#737373; }
+.lv2 .lv-grad-text{ background:linear-gradient(-8.5deg,#39d47a 4%,#16bfa6 50%,#009cd0 96%); -webkit-background-clip:text; background-clip:text; color:transparent; font-weight:600; }
+
+/* Section top margins — the same numbers the reference uses at each breakpoint */
+.lv2 .sec-models{ margin-top:var(--section-gap); }
+.lv2 .sec-workflow{ margin-top:calc(var(--section-gap) - 56px); }
+.lv2 .sec-pricing{ margin-top:calc(var(--section-gap) - 100px); }
+.lv2 .sec-testimonials{ margin-top:calc(var(--section-gap) - 126px); }
+.lv2 .sec-features{ margin-top:calc(var(--section-gap) - 40px); }
+.lv2 .sec-faq{ margin-top:calc(var(--section-gap) - 131px); }
+.lv2 .sec-closing{ margin-top:calc(var(--section-gap) - 13px); }
+.lv2 .sec-footer{ margin-top:var(--section-gap); }
+@media (min-width:768px) and (max-width:1279px){
+  .lv2 .sec-workflow{ margin-top:calc(var(--section-gap) - 62px); }
+  .lv2 .sec-pricing{ margin-top:calc(var(--section-gap) - 64px); }
+  .lv2 .sec-testimonials{ margin-top:calc(var(--section-gap) - 88px); }
+  .lv2 .sec-faq{ margin-top:calc(var(--section-gap) - 90px); }
+  .lv2 .sec-closing{ margin-top:calc(var(--section-gap) + 5px); }
+}
+@media (max-width:767px){
+  .lv2 .sec-workflow{ margin-top:calc(var(--section-gap) - 62px); }
+  .lv2 .sec-pricing{ margin-top:calc(var(--section-gap) - 64px); }
+  .lv2 .sec-testimonials{ margin-top:calc(var(--section-gap) - 72px); }
+  .lv2 .sec-features{ margin-top:calc(var(--section-gap) - 32px); }
+  .lv2 .sec-faq{ margin-top:calc(var(--section-gap) - 70px); }
+  .lv2 .sec-closing{ margin-top:calc(var(--section-gap) + 5px); }
+}
+
+@keyframes lv-marquee-left{ from{transform:translateX(0)} to{transform:translateX(-50%)} }
+@keyframes lv-marquee-right{ from{transform:translateX(-50%)} to{transform:translateX(0)} }
+@keyframes lv-fade{ from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:none} }
+@keyframes lv-halo{ 0%,100%{opacity:.5;transform:scale(1)} 50%{opacity:1;transform:scale(1.08)} }
+.lv2 .lv-marquee-l{ animation:lv-marquee-left 55s linear infinite; }
+.lv2 .lv-marquee-r{ animation:lv-marquee-right 60s linear infinite; }
+.lv2 .lv-marquee-wrap:hover .lv-marquee-l,.lv2 .lv-marquee-wrap:hover .lv-marquee-r{ animation-play-state:paused; }
+.lv2 .lv-fade{ animation:lv-fade .3s var(--ease-out-soft); }
+@media (prefers-reduced-motion:reduce){ .lv2 .lv-marquee-l,.lv2 .lv-marquee-r,.lv2 .lv-fade{ animation:none; } }
+.lv2 .lv-noscroll{ scrollbar-width:none; } .lv2 .lv-noscroll::-webkit-scrollbar{ display:none; }
+
+/* gradient hairline border used by the section panels (masked 1px ring) */
+.lv2 .lv-panel{ position:relative; overflow:hidden; border-top-left-radius:60px; border-top-right-radius:60px; background:linear-gradient(180deg,#e5f6ea -86.7%,#fff 49.1%); }
+.lv2 .lv-panel::before{ content:""; position:absolute; inset:0; border-top-left-radius:60px; border-top-right-radius:60px; padding:1px; pointer-events:none;
+  background:linear-gradient(180deg,#e5e5e5 0%,#fff 84.9%);
+  -webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0); -webkit-mask-composite:xor; mask:linear-gradient(#fff 0 0) content-box exclude,linear-gradient(#fff 0 0); }
+@media (max-width:1023px){ .lv2 .lv-panel,.lv2 .lv-panel::before{ border-top-left-radius:32px; border-top-right-radius:32px; } }
+
+/* The app's dark theme must not leak into the marketing page */
+body:has(.lv2){ background:#fff; }
+body:has(.lv2)::before{ display:none; }
+
+/* gradient ring (2px) used on the plan card and open FAQ items */
+.lv2 .lv-ring{ position:absolute; inset:0; border-radius:inherit; padding:2px; pointer-events:none;
+  background:linear-gradient(318.1deg,#39d47a 4%,#16bfa6 50%,#009cd0 96%);
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0); -webkit-mask-composite:xor;
+  mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0); }

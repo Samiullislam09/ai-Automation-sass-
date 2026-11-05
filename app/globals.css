@@ -110,7 +110,7 @@
 html{scroll-behavior:smooth}
 body{background:var(--bg);color:var(--ink);font-family:Inter,"Segoe UI",system-ui,sans-serif;font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden;margin:0}
 body::before{content:"";position:fixed;inset:0;background:radial-gradient(900px 500px at 80% -10%,#6a5af00d,transparent 60%),radial-gradient(700px 500px at 0% 110%,#6ea8ff0a,transparent 60%);pointer-events:none;z-index:0}
-a{color:var(--ac);text-decoration:none}
+@layer base{a{color:var(--ac);text-decoration:none}}
 input,select,textarea{font-family:inherit;font-size:14px;background:var(--panel2);border:1px solid var(--line2);border-radius:10px;color:var(--ink);padding:11px 13px;width:100%;transition:border-color var(--tr)}
 input:focus,select:focus,textarea:focus{border-color:var(--ac)}
 /* One visible keyboard focus ring for everything interactive. Mouse clicks don't show it. */

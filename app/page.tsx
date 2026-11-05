@@ -1,8 +1,6 @@
-import PixelLanding from "@/components/landing-pixel/PixelLanding";
+import Landing from "@/components/landing-v2/Landing";
 
-/** Landing page — pixel-art "AI Command Center" theme, ported 1:1 from the user-supplied
- *  reference build (components/landing-pixel/PixelLanding.tsx). Replaces the earlier Tailwind
- *  "Apex" redesign; see git history for that version if it's ever needed again. */
+/** Home page. The previous pixel-art landing (components/landing-pixel) is kept in git history. */
 export default function Home() {
-  return <PixelLanding />;
+  return <Landing />;
 }
