@@ -132,14 +132,17 @@ export default function ApprovalsSection({
   heading = "Approvals",
   subtitle = "Review and manage all generated content",
   createHref,
+  initialItems,
 }: {
   heading?: string;
   subtitle?: string;
   createHref?: string;
+  /** Rows the server already read for this render: the page paints with data, no extra fetch. */
+  initialItems?: ContentItem[];
 } = {}) {
   const { act, report, toast } = useStore();
-  const [items, setItems] = useState<ContentItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState<ContentItem[]>(initialItems ?? []);
+  const [loading, setLoading] = useState(!initialItems);
   const [busy, setBusy] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ContentItem | null>(null);
@@ -159,7 +162,7 @@ export default function ApprovalsSection({
 
   // Stale-while-revalidate: the list from the last visit paints instantly and the network
   // refresh replaces it quietly. The spinner only shows on a true first load.
-  const hasData = useRef(false);
+  const hasData = useRef(!!initialItems);
   const abortRef = useRef<AbortController | null>(null);
   /** `query` goes to the database (title ILIKE), so search reaches every item, not just the 100
    *  the page loads. Typing also filters what is already on screen instantly, below. */
@@ -183,6 +186,10 @@ export default function ApprovalsSection({
       .finally(() => { if (!ac.signal.aborted) { setLoading(false); setSearching(false); } });
   };
   useEffect(() => {
+    if (initialItems) {
+      try { sessionStorage.setItem(LIST_CACHE_KEY, JSON.stringify(initialItems)); } catch { /* fine */ }
+      return;
+    }
     try {
       const raw = sessionStorage.getItem(LIST_CACHE_KEY);
       const cached = raw ? JSON.parse(raw) : null;
@@ -412,11 +419,11 @@ export default function ApprovalsSection({
         <div className="lx-scroll flex-1 overflow-y-auto px-4 pb-4">
           {/* stat strip: each tile is also the status filter */}
           <div className="ap-stats mt-3">
-            <Stat n={counts.total}     label="All items"      color="#8b5cf6" Icon={FileText}     on={fStatus === "all"}               onClick={() => setFStatus("all")} />
-            <Stat n={counts.pending}   label="Pending review" color="#f59e0b" Icon={Clock}        on={fStatus === "awaiting_approval"} onClick={() => setFStatus("awaiting_approval")} />
-            <Stat n={counts.published} label="Published"      color="#22c55e" Icon={CheckCircle2} on={fStatus === "published"}         onClick={() => setFStatus("published")} />
-            <Stat n={counts.rejected}  label="Rejected"       color="#ef4444" Icon={XCircle}      on={fStatus === "rejected"}          onClick={() => setFStatus("rejected")} />
-            <Stat n={counts.draft}     label="In progress"    color="#3b82f6" Icon={RefreshCw}    on={fStatus === "draft"}             onClick={() => setFStatus("draft")} />
+            <Stat n={loading ? "–" : counts.total}     label="All items"      color="#8b5cf6" Icon={FileText}     on={fStatus === "all"}               onClick={() => setFStatus("all")} />
+            <Stat n={loading ? "–" : counts.pending}   label="Pending review" color="#f59e0b" Icon={Clock}        on={fStatus === "awaiting_approval"} onClick={() => setFStatus("awaiting_approval")} />
+            <Stat n={loading ? "–" : counts.published} label="Published"      color="#22c55e" Icon={CheckCircle2} on={fStatus === "published"}         onClick={() => setFStatus("published")} />
+            <Stat n={loading ? "–" : counts.rejected}  label="Rejected"       color="#ef4444" Icon={XCircle}      on={fStatus === "rejected"}          onClick={() => setFStatus("rejected")} />
+            <Stat n={loading ? "–" : counts.draft}     label="In progress"    color="#3b82f6" Icon={RefreshCw}    on={fStatus === "draft"}             onClick={() => setFStatus("draft")} />
           </div>
 
           {/* toolbar: one search, four filters, one clear */}
@@ -442,7 +449,7 @@ export default function ApprovalsSection({
           {/* rows */}
           <div className="mt-2 space-y-3">
             {loading ? (
-              <div className="ap-row items-center justify-center py-10"><Loader2 size={18} className="ap-spin lx-mut" /><span className="lx-11 lx-mut ml-2">Loading…</span></div>
+              <>{Array.from({ length: 5 }, (_, i) => <div key={i} className="ap-skel" aria-hidden />)}</>
             ) : rows.length ? rows.map((c) => {
               const tile = tileOf(c.type);
               const selected = c.id === selectedId;
@@ -486,18 +493,18 @@ export default function ApprovalsSection({
                   {/* actions */}
                   <div className="ap-c-x relative flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
                     {c.type === "article" ? (
-                      <Link href={`/dashboard/content/${c.id}`} className="ap-act ap-act-b" title="Open the full article page" aria-label="Open the full article page">
+                      <Link href={`/dashboard/content/${c.id}`} target="_blank" rel="noopener" className="ap-act ap-act-b" title="Open the full article in a new tab" aria-label="Open the full article in a new tab">
                         <Monitor size={15} />
                       </Link>
                     ) : <span className="ap-act ap-act-0" aria-hidden />}
-                    <RowAction c={c} busy={isBusy} onReview={() => openDetail(c)} onHistory={() => openDetail(c, "history")} />
+                    <RowAction c={c} busy={isBusy} onReview={() => openDetail(c)} onHistory={() => openDetail(c, "history")} onApprove={() => approve(c)} />
                     <button className="ap-kebab" onClick={() => setMenuFor(menuFor === c.id ? null : c.id)} aria-label="More">
                       <MoreVertical size={16} />
                     </button>
                     {menuFor === c.id && (
                       <div className="ap-menu" onClick={(e) => e.stopPropagation()}>
-                        <button onClick={() => { openDetail(c, "preview"); setMenuFor(null); }}><Eye size={13} /> Preview</button>
-                        {c.type === "article" && <Link href={`/dashboard/content/${c.id}`}><Monitor size={13} /> Browser View</Link>}
+                        <button onClick={() => { openDetail(c, "preview"); setMenuFor(null); }}><Eye size={13} /> Quick preview</button>
+                        {c.type === "article" && <Link href={`/dashboard/content/${c.id}`} target="_blank" rel="noopener" onClick={() => setMenuFor(null)}><Monitor size={13} /> Open in new tab</Link>}
                         {c.type === "social" && <button onClick={() => { copyPost(c); setMenuFor(null); }}><Copy size={13} /> Copy text</button>}
                         {c.meta?.publishedUrl && <a href={c.meta.publishedUrl} target="_blank" rel="noreferrer"><ArrowRight size={13} /> Open live page</a>}
                         {c.status === "awaiting_approval" && (
@@ -568,7 +575,7 @@ export default function ApprovalsSection({
 
 /* ---- pieces ------------------------------------------------------------------------------ */
 
-function Stat({ n, label, color, Icon, on, onClick }: { n: number; label: string; color: string; Icon: React.ElementType; on?: boolean; onClick?: () => void }) {
+function Stat({ n, label, color, Icon, on, onClick }: { n: number | string; label: string; color: string; Icon: React.ElementType; on?: boolean; onClick?: () => void }) {
   return (
     <button type="button" className={`ap-stat ${on ? "on" : ""}`} style={{ "--c": color } as React.CSSProperties} onClick={onClick} aria-pressed={!!on} title={`Show ${label.toLowerCase()}`}>
       <span className="ap-stat-ico"><Icon size={17} /></span>
@@ -618,11 +625,23 @@ function StatusPill({ s }: { s: string }) {
 }
 
 /** Icon-only row action — the label lives in the native tooltip so the row stays compact. */
-function RowAction({ c, busy, onReview, onHistory }: { c: ContentItem; busy: boolean; onReview: () => void; onHistory: () => void }) {
+function RowAction({ c, busy, onReview, onHistory, onApprove }: { c: ContentItem; busy: boolean; onReview: () => void; onHistory: () => void; onApprove: () => void }) {
+  // Approving publishes, so the first click only arms the button ("Confirm?"); a second click
+  // within 3 seconds does it. Reading the piece first is one click on the row.
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 3000);
+    return () => clearTimeout(t);
+  }, [armed]);
   if (busy) return <span className="ap-btn"><Loader2 size={14} className="ap-spin" /></span>;
   switch (c.status) {
-    case "awaiting_approval":
-      return <button className="ap-btn ap-btn-p" onClick={onReview} title="Read it and approve or reject">Review <ArrowRight size={13} /></button>;
+    case "awaiting_approval": {
+      const label = c.type === "social" && c.meta?.copyOnly ? "Mark ready" : "Approve";
+      return armed
+        ? <button className="ap-btn ap-btn-ok" onClick={() => { setArmed(false); onApprove(); }} title="Click again to confirm"><Check size={13} /> Confirm?</button>
+        : <button className="ap-btn ap-btn-p" onClick={() => setArmed(true)} title={`${label}. Click the row first to read it.`}><Check size={13} /> {label}</button>;
+    }
     case "published":
       return c.meta?.publishedUrl
         ? <a className="ap-btn" href={c.meta.publishedUrl} target="_blank" rel="noreferrer" title="Open the live page"><ExternalLink size={13} /> Live</a>
@@ -903,7 +922,7 @@ function Drawer({ c, loading, busy, tab, setTab, onClose, onApprove, onReject, o
           </button>
         </div>
         {c.type === "article" ? (
-          <Link href={`/dashboard/content/${c.id}`} className="ap-changes mt-3"><Monitor size={15} /> View</Link>
+          <Link href={`/dashboard/content/${c.id}`} target="_blank" rel="noopener" className="ap-changes mt-3"><Monitor size={15} /> Open full article in new tab</Link>
         ) : (
           <button className="ap-changes mt-3" onClick={onCopy}><Copy size={15} /> Copy text</button>
         )}
@@ -1015,7 +1034,7 @@ const CSS = `
 .ap-select select{appearance:none;-webkit-appearance:none;background:none;border:none;outline:none;color:inherit;font:inherit;
   padding-right:2px;cursor:pointer}
 .ap-select select option{background:var(--lx-in);color:var(--lx-text)}
-.ap-grid{display:grid;grid-template-columns:minmax(0,1fr) 132px 96px 156px;grid-template-areas:"a s u x";align-items:center;gap:14px}
+.ap-grid{display:grid;grid-template-columns:minmax(0,1fr) 118px 96px 156px;grid-template-areas:"a s u x";align-items:center;gap:14px}
 .ap-c-a{grid-area:a;min-width:0}.ap-c-s{grid-area:s;justify-self:start}.ap-c-u{grid-area:u}.ap-c-x{grid-area:x;justify-self:end}
 /* row actions are icon-only squares: the row stays compact, the label is the tooltip */
 .ap-act{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;flex-shrink:0;border-radius:8px;
@@ -1070,6 +1089,13 @@ const CSS = `
 .ap-toolbar .ap-select{height:36px}
 .ap-x{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:6px;border:none;background:var(--ap-s1);color:var(--lx-mut);cursor:pointer}
 .ap-x:hover{color:var(--lx-text)}
+.ap-status{font-size:10.5px!important;line-height:1.3;padding:3px 9px!important;gap:5px!important}
+.ap-skel{height:74px;border-radius:12px;border:1px solid var(--lx-border);
+  background:linear-gradient(90deg,var(--ap-s1) 25%,var(--ap-s2) 50%,var(--ap-s1) 75%);background-size:200% 100%;animation:apShim 1.3s linear infinite}
+@keyframes apShim{to{background-position:-200% 0}}
+@media (prefers-reduced-motion:reduce){.ap-skel{animation:none}}
+.ap-btn-ok{color:#fff;background:linear-gradient(135deg,#16a34a,#15803d);border-color:rgba(34,197,94,.7);box-shadow:0 2px 10px rgba(22,163,74,.3)}
+.ap-btn-ok:hover{filter:brightness(1.08);border-color:rgba(34,197,94,.95)}
 .ap-clear{display:inline-flex;align-items:center;gap:5px;height:36px;padding:0 10px;border-radius:9px;font-size:12px;font-weight:600;cursor:pointer;
   color:var(--lx-mut);background:none;border:1px dashed var(--lx-border)}
 .ap-clear:hover{color:var(--lx-text);border-color:var(--ap-s3)}

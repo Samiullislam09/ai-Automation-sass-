@@ -2746,7 +2746,9 @@ export default function MrLxwaDashboard({
   // anyone who wants it re-checked on demand right now.
   const [acctData, setAcctData] = useState<any>(null);
   useEffect(() => {
-    fetch("/api/account", { cache: "no-store" })
+    // Deferred ~1.2s: this route runs several queries and is only needed when the account panel
+    // is opened, so it must not compete with the page's own first load.
+    const wait = setTimeout(() => fetch("/api/account", { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => {
         setAcctData(d);
@@ -2754,7 +2756,7 @@ export default function MrLxwaDashboard({
         // `account.plan`) stops showing a plan the database no longer agrees with.
         if (d?.ok && d.plan && PLANS[d.plan]) patch({ plan: d.plan, tokensMax: PLANS[d.plan].tokens });
       })
-      .catch(() => setAcctData({ ok: false }));
+      .catch(() => setAcctData({ ok: false })), 1200);
     // `patch` deliberately excluded — lib/store.tsx hands out a new function identity on every
     // one of its own re-renders (it isn't wrapped in useCallback), and StoreProvider re-renders
     // often (toasts, chat, live polling all live in the same context). With `patch` in this
@@ -2762,6 +2764,7 @@ export default function MrLxwaDashboard({
     // the fetch never won the race — this panel was stuck on "Loading…" forever (owner report
     // 2026-09-09). Mount-once is exactly what this needs — nothing to react to afterward.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => clearTimeout(wait);
   }, []);
 
   // Real pending-approvals count for the sidebar badge — same /api/content endpoint the
