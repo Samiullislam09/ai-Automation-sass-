@@ -15,8 +15,8 @@ import { AGENTS } from "@/lib/agents-data";
 export const TOKEN_COST: Record<string, number> = { article: 10, story: 4, social: 1 };
 export const PLANS: Record<string, { name: string; price: number; tokens: number; tagline: string }> = {
   free:    { name: "Free",    price: 0,  tokens: 10,  tagline: "1 article/month — try the full experience" },
-  starter: { name: "Starter", price: 5,  tokens: 120, tagline: "~10 articles + stories & posts every month" },
-  growth:  { name: "Growth",  price: 15, tokens: 400, tagline: "Serious volume + priority writing model" },
+  starter: { name: "Pro", price: 5,  tokens: 120, tagline: "~10 articles + stories & posts every month" },
+  growth:  { name: "Max",     price: 15, tokens: 400, tagline: "Serious volume + priority writing model" },
 };
 // "live" agents have real backend wiring (agent-server queue jobs, see agent-server/src/agents/).
 // The rest are visual roster slots for now (roadmap placeholders) — shown in the office same as

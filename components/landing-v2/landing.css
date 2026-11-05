@@ -23,6 +23,7 @@
 .lv2 .sec-workflow{ margin-top:calc(var(--section-gap) - 56px); }
 .lv2 .sec-pricing{ margin-top:calc(var(--section-gap) - 100px); }
 .lv2 .sec-testimonials{ margin-top:calc(var(--section-gap) - 126px); }
+.lv2 .sec-after-plans{ margin-top:var(--section-gap); }
 .lv2 .sec-features{ margin-top:calc(var(--section-gap) - 40px); }
 .lv2 .sec-faq{ margin-top:calc(var(--section-gap) - 131px); }
 .lv2 .sec-closing{ margin-top:calc(var(--section-gap) - 13px); }

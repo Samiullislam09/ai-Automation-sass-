@@ -43,7 +43,7 @@ export function Pricing() {
   const toggle = (id: string) => setSel(s => (s.includes(id) ? s.filter(x => x !== id) : [...s, id]));
 
   return (
-    <section id="pricing" className="sec-pricing relative mx-auto w-full max-w-[1440px] scroll-mt-[84px] text-[#0a0a0a] max-lg:pb-9">
+    <section id="compare" className="sec-pricing relative mx-auto w-full max-w-[1440px] scroll-mt-[84px] text-[#0a0a0a] max-lg:pb-9">
       <div className="absolute inset-x-[40px] inset-y-0 max-w-[1360px] overflow-hidden rounded-t-[60px] bg-[linear-gradient(180deg,#efecff_-86.7%,#fff_49.1%)] max-[901px]:rounded-t-[32px] max-lg:inset-x-0" />
       <div className="absolute inset-x-[40px] top-0 h-[733px] w-auto max-w-[1360px] overflow-hidden rounded-[44px] opacity-50 max-lg:inset-x-0 max-lg:w-full"
         style={{ background: "linear-gradient(180deg,rgba(255,255,255,0) 63.165%,#fff 100%),radial-gradient(ellipse 680px 366.5px at 612px -73.3px,rgba(255,255,255,0.5) 0%,rgba(255,255,255,0) 100%),radial-gradient(ellipse 544px 293.2px at 40.8px 696.35px,rgba(139,108,255,0.8) 0%,rgba(139,108,255,0) 100%),radial-gradient(ellipse 612px 329.85px at 54.4px 58.64px,rgba(196,181,253,0.95) 0%,rgba(196,181,253,0) 100%),radial-gradient(ellipse 816px 439.8px at 1196.8px 183.25px,rgba(99,140,250,0.9) 0%,rgba(99,140,250,0) 100%),#a99cf6" }} />

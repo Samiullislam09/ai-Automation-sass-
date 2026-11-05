@@ -16,7 +16,7 @@ export function Nav() {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <header className="relative z-30 w-full bg-white py-3 pl-6 pr-6 max-[380px]:px-4 md:px-12 lg:fixed lg:inset-x-0 lg:top-0">
+      <header className="relative z-30 w-full bg-white py-3 pl-6 pr-6 max-[420px]:px-4 md:px-12 lg:fixed lg:inset-x-0 lg:top-0">
         <div className="mx-auto flex w-full max-w-[1360px] items-center max-lg:gap-3">
           <Link href="/" className="flex shrink-0 items-center"><Logo /></Link>
           <div className="flex flex-1 items-center justify-between">
@@ -26,9 +26,9 @@ export function Nav() {
               ))}
             </nav>
             <div className="ml-auto flex items-center gap-2 lg:ml-0">
-              <AuthLink guestHref="/login" guestLabel="" authedLabel="Dashboard" className="inline-flex h-10 items-center gap-2 rounded-full bg-[#262626] pl-4 pr-3 text-[14px] font-semibold leading-5 text-[#fafafa] transition-colors hover:bg-[#3d3d3d]"><span>Login</span><ArrowRight size={18} /></AuthLink>
+              <AuthLink guestHref="/login" guestLabel="" authedLabel="Dashboard" className="inline-flex h-10 items-center gap-2 whitespace-nowrap rounded-full bg-[#262626] pl-4 pr-3 max-[380px]:h-9 max-[380px]:pl-3 max-[380px]:pr-2.5 max-[380px]:text-[13px] max-[340px]:pl-2.5 max-[340px]:pr-2 max-[340px]:text-[12px] text-[14px] font-semibold leading-5 text-[#fafafa] transition-colors hover:bg-[#3d3d3d]"><span>Login</span><ArrowRight size={18} /></AuthLink>
               <button type="button" aria-label="Open menu" aria-expanded={open} onClick={() => setOpen(o => !o)}
-                className="flex h-11 w-11 items-center justify-center rounded-full border border-[#e5e5e5] lg:hidden">
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#e5e5e5] max-[420px]:h-10 max-[420px]:w-10 max-[340px]:h-9 max-[340px]:w-9 lg:hidden">
                 <span className="relative block h-[14px] w-[18px]">
                   <span className="absolute left-0 block h-[2px] w-full rounded bg-[#0a0a0a] transition-transform duration-200" style={{ top: open ? 6 : 0, transform: open ? "rotate(45deg)" : "none" }} />
                   <span className="absolute left-0 top-[6px] block h-[2px] w-full rounded bg-[#0a0a0a] transition-opacity duration-200" style={{ opacity: open ? 0 : 1 }} />

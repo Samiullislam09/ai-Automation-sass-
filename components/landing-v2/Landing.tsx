@@ -5,6 +5,7 @@ import { ValueStrip } from "./ValueStrip";
 import { Integrations } from "./Integrations";
 import { Workflow } from "./Workflow";
 import { Pricing } from "./Pricing";
+import { Plans } from "./Plans";
 import { Testimonials } from "./Testimonials";
 import { StickyCta } from "./StickyCta";
 import { Features } from "./Features";
@@ -26,6 +27,7 @@ export default function Landing() {
         <Integrations />
         <Workflow />
         <Pricing />
+        <Plans />
         <Testimonials />
         <Features />
         <Faq />

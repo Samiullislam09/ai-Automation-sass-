@@ -42,7 +42,7 @@ export function Testimonials() {
   };
 
   return (
-    <section className="sec-testimonials mx-auto w-full max-w-[1440px] overflow-hidden bg-white pb-8 pt-4 md:pb-12 lg:pb-12 lg:pt-5 max-[601px]:px-4 min-[601px]:max-[901px]:px-6">
+    <section className="sec-after-plans mx-auto w-full max-w-[1440px] overflow-hidden bg-white pb-8 pt-4 md:pb-12 lg:pb-12 lg:pt-5 max-[601px]:px-4 min-[601px]:max-[901px]:px-6">
       <div className="mx-auto flex w-[760px] flex-col items-center gap-[calc(16px*var(--mk-scale))] text-center max-[901px]:w-full">
         <h2 className="lv-h2 whitespace-nowrap max-[601px]:whitespace-normal">{REVIEWS_HEADLINE[0]} <br className="min-[602px]:hidden" /><span className="max-[601px]:whitespace-nowrap">{REVIEWS_HEADLINE[1]}</span></h2>
         <p className="lv-sub !text-[#7d827e] max-[601px]:pb-4">See what people using {BRAND.name} have to say.</p>
