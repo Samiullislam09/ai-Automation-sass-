@@ -1276,7 +1276,7 @@ const CSS = `
 .ap-fgroup{display:contents}
 .ap-ftoggle{display:none;align-items:center;gap:6px;height:40px;padding:0 12px;border-radius:9px;font-size:12.5px;font-weight:600;cursor:pointer;
   color:var(--lx-text);background:var(--lx-card);border:1px solid var(--lx-border)}
-.ap-ftoggle.on{border-color:rgba(139,92,246,.55)}
+.ap-ftoggle.on{background:var(--lx-sel-bg);border-color:var(--lx-sel-border);color:var(--lx-sel-text)}
 .ap-fcount{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:999px;font-size:10.5px;color:#fff;
   background:linear-gradient(135deg,#4f46e5,#7c3aed)}
 /* phone: the panel gives its edges back, the drawer becomes a full-screen sheet */
@@ -1307,7 +1307,7 @@ button.ap-stat.on{border-color:var(--c);box-shadow:0 0 0 1px var(--c),inset 0 0 
 .ap-row{background:var(--lx-card);border:1px solid var(--lx-border);border-radius:12px;padding:16px 18px;cursor:pointer;
   transition:border-color .15s,background .15s;display:grid;position:relative}
 .ap-row:hover{border-color:var(--ap-s2);background:var(--lx-card2);z-index:5}
-.ap-row.on{border-color:rgba(139,92,246,.5);box-shadow:0 0 0 1px rgba(139,92,246,.2),0 0 22px rgba(139,92,246,.12)}
+.ap-row.on{background:var(--lx-sel-bg);border-color:var(--lx-sel-border);box-shadow:var(--lx-sel-glow)}
 .ap-title-wrap{position:relative;min-width:0}
 .ap-title{font-size:13.5px;font-weight:600;color:var(--lx-text);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* full title on hover — a real tooltip, not the browser's slow native one */

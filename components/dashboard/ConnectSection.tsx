@@ -724,11 +724,9 @@ const CONNECT_CSS = `
   color:var(--lx-mut);background:var(--lx-in);border:1px solid var(--lx-border);transition:.15s;white-space:nowrap}
 .cn-tab:hover{color:var(--lx-text)}
 /* the sidebar's selected look, reused so the whole app says "selected" one way */
-.cn-tab.on,.cn-card.on{background:linear-gradient(90deg,rgba(37,99,235,.35),rgba(139,92,246,.12));border-color:rgba(99,102,241,.35);
-  box-shadow:0 0 18px rgba(59,130,246,.16),inset 0 0 14px rgba(59,130,246,.08)}
-.cn-tab.on{color:#fff}
-.light .lx-root .cn-tab.on,.light .lx-root .cn-card.on{background:linear-gradient(90deg,rgba(37,99,235,.14),rgba(139,92,246,.07));border-color:rgba(99,102,241,.4)}
-.light .lx-root .cn-tab.on{color:#3730a3}
+.cn-tab.on{background:var(--lx-sel-bg);border-color:var(--lx-sel-border);box-shadow:var(--lx-sel-glow);color:var(--lx-sel-text)}
+/* a connected card is outline only: the same indigo border as the sidebar, no fill and no glow */
+.cn-card.on{border-color:var(--lx-sel-border)}
 .cn-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
 .cn-card{position:relative;display:grid;grid-template-columns:auto minmax(0,1fr);grid-template-areas:"m b" "a a";gap:12px 12px;align-content:start;
   padding:14px;border-radius:14px;background:var(--lx-card);border:1px solid var(--lx-border);transition:border-color .15s,transform .15s}
@@ -752,7 +750,7 @@ const CONNECT_CSS = `
 .cn-act{grid-area:a;height:38px;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid transparent;transition:.15s}
 .cn-act.pri{color:#fff;background:linear-gradient(135deg,#4f46e5,#7c3aed);box-shadow:0 2px 10px rgba(124,58,237,.3)}
 .cn-act.pri:hover{filter:brightness(1.1)}
-.cn-act.sec{color:var(--lx-text);background:rgba(255,255,255,.04);border-color:rgba(99,102,241,.35)}
+.cn-act.sec{color:var(--lx-text);background:transparent;border-color:var(--lx-sel-border)}
 .cn-act.sec:hover{border-color:rgba(139,92,246,.55)}
 .cn-empty{grid-column:1/-1;display:flex;flex-direction:column;align-items:center;gap:8px;padding:32px;border-radius:14px;
   background:var(--lx-card);border:1px dashed var(--lx-border);color:var(--lx-mut);font-size:12.5px;text-align:center}

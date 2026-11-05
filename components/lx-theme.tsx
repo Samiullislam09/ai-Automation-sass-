@@ -27,6 +27,12 @@ export const LX_CSS = `
   --lx-cyan:#22d3ee;
   --lx-green:#22c55e;
   --lx-red:#ef4444;
+  /* the SELECTED look: used by the sidebar's active item and by every selected tab, chip, card
+     and row, so the whole app says "selected" in one way */
+  --lx-sel-bg:linear-gradient(90deg,rgba(37,99,235,.35),rgba(139,92,246,.12));
+  --lx-sel-border:rgba(99,102,241,.35);
+  --lx-sel-glow:0 0 18px rgba(59,130,246,.16),inset 0 0 14px rgba(59,130,246,.08);
+  --lx-sel-text:#fff;
   background:var(--lx-bg);
   color:var(--lx-text);
   font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
@@ -56,6 +62,8 @@ export const LX_CSS = `
   --lx-border:rgba(22,32,60,.12); --lx-text:#1b2440; --lx-mut:#5b6784; --lx-dim:#8a96b2;
   --lx-purple:#7c5cff; --lx-violet:#6a45f5; --lx-blue:#2f6fe0; --lx-cyan:#0e93b0; --lx-green:#12a85f; --lx-red:#e0435f;
   --ac:#6a45f5; --ac-d:#5436d8; --line2:rgba(22,32,60,.2);
+  --lx-sel-bg:linear-gradient(90deg,rgba(37,99,235,.14),rgba(139,92,246,.07));
+  --lx-sel-border:rgba(99,102,241,.4); --lx-sel-text:#3730a3;
 }
 /* The handful of surfaces painted with a white alpha (invisible on white) get a dark alpha
    in light mode so they still read as a subtle fill. */
@@ -148,9 +156,7 @@ export const LX_CSS = `
   color:var(--lx-mut);font-size:13px;font-weight:500;cursor:pointer;background:transparent;
   border:1px solid transparent;transition:all .18s;text-align:left}
 .lx-nav:hover{color:#e8e8f2;background:rgba(255,255,255,.04)}
-.lx-nav.on{color:#fff;background:linear-gradient(90deg,rgba(37,99,235,.35),rgba(139,92,246,.12));
-  border-color:rgba(99,102,241,.35);
-  box-shadow:0 0 18px rgba(59,130,246,.16),inset 0 0 14px rgba(59,130,246,.08)}
+.lx-nav.on{color:var(--lx-sel-text);background:var(--lx-sel-bg);border-color:var(--lx-sel-border);box-shadow:var(--lx-sel-glow)}
 
 /* ---- pills / chips ---------------------------------------------------- */
 .lx-pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;
@@ -256,10 +262,10 @@ export const LX_CSS = `
 }
 
 /* ---- tabs -------------------------------------------------------------- */
-.lx-tab{position:relative;padding:10px 2px;font-size:12.5px;font-weight:500;color:var(--lx-mut);
+.lx-tab{position:relative;padding:9px 12px;border-radius:10px 10px 0 0;font-size:12.5px;font-weight:500;color:var(--lx-mut);
   background:none;border:none;cursor:pointer;white-space:nowrap}
 .lx-tab:hover{color:#d6d6e4}
-.lx-tab.on{color:#fff}
+.lx-tab.on{color:var(--lx-sel-text);background:var(--lx-sel-bg);box-shadow:var(--lx-sel-glow)}
 .lx-tab.on::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;border-radius:2px;
   background:linear-gradient(90deg,#3b82f6,#22d3ee);box-shadow:0 0 8px rgba(59,130,246,.85)}
 

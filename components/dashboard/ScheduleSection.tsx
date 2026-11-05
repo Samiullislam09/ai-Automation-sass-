@@ -795,7 +795,7 @@ const CSS = `
 .sched .tabs{display:flex;gap:4px;margin-bottom:16px;flex-wrap:wrap;border-bottom:1px solid var(--line)}
 .sched .tab{display:inline-flex;align-items:center;gap:8px;border:0;border-bottom:3px solid transparent;background:none;color:var(--mut);padding:10px 14px;font:inherit;font-weight:500;cursor:pointer;margin-bottom:-1px}
 .sched .tab:hover{color:var(--tx)}
-.sched .tab.a{color:var(--ac);border-bottom-color:var(--ac)}
+.sched .tab.a{color:var(--lx-sel-text);background:var(--lx-sel-bg);box-shadow:var(--lx-sel-glow);border-radius:10px 10px 0 0}
 .sched .cnt{background:var(--bg);color:var(--mut);border-radius:99px;font-size:12px;padding:0 8px;line-height:20px;min-width:20px;text-align:center}
 .sched .cnt.hi,.sched .tab.a .cnt{background:var(--acs);color:var(--ac)}
 .sched .list{display:flex;flex-direction:column;gap:10px}
@@ -820,7 +820,7 @@ const CSS = `
 .sched .search input{padding-left:38px;border-radius:99px}
 .sched .chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
 .sched .chip{border:1px solid var(--line);background:none;color:var(--tx);padding:6px 14px;border-radius:99px;font:inherit;font-size:14px;cursor:pointer;display:inline-flex;align-items:center;gap:8px}
-.sched .chip:hover{background:var(--bg)}.sched .chip.a{background:var(--acs);color:var(--ac);border-color:transparent;font-weight:500}
+.sched .chip:hover{background:var(--bg)}.sched .chip.a{background:var(--lx-sel-bg);color:var(--lx-sel-text);border-color:var(--lx-sel-border);box-shadow:var(--lx-sel-glow);font-weight:500}
 .sched .chip-n{background:rgba(0,0,0,.06);border-radius:99px;padding:0 7px;font-size:12px;line-height:18px;min-width:18px;text-align:center;color:var(--mut)}
 .sched .chip.a .chip-n{background:color-mix(in srgb,var(--ac) 20%,transparent);color:var(--ac)}
 .sched .chip.dp{position:relative;overflow:hidden}
@@ -863,7 +863,7 @@ const CSS = `
 .sched .seg{display:flex;border:1px solid var(--line);border-radius:99px;overflow:hidden}
 .sched .seg button{flex:1;border:0;border-right:1px solid var(--line);background:none;color:var(--tx);padding:8px 6px;font:inherit;cursor:pointer}
 .sched .seg button:last-child{border-right:0}
-.sched .seg button.a{background:var(--acs);color:var(--ac);font-weight:500}
+.sched .seg button.a{background:var(--lx-sel-bg);color:var(--lx-sel-text);font-weight:500}
 .sched .tzr{display:flex;gap:8px;align-items:stretch}
 .sched .tzr select{flex:1;width:auto;min-width:0}
 .sched .tzr .btn{flex:none}
@@ -929,8 +929,8 @@ const CSS = `
 /* automation rows: smaller, one clear toggle and one clear Edit */
 .sched .list{gap:8px}
 .sched .row{cursor:default;padding:12px 14px;gap:12px}
-.sched .row:hover{background:var(--card);border-color:var(--line)}
-.sched .row.on{border-color:color-mix(in srgb,var(--ok) 40%,var(--line));box-shadow:inset 3px 0 0 var(--ok)}
+.sched .row:not(.on):hover{background:var(--card);border-color:var(--line)}
+.sched .row.on{background:var(--lx-sel-bg);border-color:var(--lx-sel-border);box-shadow:var(--lx-sel-glow)}
 .sched .ico{width:38px;height:38px}
 .sched .name{font-weight:600;font-size:14px}
 .sched .meta{font-size:12.5px;margin-top:2px;color:var(--mut)}
@@ -943,7 +943,7 @@ const CSS = `
 .sched .tr{padding:10px 14px}
 .sched .chip{padding:5px 12px;font-size:13px}
 .sched .btn.p{background:linear-gradient(135deg,#4f46e5,#7c3aed);border-color:transparent;color:#fff}
-.sched .tab.a{color:var(--ac);border-bottom-color:var(--ac)}
+.sched .tab.a{color:var(--lx-sel-text);background:var(--lx-sel-bg);box-shadow:var(--lx-sel-glow);border-radius:10px 10px 0 0}
 @media(max-width:600px){
   .sched .panel{padding:12px 12px 32px}
   .sched h1{font-size:19px}
