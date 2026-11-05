@@ -4812,7 +4812,7 @@ export default function MrLxwaDashboard({
   /* ---------------------------------------------------------------------- */
 
   return (
-    <div className="lx-root flex h-screen w-full overflow-hidden">
+    <div className="lx-root flex h-screen w-full overflow-hidden" style={{ height: "100dvh" }}>
       <GlobalStyle />
 
       {/* drawer overlays */}
@@ -4852,7 +4852,7 @@ export default function MrLxwaDashboard({
             and every page whose header has buttons on the right had them sitting under it
             (owner, 2026-09-05: the Audit page's "Export as PDF" half-covered by it). The
             reserved strip is only on >=lg, which is the only size that button exists at. */}
-        <main className="lx-scroll flex-1 overflow-y-auto p-3 sm:p-4" style={{ scrollbarGutter: "stable" }}>
+        <main className="lx-scroll lx-main flex-1 overflow-y-auto p-1.5 sm:p-4">
           {children ?? (
             <>
               {Workflow}

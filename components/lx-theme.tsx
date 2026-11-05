@@ -63,6 +63,18 @@ export const LX_CSS = `
 .light .lx-root .lx-chip,
 .light .lx-root .lx-pill.mut,
 .light .lx-root .lx-listening{background:rgba(22,32,60,.04)}
+
+/* ---- responsive foundation (every dashboard page inherits this) --------------------------------
+   The reserved scrollbar gutter only makes sense where scrollbars take space (mouse, desktop).
+   On a phone it was an empty strip down one side, so the page looked off-centre. */
+@media (hover:hover) and (pointer:fine){ .lx-root .lx-main{scrollbar-gutter:stable} }
+/* Phones: pages get the width. Taps are at least 40px tall, and nothing may push the page
+   sideways. */
+@media (max-width:639px){
+  .lx-root .lx-main{padding-bottom:max(12px,env(safe-area-inset-bottom))}
+  .lx-root .lx-icobtn{min-width:40px;min-height:40px}
+  .lx-root{overflow-x:hidden}
+}
 .lx-root *{box-sizing:border-box}
 .lx-root ::selection{background:rgba(139,92,246,.35)}
 

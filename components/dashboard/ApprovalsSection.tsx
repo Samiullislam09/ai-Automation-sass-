@@ -150,6 +150,7 @@ export default function ApprovalsSection({
   const [tab, setTab] = useState<"details" | "preview" | "history">("details");
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false); // phone only: the filters fold away
 
   // filters
   const [q, setQ] = useState("");
@@ -444,10 +445,16 @@ export default function ApprovalsSection({
               {searching && <Loader2 size={14} className="ap-spin lx-mut" />}
               {q && !searching && <button className="ap-x" onClick={() => setQ("")} aria-label="Clear search"><X size={13} /></button>}
             </label>
+            <button type="button" className={`ap-ftoggle ${filtersOpen ? "on" : ""}`} onClick={() => setFiltersOpen((v) => !v)} aria-expanded={filtersOpen}>
+              <SlidersHorizontal size={14} /> Filters
+              {[fAgent, fType, fDate].some((v) => v !== "all") && <span className="ap-fcount">{[fAgent, fType, fDate].filter((v) => v !== "all").length}</span>}
+            </button>
+            <div className={`ap-fgroup ${filtersOpen ? "open" : ""}`}>
             <Select value={fAgent} onChange={setFAgent} options={[["all", "All agents"], ...ALL_AGENTS.map((a) => [a, `${a} (${agentCount.get(a) ?? 0})`] as [string, string])]} />
             <Select value={fType} onChange={setFType} options={[["all", "All types"], ...types.map((t) => [t, TYPE_LABEL[t] ?? t] as [string, string])]} />
             <Select value={fDate} onChange={setFDate} icon={<Calendar size={14} />} options={[["all", "Any date"], ["7d", "Last 7 days"], ["30d", "Last 30 days"], ["90d", "Last 90 days"]]} />
             <Select value={sort} onChange={(v) => setSort(v as typeof sort)} options={[["newest", "Newest first"], ["oldest", "Oldest first"], ["title", "Title A to Z"]]} />
+            </div>
             {filtersOn && <button className="ap-clear" onClick={clearFilters}><X size={13} /> Clear</button>}
           </div>
 
@@ -1161,17 +1168,26 @@ const CSS = `
 }
 .ap-inline-status{display:none}
 @container ap (max-width:620px){
-  .ap-grid{grid-template-columns:minmax(0,1fr) max-content;grid-template-areas:"a a" "s x";row-gap:10px}
+  .ap-grid{grid-template-columns:minmax(0,1fr);grid-template-areas:"a" "x";row-gap:12px}
   .ap-head{display:none}
   .ap-c-s{justify-self:start}
+  .ap-c-a{gap:10px!important}
+  .ap-c-x{justify-self:stretch;justify-content:stretch;gap:8px}
+  .ap-c-x .ap-btn{flex:1 1 0;min-width:0;height:38px;font-size:12.5px}
+  .ap-c-x .ap-kebab{flex:0 0 38px;width:38px;height:38px;border:1px solid var(--lx-border);border-radius:9px}
+  .ap-root .ap-menu{right:0;left:auto;max-width:calc(100vw - 32px)}
+  .ap-root .ap-ftoggle{display:inline-flex}
+  .ap-root .ap-fgroup{display:none}
+  .ap-root .ap-fgroup.open{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;flex:1 1 100%}
+  .ap-root .ap-fgroup .ap-select{height:40px}
+  .ap-root .ap-search-main{height:40px}
   .ap-c-u{display:none}
   .ap-inline-date{display:inline}
 }
 @container ap (max-width:620px){
   /* phone: titles wrap to two lines, filters become a tidy two-up grid, nothing is cut off */
-  .ap-c-s{display:block}
-  .ap-inline-status{display:none}
-  .ap-btn{min-width:72px;padding:0 8px}
+  .ap-inline-status{display:inline-flex}
+  .ap-btn{padding:0 8px}
   .ap-title{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
   .ap-tip{display:none}
   .ap-meta{white-space:normal;flex-wrap:wrap;row-gap:4px}
@@ -1227,6 +1243,21 @@ const CSS = `
 .ap-zoom img{max-width:94vw;max-height:90vh;object-fit:contain;border-radius:10px;cursor:default}
 .ap-zoom-x{position:absolute;top:16px;right:16px;width:38px;height:38px;border-radius:50%;border:none;background:rgba(255,255,255,.14);color:#fff;cursor:pointer;
   display:flex;align-items:center;justify-content:center}
+.ap-fgroup{display:contents}
+.ap-ftoggle{display:none;align-items:center;gap:6px;height:40px;padding:0 12px;border-radius:9px;font-size:12.5px;font-weight:600;cursor:pointer;
+  color:var(--lx-text);background:var(--lx-card);border:1px solid var(--lx-border)}
+.ap-ftoggle.on{border-color:rgba(139,92,246,.55)}
+.ap-fcount{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:999px;font-size:10.5px;color:#fff;
+  background:linear-gradient(135deg,#4f46e5,#7c3aed)}
+/* phone: the panel gives its edges back, the drawer becomes a full-screen sheet */
+@media (max-width:639px){
+  .ap-root .ap-main{border-radius:12px}
+  .ap-root .ap-hdr{padding:12px 12px 10px}
+  .ap-drawer{top:0;right:0;bottom:0;left:0;width:100%;border-radius:0;border:none}
+  .ap-drawer .ap-foot{padding-bottom:max(16px,env(safe-area-inset-bottom))}
+  .ap-close{top:12px;right:10px;width:38px;height:38px}
+  .ap-img-actions .ap-btn{flex:1 1 0}
+}
 .ap-clear{display:inline-flex;align-items:center;gap:5px;height:36px;padding:0 10px;border-radius:9px;font-size:12px;font-weight:600;cursor:pointer;
   color:var(--lx-mut);background:none;border:1px dashed var(--lx-border)}
 .ap-clear:hover{color:var(--lx-text);border-color:var(--ap-s3)}
