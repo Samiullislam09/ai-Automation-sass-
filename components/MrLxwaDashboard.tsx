@@ -1802,13 +1802,18 @@ const WriterDocScreen = ({
   color,
   label,
   scrollRef,
+  stage,
 }: {
   items: CanvasItem[];
   running: boolean;
   color: string;
   label: string;
   scrollRef?: React.RefObject<HTMLDivElement>;
+  /** The agent's own current step sentence (its real progress label). */
+  stage?: string;
 }) => {
+  const elapsedSec = useElapsedSeconds(running);
+  const outlineItem = items.filter((it) => it.kind === "outline").slice(-1)[0];
   // A section the quality review rewrote (lib/articleReview.ts) shows its rewritten text under
   // its possibly-new heading: each section_revised names the heading it replaces, and a chain of
   // rewrites across rounds is followed in arrival order to the newest. Same item key, so nothing
@@ -1882,10 +1887,36 @@ const WriterDocScreen = ({
     // screenshot round: "mr writer sayed stuck hai... abhi task stuck hai sayed"). Same
     // Wave+shimmer language as every other agent's "still working, nothing real to show yet"
     // moment (BossScreen/SiteBrainScreen/ResearchScreen) instead of this one alone sitting mute.
+    const plan: { h2: string; goal?: string }[] = Array.isArray(outlineItem?.payload?.sections) ? outlineItem!.payload.sections : [];
     return running ? (
-      <div className="flex flex-col items-center justify-center gap-3 py-10">
-        <Wave n={22} h={18} anim color={color} />
-        <span className="lx-shimmer lx-11 font-medium" style={{ color: "var(--lx-text)" }}>Writing the outline…</span>
+      <div className="py-2">
+        <div className="flex items-center gap-2.5">
+          <Wave n={18} h={14} anim color={color} />
+          <span className="lx-shimmer lx-11 font-semibold" style={{ color: "var(--lx-text)" }}>
+            {plan.length ? "Outline ready, writing the sections" : "Planning the article outline"}
+          </span>
+          <span className="lx-10 lx-mut ml-auto tabular-nums">{elapsedSec}s</span>
+        </div>
+        {stage && <div className="lx-10 lx-mut mt-1.5">{stage}</div>}
+        {outlineItem?.payload?.title && (
+          <h1 className="lx-live-anim" style={{ fontSize: 17, fontWeight: 600, lineHeight: 1.3, margin: "16px 0 10px", color: "#20241f" }}>
+            {String(outlineItem.payload.title)}
+          </h1>
+        )}
+        {plan.length > 0 && (
+          <ol className="lx-live-anim m-0 flex list-none flex-col gap-1.5 p-0">
+            {plan.map((sec, n) => (
+              <li key={n} className="flex items-start gap-2.5 rounded-lg px-3 py-2" style={{ border: "1px solid var(--lx-border)" }}>
+                <span className="lx-10 mt-px font-semibold tabular-nums lx-mut">{n + 1}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="lx-12 block font-medium leading-snug" style={{ color: "var(--lx-text)" }}>{sec.h2}</span>
+                  {sec.goal && <span className="lx-10 lx-mut mt-0.5 block leading-snug">{sec.goal}</span>}
+                </span>
+                <span className="lx-10 lx-shimmer shrink-0">writing…</span>
+              </li>
+            ))}
+          </ol>
+        )}
       </div>
     ) : (
       <div className="lx-10 lx-mut px-1 py-2">No article has been written for this order.</div>
@@ -4000,7 +4031,7 @@ export default function MrLxwaDashboard({
                           {articleFinished && finalDraft ? (
                             <FinishedArticleScreen title={finalDraft.title as string | undefined} body={String(finalDraft.body)} />
                           ) : (
-                            <WriterDocScreen items={producedItems} running={!!runningStep} color={panelAgent.color} label={panelAgent.name} scrollRef={canvasScrollRef} />
+                            <WriterDocScreen items={producedItems} running={!!runningStep} color={panelAgent.color} label={panelAgent.name} scrollRef={canvasScrollRef} stage={runningStep?.progressLabel || runningStep?.label} />
                           )}
                         </div>
                       </div>

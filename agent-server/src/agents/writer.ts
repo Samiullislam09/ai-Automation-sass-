@@ -244,6 +244,7 @@ export class WriterAgent extends Agent {
     const pipeline = await writeArticlePipeline(topic.trim(), blueprint, context, nimComplete, {
       // `text` added (2026-08-31, live Writing-tab preview) alongside the h2/words this already
       // carried — the section's own real prose, exactly as written, nothing summarised.
+      onOutline: (o) => ctx.data("outline", { title: o.title, sections: o.sections.map((x) => ({ h2: x.h2, goal: x.goal })) }),
       onSection: (section) => ctx.data("section", { h2: section.h2, words: section.words, text: section.text }),
       // Live "reading web pages" visual (2026-08-31) — researchTopic forwards whatever
       // gpt-researcher itself reports, verbatim, as it happens; this never invents a page name,

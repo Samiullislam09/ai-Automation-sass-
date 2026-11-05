@@ -596,6 +596,8 @@ export type WriteOptions = {
    *  the live workspace shows the article assembling itself section by section, for real,
    *  instead of the old post-hoc split of an already-finished one-shot draft. */
   onSection?: (section: PipelineSection) => void;
+  /** Fires the moment the outline is planned, so the dashboard can show the real plan while sections are still being written. */
+  onOutline?: (outline: Outline) => void;
   /** Real gpt-researcher, injected — writer.ts wires this to lib/research/gptResearcher.ts's
    *  `researchTopic`. Omitted entirely in every existing test, which is deliberate: the
    *  pipeline's shape must not depend on research being present. */
@@ -617,6 +619,7 @@ export async function writeArticlePipeline(
   opts.onResearch?.(research);
 
   const outline = await buildOutline(topic, blueprint, context, complete, research);
+  opts.onOutline?.(outline);
 
   // Truly concurrent — see the file header for why this is the deliberate reading of the
   // plan's "parallel" against its "previous section's last 2 lines". `onSection` fires the
