@@ -483,8 +483,8 @@ export default function AuditSection() {
   const q = pageQuery.trim().toLowerCase();
   const filteredPages = pages.filter((p) => (bucketFilter === "all" || bucketOf(p) === bucketFilter) && (!q || p.url.toLowerCase().includes(q)));
 
-  const chip = (active: boolean, label: string, onClick: () => void, color?: string) => (
-    <button key={label} className={`au-chip ${active ? "on" : ""}`} style={active && color ? { borderColor: color, color } : undefined} onClick={onClick}>
+  const chip = (active: boolean, label: string, onClick: () => void, _color?: string) => (
+    <button key={label} className={`au-chip ${active ? "on" : ""}`} onClick={onClick}>
       {label}
     </button>
   );
@@ -1191,7 +1191,7 @@ const AUDIT_CSS = `
 .au-tab{flex-shrink:0;display:inline-flex;align-items:center;gap:6px;height:42px;padding:0 14px;background:none;border:none;border-bottom:2px solid transparent;
   color:var(--lx-mut);font-size:13px;font-weight:600;cursor:pointer;margin-bottom:-1px}
 .au-tab:hover{color:var(--lx-text)}
-.au-tab.on{color:var(--lx-text);border-bottom-color:#818cf8}
+.au-tab.on{color:var(--lx-sel-text);border-bottom-color:rgba(129,140,248,.9);background:var(--lx-sel-bg)}
 .au-tab-n{padding:1px 7px;border-radius:999px;background:var(--lx-in);font-size:10.5px;color:var(--lx-mut)}
 .au-page{--au-line:color-mix(in srgb,var(--lx-text) 13%,transparent)}
 .au-card{padding:16px;border-radius:14px;background:var(--lx-card);border:1px solid var(--au-line);min-width:0}
@@ -1243,7 +1243,7 @@ const AUDIT_CSS = `
 .au-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
 .au-chip{height:30px;padding:0 12px;border-radius:999px;background:transparent;border:1px solid var(--lx-border);color:var(--lx-mut);font-size:12px;font-weight:600;cursor:pointer}
 .au-chip:hover{color:var(--lx-text)}
-.au-chip.on{background:var(--lx-sel-bg);border-color:var(--lx-sel-border);color:var(--lx-text)}
+.au-chip.on{background:var(--lx-sel-bg);border-color:var(--lx-sel-border);box-shadow:var(--lx-sel-glow);color:var(--lx-sel-text)}
 .au-search{width:100%;height:38px;margin-bottom:10px;padding:0 12px;border-radius:10px;background:var(--lx-in);border:1px solid var(--lx-border);color:var(--lx-text);font-size:13px;outline:none}
 .au-search:focus{border-color:var(--lx-sel-border)}
 .au-stack{display:flex;height:10px;border-radius:999px;overflow:hidden;background:var(--lx-border)}
