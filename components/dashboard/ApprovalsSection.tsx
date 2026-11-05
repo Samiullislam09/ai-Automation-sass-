@@ -60,6 +60,13 @@ type ContentItem = {
 const PAGE_SIZE = 10;
 const LIST_CACHE_KEY = "ap:list:v1";
 
+/** The whole team, so the Agent filter is a real roster and not "whoever happens to have a row
+ *  today". Only the content agents leave rows here; the rest show 0, which is honest. */
+const ALL_AGENTS = [
+  "Mr. Lxwa", "Mr. Crawler", "Mr. Analyst", "Mr. Keyword", "Mr. Writer", "Mr. Image",
+  "Mr. SEO", "Mr. Story", "Mr. Audit", "Miss Social", "Mr. Leads", "Mr. Publish",
+];
+
 const NETWORK_LABEL: Record<string, string> = { facebook: "Facebook", instagram: "Instagram", linkedin: "LinkedIn", x: "X (Twitter)" };
 
 /** Which agent authored a row — by type; the writer/social agents are the only ones that create content_items. */
@@ -139,7 +146,7 @@ export default function ApprovalsSection({
   const [detailLoading, setDetailLoading] = useState(false);
   const [tab, setTab] = useState<"details" | "preview" | "history">("details");
   const [menuFor, setMenuFor] = useState<string | null>(null);
-  const [showFilters, setShowFilters] = useState(true);
+  const [searching, setSearching] = useState(false);
 
   // filters
   const [q, setQ] = useState("");
@@ -153,19 +160,27 @@ export default function ApprovalsSection({
   // Stale-while-revalidate: the list from the last visit paints instantly and the network
   // refresh replaces it quietly. The spinner only shows on a true first load.
   const hasData = useRef(false);
-  const load = () => {
+  const abortRef = useRef<AbortController | null>(null);
+  /** `query` goes to the database (title ILIKE), so search reaches every item, not just the 100
+   *  the page loads. Typing also filters what is already on screen instantly, below. */
+  const load = (query = "") => {
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
     if (!hasData.current) setLoading(true);
-    fetch("/api/content?status=all")
+    setSearching(!!query);
+    fetch(`/api/content?status=all${query ? `&q=${encodeURIComponent(query)}` : ""}`, { signal: ac.signal })
       .then((r) => r.json())
       .then((data) => {
+        if (ac.signal.aborted) return;
         if (data.ok) {
           hasData.current = true;
           setItems(data.items);
-          try { sessionStorage.setItem(LIST_CACHE_KEY, JSON.stringify(data.items)); } catch { /* quota or private mode: fine */ }
+          if (!query) { try { sessionStorage.setItem(LIST_CACHE_KEY, JSON.stringify(data.items)); } catch { /* quota or private mode: fine */ } }
         } else toast(data.error || "Couldn't load approvals.", "error");
       })
-      .catch(() => toast("Couldn't load approvals — try refreshing.", "error"))
-      .finally(() => setLoading(false));
+      .catch((e) => { if (e?.name !== "AbortError") toast("Couldn't load approvals. Try refreshing.", "error"); })
+      .finally(() => { if (!ac.signal.aborted) { setLoading(false); setSearching(false); } });
   };
   useEffect(() => {
     try {
@@ -175,6 +190,14 @@ export default function ApprovalsSection({
     } catch { /* unreadable cache: just load */ }
     load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Live search: wait 300ms after the last keystroke, then ask the server.
+  const firstQ = useRef(true);
+  useEffect(() => {
+    if (firstQ.current) { firstQ.current = false; return; }
+    const t = setTimeout(() => load(q.trim()), 300);
+    return () => clearTimeout(t);
+  }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Default selection = first pending item (the mockup opens with the top pending article).
   // Runs ONCE after the first load — it used to re-fire on every render where selectedId was
@@ -327,7 +350,7 @@ export default function ApprovalsSection({
       if (needle && !(c.title ?? "").toLowerCase().includes(needle) && !categoryOf(c).toLowerCase().includes(needle)) return false;
       if (fAgent !== "all" && agentOf(c) !== fAgent) return false;
       if (fType !== "all" && c.type !== fType) return false;
-      if (fStatus !== "all" && c.status !== fStatus) return false;
+      if (fStatus === "rejected" ? !(c.status === "rejected" || c.status === "failed") : fStatus !== "all" && c.status !== fStatus) return false;
       if (since && +new Date(c.updated_at ?? c.created_at) < since) return false;
       return true;
     });
@@ -343,7 +366,13 @@ export default function ApprovalsSection({
   const rows = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
   useEffect(() => { setPage(1); }, [q, fAgent, fType, fStatus, fDate, sort]);
 
-  const agents = Array.from(new Set(items.map(agentOf)));
+  const agentCount = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const i of tops) m.set(agentOf(i), (m.get(agentOf(i)) ?? 0) + 1);
+    return m;
+  }, [tops]);
+  const filtersOn = !!q || fAgent !== "all" || fType !== "all" || fStatus !== "all" || fDate !== "all";
+  const clearFilters = () => { setQ(""); setFAgent("all"); setFType("all"); setFStatus("all"); setFDate("all"); };
   const types = Array.from(new Set(items.map((i) => i.type)));
 
   const openDetail = (c: ContentItem, t: typeof tab = "details") => { setSelectedId(c.id); setTab(t); };
@@ -357,7 +386,7 @@ export default function ApprovalsSection({
       {/* ============ centre column ============ */}
       <section className="ap-panel ap-main flex min-w-0 flex-1 flex-col">
         {/* header */}
-        <header className="flex flex-wrap items-center gap-3 px-4 pt-4 pb-3" style={{ borderBottom: "1px solid var(--lx-border)" }}>
+        <header className="ap-hdr">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <h1 className="ap-h1">{heading}</h1>
@@ -365,56 +394,49 @@ export default function ApprovalsSection({
             </div>
             <p className="lx-mut mt-0.5" style={{ fontSize: 12 }}>{subtitle}</p>
           </div>
-          <div className="flex items-center gap-2">
-            <label className="ap-search ap-hdr-search" style={{ width: 170 }}>
-              <Search size={15} className="lx-mut" />
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search articles..." />
-            </label>
-            <Link href="/dashboard/reports" className="ap-icobtn relative" title="Reports & notifications">
-              <Bell size={16} />
-              {counts.pending > 0 && <span className="ap-dot" />}
-            </Link>
-            <button className={`ap-icobtn ${showFilters ? "on" : ""}`} onClick={() => setShowFilters((v) => !v)} title="Toggle filters">
-              <SlidersHorizontal size={16} />
+          {counts.pending > 0 && (
+            <button className="ap-todo" onClick={() => setFStatus("awaiting_approval")} title="Show only what is waiting for you">
+              <span className="ap-todo-dot" /> {counts.pending} waiting for you
             </button>
-            {createHref && (
-              <Link href={createHref} className="lx-grad ap-create" title="Ask the team for something new">
-                <Plus size={15} /> <span className="ap-create-t">Create new</span>
-              </Link>
-            )}
-          </div>
+          )}
+          <button className="ap-icobtn" onClick={() => load(q.trim())} title="Refresh the list" aria-label="Refresh">
+            <RefreshCw size={15} className={loading || searching ? "ap-spin" : ""} />
+          </button>
+          {createHref && (
+            <Link href={createHref} className="lx-grad ap-create" title="Ask the team for something new">
+              <Plus size={15} /> <span className="ap-create-t">Create new</span>
+            </Link>
+          )}
         </header>
 
         <div className="lx-scroll flex-1 overflow-y-auto px-4 pb-4">
-          {/* stat strip */}
+          {/* stat strip: each tile is also the status filter */}
           <div className="ap-stats mt-3">
-            <Stat n={counts.total}     label="Total Items" color="#8b5cf6" Icon={FileText} />
-            <Stat n={counts.pending}   label="Pending Review" color="#f59e0b" Icon={Clock} />
-            <Stat n={counts.published} label="Published"      color="#22c55e" Icon={CheckCircle2} />
-            <Stat n={counts.rejected}  label="Rejected"       color="#ef4444" Icon={XCircle} />
-            <Stat n={counts.draft}     label="In Progress"    color="#3b82f6" Icon={RefreshCw} />
+            <Stat n={counts.total}     label="All items"      color="#8b5cf6" Icon={FileText}     on={fStatus === "all"}               onClick={() => setFStatus("all")} />
+            <Stat n={counts.pending}   label="Pending review" color="#f59e0b" Icon={Clock}        on={fStatus === "awaiting_approval"} onClick={() => setFStatus("awaiting_approval")} />
+            <Stat n={counts.published} label="Published"      color="#22c55e" Icon={CheckCircle2} on={fStatus === "published"}         onClick={() => setFStatus("published")} />
+            <Stat n={counts.rejected}  label="Rejected"       color="#ef4444" Icon={XCircle}      on={fStatus === "rejected"}          onClick={() => setFStatus("rejected")} />
+            <Stat n={counts.draft}     label="In progress"    color="#3b82f6" Icon={RefreshCw}    on={fStatus === "draft"}             onClick={() => setFStatus("draft")} />
           </div>
 
-          {/* filter bar */}
-          {showFilters && (
-            <div className="mt-3 flex flex-wrap items-center gap-2 pt-3" style={{ borderTop: "1px solid var(--lx-border)" }}>
-              <label className="ap-search" style={{ width: 160 }}>
-                <Search size={15} className="lx-mut" />
-                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search articles..." />
-              </label>
-              <Select value={fAgent} onChange={setFAgent} options={[["all", "All Agents"], ...agents.map((a) => [a, a] as [string, string])]} />
-              <Select value={fType} onChange={setFType} options={[["all", "All Types"], ...types.map((t) => [t, TYPE_LABEL[t] ?? t] as [string, string])]} />
-              <Select value={fStatus} onChange={setFStatus} options={[["all", "All Status"], ...Object.entries(STATUS).map(([k, v]) => [k, v.label] as [string, string])]} />
-              <Select value={fDate} onChange={setFDate} icon={<Calendar size={14} />} options={[["all", "All Dates"], ["7d", "Last 7 days"], ["30d", "Last 30 days"], ["90d", "Last 90 days"]]} />
-              <div className="ml-auto">
-                <Select value={sort} onChange={(v) => setSort(v as typeof sort)} options={[["newest", "Sort: Newest"], ["oldest", "Sort: Oldest"], ["title", "Sort: Title A–Z"]]} />
-              </div>
-            </div>
-          )}
+          {/* toolbar: one search, four filters, one clear */}
+          <div className="ap-toolbar mt-3">
+            <label className="ap-search ap-search-main">
+              <Search size={15} className="lx-mut" />
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by title" aria-label="Search by title" />
+              {searching && <Loader2 size={14} className="ap-spin lx-mut" />}
+              {q && !searching && <button className="ap-x" onClick={() => setQ("")} aria-label="Clear search"><X size={13} /></button>}
+            </label>
+            <Select value={fAgent} onChange={setFAgent} options={[["all", "All agents"], ...ALL_AGENTS.map((a) => [a, `${a} (${agentCount.get(a) ?? 0})`] as [string, string])]} />
+            <Select value={fType} onChange={setFType} options={[["all", "All types"], ...types.map((t) => [t, TYPE_LABEL[t] ?? t] as [string, string])]} />
+            <Select value={fDate} onChange={setFDate} icon={<Calendar size={14} />} options={[["all", "Any date"], ["7d", "Last 7 days"], ["30d", "Last 30 days"], ["90d", "Last 90 days"]]} />
+            <Select value={sort} onChange={(v) => setSort(v as typeof sort)} options={[["newest", "Newest first"], ["oldest", "Oldest first"], ["title", "Title A to Z"]]} />
+            {filtersOn && <button className="ap-clear" onClick={clearFilters}><X size={13} /> Clear</button>}
+          </div>
 
           {/* table head */}
           <div className="ap-grid ap-head mt-3">
-            <span className="ap-c-a">Article</span><span className="ap-c-s">Status</span><span className="ap-c-v">Version</span><span className="ap-c-u">Updated</span><span className="ap-c-x text-right">Actions</span>
+            <span className="ap-c-a">Item</span><span className="ap-c-s">Status</span><span className="ap-c-u">Updated</span><span className="ap-c-x" />
           </div>
 
           {/* rows */}
@@ -456,8 +478,6 @@ export default function ApprovalsSection({
                   </div>
                   {/* status */}
                   <div className="ap-c-s"><StatusPill s={c.status} /></div>
-                  {/* version */}
-                  <div className="ap-c-v lx-11" style={{ color: "var(--lx-text)" }}>{versionOf(c)}</div>
                   {/* updated */}
                   <div className="ap-c-u lx-11 whitespace-nowrap" style={{ color: "var(--lx-text)" }}>
                     <div>{fmtDate(c.updated_at ?? c.created_at)}</div>
@@ -465,11 +485,11 @@ export default function ApprovalsSection({
                   </div>
                   {/* actions */}
                   <div className="ap-c-x relative flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
-                    {c.type === "article" && (
-                      <Link href={`/dashboard/content/${c.id}`} className="ap-act ap-act-b" title="Browser View — open the full article page" aria-label="Browser View">
+                    {c.type === "article" ? (
+                      <Link href={`/dashboard/content/${c.id}`} className="ap-act ap-act-b" title="Open the full article page" aria-label="Open the full article page">
                         <Monitor size={15} />
                       </Link>
-                    )}
+                    ) : <span className="ap-act ap-act-0" aria-hidden />}
                     <RowAction c={c} busy={isBusy} onReview={() => openDetail(c)} onHistory={() => openDetail(c, "history")} />
                     <button className="ap-kebab" onClick={() => setMenuFor(menuFor === c.id ? null : c.id)} aria-label="More">
                       <MoreVertical size={16} />
@@ -548,15 +568,15 @@ export default function ApprovalsSection({
 
 /* ---- pieces ------------------------------------------------------------------------------ */
 
-function Stat({ n, label, color, Icon }: { n: number; label: string; color: string; Icon: React.ElementType }) {
+function Stat({ n, label, color, Icon, on, onClick }: { n: number; label: string; color: string; Icon: React.ElementType; on?: boolean; onClick?: () => void }) {
   return (
-    <div className="ap-stat" style={{ "--c": color } as React.CSSProperties}>
+    <button type="button" className={`ap-stat ${on ? "on" : ""}`} style={{ "--c": color } as React.CSSProperties} onClick={onClick} aria-pressed={!!on} title={`Show ${label.toLowerCase()}`}>
       <span className="ap-stat-ico"><Icon size={17} /></span>
-      <div>
-        <div className="ap-stat-n">{n}</div>
-        <div className="lx-10 lx-mut mt-0.5">{label}</div>
-      </div>
-    </div>
+      <span className="text-left">
+        <span className="ap-stat-n block">{n}</span>
+        <span className="lx-10 lx-mut mt-0.5 block">{label}</span>
+      </span>
+    </button>
   );
 }
 
@@ -599,22 +619,22 @@ function StatusPill({ s }: { s: string }) {
 
 /** Icon-only row action — the label lives in the native tooltip so the row stays compact. */
 function RowAction({ c, busy, onReview, onHistory }: { c: ContentItem; busy: boolean; onReview: () => void; onHistory: () => void }) {
-  if (busy) return <span className="ap-act"><Loader2 size={14} className="ap-spin" /></span>;
+  if (busy) return <span className="ap-btn"><Loader2 size={14} className="ap-spin" /></span>;
   switch (c.status) {
     case "awaiting_approval":
-      return <button className="ap-act ap-act-p" onClick={onReview} title="Review this article" aria-label="Review"><ArrowRight size={15} /></button>;
+      return <button className="ap-btn ap-btn-p" onClick={onReview} title="Read it and approve or reject">Review <ArrowRight size={13} /></button>;
     case "published":
       return c.meta?.publishedUrl
-        ? <a className="ap-act" href={c.meta.publishedUrl} target="_blank" rel="noreferrer" title="View the live page" aria-label="View live page"><Eye size={15} /></a>
-        : <button className="ap-act" onClick={onReview} title="View" aria-label="View"><Eye size={15} /></button>;
+        ? <a className="ap-btn" href={c.meta.publishedUrl} target="_blank" rel="noreferrer" title="Open the live page"><ExternalLink size={13} /> Live</a>
+        : <button className="ap-btn" onClick={onReview}><Eye size={13} /> View</button>;
     case "approved":
-      return <button className="ap-act" onClick={onReview} title="View" aria-label="View"><Eye size={15} /></button>;
+      return <button className="ap-btn" onClick={onReview}><Eye size={13} /> View</button>;
     case "draft":
       return c.type === "article"
-        ? <Link className="ap-act" href={`/dashboard/content/${c.id}`} title="Continue writing" aria-label="Continue"><Pencil size={14} /></Link>
-        : <button className="ap-act" onClick={onReview} title="Continue" aria-label="Continue"><Pencil size={14} /></button>;
+        ? <Link className="ap-btn" href={`/dashboard/content/${c.id}`}><Pencil size={13} /> Continue</Link>
+        : <button className="ap-btn" onClick={onReview}><Pencil size={13} /> Continue</button>;
     default:
-      return <button className="ap-act" onClick={onHistory} title="Review history" aria-label="Review history"><History size={15} /></button>;
+      return <button className="ap-btn" onClick={onHistory} title="See what happened"><History size={13} /> History</button>;
   }
 }
 
@@ -995,8 +1015,8 @@ const CSS = `
 .ap-select select{appearance:none;-webkit-appearance:none;background:none;border:none;outline:none;color:inherit;font:inherit;
   padding-right:2px;cursor:pointer}
 .ap-select select option{background:var(--lx-in);color:var(--lx-text)}
-.ap-grid{display:grid;grid-template-columns:minmax(0,1fr) 128px 56px 96px max-content;grid-template-areas:"a s v u x";align-items:center;gap:14px}
-.ap-c-a{grid-area:a;min-width:0}.ap-c-s{grid-area:s}.ap-c-v{grid-area:v}.ap-c-u{grid-area:u}.ap-c-x{grid-area:x}
+.ap-grid{display:grid;grid-template-columns:minmax(0,1fr) 132px 96px 156px;grid-template-areas:"a s u x";align-items:center;gap:14px}
+.ap-c-a{grid-area:a;min-width:0}.ap-c-s{grid-area:s;justify-self:start}.ap-c-u{grid-area:u}.ap-c-x{grid-area:x;justify-self:end}
 /* row actions are icon-only squares: the row stays compact, the label is the tooltip */
 .ap-act{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;flex-shrink:0;border-radius:8px;
   background:var(--lx-in);border:1px solid var(--lx-border);color:var(--lx-mut);cursor:pointer;transition:.15s}
@@ -1010,9 +1030,10 @@ const CSS = `
 .ap-live{display:inline-flex;align-items:center;gap:4px;max-width:100%;margin-top:3px;font-size:11px;color:var(--lx-green);text-decoration:none}
 .ap-live:hover{text-decoration:underline}
 @container ap (max-width:980px){
-  /* version drops first — the date column always stays visible */
-  .ap-grid{grid-template-columns:minmax(0,1fr) 116px 84px max-content;grid-template-areas:"a s u x";gap:8px}
-  .ap-c-v{display:none}
+  /* the date moves into the meta line; every column that stays is fixed, so rows line up */
+  .ap-grid{grid-template-columns:minmax(0,1fr) 124px 156px;grid-template-areas:"a s x";gap:10px}
+  .ap-c-u{display:none}
+  .ap-inline-date{display:inline}
 }
 @container ap (max-width:620px){
   .ap-grid{grid-template-columns:minmax(0,1fr) max-content;grid-template-areas:"a a" "s x";row-gap:10px}
@@ -1029,12 +1050,41 @@ const CSS = `
   .ap-row{padding:12px 14px}
   .ap-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
   .ap-stat:last-child:nth-child(odd){grid-column:1/-1}
-  .ap-search{width:100%!important;flex:1 1 100%}
+  .ap-search-main{flex:1 1 100%}
+  .ap-c-x{justify-self:end}
+  .ap-act-0{display:none}
+  .ap-todo{order:3}
   .ap-select{flex:1 1 calc(50% - 8px);min-width:0}
   .ap-select select{width:100%;min-width:0}
   .ap-pager button{min-width:36px;height:36px}
   .ap-act,.ap-kebab,.ap-icobtn{min-width:36px;min-height:36px}
 }
+.ap-hdr{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:16px 16px 12px;border-bottom:1px solid var(--lx-border)}
+.ap-todo{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 12px;border-radius:999px;font-size:12px;font-weight:600;cursor:pointer;
+  color:#f59e0b;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.4);white-space:nowrap}
+.ap-todo:hover{background:rgba(245,158,11,.18)}
+.ap-todo-dot{width:7px;height:7px;border-radius:50%;background:#f59e0b;box-shadow:0 0 8px #f59e0b}
+.light .ap-root .ap-todo{color:#a16207}
+.ap-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding-top:12px;border-top:1px solid var(--lx-border)}
+.ap-search-main{flex:1 1 240px;min-width:0;height:36px}
+.ap-toolbar .ap-select{height:36px}
+.ap-x{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:6px;border:none;background:var(--ap-s1);color:var(--lx-mut);cursor:pointer}
+.ap-x:hover{color:var(--lx-text)}
+.ap-clear{display:inline-flex;align-items:center;gap:5px;height:36px;padding:0 10px;border-radius:9px;font-size:12px;font-weight:600;cursor:pointer;
+  color:var(--lx-mut);background:none;border:1px dashed var(--lx-border)}
+.ap-clear:hover{color:var(--lx-text);border-color:var(--ap-s3)}
+button.ap-stat{cursor:pointer;text-align:left;font:inherit;color:inherit;transition:border-color .15s,transform .1s}
+button.ap-stat:hover{border-color:color-mix(in srgb,var(--c) 70%,transparent)}
+button.ap-stat:active{transform:scale(.98)}
+button.ap-stat.on{border-color:var(--c);box-shadow:0 0 0 1px var(--c),inset 0 0 30px color-mix(in srgb,var(--c) 10%,transparent)}
+.ap-c-x{display:flex;align-items:center;justify-content:flex-end;gap:6px;position:relative}
+.ap-btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-width:84px;height:30px;padding:0 10px;border-radius:8px;
+  font-size:12px;font-weight:600;white-space:nowrap;text-decoration:none;cursor:pointer;
+  color:var(--lx-text);background:var(--lx-in);border:1px solid var(--lx-border);transition:.15s}
+.ap-btn:hover{border-color:var(--ap-s3)}
+.ap-btn-p{color:#fff;background:linear-gradient(135deg,#4f46e5,#7c3aed);border-color:rgba(139,92,246,.65);box-shadow:0 2px 10px rgba(124,58,237,.3)}
+.ap-btn-p:hover{filter:brightness(1.1);border-color:rgba(139,92,246,.9)}
+.ap-act-0{visibility:hidden}
 .ap-head{padding:0 18px;font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--lx-mut)}
 .ap-row{background:var(--lx-card);border:1px solid var(--lx-border);border-radius:12px;padding:16px 18px;cursor:pointer;
   transition:border-color .15s,background .15s;display:grid;position:relative}

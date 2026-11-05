@@ -30,6 +30,10 @@ export async function GET(req: NextRequest) {
     .order("created_at", { ascending: false })
     .limit(100);
   if (status !== "all") query = query.eq("status", status);
+  // Live search from the Approvals box: title contains the text. `%`, `_` and `,` are stripped
+  // so a typed character can never change the pattern or break the filter expression.
+  const q = (req.nextUrl.searchParams.get("q") || "").replace(/[%_,()]/g, " ").trim().slice(0, 80);
+  if (q) query = query.ilike("title", `%${q}%`);
 
   const { data, error } = await query;
 
