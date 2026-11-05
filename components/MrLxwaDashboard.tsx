@@ -51,7 +51,6 @@ import {
   ClipboardList,
   ListChecks,
   CalendarDays,
-  FileText,
   Globe,
   UserRound,
   TrendingUp,
@@ -121,11 +120,9 @@ const GlobalStyle = LxGlobalStyle;
 type NavItem = { label: string; icon: React.ElementType; badge?: number; href?: string };
 const NAV: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
-  { label: "Office (Agents)", icon: Users, href: "/dashboard/workspace" },
   { label: "Approvals", icon: ListChecks, href: "/dashboard/approvals" },
   { label: "Connect", icon: Link2, href: "/dashboard/connect" },
   { label: "Schedule", icon: CalendarDays, href: "/dashboard/schedule" },
-  { label: "Content", icon: FileText, href: "/dashboard/content" },
   { label: "Leads", icon: UserRound, href: "/dashboard/leads" },
   { label: "WhatsApp", icon: MessageCircle, href: "/dashboard/whatsapp" },
   { label: "Site Brain", icon: Globe, href: "/dashboard/site-brain" },
