@@ -492,11 +492,6 @@ export default function ApprovalsSection({
                   </div>
                   {/* actions */}
                   <div className="ap-c-x relative flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
-                    {c.type === "article" ? (
-                      <Link href={`/dashboard/content/${c.id}`} target="_blank" rel="noopener" className="ap-act ap-act-b" title="Open the full article in a new tab" aria-label="Open the full article in a new tab">
-                        <Monitor size={15} />
-                      </Link>
-                    ) : <span className="ap-act ap-act-0" aria-hidden />}
                     <RowAction c={c} busy={isBusy} onReview={() => openDetail(c)} onHistory={() => openDetail(c, "history")} onApprove={() => approve(c)} />
                     <button className="ap-kebab" onClick={() => setMenuFor(menuFor === c.id ? null : c.id)} aria-label="More">
                       <MoreVertical size={16} />
@@ -638,9 +633,14 @@ function RowAction({ c, busy, onReview, onHistory, onApprove }: { c: ContentItem
   switch (c.status) {
     case "awaiting_approval": {
       const label = c.type === "social" && c.meta?.copyOnly ? "Mark ready" : "Approve";
-      return armed
-        ? <button className="ap-btn ap-btn-ok" onClick={() => { setArmed(false); onApprove(); }} title="Click again to confirm"><Check size={13} /> Confirm?</button>
-        : <button className="ap-btn ap-btn-p" onClick={() => setArmed(true)} title={`${label}. Click the row first to read it.`}><Check size={13} /> {label}</button>;
+      return (
+        <>
+          <button className="ap-btn" onClick={onReview} title="Read it before you decide"><Eye size={13} /> Review</button>
+          {armed
+            ? <button className="ap-btn ap-btn-ok" onClick={() => { setArmed(false); onApprove(); }} title="Click again to confirm"><Check size={13} /> Confirm?</button>
+            : <button className="ap-btn ap-btn-p" onClick={() => setArmed(true)} title={`${label}: click, then confirm`}><Check size={13} /> {label}</button>}
+        </>
+      );
     }
     case "published":
       return c.meta?.publishedUrl
@@ -796,6 +796,13 @@ function Drawer({ c, loading, busy, tab, setTab, onClose, onApprove, onReject, o
   const tile = tileOf(c.type);
   const events = useMemo(() => historyOf(c), [c]);
   const pending = c.status === "awaiting_approval";
+  const copyOnly = c.type === "social" && !!c.meta?.copyOnly;
+  const approveLabel = copyOnly ? "Mark ready" : c.type === "article" || kids.length ? "Approve & publish" : "Approve";
+  const hint = kids.length
+    ? `Publishes the article together with its ${kids.map((k) => (TYPE_LABEL[k.type] ?? k.type).toLowerCase()).join(" and ")}.`
+    : c.type === "article" ? "Publishes this article to your connected site."
+    : copyOnly ? "Marks it ready to copy. Nothing is posted anywhere."
+    : "Approves this item.";
   const bodyHtml = useMemo(() => (c.type === "article" && c.body ? renderMarkdown(c.body) : ""), [c.type, c.body]);
   const scroller = useRef<HTMLDivElement>(null);
   useEffect(() => { scroller.current?.scrollTo({ top: 0 }); }, [c.id, tab]);
@@ -814,6 +821,11 @@ function Drawer({ c, loading, busy, tab, setTab, onClose, onApprove, onReject, o
             </div>
             <div className="lx-10 lx-mut mt-1.5 flex items-center gap-2">
               <span className="truncate">{categoryOf(c)}</span><i className="ap-sep" /><span className="whitespace-nowrap">{agentOf(c)}</span>
+              {c.type === "article" && (
+                <Link href={`/dashboard/content/${c.id}`} target="_blank" rel="noopener" className="ap-openlink">
+                  Open full article <ExternalLink size={11} />
+                </Link>
+              )}
             </div>
           </div>
         </div>
@@ -911,20 +923,23 @@ function Drawer({ c, loading, busy, tab, setTab, onClose, onApprove, onReject, o
         )}
       </div>
 
-      {/* actions */}
-      <div className="px-4 pb-4 pt-3" style={{ borderTop: "1px solid var(--lx-border)" }}>
-        <div className="grid grid-cols-2 gap-3">
-          <button className="ap-reject" disabled={!pending || busy} onClick={onReject} title={pending ? "" : `A ${st.label.toLowerCase()} item can't be rejected`}>
-            <X size={16} /> {kids.length ? "Reject all" : "Reject"}
-          </button>
-          <button className="lx-grad ap-approve" disabled={!pending || busy} onClick={onApprove} title={pending ? "" : `A ${st.label.toLowerCase()} item can't be approved`}>
-            {busy ? <Loader2 size={16} className="ap-spin" /> : <Check size={16} />} {c.type === "social" && c.meta?.copyOnly ? "Mark ready" : kids.length ? "Approve all" : "Approve"}
-          </button>
-        </div>
-        {c.type === "article" ? (
-          <Link href={`/dashboard/content/${c.id}`} target="_blank" rel="noopener" className="ap-changes mt-3"><Monitor size={15} /> Open full article in new tab</Link>
+      {/* decision bar */}
+      <div className="ap-foot">
+        {pending ? (
+          <>
+            <p className="ap-foot-hint">{hint}</p>
+            <div className="ap-foot-btns">
+              <button className="ap-reject" disabled={busy} onClick={onReject}><X size={15} /> Reject</button>
+              <button className="lx-grad ap-approve" disabled={busy} onClick={onApprove}>
+                {busy ? <Loader2 size={15} className="ap-spin" /> : <Check size={15} />} {approveLabel}
+              </button>
+            </div>
+          </>
         ) : (
-          <button className="ap-changes mt-3" onClick={onCopy}><Copy size={15} /> Copy text</button>
+          <p className="ap-foot-hint ap-foot-state">This item is <b>{st.label.toLowerCase()}</b>, so there is nothing left to decide.</p>
+        )}
+        {c.type !== "article" && (
+          <button className="ap-changes" onClick={onCopy}><Copy size={14} /> Copy text</button>
         )}
       </div>
     </>
@@ -1006,7 +1021,7 @@ const CSS = `
   box-shadow:0 20px 60px rgba(0,0,0,.6)}
 @media (min-width:1280px){.ap-drawer{position:relative;top:auto;right:auto;bottom:auto;height:100%;z-index:auto;box-shadow:none}}
 .ap-h1{font-size:22px;font-weight:800;letter-spacing:-.02em;line-height:1.1}
-.ap-h2{font-size:17px;font-weight:700;line-height:1.3;color:var(--lx-text);min-width:0}
+.ap-h2{font-size:15px;font-weight:700;line-height:1.3;color:var(--lx-text);min-width:0}
 .ap-h3{font-size:14px;font-weight:700;color:var(--lx-text)}
 .ap-search{display:flex;align-items:center;gap:8px;height:34px;padding:0 10px;border-radius:9px;
   background:var(--lx-card);border:1px solid var(--lx-border);transition:border-color .15s}
@@ -1034,7 +1049,7 @@ const CSS = `
 .ap-select select{appearance:none;-webkit-appearance:none;background:none;border:none;outline:none;color:inherit;font:inherit;
   padding-right:2px;cursor:pointer}
 .ap-select select option{background:var(--lx-in);color:var(--lx-text)}
-.ap-grid{display:grid;grid-template-columns:minmax(0,1fr) 118px 96px 156px;grid-template-areas:"a s u x";align-items:center;gap:14px}
+.ap-grid{display:grid;grid-template-columns:minmax(0,1fr) 108px 96px 232px;grid-template-areas:"a s u x";align-items:center;gap:14px}
 .ap-c-a{grid-area:a;min-width:0}.ap-c-s{grid-area:s;justify-self:start}.ap-c-u{grid-area:u}.ap-c-x{grid-area:x;justify-self:end}
 /* row actions are icon-only squares: the row stays compact, the label is the tooltip */
 .ap-act{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;flex-shrink:0;border-radius:8px;
@@ -1050,7 +1065,7 @@ const CSS = `
 .ap-live:hover{text-decoration:underline}
 @container ap (max-width:980px){
   /* the date moves into the meta line; every column that stays is fixed, so rows line up */
-  .ap-grid{grid-template-columns:minmax(0,1fr) 124px 156px;grid-template-areas:"a s x";gap:10px}
+  .ap-grid{grid-template-columns:minmax(0,1fr) 112px 232px;grid-template-areas:"a s x";gap:10px}
   .ap-c-u{display:none}
   .ap-inline-date{display:inline}
 }
@@ -1089,7 +1104,8 @@ const CSS = `
 .ap-toolbar .ap-select{height:36px}
 .ap-x{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:6px;border:none;background:var(--ap-s1);color:var(--lx-mut);cursor:pointer}
 .ap-x:hover{color:var(--lx-text)}
-.ap-status{font-size:10.5px!important;line-height:1.3;padding:3px 9px!important;gap:5px!important}
+.ap-status{font-size:10px!important;line-height:1.3;padding:2px 8px!important;gap:5px!important;font-weight:600!important}
+.ap-status i{width:5px!important;height:5px!important}
 .ap-skel{height:74px;border-radius:12px;border:1px solid var(--lx-border);
   background:linear-gradient(90deg,var(--ap-s1) 25%,var(--ap-s2) 50%,var(--ap-s1) 75%);background-size:200% 100%;animation:apShim 1.3s linear infinite}
 @keyframes apShim{to{background-position:-200% 0}}
@@ -1156,10 +1172,17 @@ button.ap-stat.on{border-color:var(--c);box-shadow:0 0 0 1px var(--c),inset 0 0 
 .ap-tl-item:last-child{padding-bottom:0}
 .ap-tl-dot{position:absolute;left:-18px;top:3px;width:11px;height:11px;border-radius:50%;background:var(--lx-card);
   border:2px solid var(--c);box-shadow:0 0 8px color-mix(in srgb,var(--c) 70%,transparent)}
-.ap-reject{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:44px;border-radius:12px;font-size:14px;font-weight:600;
+.ap-foot{padding:12px 16px 16px;border-top:1px solid var(--lx-border);display:grid;gap:10px}
+.ap-foot-hint{margin:0;font-size:11.5px;line-height:1.45;color:var(--lx-mut)}
+.ap-foot-state b{color:var(--lx-text);font-weight:600}
+.ap-foot-btns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.7fr);gap:10px}
+.ap-openlink{margin-left:auto;display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:11px;font-weight:600;
+  color:var(--lx-blue);text-decoration:none}
+.ap-openlink:hover{text-decoration:underline}
+.ap-reject{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:42px;border-radius:11px;font-size:13.5px;font-weight:600;
   color:#f87171;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.45);cursor:pointer;transition:.15s}
 .ap-reject:hover:not(:disabled){background:rgba(239,68,68,.16)}
-.ap-approve{height:44px;font-size:14px;border-radius:12px}
+.ap-approve{height:42px;font-size:13.5px;border-radius:11px}
 .ap-reject:disabled,.ap-approve:disabled{opacity:.4;cursor:not-allowed;filter:none}
 .ap-changes{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;height:44px;border-radius:12px;font-size:14px;font-weight:600;
   color:var(--lx-text);background:var(--ap-s1);border:1px solid var(--lx-border);cursor:pointer;transition:.15s}
