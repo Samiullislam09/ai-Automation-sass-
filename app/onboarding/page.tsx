@@ -20,7 +20,7 @@ export default async function Page() {
     // Only bounce on a definite yes — mirroring the /app gate, which only redirects on a
     // definite no. A failed read leaves the wizard reachable rather than trapping the user
     // between two redirects.
-    if (!error && data?.onboarded === true) redirect("/app");
+    if (!error && data?.onboarded === true) redirect("/dashboard");
   }
 
   return <OnboardingWizard />;

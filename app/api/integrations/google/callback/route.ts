@@ -4,10 +4,10 @@ import { getCurrentTenantId } from "@/lib/supabase/tenant";
 import { exchangeCode, loadGoogle, packCreds, saveGoogle } from "@/lib/google";
 
 /** Step 2 — Google sends the user back here with ?code=. Swap it for a refresh token,
- *  store it encrypted, and drop the user back on /app/connect where they pick which
+ *  store it encrypted, and drop the user back on /dashboard/connect where they pick which
  *  property/site to read. */
 export async function GET(request: NextRequest) {
-  const back = (status: string) => NextResponse.redirect(new URL(`/app/connect?google=${status}`, request.url));
+  const back = (status: string) => NextResponse.redirect(new URL(`/dashboard/connect?google=${status}`, request.url));
 
   const supabase = await createClient();
   const tenantId = await getCurrentTenantId(supabase);

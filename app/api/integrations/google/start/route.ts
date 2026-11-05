@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
   if (!tenantId) return NextResponse.redirect(new URL("/login", request.url));
 
   if (!googleConfigured()) {
-    return NextResponse.redirect(new URL("/app/connect?google=not_configured", request.url));
+    return NextResponse.redirect(new URL("/dashboard/connect?google=not_configured", request.url));
   }
 
   // CSRF: the value goes to Google and comes back in the query string; the copy in this

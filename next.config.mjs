@@ -14,5 +14,14 @@ const nextConfig = {
   // project folder stops the climb. (Next 14.2.x still nests this under `experimental` — it's a
   // top-level option in newer versions.)
   experimental: { outputFileTracingRoot: __dirname },
+  // The old /app/** area was retired in favour of /dashboard/**. Old bookmarks and links already
+  // stored in chat messages / emails keep working through these redirects (temporary, 307).
+  async redirects() {
+    return [
+      { source: "/app", destination: "/dashboard", permanent: false },
+      { source: "/app/billing", destination: "/dashboard/account", permanent: false },
+      { source: "/app/:path*", destination: "/dashboard/:path*", permanent: false },
+    ];
+  },
 };
 export default nextConfig;

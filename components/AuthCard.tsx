@@ -89,7 +89,7 @@ export function AuthCard({ mode }: { mode: "login" | "signup" }) {
       // Hard navigation (not router.push) — guarantees the session cookie is fully
       // written before the request that middleware checks. router.push here raced
       // the cookie write and could bounce a just-logged-in user right back to /login.
-      window.location.href = "/app";
+      window.location.href = "/dashboard";
     }
   };
 

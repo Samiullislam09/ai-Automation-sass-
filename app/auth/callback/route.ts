@@ -9,7 +9,7 @@ import { getCurrentTenantId } from "@/lib/supabase/tenant";
  *  The tenant/membership bootstrap itself is `getCurrentTenantId`'s job, not duplicated
  *  here — this route used to run its own copy of the same insert-if-missing logic on the
  *  caller's own (RLS-scoped) client, silently swallowing the result either way (no error
- *  was ever logged, and the redirect to /app happened whether or not the bootstrap actually
+ *  was ever logged, and the redirect to /dashboard happened whether or not the bootstrap actually
  *  worked). That is how a genuine RLS failure on a fresh Supabase project went unnoticed:
  *  the user landed on a working-looking dashboard with no tenant behind it at all. */
 export async function GET(request: Request) {
@@ -23,7 +23,7 @@ export async function GET(request: Request) {
     if (!error && data.user) {
       const tenantId = await getCurrentTenantId(supabase);
       if (!tenantId) console.error("[auth/callback] signed in but no tenant could be resolved for this user");
-      return NextResponse.redirect(`${origin}/app`);
+      return NextResponse.redirect(`${origin}/dashboard`);
     }
   }
 

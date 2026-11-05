@@ -14,7 +14,7 @@ const footerLinks: Record<string, { label: string; href: string }[]> = {
   Account: [
     { label: "Log in", href: "/login" },
     { label: "Start free", href: "/signup" },
-    { label: "Dashboard", href: "/app" },
+    { label: "Dashboard", href: "/dashboard" },
   ],
   Company: [
     { label: "How it works", href: "#office" },

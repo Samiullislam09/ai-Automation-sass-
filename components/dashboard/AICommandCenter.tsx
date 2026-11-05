@@ -1342,7 +1342,7 @@ export default function AICommandCenter(): JSX.Element {
             el.className = "si"; (el as HTMLElement).style.opacity = "1"; (el as HTMLElement).style.cursor = "pointer";
             const time = new Date(p.createdAt).toLocaleDateString([], { month: "short", day: "numeric" });
             el.innerHTML = `<span class="t">${time}</span><span style="font-size:12px;flex:none">📝</span><span class="x">${escapeHtml(p.title)}</span>`;
-            el.addEventListener("click", () => router.push("/app/approvals"));
+            el.addEventListener("click", () => router.push("/dashboard/approvals"));
             schedEl.appendChild(el);
           });
         }
@@ -1516,7 +1516,7 @@ export default function AICommandCenter(): JSX.Element {
 
     // Real navigation for the 3 sidebar items that have an actual page behind them (the rest
     // are visual-only roster slots — same "don't fake it" rule as AGENTS[].live in lib/store.tsx).
-    const navMap: Record<string, string> = { Dashboard: "/app", Content: "/app/content", Approvals: "/app/approvals" };
+    const navMap: Record<string, string> = { Dashboard: "/dashboard", Content: "/dashboard/content", Approvals: "/dashboard/approvals" };
     const navHandlers: [Element, EventListener][] = [];
     document.querySelectorAll(".ni").forEach((el) => {
       const label = (el.textContent || "").trim().replace(/\d+$/, "").trim();
@@ -1528,7 +1528,7 @@ export default function AICommandCenter(): JSX.Element {
       navHandlers.push([el, handler]);
     });
     const upgradeBtn = document.querySelector(".upg");
-    const upgradeHandler = () => router.push("/app/billing");
+    const upgradeHandler = () => router.push("/dashboard/account");
     if (upgradeBtn) upgradeBtn.addEventListener("click", upgradeHandler);
     const userRow = document.querySelector(".s-user") as HTMLElement | null;
     const signOutHandler = () => signOut();

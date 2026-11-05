@@ -4,7 +4,7 @@ import { createServerClient } from "@supabase/ssr";
 // doesn't support Node's `dns` module at all (this broke every guarded request when
 // tried). The dns-fix is only safe in normal Node.js routes (app/api/*/route.ts).
 
-/** Guards /app/** server-side — replaces the old 350ms client-side redirect.
+/** Guards /dashboard/** server-side — replaces the old 350ms client-side redirect.
  *  Also refreshes the Supabase session cookie on every request. */
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -48,7 +48,7 @@ export async function middleware(request: NextRequest) {
   // Only page routes redirect to /login on no-session — API routes under this matcher
   // (onboarding/dashboard) still get their cookies refreshed, but return their own JSON
   // 401 instead (a redirect would hand the client's fetch() an HTML login page).
-  const guarded = request.nextUrl.pathname.startsWith("/app") || request.nextUrl.pathname === "/onboarding";
+  const guarded = request.nextUrl.pathname.startsWith("/dashboard") || request.nextUrl.pathname === "/onboarding";
 
   // A network hiccup reaching Supabase must NOT look like "not logged in" — that was
   // force-logging out real, still-valid sessions. Only redirect on a genuine no-session
@@ -85,5 +85,5 @@ export async function middleware(request: NextRequest) {
 // authenticate themselves (createClient + getCurrentTenantId, 401 on no session) and, being
 // route handlers, can write the refreshed cookie on their own.
 export const config = {
-  matcher: ["/app/:path*", "/onboarding", "/api/onboarding/:path*"],
+  matcher: ["/dashboard/:path*", "/onboarding", "/api/onboarding/:path*"],
 };

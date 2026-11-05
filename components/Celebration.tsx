@@ -71,8 +71,8 @@ export default function Celebration() {
         )}
 
         <div className="celeb-actions btnrow">
-          {c.agentId === "writer" && !failed && <Link href="/app/approvals" className="btn btn-p btn-sm">Review it →</Link>}
-          {failed && <Link href="/app" className="btn btn-p btn-sm" onClick={() => store?.patch?.({ celebration: null })}>Back to the office</Link>}
+          {c.agentId === "writer" && !failed && <Link href="/dashboard/approvals" className="btn btn-p btn-sm">Review it →</Link>}
+          {failed && <Link href="/dashboard" className="btn btn-p btn-sm" onClick={() => store?.patch?.({ celebration: null })}>Back to the office</Link>}
           <button className="btn btn-g btn-sm" onClick={() => store?.patch?.({ celebration: null })}>Dismiss</button>
         </div>
       </div>
