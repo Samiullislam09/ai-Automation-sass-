@@ -143,7 +143,7 @@ export default function ScheduleSection() {
   const [historyError, setHistoryError] = useState("");
   const [orders, setOrders] = useState<any[] | null>(null);
   const [now, setNow] = useState<number>(Date.now());
-  const [tab, setTab] = useState<"auto" | "up" | "tasks" | "hist">("auto");
+  const [tab, setTab] = useState<"auto" | "up" | "hist">("auto");
 
   // modal editor
   const [modalKind, setModalKind] = useState<Kind | null>(null);
@@ -291,7 +291,7 @@ export default function ScheduleSection() {
   const failedTotal = (runs ?? []).filter((r) => r.status === "failed").length;
   const articlesMade = (runs ?? []).reduce((n, r) => n + r.articles.length, 0);
 
-  const anyOn = (Object.values(scheds) as Sched[]).some((s) => s.enabled);
+  const anyOn = onCount > 0;
   const summary = (k: Kind) => {
     const c = scheds[k];
     if (!c.enabled) return "Off";
@@ -309,10 +309,10 @@ export default function ScheduleSection() {
           <div className="top">
             <div className="t">
               <h1>Schedule</h1>
-              <p className="sub">Set it once and the team works on its own. Tap any item to change it.</p>
+              <p className="sub">Set it once and the team works on its own.</p>
             </div>
             <button className="icobtn" title="Refresh" onClick={() => { void loadSchedule(); void loadHistory(); void loadOrders(); }}><Ic n="refresh" z={18} /></button>
-            <div className={"pill" + (anyOn ? "" : " off")}><i /><span>{anyOn ? "Schedule is ON" : "Schedule is OFF"}</span></div>
+            <div className={"pill" + (anyOn ? "" : " off")} title="Automations that are switched on"><i /><span>{onCount === 0 ? "All off" : `${onCount} of 3 on`}</span></div>
           </div>
 
           {migration && (
@@ -325,10 +325,10 @@ export default function ScheduleSection() {
             <span className="nl-ic"><Ic n="clock" z={20} /></span>
             <span className="nl-head">
               <span className="nl-label">Next task</span>
-              <span className="nl-val" suppressHydrationWarning>{!nextInfo ? "Nothing scheduled" : countdown(nextInfo.at.getTime() - now)}</span>
+              <span className="nl-val" suppressHydrationWarning>{!nextInfo ? "Nothing scheduled" : `in ${countdown(nextInfo.at.getTime() - now)}`}</span>
             </span>
             {nextInfo && <span className="nl-sub" suppressHydrationWarning>{`${nextInfo.s.kind === "article" ? "Articles" : nextInfo.s.kind === "leads" ? "Leads" : "Site audit"} · ${dayLabel(nextInfo.at, tz, now)}, ${time12(nextInfo.at, tz)}`}</span>}
-            <span className="nl-go">View upcoming ›</span>
+            <span className="nl-go">Upcoming ›</span>
           </button>
 
           {/* stats — each tile jumps to the tab it summarises */}
@@ -340,7 +340,7 @@ export default function ScheduleSection() {
                 <div className="sl">{failedToday ? `${failedToday} failed, check History` : "all went well"}</div>
               </div>
             </button>
-            <button className="st c" onClick={() => setTab("tasks")} title="See tasks from Mr Lxwa">
+            <button className="st c" onClick={() => setTab("up")} title="See what is booked">
               <span className="sbox"><Ic n="hourglass" /></span><div>
                 <div className="sv">{orders === null ? "…" : pendingOrders.length}</div>
                 <div className="sl">Tasks from Mr Lxwa</div>
@@ -365,7 +365,7 @@ export default function ScheduleSection() {
 
           {/* tabs */}
           <div className="tabs">
-            {([["auto", "Automation", 0], ["up", "Upcoming", 0], ["tasks", "Tasks from Mr Lxwa", pendingOrders.length], ["hist", "History", runs?.length ?? 0]] as [string, string, number][]).map(([k, l, c]) => (
+            {([["auto", "Automation", 0], ["up", "Upcoming", 0], ["hist", "History", runs?.length ?? 0]] as [string, string, number][]).map(([k, l, c]) => (
               <button key={k} className={"tab" + (tab === k ? " a" : "")} onClick={() => setTab(k as any)}>
                 {l}{c ? <span className={"cnt" + (k === "tasks" ? " hi" : "")}>{c}</span> : null}
               </button>
@@ -379,18 +379,16 @@ export default function ScheduleSection() {
                   const c = scheds[k];
                   const nAt = c.nextRunAt ? new Date(c.nextRunAt) : null;
                   return (
-                    <div key={k} className="row" role="button" tabIndex={0} onClick={() => openModal(k)}
-                      onKeyDown={(e) => { if (e.key === "Enter" && e.currentTarget === e.target) openModal(k); }}>
+                    <div key={k} className={"row" + (c.enabled ? " on" : "")}>
                       <span className="ico"><Ic n={META[k].icon} /></span>
                       <span className="info">
                         <div className="name">{META[k].name}</div>
-                        <div className="desc">{META[k].desc}</div>
-                        <div className={"meta" + (c.enabled ? "" : " off")}>{summary(k)}</div>
+                        <div className={"meta" + (c.enabled ? "" : " off")}>{c.enabled ? summary(k) : META[k].desc}</div>
                         {c.enabled && nAt && <small suppressHydrationWarning>Next run: {dayLabel(nAt, tz, now)}, {time12(nAt, tz)}</small>}
                       </span>
+                      <button className="editbtn" onClick={() => openModal(k)} aria-label={`Edit ${META[k].name} schedule`}>Edit</button>
                       <button className={"tg" + (c.enabled ? " on" : "")} role="switch" aria-checked={c.enabled}
-                        aria-label={`${META[k].name} on or off`} onClick={(e) => { e.stopPropagation(); void toggleRow(k); }} />
-                      <span className="chev">›</span>
+                        aria-label={`${META[k].name} on or off`} onClick={() => void toggleRow(k)} />
                     </div>
                   );
                 })}
@@ -404,9 +402,15 @@ export default function ScheduleSection() {
 
             {tab === "up" && <Upcoming scheds={scheds} orders={orders} pendingOrders={pendingOrders} now={now} tz={tz} uf={uf} setUf={setUf} ud={ud} setUd={setUd} skip={skip} setSkip={setSkip} onCancel={cancelOrder} cancelling={cancelling} />}
 
-            {tab === "tasks" && <Tasks orders={orders} now={now} tz={tz} tf={tf} setTf={setTf} q={qTasks} setQ={setQTasks} onCancel={cancelOrder} cancelling={cancelling} />}
-
-            {tab === "hist" && <HistoryTab runs={runs} error={historyError} now={now} tz={tz} hf={hf} setHf={setHf} q={qHist} setQ={setQHist} />}
+            {tab === "hist" && (
+              <>
+                <HistoryTab runs={runs} error={historyError} now={now} tz={tz} hf={hf} setHf={setHf} q={qHist} setQ={setQHist} />
+                {/* what Mr Lxwa was asked to do in chat, finished or not: it lives next to the other
+                    history instead of on a tab of its own */}
+                <h3 className="sec-h">Tasks you gave Mr Lxwa</h3>
+                <Tasks orders={orders} now={now} tz={tz} tf={tf} setTf={setTf} q={qTasks} setQ={setQTasks} onCancel={cancelOrder} cancelling={cancelling} />
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -742,18 +746,22 @@ const CSS = `
 /* Negative margin cancels the dashboard <main>'s p-3/sm:p-4 padding so the schedule fills the
    content area edge-to-edge (owner: "ege to egde", 2026-10-21). overflow-x:hidden guards the
    negative margin from ever producing a horizontal scrollbar. */
-.sched{--bg:#f8f9fa;--panel:#fff;--card:#fff;--line:#dadce0;--tx:#202124;--mut:#5f6368;--ac:#1a73e8;--acs:#e8f0fe;--onac:#fff;--ok:#188038;--oks:#e6f4ea;--bad:#d93025;--warn:#b06000;--warns:#fef7e0;--off:#bdc1c6;--bads:#fce8e6;--pu:#8430ce;--pus:#f3e8fd;color-scheme:light;color:var(--tx);background:#fff;min-height:100%;margin:-6px;overflow-x:hidden;font:15px/1.5 "Google Sans",Roboto,"Segoe UI",Arial,sans-serif}
+.sched{--bg:var(--lx-bg);--panel:var(--lx-card);--card:var(--lx-card);--line:var(--lx-border);--tx:var(--lx-text);--mut:var(--lx-mut);
+  --ac:var(--lx-violet);--acs:color-mix(in srgb,var(--lx-purple) 14%,transparent);--onac:#fff;
+  --ok:#22c55e;--oks:color-mix(in srgb,#22c55e 12%,transparent);--bad:#f87171;--bads:color-mix(in srgb,#ef4444 12%,transparent);
+  --warn:#fbbf24;--warns:color-mix(in srgb,#f59e0b 13%,transparent);--off:var(--lx-dim);--pu:var(--lx-violet);--pus:color-mix(in srgb,var(--lx-purple) 14%,transparent);
+  color:var(--tx);background:var(--bg);min-height:100%;margin:-6px;overflow-x:hidden;font:14px/1.5 inherit}
+.light .sched{--ok:#15803d;--bad:#c0283f;--warn:#b45309}
 @media(min-width:640px){.sched{margin:-16px}}
 /* Follows the app theme toggle (next-themes .dark/.light on <html>): white in light mode,
    the dashboard's navy in dark mode — so Schedule matches whichever the two-colour toggle picks. */
-.dark .sched{--bg:#080b16;--panel:#0a0e1b;--card:#0d1220;--line:#1b2236;--tx:#f2f4fa;--mut:#9aa3b8;--ac:#8ab4f8;--acs:#1b2740;--onac:#0a0e1b;--ok:#81c995;--oks:#13331f;--bad:#f28b82;--warn:#f5c451;--warns:#3a2e12;--off:#3a4160;--bads:#3a1c1a;--pu:#c4b5fd;--pus:#2a2246;color-scheme:dark;background:#04060e}
 .dark .sched input,.dark .sched select,.dark .sched .chip.dp input{color-scheme:dark}
 .dark .sched .chip-n{background:rgba(255,255,255,.08)}
 .sched *{box-sizing:border-box}
 /* Full-bleed: no outer card. The whole content area is one white sheet reaching the edges
    (owner confirmed 2026-10-21); the panel wrapper is now just a padding box. */
 .sched .wrap{max-width:none;margin:0;padding:0}
-.sched .panel{background:transparent;border:0;border-radius:0;padding:20px 20px 48px}
+.sched .panel{background:transparent;border:0;border-radius:0;padding:18px 18px 40px;max-width:1100px}
 .sched .top{display:flex;align-items:flex-start;gap:12px;margin-bottom:20px}
 .sched .top .t{flex:1;min-width:0}
 .sched h1{font-size:26px;font-weight:500;margin:0;color:var(--tx)}
@@ -887,4 +895,69 @@ const CSS = `
   .sched .search{max-width:none}
 }
 @media(max-width:360px){.sched .stats{grid-template-columns:1fr}}
+
+/* ============ compact layout: neutral cards, colour only where it means something ============ */
+.sched h1{font-size:20px;font-weight:700;letter-spacing:-.01em}
+.sched .sub{font-size:12.5px;margin-top:3px}
+.sched .top{margin-bottom:14px;align-items:center}
+.sched .icobtn{width:34px;height:34px}
+.sched .pill{padding:5px 12px;font-size:12.5px;font-weight:600}
+.sched .pill.off{background:var(--card)}
+/* next task: one quiet card, one line */
+.sched .nextline{border:1px solid var(--line);border-radius:12px;background:var(--card);padding:10px 14px;margin:0 0 12px;gap:10px 12px;align-items:center}
+.sched .nl-ic{width:32px;height:32px}
+.sched .nl-head{flex-direction:row;align-items:baseline;gap:8px;flex-wrap:wrap}
+.sched .nl-label{font-size:10.5px}
+.sched .nl-val{font-size:15px;font-weight:600}
+.sched .nl-sub{font-size:12.5px}
+.sched .nl-go{font-size:12.5px}
+/* four tiles become one strip of chips; only "needs attention" earns a colour */
+.sched .stats{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.sched .st,.sched .st.a,.sched .st.b,.sched .st.c,.sched .st.e{flex:0 1 auto;width:auto;padding:7px 12px 7px 8px;gap:8px;border-radius:999px;background:var(--card);border:1px solid var(--line)}
+.sched .st:hover{box-shadow:none;transform:none;border-color:var(--off)}
+.sched .st>div{display:flex;align-items:baseline;gap:6px;flex:0 1 auto}
+.sched .sbox{width:26px;height:26px;background:var(--bg)}
+.sched .sbox svg{width:15px;height:15px}
+.sched .sv{font-size:15px;font-weight:700}
+.sched .sl{font-size:12px;white-space:nowrap}
+.sched .st>div .sl:nth-of-type(3){display:none}
+.sched .st.b .sbox{color:var(--ok)}.sched .st.c .sbox{color:var(--warn)}.sched .st.e .sbox{color:var(--pu)}
+.sched .st.d{background:var(--bads);border-color:color-mix(in srgb,var(--bad) 45%,transparent)}
+.sched .st.d .sv,.sched .st.d .sl{color:var(--bad)}
+.sched .tabs{margin-bottom:14px}
+.sched .tab{padding:9px 14px;font-size:13.5px;font-weight:600}
+/* automation rows: smaller, one clear toggle and one clear Edit */
+.sched .list{gap:8px}
+.sched .row{cursor:default;padding:12px 14px;gap:12px}
+.sched .row:hover{background:var(--card);border-color:var(--line)}
+.sched .row.on{border-color:color-mix(in srgb,var(--ok) 40%,var(--line));box-shadow:inset 3px 0 0 var(--ok)}
+.sched .ico{width:38px;height:38px}
+.sched .name{font-weight:600;font-size:14px}
+.sched .meta{font-size:12.5px;margin-top:2px;color:var(--mut)}
+.sched .row.on .meta{color:var(--tx)}
+.sched .editbtn{flex:none;height:32px;padding:0 14px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--tx);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+.sched .editbtn:hover{border-color:var(--ac);color:var(--ac)}
+.sched .tg{width:42px;height:24px}.sched .tg::after{width:20px;height:20px}.sched .tg.on{background:#22c55e}.sched .tg.on::after{left:20px}
+.sched .sec-h{margin:22px 0 10px;font-size:14px;font-weight:700;color:var(--tx)}
+.sched .tbl,.sched .tip{border-radius:12px}
+.sched .tr{padding:10px 14px}
+.sched .chip{padding:5px 12px;font-size:13px}
+.sched .btn.p{background:linear-gradient(135deg,#4f46e5,#7c3aed);border-color:transparent;color:#fff}
+.sched .tab.a{color:var(--ac);border-bottom-color:var(--ac)}
+@media(max-width:600px){
+  .sched .panel{padding:12px 12px 32px}
+  .sched h1{font-size:19px}
+  .sched .stats{flex-wrap:nowrap;overflow-x:auto;margin-inline:-12px;padding:0 12px 2px;scrollbar-width:none}
+  .sched .stats::-webkit-scrollbar{display:none}
+  .sched .stats .st{flex:0 0 auto}
+  .sched .nextline{padding:9px 12px}
+  .sched .nl-sub{width:auto}
+  /* each automation: icon + text on top, then toggle and Edit on a row of their own */
+  .sched .row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:8px 10px;padding:12px}
+  .sched .row .info{grid-column:2/-1}
+  .sched .row .editbtn{grid-column:2;justify-self:start}
+  .sched .row .tg{grid-column:4;justify-self:end}
+  .sched .row.dis{display:flex}
+  .sched .tabs{margin-inline:-12px;padding-inline:12px}
+}
 `;
