@@ -4408,9 +4408,6 @@ export default function MrLxwaDashboard({
             <span className="h-1.5 w-1.5 rounded-full" style={{ background: "#22c55e", boxShadow: "0 0 6px #22c55e" }} /> Online
           </span>
         </div>
-        <button className="lx-icobtn" aria-label="Expand agent">
-          <Maximize2 size={13} />
-        </button>
       </div>
 
       {aTab === "assistant" ? (
@@ -4430,7 +4427,10 @@ export default function MrLxwaDashboard({
               </div>
             ) : (
               <div key={i}>
-                <div className="flex items-center gap-2">
+                {/* The very first reply is already introduced by the "Mr. Lxwa · Online" card
+                    above it, so repeating the name row there showed him twice. Later replies,
+                    and any reply still working, keep their name row. */}
+                <div className="flex items-center gap-2" style={i === 0 && !(m.live && m.taskId) ? { display: "none" } : undefined}>
                   <Robo size={24} />
                   <span className="lx-11 font-semibold">Mr. Lxwa</span>
                   {/* Genuinely means the order this bubble belongs to is still running — stream()
@@ -4446,7 +4446,8 @@ export default function MrLxwaDashboard({
                 <div
                   className="lx-ai lx-11 mt-1.5 px-3 py-2.5 leading-relaxed"
                   style={{
-                    marginLeft: 30,
+                    marginLeft: i === 0 && !(m.live && m.taskId) ? 0 : 30,
+                    marginTop: i === 0 && !(m.live && m.taskId) ? 0 : undefined,
                     color: m.failed ? "#f87171" : undefined,
                     whiteSpace: "pre-wrap",
                     borderColor: m.live && m.taskId ? "rgba(34,211,238,.35)" : undefined,
