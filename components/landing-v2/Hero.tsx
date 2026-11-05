@@ -80,7 +80,7 @@ export function Hero() {
                 AI agents research keywords, write ranking articles and publish to your website, all while you stay in control of every approval.
               </p>
               <div className="flex items-center gap-[10px] max-sm:flex-col">
-                <AuthLink guestHref="/signup" guestLabel="" authedLabel="Go to dashboard" className="inline-flex h-12 items-center gap-2 rounded-full bg-[#262626] pl-6 pr-[22px] text-[16px] font-semibold text-[#fafafa] transition-colors hover:bg-[#3d3d3d]"><span>Start free</span><ArrowRight size={18} /></AuthLink>
+                <AuthLink guestHref="/signup" guestLabel="Start free" authedLabel="Go to dashboard" className="inline-flex h-12 items-center gap-2 rounded-full bg-[#262626] pl-6 pr-[22px] text-[16px] font-semibold text-[#fafafa] transition-colors hover:bg-[#3d3d3d]"><ArrowRight size={18} /></AuthLink>
                 <span className="flex h-10 items-center gap-2 px-4 text-[16px] font-semibold text-[#0a0a0a] max-[601px]:text-[14px]">
                   <span className="h-2 w-2 rounded-full bg-[#6a5af0]" />Connect your site in minutes
                 </span>

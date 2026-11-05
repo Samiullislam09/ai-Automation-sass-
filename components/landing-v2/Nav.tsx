@@ -27,7 +27,7 @@ export function Nav() {
               ))}
             </nav>
             <div className="ml-auto flex items-center gap-2 lg:ml-0">
-              <AuthLink guestHref="/login" guestLabel="" authedLabel="Dashboard" className="inline-flex h-10 items-center gap-2 whitespace-nowrap rounded-full bg-[#262626] pl-4 pr-3 max-[380px]:h-9 max-[380px]:pl-3 max-[380px]:pr-2.5 max-[380px]:text-[13px] max-[340px]:pl-2.5 max-[340px]:pr-2 max-[340px]:text-[12px] text-[14px] font-semibold leading-5 text-[#fafafa] transition-colors hover:bg-[#3d3d3d]"><span>Login</span><ArrowRight size={18} /></AuthLink>
+              <AuthLink guestHref="/login" guestLabel="Login" authedLabel="Dashboard" className="inline-flex h-10 items-center gap-2 whitespace-nowrap rounded-full bg-[#262626] pl-4 pr-3 max-[380px]:h-9 max-[380px]:pl-3 max-[380px]:pr-2.5 max-[380px]:text-[13px] max-[340px]:pl-2.5 max-[340px]:pr-2 max-[340px]:text-[12px] text-[14px] font-semibold leading-5 text-[#fafafa] transition-colors hover:bg-[#3d3d3d]"><ArrowRight size={18} /></AuthLink>
               <button type="button" aria-label="Open menu" aria-expanded={open} onClick={() => setOpen(o => !o)}
                 className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#e5e5e5] max-[420px]:h-10 max-[420px]:w-10 max-[340px]:h-9 max-[340px]:w-9 lg:hidden">
                 <span className="relative block h-[14px] w-[18px]">
