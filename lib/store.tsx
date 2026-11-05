@@ -7,7 +7,7 @@
  *  - Chat: /api/chat already streams; swap canned brain for NVIDIA NIM (Lightning) call.
  *  - Payments: replace applyPlan() with Paddle/LemonSqueezy checkout + webhooks.
  */
-import React, { createContext, useContext, useEffect, useRef, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { CheckCircle2, Info, X, XCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { AGENTS } from "@/lib/agents-data";
@@ -213,21 +213,32 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   /** Returns a dismiss function so a caller can take the toast down early (e.g. after Undo). */
-  const toast = (msg: string, tone: ToastTone = "ok", opts?: { action?: Toast["action"]; ms?: number }) => {
+  // toast / patch / act are STABLE (useCallback, no deps): they only call state setters. They used
+  // to be new functions on every render, and every effect that listed one as a dependency
+  // (Audit, Schedule, Site Brain, buyer profile...) re-ran, and so re-fetched, each time anything
+  // in the store changed, including each toast those same fetches raised on failure.
+  const lastToast = useRef({ key: "", at: 0 });
+  const toast = useCallback((msg: string, tone: ToastTone = "ok", opts?: { action?: Toast["action"]; ms?: number }) => {
+    // The same message twice within 2.5s is one message: a failing request must not stack a
+    // wall of identical errors over the page.
+    const key = tone + "|" + msg;
+    const now = Date.now();
+    if (!opts?.action && lastToast.current.key === key && now - lastToast.current.at < 2500) return () => {};
+    lastToast.current = { key, at: now };
     const id = Date.now() + Math.random();
     const dismiss = () => setToasts(t => t.filter(x => x.id !== id));
     setToasts(t => [...t, { id, msg, tone, action: opts?.action }]);
     setTimeout(dismiss, opts?.ms ?? 3200);
     return dismiss;
-  };
+  }, []);
   /** Ask before doing something that can't be undone. Resolves true only on the confirm button. */
   const confirmAction = (o: ConfirmOpts) =>
     new Promise<boolean>((resolve) => setConfirm({ ...o, resolve }));
   const answer = (ok: boolean) => { confirm?.resolve(ok); setConfirm(null); };
-  const patch = (p: Partial<State> | ((prev: State) => Partial<State>)) => setS(prev => ({ ...prev, ...(typeof p === "function" ? p(prev) : p) }));
+  const patch = useCallback((p: Partial<State> | ((prev: State) => Partial<State>)) => setS(prev => ({ ...prev, ...(typeof p === "function" ? p(prev) : p) })), []);
 
-  const act = (msg: string, from?: string, to?: string) =>
-    patch(prev => ({ activity: [{ t: nowT(), from, to, msg }, ...prev.activity].slice(0, 40) }));
+  const act = useCallback((msg: string, from?: string, to?: string) =>
+    patch(prev => ({ activity: [{ t: nowT(), from, to, msg }, ...prev.activity].slice(0, 40) })), [patch]);
 
   const setAgent = (id: string, st: AgentState["st"], task: string) =>
     patch(prev => ({ agents: { ...prev.agents, [id]: { st, task } } }));
@@ -266,14 +277,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       focusAgent: agentId,
     }));
 
-  const report = (line: string) => patch(prev => {
+  const report = useCallback((line: string) => patch(prev => {
     const key = new Date().toDateString();
     const reports = [...prev.reports];
     let r = reports.find(x => x.key === key);
     if (!r) { r = { id: Date.now(), key, dateISO: new Date().toISOString(), unread: true, lines: [] }; reports.unshift(r); }
     r.lines = [...r.lines, { t: nowT(), s: line }]; r.unread = true;
     return { reports };
-  });
+  }), [patch]);
 
   /** Demo pipeline — TODO(backend): replace with agent-server jobs + Socket.io */
   const generate = (type: string, onStage?: (i: number) => void, onDone?: () => void) => {

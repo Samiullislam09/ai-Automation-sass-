@@ -108,7 +108,7 @@ export default function WhatsAppSection() {
   return (
     // Full-bleed like the Leads page: cancel the dashboard's padding so the WhatsApp app runs
     // edge-to-edge (only the sidebar remains), and fill the height.
-    <div className="-m-3 flex h-[calc(100%+1.5rem)] min-h-0 flex-col sm:-m-4 sm:h-[calc(100%+2rem)]" style={{ background: "#fff", color: WA.text, colorScheme: "light" }}>
+    <div className="-m-1.5 flex h-[calc(100%+0.75rem)] min-h-0 flex-col sm:-m-4 sm:h-[calc(100%+2rem)]" style={{ background: "#fff", color: WA.text, colorScheme: "light" }}>
       <style>{`
         /* the input carries NO ring of its own — the ONE outline is drawn by its .wa-search wrapper,
            so focusing never shows a second (purple) border inside the green one */

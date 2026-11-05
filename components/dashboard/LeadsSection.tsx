@@ -302,7 +302,7 @@ export default function LeadsSection() {
   const paged = filtered.slice((pageSafe - 1) * perPage, pageSafe * perPage);
 
   return (
-    <div className="-m-3 min-h-[calc(100%+1.5rem)] p-3 sm:-m-4 sm:min-h-[calc(100%+2rem)] sm:p-4" style={{ background: C.bg, color: C.ink, colorScheme: "light" }}>
+    <div className="-m-1.5 min-h-[calc(100%+0.75rem)] p-3 sm:-m-4 sm:min-h-[calc(100%+2rem)] sm:p-4" style={{ background: C.bg, color: C.ink, colorScheme: "light" }}>
       {/* Kill Chrome's dark autofill fill on this light surface: an input it thinks is an email
           field gets a black background (and the parent dashboard is dark). Force a white inset. */}
       <style>{`
@@ -339,8 +339,8 @@ export default function LeadsSection() {
 
       {/* toolbar — a full-width search, then Filters and Generate Leads, like the reference. The
           search has the same quiet border as the KPI cards and no focus ring. */}
-      <div className="mb-4 flex items-center gap-2.5">
-        <div className="flex h-11 min-w-0 flex-1 items-center gap-2.5 rounded-xl px-3.5" style={{ background: "#fff", border: `1px solid ${C.line}` }}>
+      <div className="mb-4 flex flex-wrap items-center gap-2.5 sm:flex-nowrap">
+        <div className="flex h-11 min-w-0 basis-full items-center gap-2.5 rounded-xl px-3.5 sm:basis-0 sm:flex-1" style={{ background: "#fff", border: `1px solid ${C.line}` }}>
           <svg className="shrink-0" width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke={C.sub} strokeWidth="2" /><path d="M21 21l-4-4" stroke={C.sub} strokeWidth="2" strokeLinecap="round" /></svg>
           <input type="search" name="lead-search" autoComplete="off" spellCheck={false} className="lx-input w-full min-w-0 border-0 text-[13.5px]" style={{ background: "#fff" }} placeholder="Search by name, email, phone, or company…" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
@@ -352,8 +352,8 @@ export default function LeadsSection() {
           </button>
           {filtersOpen && <FilterPanel flt={flt} setFlt={setFlt} cities={cities} dateRange={dateRange} setDateRange={setDateRange} onClose={() => setFiltersOpen(false)} onClear={() => { setFlt({ status: [], source: [], city: [], ai: "any", you: "any", converted: "any", client: "any", score: "any" }); setDateRange("all"); }} />}
         </div>
-        <div className="relative shrink-0">
-          <button className="flex h-11 items-center gap-1.5 rounded-xl px-4 text-[13px] font-semibold text-white disabled:opacity-60" style={{ background: C.brand }} onClick={() => setGenMenuOpen((o) => !o)} disabled={gen?.running || genBusy}>
+        <div className="relative shrink-0 max-sm:flex-1">
+          <button className="flex h-11 items-center gap-1.5 rounded-xl px-4 max-sm:w-full max-sm:justify-center text-[13px] font-semibold text-white disabled:opacity-60" style={{ background: C.brand }} onClick={() => setGenMenuOpen((o) => !o)} disabled={gen?.running || genBusy}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6l2.1 2.1m0-12.8l-2.1 2.1M7.7 16.3l-2.1 2.1" stroke="#fff" strokeWidth="1.8" strokeLinecap="round"/></svg>
             <span>{gen?.running ? "Searching…" : "Generate Leads"}</span>
             {!gen?.running && <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>}

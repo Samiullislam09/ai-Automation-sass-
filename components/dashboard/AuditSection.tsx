@@ -1217,8 +1217,8 @@ function ReportSkeleton({ actions }: { actions: React.ReactNode }) {
         </div>
         {actions}
       </div>
-      <div className="flex gap-5 border-b pb-3" style={{ borderColor: "var(--lx-border)" }}>
-        {TABS.map((t) => <div key={t.id}>{block(t.label.length * 7 + 8, 12)}</div>)}
+      <div className="flex gap-5 overflow-hidden border-b pb-3" style={{ borderColor: "var(--lx-border)" }}>
+        {TABS.map((t) => <div key={t.id} className="shrink-0">{block(t.label.length * 7 + 8, 12)}</div>)}
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="lx-card2 p-4">
