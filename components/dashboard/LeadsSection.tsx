@@ -302,7 +302,7 @@ export default function LeadsSection() {
   const paged = filtered.slice((pageSafe - 1) * perPage, pageSafe * perPage);
 
   return (
-    <div className="-m-1.5 min-h-[calc(100%+0.75rem)] p-3 sm:-m-4 sm:min-h-[calc(100%+2rem)] sm:p-4" style={{ background: C.bg, color: C.ink, colorScheme: "light" }}>
+    <div className="-m-3 min-h-[calc(100%+1.5rem)] p-3 sm:-m-4 sm:min-h-[calc(100%+2rem)] sm:p-4" style={{ background: C.bg, color: C.ink, colorScheme: "light" }}>
       {/* Kill Chrome's dark autofill fill on this light surface: an input it thinks is an email
           field gets a black background (and the parent dashboard is dark). Force a white inset. */}
       <style>{`

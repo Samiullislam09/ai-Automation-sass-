@@ -750,7 +750,7 @@ const CSS = `
   --ac:var(--lx-violet);--acs:color-mix(in srgb,var(--lx-purple) 14%,transparent);--onac:#fff;
   --ok:#22c55e;--oks:color-mix(in srgb,#22c55e 12%,transparent);--bad:#f87171;--bads:color-mix(in srgb,#ef4444 12%,transparent);
   --warn:#fbbf24;--warns:color-mix(in srgb,#f59e0b 13%,transparent);--off:var(--lx-dim);--pu:var(--lx-violet);--pus:color-mix(in srgb,var(--lx-purple) 14%,transparent);
-  color:var(--tx);background:var(--bg);min-height:100%;margin:-6px;overflow-x:hidden;font:14px/1.5 inherit}
+  color:var(--tx);background:var(--bg);min-height:100%;margin:-12px;overflow-x:hidden;font:14px/1.5 inherit}
 .light .sched{--ok:#15803d;--bad:#c0283f;--warn:#b45309}
 @media(min-width:640px){.sched{margin:-16px}}
 /* Follows the app theme toggle (next-themes .dark/.light on <html>): white in light mode,

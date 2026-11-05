@@ -747,7 +747,7 @@ const CONNECT_CSS = `
 .light .lx-root .cn-pill.pairing{color:#0e7490}
 .cn-blurb{margin:6px 0 0;font-size:12px;line-height:1.5;color:var(--lx-mut);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .cn-detail{margin:6px 0 0;font-size:12px;color:var(--lx-cyan);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.cn-act{grid-area:a;height:38px;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid transparent;transition:.15s}
+.cn-act{grid-area:a;justify-self:start;height:32px;padding:0 18px;border-radius:8px;font-size:12.5px;font-weight:600;cursor:pointer;border:1px solid transparent;transition:.15s}
 .cn-act.pri{color:#fff;background:linear-gradient(135deg,#4f46e5,#7c3aed);box-shadow:0 2px 10px rgba(124,58,237,.3)}
 .cn-act.pri:hover{filter:brightness(1.1)}
 .cn-act.sec{color:var(--lx-text);background:transparent;border-color:var(--lx-sel-border)}
@@ -760,7 +760,7 @@ const CONNECT_CSS = `
   .cn-grid{grid-template-columns:minmax(0,1fr);gap:8px}
   .cn-card{grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"m b a";align-items:center;padding:12px;gap:10px}
   .cn-glyph{width:38px;height:38px}
-  .cn-act{height:36px;min-width:88px;padding:0 12px}
+  .cn-act{justify-self:end;height:32px;min-width:0;padding:0 14px}
   .cn-blurb{margin-top:3px;-webkit-line-clamp:1}
   .cn-head{align-items:stretch}
   .cn-total{flex:1 1 100%}

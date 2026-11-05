@@ -1281,7 +1281,8 @@ const CSS = `
   background:linear-gradient(135deg,#4f46e5,#7c3aed)}
 /* phone: the panel gives its edges back, the drawer becomes a full-screen sheet */
 @media (max-width:639px){
-  .ap-root .ap-main{border-radius:0;border-left:none;border-right:none}
+  .ap-root .ap-main{border-radius:12px}
+  .ap-root .ap-main .lx-scroll{padding-left:10px;padding-right:10px}
   .ap-root .ap-hdr{padding:12px 12px 10px}
   .ap-drawer{top:0;right:0;bottom:0;left:0;width:100%;border-radius:0;border:none}
   .ap-drawer .ap-foot{padding-bottom:max(16px,env(safe-area-inset-bottom))}
