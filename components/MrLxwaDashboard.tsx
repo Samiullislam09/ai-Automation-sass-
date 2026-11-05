@@ -2906,8 +2906,16 @@ export default function MrLxwaDashboard({
   // had auto-opened before any step existed, nothing was ever selected, and `lastStep` needs a
   // `startedAt` that a step only gets once it runs.
   const producerAgent = task?.agents.find((p) => p.items.length)?.agent_id ?? null;
+  // 100% done AND the writer saved an article: the live view lands on the full article (not on
+  // whichever agent happened to finish last, e.g. Mr. Image) until the user picks a tab.
+  const articleFinished =
+    !!task &&
+    task.steps.length > 0 &&
+    task.steps.every((s) => s.status === "done") &&
+    task.agents.some((p) => p.agent_id === "writer" && p.items.some((it) => it.kind === "saved" && it.payload?.contentItemId));
   const panelAgent =
     (selectedAgentId ? [...allAgents, bossAgent, publishAgent].find((a) => a.id === selectedAgentId) ?? null : null) ??
+    (articleFinished ? allAgents.find((a) => a.id === "writer") ?? null : null) ??
     workingAgent ??
     (lastStep ? [...allAgents, bossAgent, publishAgent].find((a) => a.id === lastStep.agent_id) ?? null : null) ??
     (producerAgent ? [...allAgents, bossAgent, publishAgent].find((a) => a.id === producerAgent) ?? null : null);
@@ -3879,7 +3887,20 @@ export default function MrLxwaDashboard({
       </div>
 
       <div className="mt-3 flex flex-col gap-4">
-        <div className="min-w-0">
+        <div className="relative min-w-0">
+          {/* Finished article: "Go" opens it as a full page (/dashboard/content/<id>). Sits on the
+              canvas corner, outside the scroll box, so it stays put while the article scrolls. */}
+          {articleFinished && savedContentId && (
+            <Link
+              href={`/dashboard/content/${savedContentId}`}
+              className="lx-pill absolute right-5 top-3 z-10 inline-flex items-center gap-1 font-semibold shadow"
+              style={{ background: "var(--lx-cyan)", color: "#04121a" }}
+              aria-label="Open the full article page"
+              title="Open the full article on a big screen"
+            >
+              Go <ArrowRight size={12} />
+            </Link>
+          )}
           {/* ONE height, not a range, and its own scrollbar.
               This was `minHeight:360, maxHeight:460`, which is a range — so the box grew and
               shrank with whatever the current step happened to be showing, and every step change
@@ -3932,7 +3953,7 @@ export default function MrLxwaDashboard({
                 ) : panelAgent?.id === "writer" ? (
                   (() => {
                     const hasReview = producedItems.some((it) => REVIEW_KINDS.has(it.kind));
-                    const view = writerView === "auto" ? (hasReview ? "review" : "article") : writerView;
+                    const view = writerView === "auto" ? (hasReview && !articleFinished ? "review" : "article") : writerView;
                     return (
                       <div>
                         {hasReview && (
