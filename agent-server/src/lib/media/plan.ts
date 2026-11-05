@@ -343,26 +343,14 @@ export async function planImages(
     const section = picked.section;
     const slot = `inline_${i + 1}`;
 
-    // GATE 3 first: a factual section never goes to the image model at all.
-    const card = cardFor(section);
-    if (card) {
-      slots.push({
-        slot,
-        kind: "card",
-        anchor: section.heading,
-        depicts: firstSentence(section.text) || section.heading,
-        subject: "",
-        alt: `${section.heading} — ${card.type === "steps" ? "the steps" : card.type === "stats" ? "the figures" : "the key point"} from this section`,
-        card: { type: card.type, lines: card.lines },
-        note: card.why,
-      });
-      continue;
-    }
-
+    // Owner, 2026-11-02: text cards read as low quality ("aisa text image kyun? real image, best
+    // image"). Every inline slot is now a real picture; a factual section is pictured through a
+    // clean real-world scene that evokes it (the brief prompt forbids anything carrying text).
     const depicts = String(picked.from?.depicts ?? "").trim();
     const subject = String(picked.from?.subject ?? "").trim();
     // GATE 2: does the brief actually describe THIS section?
-    if (subject && describesSection(depicts || subject, subject, section)) {
+    // A brief that asks the model to draw a map/chart/diagram is refused: it would draw a convincing wrong one.
+    if (subject && !FACTUAL_VISUAL.test(subject) && describesSection(depicts || subject, subject, section)) {
       slots.push({
         slot,
         kind: style,
@@ -374,19 +362,18 @@ export async function planImages(
       continue;
     }
 
-    // The brief was generic (or missing) for this section. Rather than render something
-    // unrelated, state the section's own point on a card.
+    // The brief was generic (or missing) for this section: still a real picture, staged from the
+    // section's own heading and a clean real-world scene, never a card of text.
     slots.push({
       slot,
-      kind: "card",
+      kind: style,
       anchor: section.heading,
       depicts: firstSentence(section.text) || section.heading,
-      subject: "",
-      alt: `${section.heading} — the key point from this section`,
-      card: { type: "keypoint", lines: [firstSentence(section.text) || section.heading] },
+      subject: `${FACTUAL_VISUAL.test(section.heading) ? "the topic of this section" : section.heading}: a clean, premium real-world scene that evokes it, such as a modern glass-walled meeting room, architectural detail or a city skyline at golden hour`,
+      alt: `${section.heading} — illustration`,
       note: subject
-        ? "the brief for this section did not share a single word with it, so it was not used"
-        : "no brief came back for this section",
+        ? "the brief for this section did not share a single word with it, so the heading is the subject"
+        : "no brief came back for this section, so the heading is the subject",
     });
   }
 

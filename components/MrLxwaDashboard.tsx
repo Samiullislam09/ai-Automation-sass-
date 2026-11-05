@@ -3887,7 +3887,17 @@ export default function MrLxwaDashboard({
             Shown only once agents/writer.ts has reported a SAVED row (`contentItemId`), because
             before that there is no page to open and an icon that navigates nowhere is worse than
             no icon. */}
-        {savedContentId && (
+        {savedContentId && articleFinished && (
+          <Link
+            href={`/dashboard/content/${savedContentId}`}
+            className="lx-grad shrink-0 whitespace-nowrap px-3 py-1.5 text-[11.5px]"
+            aria-label="Open the full article page"
+            title="Open the full article on a big screen"
+          >
+            <Maximize2 size={12} /> Open full article
+          </Link>
+        )}
+        {savedContentId && !articleFinished && (
           <Link
             href={`/dashboard/content/${savedContentId}`}
             className="lx-icobtn shrink-0"
@@ -3916,21 +3926,7 @@ export default function MrLxwaDashboard({
       </div>
 
       <div className="mt-3 flex flex-col gap-4">
-        <div className="relative min-w-0">
-          {/* Finished article: opens the full page (/dashboard/content/<id>). Its own row above the
-              canvas so it never covers the article. */}
-          {articleFinished && savedContentId && (
-            <div className="mb-2 flex justify-end">
-              <Link
-                href={`/dashboard/content/${savedContentId}`}
-                className="lx-grad px-3.5 py-1.5 text-[12px]"
-                aria-label="Open the full article page"
-                title="Open the full article on a big screen"
-              >
-                <Maximize2 size={13} /> Open full article
-              </Link>
-            </div>
-          )}
+        <div className="min-w-0">
           {/* ONE height, not a range, and its own scrollbar.
               This was `minHeight:360, maxHeight:460`, which is a range — so the box grew and
               shrank with whatever the current step happened to be showing, and every step change

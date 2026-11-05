@@ -153,12 +153,13 @@ test("gate 2: a generic stock brief is refused and the section's own point is dr
   };
   const plan = await planImages(article({ wordCount: 900 }), PROFILE, { complete: async () => reply as any });
   const inline = plan.slots.find((s) => s.slot === "inline_1")!;
-  assert.equal(inline.kind, "card", "an office desk for a gutters section is not rendered");
+  assert.notEqual(inline.kind, "card", "never a text card");
+  assert.match(inline.subject, /Gutters and fascias/, "the heading becomes the subject");
   assert.equal(inline.anchor, "Gutters and fascias");
   assert.match(inline.note!, /did not share a single word/);
 });
 
-test("gate 3 wins over the model: a map section is a card even when the brief looks fine", async () => {
+test("a map brief is never sent to the image model, and never becomes a text card either", async () => {
   const withMap = article({
     wordCount: 900,
     sections: [{ heading: "Our coverage map", text: "The map shows every county we cover across central Illinois." }],
@@ -166,8 +167,8 @@ test("gate 3 wins over the model: a map section is a card even when the brief lo
   const reply = { ...goodReply, inline: [{ anchor: "Our coverage map", depicts: "the counties we cover", subject: "a map of central Illinois with counties shaded", alt: "Coverage map" }] };
   const plan = await planImages(withMap, PROFILE, { complete: async () => reply as any });
   const inline = plan.slots.find((s) => s.slot === "inline_1")!;
-  assert.equal(inline.kind, "card");
-  assert.equal(inline.card?.type, "keypoint");
+  assert.notEqual(inline.kind, "card");
+  assert.doesNotMatch(inline.subject, /map/i);
 });
 
 test("a model that fails entirely still leaves a usable plan — two images, from the article's own words", async () => {

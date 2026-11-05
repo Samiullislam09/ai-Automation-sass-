@@ -309,6 +309,7 @@ export async function writeSection(
     // "do not stop early" reads as a requirement rather than a suggestion.
     `LENGTH: at least 300 words for this section — this is a hard minimum, not a target. Do not stop early; if you run short, go deeper on the reader's question with specifics rather than padding.`,
     `Start with "## ${section.h2}" then the prose. The very next paragraph after the heading must answer "${section.readerQuestion}" directly in its first sentence (the number, the yes/no, or the name first), in 40-58 words total — this is the length Google most often lifts into a featured snippet, so do not open with throat-clearing.`,
+    `Structure: after that opening answer, break the rest of the section into 2-3 sub-parts, each starting with its own "### " sub-heading (a short, specific noun phrase, never a question repeating the H2), followed by 1-2 short paragraphs. Never write one long block of prose under a single heading; a paragraph over 4 sentences is a defect.`,
     `Short paragraphs (2-4 sentences) for everything after that first one. No filler, no "in today's fast-paced world" openings. Never use an em dash (—); use a period, comma, or colon instead. Use only facts present in the context above — never invent a statistic, price, award, client name or date.`,
     // REWRITTEN 2026-10-06. This line used to demand "at least one sentence of 6 words or fewer
     // for every 150 words", and it was the direct cause of the article pipeline's 100% failure

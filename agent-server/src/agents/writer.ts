@@ -5,6 +5,7 @@ import { writeArticlePipeline, nimComplete, nimCompleteFast } from "../lib/write
 import { runArticleReview, checkLinkLive, type LinkRef } from "../lib/articleReview.js";
 import { researchTopic } from "../lib/research/gptResearcher.js";
 import { gateArticle, summarizeGate, CORE_CHECK_IDS } from "../lib/qualityGate.js";
+import { splitLongParagraphs } from "../lib/articleLayout.js";
 import { supabase } from "../supabase.js";
 import { loadInsights, writerBlock } from "../lib/insights.js";
 import { buildBlueprint, matchOfferings, nearestCluster, type Research } from "../lib/blueprint.js";
@@ -90,7 +91,8 @@ async function fixArticle(job: Job<AgentJobData>, ctx: AgentContext) {
       onProgress: (label) => ctx.onProgress({ label }),
     },
   );
-  body = review.body;
+  // Readability pass in code: no wall-of-text paragraphs (lib/articleLayout.ts).
+  body = splitLongParagraphs(review.body);
   ctx.data("draft", { title, body });
 
   const baseGate = gateArticle(body, {
@@ -300,7 +302,8 @@ export class WriterAgent extends Agent {
         onProgress: (label) => ctx.onProgress({ label }),
       },
     );
-    body = review.body;
+    // Readability pass in code: no wall-of-text paragraphs (lib/articleLayout.ts).
+  body = splitLongParagraphs(review.body);
     ctx.data("draft", { title, body });
 
     // One verdict, kept in the gate's own shape so the dashboard and Approvals read it unchanged:
