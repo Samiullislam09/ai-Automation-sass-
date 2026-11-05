@@ -5,7 +5,7 @@ import { loadActiveProfile } from "../lib/siteProfile.js";
 import { planImages, buildPrompt, seedFor, type ImageSlot, type ArticleSection } from "../lib/media/plan.js";
 import { generateImage, NoProviderAnswered } from "../lib/media/providers.js";
 import { toShape, templateCard, contentCard, type Shape } from "../lib/media/render.js";
-import { saveImage, generatedToday, type StoredImage } from "../lib/media/store.js";
+import { saveImage, generatedToday, type StoredImage, removeStoredFile } from "../lib/media/store.js";
 import { embedImagesInBody, type EmbeddableImage } from "../lib/media/embed.js";
 import { capFor } from "../config/caps.js";
 import { supabase } from "../supabase.js";
@@ -276,6 +276,7 @@ export class ImageAgent extends Agent {
         providerAccount: null,
         neurons: 0,
         attribution: null,
+        keepPrevious: input.bump > 0,
         ...extra,
       });
 
@@ -520,7 +521,12 @@ async function updateReview(tenantId: string, article: LoadedArticle, redone: Im
   const existing: any[] = Array.isArray(meta.images) ? meta.images : [];
   const bySlot = new Map(existing.map((i: any) => [String(i.slot), i]));
   for (const r of redone) {
-    bySlot.set(r.slot, { slot: r.slot, url: r.url, alt: r.alt, anchor: r.anchor, provider: r.provider, license: licenseFor(r.provider, (r as any).attribution), kind: r.kind, note: r.note, width: r.width, height: r.height });
+    const before = bySlot.get(r.slot) as any;
+    // Remember the picture this one replaced so the owner can undo until they approve. A
+    // version older than that is no longer reachable, so its file goes now.
+    const previous = r.previousUrl ? { url: r.previousUrl, alt: before?.alt ?? r.alt, provider: before?.provider ?? null, width: before?.width ?? null, height: before?.height ?? null } : undefined;
+    if (before?.previous?.url && before.previous.url !== previous?.url) await removeStoredFile(before.previous.url);
+    bySlot.set(r.slot, { previous, slot: r.slot, url: r.url, alt: r.alt, anchor: r.anchor, provider: r.provider, license: licenseFor(r.provider, (r as any).attribution), kind: r.kind, note: r.note, width: r.width, height: r.height });
   }
   const images = [...bySlot.values()];
   const { error } = await supabase

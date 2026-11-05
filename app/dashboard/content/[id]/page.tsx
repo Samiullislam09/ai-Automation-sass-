@@ -27,41 +27,38 @@ export default async function DashboardContentDetailPage({ params }: { params: P
   const supabase = await createClient();
   const tenantId = await getCurrentTenantId(supabase);
 
-  const { data: item, error } = tenantId
-    ? await supabase
-        .from("content_items")
-        .select("id, type, status, title, body, meta, primary_keyword, slug, created_at, updated_at")
-        .eq("id", id)
-        .eq("tenant_id", tenantId)
-        .maybeSingle()
-    : { data: null, error: null as any };
+  /* The four reads do not depend on each other, so they go out together: one round trip instead
+     of four in a row (that chain was most of the wait when an article opened).
 
-  const { data: tenant } = tenantId
-    ? await supabase.from("tenants").select("name, website_url").eq("id", tenantId).maybeSingle()
-    : { data: null };
-
-  /* Images and the Web Story are NOT in the article row — that is why this page showed neither
-     until 2026-09-18. Mr. Image files every picture in `media`, keyed by (article, slot), and
-     Mr. Story files the story as its own separately-reviewable `web_story` content_item tied
-     back here through blueprint->>parent_article_id (migration 023). Both are read here, on
-     the server, with the user's own client — RLS (is_tenant_member) already scopes them. */
-  const { data: media } = tenantId
-    ? await supabase
-        .from("media")
-        .select("slot, url, alt, anchor, width, height, provider")
-        .eq("article_id", id)
-        .order("slot")
-    : { data: null };
-
-  const { data: story } = tenantId
-    ? await supabase
-        .from("content_items")
-        .select("id, status, title, meta")
-        .eq("tenant_id", tenantId)
-        .eq("type", "web_story")
-        .eq("blueprint->>parent_article_id", id)
-        .maybeSingle()
-    : { data: null };
+     Images and the Web Story are NOT in the article row. Mr. Image files every picture in
+     `media`, keyed by (article, slot), and Mr. Story files the story as its own
+     separately-reviewable `web_story` content_item tied back here through
+     blueprint->>parent_article_id (migration 023). All are read here, on the server, with the
+     user's own client; RLS (is_tenant_member) already scopes them. */
+  const [itemRes, tenantRes, mediaRes, storyRes] = tenantId
+    ? await Promise.all([
+        supabase
+          .from("content_items")
+          .select("id, type, status, title, body, meta, primary_keyword, slug, created_at, updated_at")
+          .eq("id", id)
+          .eq("tenant_id", tenantId)
+          .maybeSingle(),
+        supabase.from("tenants").select("name, website_url").eq("id", tenantId).maybeSingle(),
+        supabase.from("media").select("slot, url, alt, anchor, width, height, provider").eq("article_id", id).order("slot"),
+        supabase
+          .from("content_items")
+          .select("id, status, title, meta")
+          .eq("tenant_id", tenantId)
+          .eq("type", "web_story")
+          .eq("blueprint->>parent_article_id", id)
+          .maybeSingle(),
+      ])
+    : [null, null, null, null];
+  const item = itemRes?.data ?? null;
+  const error = itemRes?.error ?? null;
+  const tenant = tenantRes?.data ?? null;
+  const media = mediaRes?.data ?? null;
+  const story = storyRes?.data ?? null;
 
   if (!tenantId || error || !item) {
     return (

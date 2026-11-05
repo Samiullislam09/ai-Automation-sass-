@@ -5,7 +5,7 @@ import {
   ArrowRight, BadgeCheck, Bell, Calendar, Check, ChevronDown, ChevronLeft, ChevronRight, Clock,
   Copy, Eye, FileText, Loader2, Megaphone, MapPin, MoreVertical, Pencil, RefreshCw, Search,
   SlidersHorizontal, UserRound, X, XCircle, CheckCircle2, Monitor, ExternalLink, History, Plus,
-  Image as ImageIcon, Sparkles,
+  Image as ImageIcon, Sparkles, Undo2,
 } from "lucide-react";
 import { renderMarkdown } from "@/lib/md";
 import { useStore } from "@/lib/store";
@@ -247,7 +247,10 @@ export default function ApprovalsSection({
       const res = await fetch(`/api/content/${c.id}/approve`, { method: "POST" });
       const data = await res.json();
       if (data.ok) {
-        if (data.copyOnly) {
+        if (data.part) {
+          toast("Approved.");
+          patchItem(c.id, { status: "approved" });
+        } else if (data.copyOnly) {
           report(`Approved for copying — not posted anywhere: "${c.title}"`);
           toast("Marked ready — copy the text and post it yourself.");
           patchItem(c.id, { status: "approved" });
@@ -372,6 +375,13 @@ export default function ApprovalsSection({
   const safePage = Math.min(page, pages);
   const rows = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
   useEffect(() => { setPage(1); }, [q, fAgent, fType, fStatus, fDate, sort]);
+  // A new page starts at the top, not wherever the last one was scrolled to.
+  const listScroll = useRef<HTMLDivElement>(null);
+  const firstPage = useRef(true);
+  useEffect(() => {
+    if (firstPage.current) { firstPage.current = false; return; }
+    listScroll.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, [safePage]);
 
   const agentCount = useMemo(() => {
     const m = new Map<string, number>();
@@ -416,7 +426,7 @@ export default function ApprovalsSection({
           )}
         </header>
 
-        <div className="lx-scroll flex-1 overflow-y-auto px-4 pb-4">
+        <div ref={listScroll} className="lx-scroll flex-1 overflow-y-auto px-4 pb-4">
           {/* stat strip: each tile is also the status filter */}
           <div className="ap-stats mt-3">
             <Stat n={loading ? "–" : counts.total}     label="All items"      color="#8b5cf6" Icon={FileText}     on={fStatus === "all"}               onClick={() => setFStatus("all")} />
@@ -462,6 +472,7 @@ export default function ApprovalsSection({
                     <div className="min-w-0">
                       <ClampTitle text={c.title || "Untitled"} />
                       <div className="ap-meta lx-10 lx-mut mt-1.5 flex items-center gap-1.5 overflow-hidden whitespace-nowrap">
+                        <span className="ap-inline-status"><StatusPill s={c.status} /></span>
                         <span className="truncate">{categoryOf(c)}</span><i className="ap-sep" /><span>{agentOf(c)}</span><i className="ap-sep" />
                         <span>{typeof c.meta?.wordCount === "number" ? `${c.meta.wordCount.toLocaleString()} words` : "— words"}</span><i className="ap-sep" /><span>{TYPE_LABEL[c.type] ?? c.type}</span>
                         <i className="ap-sep ap-inline-date" /><span className="ap-inline-date">{fmtBoth(c.updated_at ?? c.created_at)}</span>
@@ -560,6 +571,10 @@ export default function ApprovalsSection({
               onOpenKid={(k) => openDetail(k, "preview")}
               parent={detail.blueprint?.parent_article_id ? items.find((i) => i.id === detail.blueprint!.parent_article_id) ?? null : null}
               onOpenParent={(pa) => openDetail(pa)}
+              onItemUpdated={(it) => {
+                setDetail((d) => (d && d.id === it.id ? { ...d, ...it } : d));
+                setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, meta: it.meta } : x)));
+              }}
             />
           </aside>
         </>
@@ -630,6 +645,8 @@ function RowAction({ c, busy, onReview, onHistory, onApprove }: { c: ContentItem
     return () => clearTimeout(t);
   }, [armed]);
   if (busy) return <span className="ap-btn"><Loader2 size={14} className="ap-spin" /></span>;
+  const view = <button className="ap-btn" onClick={onReview}><Eye size={13} /> View</button>;
+  const history = <button className="ap-btn" onClick={onHistory} title="See what happened"><History size={13} /> History</button>;
   switch (c.status) {
     case "awaiting_approval": {
       const label = c.type === "social" && c.meta?.copyOnly ? "Mark ready" : "Approve";
@@ -644,16 +661,14 @@ function RowAction({ c, busy, onReview, onHistory, onApprove }: { c: ContentItem
     }
     case "published":
       return c.meta?.publishedUrl
-        ? <a className="ap-btn" href={c.meta.publishedUrl} target="_blank" rel="noreferrer" title="Open the live page"><ExternalLink size={13} /> Live</a>
-        : <button className="ap-btn" onClick={onReview}><Eye size={13} /> View</button>;
-    case "approved":
-      return <button className="ap-btn" onClick={onReview}><Eye size={13} /> View</button>;
+        ? <>{view}<a className="ap-btn" href={c.meta.publishedUrl} target="_blank" rel="noreferrer" title="Open the live page"><ExternalLink size={13} /> Live</a></>
+        : <>{view}{history}</>;
     case "draft":
       return c.type === "article"
-        ? <Link className="ap-btn" href={`/dashboard/content/${c.id}`}><Pencil size={13} /> Continue</Link>
-        : <button className="ap-btn" onClick={onReview}><Pencil size={13} /> Continue</button>;
+        ? <>{history}<Link className="ap-btn" href={`/dashboard/content/${c.id}`}><Pencil size={13} /> Continue</Link></>
+        : <>{history}<button className="ap-btn" onClick={onReview}><Pencil size={13} /> Continue</button></>;
     default:
-      return <button className="ap-btn" onClick={onHistory} title="See what happened"><History size={13} /> History</button>;
+      return <>{view}{history}</>;
   }
 }
 
@@ -664,19 +679,27 @@ function RowAction({ c, busy, onReview, onHistory, onApprove }: { c: ContentItem
  *  A card (a section that explains a map, a chart or a set of steps) says so — those are drawn
  *  from the section's own words on purpose, because an image model would draw a convincing
  *  wrong map (§19.4.3). Each picture can be redone on its own; the others are left alone. */
-function ImageSetPreview({ c }: { c: ContentItem }) {
+const SLOT_LABEL = (slot: string) =>
+  slot === "thumb" ? "Thumbnail" : slot === "hero" ? "Hero image" : slot === "og" ? "Social preview"
+  : slot.startsWith("inline") ? `Inline image ${slot.replace(/\D+/g, "")}`.trim() : slot.replace(/_/g, " ");
+
+function ImageSetPreview({ c, onUpdated }: { c: ContentItem; onUpdated: (item: ContentItem) => void }) {
   const { toast } = useStore();
-  const [redoing, setRedoing] = useState<string | null>(null);
+  // slot -> the address it had when the new one was asked for; the new picture has arrived the
+  // moment the slot's address differs.
+  const [waiting, setWaiting] = useState<Record<string, string>>({});
+  const [undoing, setUndoing] = useState<string | null>(null);
+  const [zoom, setZoom] = useState<{ url: string; alt: string } | null>(null);
   const images = c.meta?.images ?? [];
   const articleId = c.blueprint?.parent_article_id ?? null;
-  // A picture asked for on its own ("ek image banao") belongs to no article — redoing it means
+  // A picture asked for on its own ("ek image banao") belongs to no article: redoing it means
   // asking for the same subject again, not re-running an article's plan.
   const standalone = (c.meta as any)?.standalone === true;
   const subject = String((c.meta as any)?.subject ?? "");
 
-  const redo = async (slot: string) => {
+  const redo = async (slot: string, currentUrl: string) => {
     if (!articleId && !standalone) return;
-    setRedoing(slot);
+    setWaiting((w) => ({ ...w, [slot]: currentUrl }));
     try {
       const res = await fetch("/api/agents/trigger", {
         method: "POST",
@@ -684,54 +707,118 @@ function ImageSetPreview({ c }: { c: ContentItem }) {
         body: JSON.stringify(standalone ? { type: "image", subject, bump: 1, source: "manual" } : { type: "image", articleId, slot, bump: 1, source: "manual" }),
       });
       const d = await res.json();
-      // The job is queued, not finished — the new picture appears when the run does, the same
-      // way every other agent works here. Saying "done" now would be a lie.
-      if (d.ok) toast("Making another one — refresh in a moment to see it.");
-      else toast(d.error || "Couldn't start that.", "error");
+      if (!d.ok) {
+        setWaiting((w) => { const x = { ...w }; delete x[slot]; return x; });
+        toast(d.error || "Couldn't start that.", "error");
+      }
     } catch {
-      toast("Couldn't start that — network error.", "error");
-    } finally {
-      setRedoing(null);
+      setWaiting((w) => { const x = { ...w }; delete x[slot]; return x; });
+      toast("Couldn't start that: network error.", "error");
     }
   };
+
+  // The job is queued, not finished. Watch the card and swap the picture in the moment it lands,
+  // with no refresh; give up quietly after two minutes.
+  useEffect(() => {
+    const slots = Object.keys(waiting);
+    if (!slots.length) return;
+    let tries = 0;
+    const timer = setInterval(async () => {
+      tries++;
+      try {
+        const d = await fetch(`/api/content/${c.id}`).then((r) => r.json());
+        if (d?.ok) {
+          const imgs: any[] = d.item?.meta?.images ?? [];
+          const done = slots.filter((sl) => { const im = imgs.find((i) => i.slot === sl); return !!im && im.url !== waiting[sl]; });
+          if (done.length) {
+            onUpdated(d.item);
+            setWaiting((w) => { const x = { ...w }; done.forEach((sl) => delete x[sl]); return x; });
+            toast("New picture is in. You can undo it until you approve.");
+          }
+        }
+      } catch { /* try again on the next tick */ }
+      if (tries >= 40) { setWaiting({}); toast("Still working on it. Reopen this in a minute.", "error"); }
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [waiting, c.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const undo = async (slot: string) => {
+    setUndoing(slot);
+    try {
+      const res = await fetch(`/api/content/${c.id}/image-undo`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slot }),
+      });
+      const d = await res.json();
+      if (!d.ok) { toast(d.error || "Couldn't undo that.", "error"); return; }
+      const fresh = await fetch(`/api/content/${c.id}`).then((r) => r.json());
+      if (fresh?.ok) onUpdated(fresh.item);
+      toast("The earlier picture is back, everywhere it was used.");
+    } catch {
+      toast("Couldn't undo that: network error.", "error");
+    } finally {
+      setUndoing(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!zoom) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setZoom(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [zoom]);
 
   if (!images.length) {
     return <div className="ap-card p-4"><p className="lx-11 lx-mut">No pictures on this item yet.</p></div>;
   }
 
+  const hasPrev = images.some((i: any) => i.previous?.url);
   return (
-    <div className="ap-card p-4">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {images.map((img) => (
-          <figure key={img.slot} className="m-0 rounded-lg" style={{ border: "1px solid var(--lx-border)", overflow: "hidden", background: "var(--lx-card)" }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={img.url} alt={img.alt} loading="lazy" style={{ display: "block", width: "100%", height: "auto", background: "var(--lx-card)" }} />
-            <figcaption className="p-2.5">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="lx-10 rounded-full px-2 py-0.5 font-semibold" style={{ border: "1px solid var(--lx-border)", color: "var(--lx-text)" }}>{img.slot.replace("_", " ")}</span>
-                {img.kind === "card" && (
-                  <span className="lx-10 rounded-full px-2 py-0.5" style={{ border: "1px solid rgba(56,189,248,.5)", color: "#38bdf8" }} title="Drawn from this section's own words — an image model cannot draw a map or a chart truthfully">
-                    from the text
-                  </span>
-                )}
-                {img.provider === "template" && img.kind !== "card" && (
-                  <span className="lx-10 rounded-full px-2 py-0.5" style={{ border: "1px solid rgba(251,191,36,.5)", color: "#fbbf24" }} title={img.note ?? ""}>
-                    template
-                  </span>
-                )}
+    <div className="space-y-3">
+      {hasPrev && (
+        <p className="ap-note">A picture you replaced keeps its earlier version until you approve. Approve to delete it for good, or Undo to bring it back.</p>
+      )}
+      {images.map((img: any) => {
+        const isWaiting = img.slot in waiting;
+        const ratio = img.width && img.height ? `${img.width} / ${img.height}` : "16 / 9";
+        return (
+          <figure key={img.slot} className="ap-img">
+            <button type="button" className="ap-img-frame" style={{ aspectRatio: ratio }} onClick={() => setZoom({ url: img.url, alt: img.alt })} aria-label={`Enlarge ${SLOT_LABEL(img.slot)}`}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={img.url} alt={img.alt} loading="lazy" />
+              {img.previous && !isWaiting && <span className="ap-img-tag">New version</span>}
+              {isWaiting && <span className="ap-img-busy"><Loader2 size={15} className="ap-spin" /> Making a new version…</span>}
+            </button>
+            <figcaption className="ap-img-cap">
+              <div className="flex items-center justify-between gap-2">
+                <span className="ap-img-name">{SLOT_LABEL(img.slot)}</span>
+                <a href={img.url} target="_blank" rel="noopener" className="ap-openlink" style={{ marginLeft: 0 }}>Open <ExternalLink size={11} /></a>
               </div>
-              {img.anchor && <p className="lx-10 lx-mut mt-1.5">for: <span style={{ color: "var(--lx-text)" }}>{img.anchor}</span></p>}
-              <p className="lx-10 lx-mut mt-1" style={{ lineHeight: 1.5 }}>{img.alt}</p>
-              {img.note && <p className="lx-10 lx-mut mt-1" style={{ opacity: 0.75 }}>{img.note}</p>}
+              {img.anchor && <p className="ap-img-sub">Under: <b>{img.anchor}</b></p>}
+              {img.provider === "template" && <p className="ap-img-sub">A branded card. No picture could be made for this slot.</p>}
+              <p className="ap-img-alt">{img.alt}</p>
               {(articleId || standalone) && (
-                <button className="lx-ghost lx-10 mt-2" disabled={redoing === img.slot} onClick={() => redo(img.slot)}>
-                  <RefreshCw size={12} className={redoing === img.slot ? "ap-spin" : ""} /> {redoing === img.slot ? "Starting…" : "Another image"}
-                </button>
+                <div className="ap-img-actions">
+                  <button className="ap-btn" disabled={isWaiting || undoing === img.slot} onClick={() => redo(img.slot, img.url)}>
+                    <RefreshCw size={13} className={isWaiting ? "ap-spin" : ""} /> {isWaiting ? "Making…" : "Another image"}
+                  </button>
+                  {img.previous?.url && (
+                    <button className="ap-btn" disabled={isWaiting || undoing === img.slot} onClick={() => undo(img.slot)} title="Bring the earlier picture back">
+                      {undoing === img.slot ? <Loader2 size={13} className="ap-spin" /> : <Undo2 size={13} />} Undo
+                    </button>
+                  )}
+                </div>
               )}
             </figcaption>
           </figure>
-        ))}
-      </div>
+        );
+      })}
+      {zoom && (
+        <div className="ap-zoom" onClick={() => setZoom(null)} role="dialog" aria-label="Picture">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={zoom.url} alt={zoom.alt} onClick={(e) => e.stopPropagation()} />
+          <button className="ap-zoom-x" onClick={() => setZoom(null)} aria-label="Close"><X size={18} /></button>
+        </div>
+      )}
     </div>
   );
 }
@@ -787,8 +874,8 @@ function WebStoryPreview({ c }: { c: ContentItem }) {
   );
 }
 
-function Drawer({ c, loading, busy, tab, setTab, onClose, onApprove, onReject, onCopy, kids, onOpenKid, parent, onOpenParent }: {
-  kids: ContentItem[]; onOpenKid: (k: ContentItem) => void; parent: ContentItem | null; onOpenParent: (p: ContentItem) => void;
+function Drawer({ c, loading, busy, tab, setTab, onClose, onApprove, onReject, onCopy, kids, onOpenKid, parent, onOpenParent, onItemUpdated }: {
+  onItemUpdated: (item: ContentItem) => void; kids: ContentItem[]; onOpenKid: (k: ContentItem) => void; parent: ContentItem | null; onOpenParent: (p: ContentItem) => void;
   c: ContentItem; loading: boolean; busy: boolean; tab: "details" | "preview" | "history";
   setTab: (t: "details" | "preview" | "history") => void; onClose: () => void; onApprove: () => void; onReject: () => void; onCopy: () => void;
 }) {
@@ -886,7 +973,7 @@ function Drawer({ c, loading, busy, tab, setTab, onClose, onApprove, onReject, o
         )}
 
         {tab === "preview" && c.type === "image_set" && (
-          <ImageSetPreview c={c} />
+          <ImageSetPreview c={c} onUpdated={onItemUpdated} />
         )}
 
         {tab === "preview" && c.type === "web_story" && (
@@ -1064,11 +1151,15 @@ const CSS = `
 .ap-live{display:inline-flex;align-items:center;gap:4px;max-width:100%;margin-top:3px;font-size:11px;color:var(--lx-green);text-decoration:none}
 .ap-live:hover{text-decoration:underline}
 @container ap (max-width:980px){
-  /* the date moves into the meta line; every column that stays is fixed, so rows line up */
-  .ap-grid{grid-template-columns:minmax(0,1fr) 112px 232px;grid-template-areas:"a s x";gap:10px}
+  /* narrow: the status pill moves into the meta line and the date with it, so the TITLE gets the
+     whole width left over after the two buttons */
+  .ap-grid{grid-template-columns:minmax(0,1fr) 232px;grid-template-areas:"a x";gap:12px}
+  .ap-c-s{display:none}
   .ap-c-u{display:none}
   .ap-inline-date{display:inline}
+  .ap-inline-status{display:inline-flex}
 }
+.ap-inline-status{display:none}
 @container ap (max-width:620px){
   .ap-grid{grid-template-columns:minmax(0,1fr) max-content;grid-template-areas:"a a" "s x";row-gap:10px}
   .ap-head{display:none}
@@ -1078,6 +1169,9 @@ const CSS = `
 }
 @container ap (max-width:620px){
   /* phone: titles wrap to two lines, filters become a tidy two-up grid, nothing is cut off */
+  .ap-c-s{display:block}
+  .ap-inline-status{display:none}
+  .ap-btn{min-width:72px;padding:0 8px}
   .ap-title{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
   .ap-tip{display:none}
   .ap-meta{white-space:normal;flex-wrap:wrap;row-gap:4px}
@@ -1112,6 +1206,27 @@ const CSS = `
 @media (prefers-reduced-motion:reduce){.ap-skel{animation:none}}
 .ap-btn-ok{color:#fff;background:linear-gradient(135deg,#16a34a,#15803d);border-color:rgba(34,197,94,.7);box-shadow:0 2px 10px rgba(22,163,74,.3)}
 .ap-btn-ok:hover{filter:brightness(1.08);border-color:rgba(34,197,94,.95)}
+.ap-note{margin:0;padding:10px 12px;border-radius:10px;font-size:11.5px;line-height:1.45;color:var(--lx-mut);
+  background:var(--ap-s1);border:1px solid var(--lx-border)}
+.ap-img{margin:0;border-radius:12px;overflow:hidden;background:var(--lx-card);border:1px solid var(--lx-border)}
+.ap-img-frame{position:relative;display:block;width:100%;padding:0;border:none;cursor:zoom-in;background:var(--ap-s1);overflow:hidden}
+.ap-img-frame img{display:block;width:100%;height:100%;object-fit:cover}
+.ap-img-tag{position:absolute;top:10px;left:10px;padding:3px 9px;border-radius:999px;font-size:10.5px;font-weight:700;color:#fff;
+  background:linear-gradient(135deg,#4f46e5,#7c3aed);box-shadow:0 2px 8px rgba(0,0,0,.35)}
+.ap-img-busy{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:8px;font-size:12.5px;font-weight:600;color:#fff;
+  background:rgba(8,8,16,.62);backdrop-filter:blur(2px)}
+.ap-img-cap{padding:12px 14px 14px;display:grid;gap:6px}
+.ap-img-name{font-size:13px;font-weight:700;color:var(--lx-text)}
+.ap-img-sub{margin:0;font-size:11.5px;color:var(--lx-mut)}
+.ap-img-sub b{color:var(--lx-text);font-weight:600}
+.ap-img-alt{margin:0;font-size:11.5px;line-height:1.5;color:var(--lx-mut);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.ap-img-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
+.ap-img-actions .ap-btn{min-width:0;padding:0 12px}
+.ap-btn:disabled{opacity:.55;cursor:not-allowed}
+.ap-zoom{position:fixed;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(0,0,0,.86);cursor:zoom-out}
+.ap-zoom img{max-width:94vw;max-height:90vh;object-fit:contain;border-radius:10px;cursor:default}
+.ap-zoom-x{position:absolute;top:16px;right:16px;width:38px;height:38px;border-radius:50%;border:none;background:rgba(255,255,255,.14);color:#fff;cursor:pointer;
+  display:flex;align-items:center;justify-content:center}
 .ap-clear{display:inline-flex;align-items:center;gap:5px;height:36px;padding:0 10px;border-radius:9px;font-size:12px;font-weight:600;cursor:pointer;
   color:var(--lx-mut);background:none;border:1px dashed var(--lx-border)}
 .ap-clear:hover{color:var(--lx-text);border-color:var(--ap-s3)}

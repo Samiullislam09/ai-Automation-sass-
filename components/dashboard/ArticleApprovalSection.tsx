@@ -335,28 +335,35 @@ export default function ArticleApprovalSection({
   // Prev/Next — real neighbours in this tenant's content list, not a fixed demo order.
   const [neighbors, setNeighbors] = useState<{ prev: string | null; next: string | null }>({ prev: null, next: null });
   useEffect(() => {
-    fetch("/api/content?status=all")
-      .then((r) => r.json())
-      .then((d) => {
-        if (!d.ok) return;
-        const ids: string[] = (d.items ?? []).map((it: { id: string }) => it.id);
-        const i = ids.indexOf(id);
-        if (i === -1) return;
-        setNeighbors({ prev: i > 0 ? ids[i - 1] : null, next: i < ids.length - 1 ? ids[i + 1] : null });
-      })
-      .catch(() => {});
+    // Deferred: the arrows are a convenience, so they wait until the article itself has painted.
+    const t = setTimeout(() => {
+      fetch("/api/content?status=all")
+        .then((r) => r.json())
+        .then((d) => {
+          if (!d.ok) return;
+          const ids: string[] = (d.items ?? []).map((it: { id: string }) => it.id);
+          const i = ids.indexOf(id);
+          if (i === -1) return;
+          setNeighbors({ prev: i > 0 ? ids[i - 1] : null, next: i < ids.length - 1 ? ids[i + 1] : null });
+        })
+        .catch(() => {});
+    }, 900);
+    return () => clearTimeout(t);
   }, [id]);
 
   // Category — real Site Brain topic clusters, matched client-side (see nearestCategory above).
   const [category, setCategory] = useState<string | null | "loading">("loading");
   useEffect(() => {
-    fetch("/api/site-brain")
-      .then((r) => r.json())
-      .then((d) => {
-        if (!d.ok) { setCategory(null); return; }
-        setCategory(nearestCategory(item.primary_keyword, d.profile?.topic_clusters ?? []));
-      })
-      .catch(() => setCategory(null));
+    const t = setTimeout(() => {
+      fetch("/api/site-brain")
+        .then((r) => r.json())
+        .then((d) => {
+          if (!d.ok) { setCategory(null); return; }
+          setCategory(nearestCategory(item.primary_keyword, d.profile?.topic_clusters ?? []));
+        })
+        .catch(() => setCategory(null));
+    }, 900);
+    return () => clearTimeout(t);
   }, [item.primary_keyword]);
 
   const revise = async (instruction: string) => {

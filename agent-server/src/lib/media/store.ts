@@ -28,6 +28,9 @@ export type StoredImage = {
   alt: string;
   provider: string;
   seed: number | null;
+  /** The address this slot pointed at before this save, when there was one. A "another image"
+   *  redo keeps that file (so the owner can undo) and the review card remembers it. */
+  previousUrl?: string | null;
 };
 
 let bucketChecked = false;
@@ -65,14 +68,30 @@ export type SaveInput = {
   providerAccount: number | null;
   neurons: number;
   attribution: string | null;
+  /** A deliberate redo: keep the file the slot used to point at, so it can be restored. */
+  keepPrevious?: boolean;
 };
 
-/** Uploads and files the row. Overwrites the same path on purpose: a regenerate ("another
- *  image") replaces the picture at the address the article already points at, so nothing has
- *  to be re-linked and no orphan file is left behind. */
+/** Removes a stored picture by its public URL. Never throws: a file that is already gone is the
+ *  state we want. */
+export async function removeStoredFile(url: string | null | undefined): Promise<void> {
+  if (!url) return;
+  const marker = `/object/public/${BUCKET}/`;
+  const i = url.indexOf(marker);
+  if (i === -1) return;
+  const path = decodeURIComponent(url.slice(i + marker.length).split("?")[0]!);
+  const { error } = await supabase.storage.from(BUCKET).remove([path]);
+  if (error) console.error(`[media] could not remove ${path}: ${error.message}`);
+}
+
+/** Uploads and files the row. Every save gets its OWN address (slot + a version stamp). It used to
+ *  overwrite one fixed path, which meant a redo kept the same URL: browsers (and our own one-year
+ *  cache header) kept showing the old picture, and the old one was gone with no way back. A new
+ *  address means every place that shows the slot updates, and the previous file can be kept
+ *  until the owner approves. */
 export async function saveImage(input: SaveInput): Promise<StoredImage> {
   await ensureBucket();
-  const path = `${input.tenantId}/${input.articleId ?? "loose"}/${input.slot}.webp`;
+  const path = `${input.tenantId}/${input.articleId ?? "loose"}/${input.slot}-${Date.now().toString(36)}.webp`;
 
   const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, input.webp, {
     contentType: "image/webp",
@@ -84,7 +103,14 @@ export async function saveImage(input: SaveInput): Promise<StoredImage> {
   const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path);
   // A regenerate must not leave the old row behind next to the new one — same article, same
   // slot, one row.
-  if (input.articleId) await supabase.from("media").delete().eq("article_id", input.articleId).eq("slot", input.slot);
+  let previousUrl: string | null = null;
+  if (input.articleId) {
+    const { data: old } = await supabase.from("media").select("url").eq("article_id", input.articleId).eq("slot", input.slot).limit(1).maybeSingle();
+    previousUrl = (old as { url?: string } | null)?.url ?? null;
+    await supabase.from("media").delete().eq("article_id", input.articleId).eq("slot", input.slot);
+  }
+  // Not a redo: nothing can go back to the old file, so it must not pile up in storage.
+  if (previousUrl && previousUrl !== pub.publicUrl && !input.keepPrevious) await removeStoredFile(previousUrl);
 
   const { data, error } = await supabase
     .from("media")
@@ -120,6 +146,7 @@ export async function saveImage(input: SaveInput): Promise<StoredImage> {
     alt: input.alt,
     provider: input.provider,
     seed: input.seed,
+    previousUrl: input.keepPrevious ? previousUrl : null,
   };
 }
 

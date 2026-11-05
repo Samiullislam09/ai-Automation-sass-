@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
 import { publishContentItem } from "@/lib/publish";
-import { settleChildren } from "@/lib/content-children";
+import { settleChildren, finalizeImageSet } from "@/lib/content-children";
 
 /** "Approve & publish" — Build Guide Step 12, the actual publish action (not the old
  *  demo's fake local-state toggle). Fetches the item (RLS scopes it to this tenant
@@ -38,6 +38,15 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   if (item.type === "social" && prevMeta.copyOnly) {
     await supabase.from("content_items").update({ status: "approved" }).eq("id", id);
     return NextResponse.json({ ok: true, copyOnly: true, url: null });
+  }
+
+  // The pictures and the web story of an article are parts of it, not posts of their own: they are
+  // approved, never sent through the post-publishing path. Approving is also "save", so the
+  // previous version of any redone picture is deleted here.
+  if (item.type === "image_set" || item.type === "web_story") {
+    await supabase.from("content_items").update({ status: "approved" }).eq("id", id);
+    if (item.type === "image_set") await finalizeImageSet(supabase, id, prevMeta);
+    return NextResponse.json({ ok: true, part: true, url: null });
   }
 
   const result = await publishContentItem(supabase, tenantId, item);
