@@ -832,6 +832,8 @@ const CSS = `
 
 .sb-body{padding:16px 20px 24px}
 .sb-item-m{display:block;min-width:0;flex:1}
+.sb-item-t{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}
+.sb-only{margin:0}
 .sb-count{margin-left:6px;padding:1px 7px;border-radius:999px;background:var(--lx-in);font-size:10.5px;color:var(--lx-mut);letter-spacing:0}
 .sb-sec{margin-top:22px}
 .sb-hero+.sb-sec{margin-top:22px}
@@ -873,8 +875,6 @@ const CSS = `
   .sb-item{padding:12px;gap:10px}
   .sb-go{height:30px;padding:0 6px}
   .sb-go-t{display:none}
-  .sb-item-t{display:flex;flex-wrap:wrap;align-items:center}
-  .sb-only{margin:4px 0 0}
   .sb-meta-r>span:first-child{width:100%}
   .sb-modal{align-items:flex-end;padding:0}
   .sb-sheet{width:100%;max-height:92dvh;border-radius:18px 18px 0 0}
