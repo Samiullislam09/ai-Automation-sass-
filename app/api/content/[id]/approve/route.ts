@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
 import { publishContentItem } from "@/lib/publish";
+import { settleChildren } from "@/lib/content-children";
 
 /** "Approve & publish" — Build Guide Step 12, the actual publish action (not the old
  *  demo's fake local-state toggle). Fetches the item (RLS scopes it to this tenant
@@ -46,7 +47,10 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       .from("content_items")
       .update({ status: "published", meta: { ...prevMeta, publishedUrl: result.url ?? null } })
       .eq("id", id);
-    return NextResponse.json({ ok: true, url: result.url ?? null });
+    // One order = one approval: the article's pictures and web story go with it, so nobody has
+    // to approve three rows for one article.
+    const kids = await settleChildren(supabase, tenantId, id, "approved");
+    return NextResponse.json({ ok: true, url: result.url ?? null, children: kids });
   } else {
     await supabase.from("content_items").update({ status: "failed", meta: { ...prevMeta, publishError: result.error } }).eq("id", id);
     return NextResponse.json({ ok: false, error: result.error }, { status: 502 });

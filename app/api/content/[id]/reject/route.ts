@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
+import { settleChildren } from "@/lib/content-children";
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -16,5 +17,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     .eq("status", "awaiting_approval"); // don't silently "reject" something already published/failed
 
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true });
+  // Rejecting an article rejects the pictures and story that were made for it.
+  const kids = await settleChildren(supabase, tenantId, id, "rejected");
+  return NextResponse.json({ ok: true, children: kids });
 }

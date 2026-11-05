@@ -67,13 +67,13 @@ const TYPE_LABEL: Record<string, string> = { article: "Blog Post", social: "Soci
 
 const STATUS: Record<string, { label: string; color: string; bg: string; border: string }> = {
   awaiting_approval: { label: "Pending Review", color: "#fbbf24", bg: "rgba(251,191,36,.10)", border: "rgba(251,191,36,.35)" },
-  published:         { label: "Published",      color: "#4ade80", bg: "rgba(34,197,94,.10)",  border: "rgba(34,197,94,.35)" },
-  approved:          { label: "Approved",       color: "#60a5fa", bg: "rgba(59,130,246,.12)", border: "rgba(59,130,246,.35)" },
+  published:         { label: "Published",      color: "var(--lx-green)", bg: "rgba(34,197,94,.10)",  border: "rgba(34,197,94,.35)" },
+  approved:          { label: "Approved",       color: "var(--lx-blue)", bg: "rgba(59,130,246,.12)", border: "rgba(59,130,246,.35)" },
   rejected:          { label: "Rejected",       color: "#f87171", bg: "rgba(239,68,68,.12)",  border: "rgba(239,68,68,.35)" },
   failed:            { label: "Publish Failed", color: "#f87171", bg: "rgba(239,68,68,.12)",  border: "rgba(239,68,68,.35)" },
-  draft:             { label: "Draft",          color: "#8b8ba0", bg: "rgba(255,255,255,.04)", border: "rgba(255,255,255,.12)" },
+  draft:             { label: "Draft",          color: "var(--lx-mut)", bg: "var(--ap-s1)", border: "var(--ap-s2)" },
 };
-const statusOf = (s: string) => STATUS[s] ?? { label: s, color: "#8b8ba0", bg: "rgba(255,255,255,.04)", border: "rgba(255,255,255,.12)" };
+const statusOf = (s: string) => STATUS[s] ?? { label: s, color: "var(--lx-mut)", bg: "var(--ap-s1)", border: "var(--ap-s2)" };
 
 /** Tile colour per type — the mockup gives every article its own tinted icon tile. */
 const TILE: Record<string, { from: string; to: string; border: string; glow: string; Icon: React.ElementType }> = {
@@ -209,6 +209,7 @@ export default function ApprovalsSection({
           report(`Published after your approval: "${c.title}"`);
           toast(data.url ? `Published! ${data.url}` : "Published!");
           patchItem(c.id, { status: "published", meta: { ...(c.meta ?? {}), publishedUrl: data.url ?? null } });
+          settleKids(data.children, "approved");
         }
       } else {
         toast(`${c.type === "social" ? "Couldn't approve" : "Publish failed"}: ${data.error}`, "error");
@@ -219,6 +220,14 @@ export default function ApprovalsSection({
     } finally {
       setBusy(null);
     }
+  };
+
+  /** The pictures / story that moved with their article on the server: mirror it locally. */
+  const settleKids = (ids: unknown, status: string) => {
+    if (!Array.isArray(ids) || !ids.length) return;
+    const set = new Set<string>(ids);
+    const stamp = { updated_at: new Date().toISOString() };
+    setItems((prev) => prev.map((x) => (set.has(x.id) ? { ...x, status, ...stamp } : x)));
   };
 
   const patchItem = (id: string, p: Partial<ContentItem>) => {
@@ -251,6 +260,7 @@ export default function ApprovalsSection({
         const res = await fetch(`/api/content/${c.id}/reject`, { method: "POST" });
         const data = await res.json();
         if (data.ok) {
+          settleKids(data.children, "rejected");
           act(`"Understood. We'll adjust and learn from this."`, "Mr Lxwa");
           report(`Rejected by you (team will adjust): "${c.title}"`);
         } else {
@@ -273,15 +283,30 @@ export default function ApprovalsSection({
 
   /* ---- derived -------------------------------------------------------------------------- */
 
-  const counts = useMemo(() => {
-    const n = (s: string) => items.filter((i) => i.status === s).length;
-    return { total: items.length, pending: n("awaiting_approval"), published: n("published"), rejected: n("rejected") + n("failed"), draft: n("draft") };
+  // One article = one row. Its pictures and web story hang under it (joined by
+  // blueprint.parent_article_id) instead of showing up as separate rows to approve one by one.
+  // A part whose article is not in this list (older than the page, or deleted) stays a row of its own.
+  const { tops, kidsOf } = useMemo(() => {
+    const ids = new Set(items.map((i) => i.id));
+    const map = new Map<string, ContentItem[]>();
+    const top: ContentItem[] = [];
+    for (const i of items) {
+      const parent = i.blueprint?.parent_article_id;
+      if (parent && ids.has(parent)) map.set(parent, [...(map.get(parent) ?? []), i]);
+      else top.push(i);
+    }
+    return { tops: top, kidsOf: map };
   }, [items]);
+
+  const counts = useMemo(() => {
+    const n = (s: string) => tops.filter((i) => i.status === s).length;
+    return { total: tops.length, pending: n("awaiting_approval"), published: n("published"), rejected: n("rejected") + n("failed"), draft: n("draft") };
+  }, [tops]);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     const since = fDate === "7d" ? Date.now() - 7 * 864e5 : fDate === "30d" ? Date.now() - 30 * 864e5 : fDate === "90d" ? Date.now() - 90 * 864e5 : 0;
-    const out = items.filter((c) => {
+    const out = tops.filter((c) => {
       if (needle && !(c.title ?? "").toLowerCase().includes(needle) && !categoryOf(c).toLowerCase().includes(needle)) return false;
       if (fAgent !== "all" && agentOf(c) !== fAgent) return false;
       if (fType !== "all" && c.type !== fType) return false;
@@ -294,7 +319,7 @@ export default function ApprovalsSection({
     else if (sort === "oldest") out.sort((a, b) => key(a) - key(b));
     else out.sort((a, b) => (a.title ?? "").localeCompare(b.title ?? ""));
     return out;
-  }, [items, q, fAgent, fType, fStatus, fDate, sort]);
+  }, [tops, q, fAgent, fType, fStatus, fDate, sort]);
 
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pages);
@@ -309,7 +334,7 @@ export default function ApprovalsSection({
   /* ---- render ---------------------------------------------------------------------------- */
 
   return (
-    <div className="flex h-full min-h-0 gap-3">
+    <div className="ap-root flex h-full min-h-0 gap-3">
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
 
       {/* ============ centre column ============ */}
@@ -346,7 +371,7 @@ export default function ApprovalsSection({
         <div className="lx-scroll flex-1 overflow-y-auto px-4 pb-4">
           {/* stat strip */}
           <div className="ap-stats mt-3">
-            <Stat n={counts.total}     label="Total Articles" color="#8b5cf6" Icon={FileText} />
+            <Stat n={counts.total}     label="Total Items" color="#8b5cf6" Icon={FileText} />
             <Stat n={counts.pending}   label="Pending Review" color="#f59e0b" Icon={Clock} />
             <Stat n={counts.published} label="Published"      color="#22c55e" Icon={CheckCircle2} />
             <Stat n={counts.rejected}  label="Rejected"       color="#ef4444" Icon={XCircle} />
@@ -395,6 +420,16 @@ export default function ApprovalsSection({
                         <span>{typeof c.meta?.wordCount === "number" ? `${c.meta.wordCount.toLocaleString()} words` : "— words"}</span><i className="ap-sep" /><span>{TYPE_LABEL[c.type] ?? c.type}</span>
                         <i className="ap-sep ap-inline-date" /><span className="ap-inline-date">{fmtBoth(c.updated_at ?? c.created_at)}</span>
                       </div>
+                      {(kidsOf.get(c.id)?.length ?? 0) > 0 && (
+                        <div className="ap-kids" onClick={(e) => e.stopPropagation()}>
+                          {kidsOf.get(c.id)!.map((k) => (
+                            <button key={k.id} className="ap-kid" onClick={() => openDetail(k, "preview")} title={`Open ${TYPE_LABEL[k.type] ?? k.type}`}>
+                              {k.type === "web_story" ? <Sparkles size={11} /> : <ImageIcon size={11} />}
+                              {k.type === "image_set" && (k.meta?.images?.length ?? 0) > 0 ? `${k.meta!.images!.length} images` : TYPE_LABEL[k.type] ?? k.type}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       {c.meta?.publishedUrl && (
                         <a href={c.meta.publishedUrl} target="_blank" rel="noreferrer" className="ap-live" onClick={(e) => e.stopPropagation()} title={c.meta.publishedUrl}>
                           <ExternalLink size={11} /><span className="truncate">{c.meta.publishedUrl.replace(/^https?:\/\//, "")}</span>
@@ -405,9 +440,9 @@ export default function ApprovalsSection({
                   {/* status */}
                   <div className="ap-c-s"><StatusPill s={c.status} /></div>
                   {/* version */}
-                  <div className="ap-c-v lx-11" style={{ color: "#d6d6e4" }}>{versionOf(c)}</div>
+                  <div className="ap-c-v lx-11" style={{ color: "var(--lx-text)" }}>{versionOf(c)}</div>
                   {/* updated */}
-                  <div className="ap-c-u lx-11 whitespace-nowrap" style={{ color: "#d6d6e4" }}>
+                  <div className="ap-c-u lx-11 whitespace-nowrap" style={{ color: "var(--lx-text)" }}>
                     <div>{fmtDate(c.updated_at ?? c.created_at)}</div>
                     <div className="lx-10 lx-mut">{fmtTime(c.updated_at ?? c.created_at)}</div>
                   </div>
@@ -482,6 +517,10 @@ export default function ApprovalsSection({
               onApprove={() => approve(detail)}
               onReject={() => reject(detail)}
               onCopy={() => copyPost(detail)}
+              kids={kidsOf.get(detail.id) ?? []}
+              onOpenKid={(k) => openDetail(k, "preview")}
+              parent={detail.blueprint?.parent_article_id ? items.find((i) => i.id === detail.blueprint!.parent_article_id) ?? null : null}
+              onOpenParent={(pa) => openDetail(pa)}
             />
           </aside>
         </>
@@ -523,7 +562,7 @@ function Tile({ tile, size = 60 }: { tile: ReturnType<typeof tileOf>; size?: num
       style={{
         width: size, height: size, borderRadius: Math.round(size * 0.28), color: "#e8e8ff",
         background: `linear-gradient(135deg,${tile.from},${tile.to})`, border: `1px solid ${tile.border}`,
-        boxShadow: "inset 0 1px 0 rgba(255,255,255,.08), 0 1px 2px rgba(0,0,0,.35)",
+        boxShadow: "inset 0 1px 0 var(--ap-s1), 0 1px 2px rgba(0,0,0,.35)",
       }}
     >
       <tile.Icon size={Math.round(size * 0.44)} strokeWidth={1.7} />
@@ -534,7 +573,7 @@ function Tile({ tile, size = 60 }: { tile: ReturnType<typeof tileOf>; size?: num
 function StatusPill({ s }: { s: string }) {
   const st = statusOf(s);
   return (
-    <span className="lx-pill" style={{ color: st.color, background: st.bg, borderColor: st.border }}>
+    <span className="lx-pill ap-status" style={{ color: st.color, background: st.bg, borderColor: st.border }}>
       <i className="h-1.5 w-1.5 rounded-full" style={{ background: st.color }} />
       {st.label}
     </span>
@@ -608,12 +647,12 @@ function ImageSetPreview({ c }: { c: ContentItem }) {
     <div className="ap-card p-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {images.map((img) => (
-          <figure key={img.slot} className="m-0 rounded-lg" style={{ border: "1px solid var(--lx-border)", overflow: "hidden", background: "#0d0d16" }}>
+          <figure key={img.slot} className="m-0 rounded-lg" style={{ border: "1px solid var(--lx-border)", overflow: "hidden", background: "var(--lx-card)" }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={img.url} alt={img.alt} loading="lazy" style={{ display: "block", width: "100%", height: "auto", background: "#0b0b12" }} />
+            <img src={img.url} alt={img.alt} loading="lazy" style={{ display: "block", width: "100%", height: "auto", background: "var(--lx-card)" }} />
             <figcaption className="p-2.5">
               <div className="flex flex-wrap items-center gap-1.5">
-                <span className="lx-10 rounded-full px-2 py-0.5 font-semibold" style={{ border: "1px solid var(--lx-border)", color: "#d6d6e4" }}>{img.slot.replace("_", " ")}</span>
+                <span className="lx-10 rounded-full px-2 py-0.5 font-semibold" style={{ border: "1px solid var(--lx-border)", color: "var(--lx-text)" }}>{img.slot.replace("_", " ")}</span>
                 {img.kind === "card" && (
                   <span className="lx-10 rounded-full px-2 py-0.5" style={{ border: "1px solid rgba(56,189,248,.5)", color: "#38bdf8" }} title="Drawn from this section's own words — an image model cannot draw a map or a chart truthfully">
                     from the text
@@ -625,7 +664,7 @@ function ImageSetPreview({ c }: { c: ContentItem }) {
                   </span>
                 )}
               </div>
-              {img.anchor && <p className="lx-10 lx-mut mt-1.5">for: <span style={{ color: "#d6d6e4" }}>{img.anchor}</span></p>}
+              {img.anchor && <p className="lx-10 lx-mut mt-1.5">for: <span style={{ color: "var(--lx-text)" }}>{img.anchor}</span></p>}
               <p className="lx-10 lx-mut mt-1" style={{ lineHeight: 1.5 }}>{img.alt}</p>
               {img.note && <p className="lx-10 lx-mut mt-1" style={{ opacity: 0.75 }}>{img.note}</p>}
               {(articleId || standalone) && (
@@ -654,7 +693,7 @@ function WebStoryPreview({ c }: { c: ContentItem }) {
   return (
     <div className="ap-card p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="lx-10 rounded-full px-2 py-0.5 font-semibold" style={{ border: `1px solid ${valid ? "rgba(74,222,128,.5)" : "rgba(248,113,113,.5)"}`, color: valid ? "#4ade80" : "#f87171" }}>
+        <span className="lx-10 rounded-full px-2 py-0.5 font-semibold" style={{ border: `1px solid ${valid ? "rgba(74,222,128,.5)" : "rgba(248,113,113,.5)"}`, color: valid ? "var(--lx-green)" : "#f87171" }}>
           {valid ? "Valid AMP" : "Not valid AMP yet"}
         </span>
         <span className="lx-10 lx-mut">
@@ -673,16 +712,16 @@ function WebStoryPreview({ c }: { c: ContentItem }) {
 
       <div className="lx-scroll mt-3 flex gap-3 overflow-x-auto pb-2">
         {pages.map((p, i) => (
-          <figure key={i} className="m-0 shrink-0 rounded-lg" style={{ width: 150, border: "1px solid var(--lx-border)", overflow: "hidden", background: "#0b0b12" }}>
+          <figure key={i} className="m-0 shrink-0 rounded-lg" style={{ width: 150, border: "1px solid var(--lx-border)", overflow: "hidden", background: "var(--lx-card)" }}>
             {p.image ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={p.image} alt={p.headline} loading="lazy" style={{ display: "block", width: "100%", aspectRatio: "9 / 16", objectFit: "cover" }} />
             ) : (
-              <div style={{ width: "100%", aspectRatio: "9 / 16", background: "#12121c" }} />
+              <div style={{ width: "100%", aspectRatio: "9 / 16", background: "var(--lx-in)" }} />
             )}
             <figcaption className="p-2">
               <span className="lx-10 lx-mut">{i === 0 ? "Cover" : `Page ${i + 1}`}</span>
-              <p className="lx-10 mt-0.5" style={{ color: "#e8e8f2", lineHeight: 1.4 }}>{p.headline}</p>
+              <p className="lx-10 mt-0.5" style={{ color: "var(--lx-text)", lineHeight: 1.4 }}>{p.headline}</p>
             </figcaption>
           </figure>
         ))}
@@ -692,7 +731,8 @@ function WebStoryPreview({ c }: { c: ContentItem }) {
   );
 }
 
-function Drawer({ c, loading, busy, tab, setTab, onClose, onApprove, onReject, onCopy }: {
+function Drawer({ c, loading, busy, tab, setTab, onClose, onApprove, onReject, onCopy, kids, onOpenKid, parent, onOpenParent }: {
+  kids: ContentItem[]; onOpenKid: (k: ContentItem) => void; parent: ContentItem | null; onOpenParent: (p: ContentItem) => void;
   c: ContentItem; loading: boolean; busy: boolean; tab: "details" | "preview" | "history";
   setTab: (t: "details" | "preview" | "history") => void; onClose: () => void; onApprove: () => void; onReject: () => void; onCopy: () => void;
 }) {
@@ -734,22 +774,42 @@ function Drawer({ c, loading, busy, tab, setTab, onClose, onApprove, onReject, o
           <>
             <div className="ap-card grid grid-cols-2 gap-x-4 gap-y-4 p-4">
               <Field label="Status"><StatusPill s={c.status} /></Field>
-              <Field label="Current Version"><span className="lx-12" style={{ color: "#e8e8f2" }}>{versionOf(c)}</span></Field>
+              <Field label="Current Version"><span className="lx-12" style={{ color: "var(--lx-text)" }}>{versionOf(c)}</span></Field>
               <Field label="Created by"><span className="flex items-center gap-2 lx-11"><span className="ap-avatar"><UserRound size={12} /></span>{agentOf(c)}</span></Field>
-              <Field label="Word Count"><span className="lx-12" style={{ color: "#e8e8f2" }}>{typeof c.meta?.wordCount === "number" ? c.meta.wordCount.toLocaleString() : "not recorded"}</span></Field>
+              <Field label="Word Count"><span className="lx-12" style={{ color: "var(--lx-text)" }}>{typeof c.meta?.wordCount === "number" ? c.meta.wordCount.toLocaleString() : "not recorded"}</span></Field>
               <Field label="Created"><span className="flex items-center gap-1.5 lx-11"><Calendar size={13} className="lx-mut" />{fmtBoth(c.created_at)}</span></Field>
               <Field label="Last Updated"><span className="flex items-center gap-1.5 lx-11"><Calendar size={13} className="lx-mut" />{fmtBoth(c.updated_at ?? c.created_at)}</span></Field>
               <Field label="Type"><span className="lx-pill blue">{TYPE_LABEL[c.type] ?? c.type}</span></Field>
               <Field label="Category"><span className="lx-pill purple">{categoryOf(c)}</span></Field>
               {c.meta?.publishedUrl && (
                 <Field label="Live URL" wide>
-                  <a href={c.meta.publishedUrl} target="_blank" rel="noreferrer" className="lx-11 truncate block" style={{ color: "#60a5fa" }}>{c.meta.publishedUrl}</a>
+                  <a href={c.meta.publishedUrl} target="_blank" rel="noreferrer" className="lx-11 truncate block" style={{ color: "var(--lx-blue)" }}>{c.meta.publishedUrl}</a>
                 </Field>
               )}
               {c.meta?.publishError && (
                 <Field label="Publish error" wide><span className="lx-11" style={{ color: "#f87171" }}>{c.meta.publishError}</span></Field>
               )}
             </div>
+            {(kids.length > 0 || parent) && (
+              <div className="ap-card mt-3 p-4">
+                <h3 className="ap-h3">{parent ? "Part of an article" : "Included with this article"}</h3>
+                <p className="lx-10 lx-mut mt-1">
+                  {parent ? "Approve or reject the article and this goes with it." : "Approving or rejecting the article decides all of these at once."}
+                </p>
+                <div className="mt-3 space-y-2">
+                  {(parent ? [parent] : kids).map((k) => (
+                    <button key={k.id} className="ap-part" onClick={() => (parent ? onOpenParent(k) : onOpenKid(k))}>
+                      <Tile tile={tileOf(k.type)} size={30} />
+                      <span className="min-w-0 flex-1 text-left">
+                        <span className="ap-part-t">{TYPE_LABEL[k.type] ?? k.type}</span>
+                        <span className="lx-10 lx-mut block truncate">{k.type === "image_set" && k.meta?.images?.length ? `${k.meta.images.length} pictures` : k.title || "Untitled"}</span>
+                      </span>
+                      <StatusPill s={k.status} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="ap-card mt-3 p-4">
               <h3 className="ap-h3">Review History</h3>
               <Timeline events={events} />
@@ -775,7 +835,7 @@ function Drawer({ c, loading, busy, tab, setTab, onClose, onApprove, onReject, o
               <div className="ap-prose" dangerouslySetInnerHTML={{ __html: bodyHtml }} />
             ) : (
               <>
-                <p className="lx-11" style={{ whiteSpace: "pre-wrap", margin: 0, color: "#e8e8f2", lineHeight: 1.6 }}>{c.body}</p>
+                <p className="lx-11" style={{ whiteSpace: "pre-wrap", margin: 0, color: "var(--lx-text)", lineHeight: 1.6 }}>{c.body}</p>
                 {c.meta?.imageBrief && <p className="lx-10 lx-mut mt-3">📷 {c.meta.imageBrief}</p>}
                 <button className="lx-ghost mt-3" onClick={onCopy}><Copy size={13} /> Copy text</button>
               </>
@@ -799,10 +859,10 @@ function Drawer({ c, loading, busy, tab, setTab, onClose, onApprove, onReject, o
       <div className="px-4 pb-4 pt-3" style={{ borderTop: "1px solid var(--lx-border)" }}>
         <div className="grid grid-cols-2 gap-3">
           <button className="ap-reject" disabled={!pending || busy} onClick={onReject} title={pending ? "" : `A ${st.label.toLowerCase()} item can't be rejected`}>
-            <X size={16} /> Reject
+            <X size={16} /> {kids.length ? "Reject all" : "Reject"}
           </button>
           <button className="lx-grad ap-approve" disabled={!pending || busy} onClick={onApprove} title={pending ? "" : `A ${st.label.toLowerCase()} item can't be approved`}>
-            {busy ? <Loader2 size={16} className="ap-spin" /> : <Check size={16} />} {c.type === "social" && c.meta?.copyOnly ? "Mark ready" : "Approve"}
+            {busy ? <Loader2 size={16} className="ap-spin" /> : <Check size={16} />} {c.type === "social" && c.meta?.copyOnly ? "Mark ready" : kids.length ? "Approve all" : "Approve"}
           </button>
         </div>
         {c.type === "article" ? (
@@ -853,7 +913,7 @@ function Timeline({ events }: { events: HistoryEvent[] }) {
         <div key={i} className="ap-tl-item">
           <span className="ap-tl-dot" style={{ "--c": e.color } as React.CSSProperties} />
           <div className="lx-10 lx-mut">{fmtBoth(e.at)}</div>
-          <div className="lx-11 mt-0.5" style={{ color: "#e8e8f2" }}>{e.title}</div>
+          <div className="lx-11 mt-0.5" style={{ color: "var(--lx-text)" }}>{e.title}</div>
           {e.detail && <div className="lx-10 lx-mut mt-0.5 break-words">{e.detail}</div>}
           <div className="lx-10 lx-mut mt-0.5">{e.who === "You" ? "Reviewer: You" : e.who}</div>
         </div>
@@ -864,7 +924,23 @@ function Timeline({ events }: { events: HistoryEvent[] }) {
 
 /* ---- page-local CSS (colours/spacing measured off the reference mockup) ------------------ */
 const CSS = `
-.ap-panel{background:#0a0a11;border:1px solid var(--lx-border);border-radius:16px}
+.ap-root{--ap-s1:rgba(255,255,255,.05);--ap-s2:rgba(255,255,255,.1);--ap-s3:rgba(255,255,255,.18)}
+.light .ap-root{--ap-s1:rgba(22,32,60,.05);--ap-s2:rgba(22,32,60,.1);--ap-s3:rgba(22,32,60,.18)}
+/* light theme: translucent dark-mode accents need a deeper ink to stay readable on white */
+.light .ap-root .ap-status{filter:brightness(.6) saturate(1.35)}
+.light .ap-root .ap-reject{color:#c0283f}
+.light .ap-root .ap-act-b{color:#0e7490}
+.light .ap-root .ap-panel,.light .ap-root .ap-card,.light .ap-root .ap-row{box-shadow:0 1px 2px rgba(22,32,60,.06)}
+.light .ap-root .ap-drawer{box-shadow:0 20px 60px rgba(22,32,60,.22)}
+.ap-kids{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.ap-kid{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:999px;font-size:10.5px;font-weight:600;cursor:pointer;
+  color:var(--lx-mut);background:var(--ap-s1);border:1px solid var(--lx-border);transition:.15s}
+.ap-kid:hover{color:var(--lx-text);border-color:rgba(139,92,246,.55)}
+.ap-part{display:flex;align-items:center;gap:10px;width:100%;padding:8px 10px;border-radius:10px;cursor:pointer;
+  background:var(--ap-s1);border:1px solid var(--lx-border);transition:.15s;color:var(--lx-text)}
+.ap-part:hover{border-color:rgba(139,92,246,.55)}
+.ap-part-t{display:block;font-size:12.5px;font-weight:600}
+.ap-panel{background:var(--lx-panel);border:1px solid var(--lx-border);border-radius:16px}
 /* the centre column is sized by the CONTAINER (drawer open = ~540px even on a 1366px screen),
    so every breakpoint below is a container query, never a viewport one */
 .ap-main{container-type:inline-size;container-name:ap}
@@ -874,47 +950,47 @@ const CSS = `
   box-shadow:0 20px 60px rgba(0,0,0,.6)}
 @media (min-width:1280px){.ap-drawer{position:relative;top:auto;right:auto;bottom:auto;height:100%;z-index:auto;box-shadow:none}}
 .ap-h1{font-size:22px;font-weight:800;letter-spacing:-.02em;line-height:1.1}
-.ap-h2{font-size:17px;font-weight:700;line-height:1.3;color:#fff;min-width:0}
-.ap-h3{font-size:14px;font-weight:700;color:#fff}
+.ap-h2{font-size:17px;font-weight:700;line-height:1.3;color:var(--lx-text);min-width:0}
+.ap-h3{font-size:14px;font-weight:700;color:var(--lx-text)}
 .ap-search{display:flex;align-items:center;gap:8px;height:34px;padding:0 10px;border-radius:9px;
-  background:#0d0d16;border:1px solid var(--lx-border);transition:border-color .15s}
+  background:var(--lx-card);border:1px solid var(--lx-border);transition:border-color .15s}
 .ap-search:focus-within{border-color:rgba(139,92,246,.55)}
-.ap-search input{flex:1;min-width:0;background:none;border:none;outline:none;color:#e8e8f2;font-size:12px}
+.ap-search input{flex:1;min-width:0;background:none;border:none;outline:none;color:var(--lx-text);font-size:12px}
 .ap-search input::placeholder{color:var(--lx-dim)}
 .ap-icobtn{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:9px;
-  border:1px solid var(--lx-border);background:#0d0d16;color:#9a9ab2;cursor:pointer;transition:.15s;flex-shrink:0}
-.ap-icobtn:hover,.ap-icobtn.on{color:#fff;border-color:rgba(139,92,246,.55)}
+  border:1px solid var(--lx-border);background:var(--lx-card);color:var(--lx-mut);cursor:pointer;transition:.15s;flex-shrink:0}
+.ap-icobtn:hover,.ap-icobtn.on{color:var(--lx-text);border-color:rgba(139,92,246,.55)}
 .ap-create{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;border-radius:9px;font-size:12.5px;font-weight:600;white-space:nowrap}
 @container ap (max-width:560px){.ap-create-t{display:none}.ap-create{padding:0 10px}}
 .ap-dot{position:absolute;top:8px;right:8px;width:6px;height:6px;border-radius:50%;background:#8b5cf6;box-shadow:0 0 6px #8b5cf6}
 .ap-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:8px}
 .ap-stat{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:11px;min-width:0;
-  background:color-mix(in srgb,var(--c) 9%,#0b0b12);border:1px solid color-mix(in srgb,var(--c) 40%,transparent);
+  background:color-mix(in srgb,var(--c) 9%,var(--lx-card));border:1px solid color-mix(in srgb,var(--c) 40%,transparent);
   box-shadow:inset 0 0 30px color-mix(in srgb,var(--c) 5%,transparent)}
 .ap-stat-ico{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:9px;flex-shrink:0;
-  color:var(--c);background:color-mix(in srgb,var(--c) 14%,#0b0b12);border:1px solid color-mix(in srgb,var(--c) 45%,transparent);
+  color:var(--c);background:color-mix(in srgb,var(--c) 14%,var(--lx-card));border:1px solid color-mix(in srgb,var(--c) 45%,transparent);
   box-shadow:0 0 14px color-mix(in srgb,var(--c) 30%,transparent)}
-.ap-stat-n{font-size:19px;font-weight:800;line-height:1;color:#fff}
+.ap-stat-n{font-size:19px;font-weight:800;line-height:1;color:var(--lx-text)}
 .ap-stat .lx-10{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ap-select{position:relative;display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 8px 0 10px;border-radius:9px;
-  background:#0d0d16;border:1px solid var(--lx-border);color:#d6d6e4;font-size:12px;cursor:pointer}
+  background:var(--lx-card);border:1px solid var(--lx-border);color:var(--lx-text);font-size:12px;cursor:pointer}
 .ap-select:hover{border-color:rgba(139,92,246,.45)}
 .ap-select select{appearance:none;-webkit-appearance:none;background:none;border:none;outline:none;color:inherit;font:inherit;
   padding-right:2px;cursor:pointer}
-.ap-select select option{background:#12121c;color:#e8e8f2}
+.ap-select select option{background:var(--lx-in);color:var(--lx-text)}
 .ap-grid{display:grid;grid-template-columns:minmax(0,1fr) 128px 56px 96px max-content;grid-template-areas:"a s v u x";align-items:center;gap:14px}
 .ap-c-a{grid-area:a;min-width:0}.ap-c-s{grid-area:s}.ap-c-v{grid-area:v}.ap-c-u{grid-area:u}.ap-c-x{grid-area:x}
 /* row actions are icon-only squares: the row stays compact, the label is the tooltip */
 .ap-act{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;flex-shrink:0;border-radius:8px;
-  background:#12121c;border:1px solid var(--lx-border);color:#b6b6c8;cursor:pointer;transition:.15s}
-.ap-act:hover{color:#fff;border-color:rgba(255,255,255,.22);background:#181824}
+  background:var(--lx-in);border:1px solid var(--lx-border);color:var(--lx-mut);cursor:pointer;transition:.15s}
+.ap-act:hover{color:var(--lx-text);border-color:var(--ap-s3);background:var(--lx-in)}
 .ap-act-b{color:#7dd3fc;background:rgba(56,189,248,.09);border-color:rgba(56,189,248,.32)}
-.ap-act-b:hover{color:#fff;background:rgba(56,189,248,.2);border-color:rgba(56,189,248,.6)}
+.ap-act-b:hover{color:var(--lx-text);background:rgba(56,189,248,.2);border-color:rgba(56,189,248,.6)}
 .ap-act-p{color:#fff;background:linear-gradient(135deg,#4f46e5,#7c3aed);border-color:rgba(139,92,246,.65);
   box-shadow:0 2px 10px rgba(124,58,237,.3)}
 .ap-act-p:hover{color:#fff;filter:brightness(1.1)}
 .ap-inline-date{display:none}
-.ap-live{display:inline-flex;align-items:center;gap:4px;max-width:100%;margin-top:3px;font-size:11px;color:#4ade80;text-decoration:none}
+.ap-live{display:inline-flex;align-items:center;gap:4px;max-width:100%;margin-top:3px;font-size:11px;color:var(--lx-green);text-decoration:none}
 .ap-live:hover{text-decoration:underline}
 @container ap (max-width:980px){
   /* version drops first — the date column always stays visible */
@@ -929,49 +1005,49 @@ const CSS = `
   .ap-inline-date{display:inline}
 }
 .ap-head{padding:0 18px;font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--lx-mut)}
-.ap-row{background:#0d0d16;border:1px solid var(--lx-border);border-radius:12px;padding:16px 18px;cursor:pointer;
+.ap-row{background:var(--lx-card);border:1px solid var(--lx-border);border-radius:12px;padding:16px 18px;cursor:pointer;
   transition:border-color .15s,background .15s;display:grid;position:relative}
-.ap-row:hover{border-color:rgba(255,255,255,.14);background:#10101a;z-index:5}
+.ap-row:hover{border-color:var(--ap-s2);background:var(--lx-card2);z-index:5}
 .ap-row.on{border-color:rgba(139,92,246,.5);box-shadow:0 0 0 1px rgba(139,92,246,.2),0 0 22px rgba(139,92,246,.12)}
 .ap-title-wrap{position:relative;min-width:0}
-.ap-title{font-size:13.5px;font-weight:600;color:#fff;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ap-title{font-size:13.5px;font-weight:600;color:var(--lx-text);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* full title on hover — a real tooltip, not the browser's slow native one */
 .ap-tip{position:absolute;left:0;top:calc(100% + 6px);z-index:40;max-width:min(460px,70vw);width:max-content;padding:8px 10px;border-radius:9px;
-  background:#16161f;border:1px solid rgba(255,255,255,.12);box-shadow:0 12px 32px rgba(0,0,0,.6);
+  background:var(--lx-in);border:1px solid var(--ap-s2);box-shadow:0 12px 32px rgba(0,0,0,.6);
   color:#f2f2f7;font-size:12.5px;font-weight:500;line-height:1.45;white-space:normal;
   opacity:0;pointer-events:none;transform:translateY(-3px);transition:opacity .15s,transform .15s;transition-delay:0s}
 .ap-title-wrap:hover .ap-tip{opacity:1;transform:translateY(0);transition-delay:.3s}
 .ap-sep{width:3px;height:3px;border-radius:50%;background:var(--lx-dim);flex-shrink:0}
 .ap-primary{padding:6px 12px;font-size:12px;border-radius:9px;gap:6px}
 .ap-kebab{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:7px;
-  background:none;border:none;color:#8b8ba0;cursor:pointer;transition:.15s}
-.ap-kebab:hover{color:#fff;background:rgba(255,255,255,.06)}
+  background:none;border:none;color:var(--lx-mut);cursor:pointer;transition:.15s}
+.ap-kebab:hover{color:var(--lx-text);background:var(--ap-s1)}
 .ap-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:30;min-width:190px;padding:6px;border-radius:12px;
-  background:#12121c;border:1px solid rgba(255,255,255,.1);box-shadow:0 12px 32px rgba(0,0,0,.55)}
+  background:var(--lx-in);border:1px solid var(--ap-s2);box-shadow:0 12px 32px rgba(0,0,0,.55)}
 .ap-menu>*{display:flex;align-items:center;gap:8px;width:100%;padding:8px 10px;border-radius:8px;border:none;background:none;
-  color:#d6d6e4;font-size:12.5px;cursor:pointer;text-align:left}
-.ap-menu>*:hover{background:rgba(255,255,255,.06);color:#fff}
+  color:var(--lx-text);font-size:12.5px;cursor:pointer;text-align:left}
+.ap-menu>*:hover{background:var(--ap-s1);color:var(--lx-text)}
 .ap-menu>*:disabled{opacity:.5;cursor:not-allowed}
 .ap-menu>.danger{color:#f87171}
 .ap-pager{display:flex;align-items:center;gap:6px}
 .ap-pager button{display:inline-flex;align-items:center;justify-content:center;min-width:32px;height:32px;padding:0 8px;border-radius:9px;
-  border:1px solid var(--lx-border);background:#0d0d16;color:#d6d6e4;font-size:12.5px;font-weight:600;cursor:pointer;transition:.15s}
-.ap-pager button:hover:not(:disabled){border-color:rgba(139,92,246,.5);color:#fff}
+  border:1px solid var(--lx-border);background:var(--lx-card);color:var(--lx-text);font-size:12.5px;font-weight:600;cursor:pointer;transition:.15s}
+.ap-pager button:hover:not(:disabled){border-color:rgba(139,92,246,.5);color:var(--lx-text)}
 .ap-pager button:disabled{opacity:.35;cursor:not-allowed}
 .ap-pager button.on{background:linear-gradient(135deg,#4f46e5,#7c3aed);border-color:rgba(139,92,246,.7);color:#fff;
   box-shadow:0 4px 16px rgba(124,58,237,.35)}
 .ap-close{position:absolute;top:16px;right:14px;display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;
-  border-radius:8px;border:none;background:none;color:#9a9ab2;cursor:pointer}
-.ap-close:hover{color:#fff;background:rgba(255,255,255,.06)}
+  border-radius:8px;border:none;background:none;color:var(--lx-mut);cursor:pointer}
+.ap-close:hover{color:var(--lx-text);background:var(--ap-s1)}
 @media (min-width:1280px){.ap-drawer .ap-close{right:46px}}
-.ap-card{background:#0d0d16;border:1px solid var(--lx-border);border-radius:12px}
+.ap-card{background:var(--lx-card);border:1px solid var(--lx-border);border-radius:12px}
 .ap-avatar{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;
-  background:#1a1a26;border:1px solid var(--lx-border);color:#c4c4d4}
+  background:var(--lx-in);border:1px solid var(--lx-border);color:var(--lx-mut)}
 .ap-tl{position:relative;padding-left:18px}
-.ap-tl::before{content:"";position:absolute;left:5px;top:6px;bottom:6px;width:1px;background:rgba(255,255,255,.08)}
+.ap-tl::before{content:"";position:absolute;left:5px;top:6px;bottom:6px;width:1px;background:var(--ap-s1)}
 .ap-tl-item{position:relative;padding-bottom:16px}
 .ap-tl-item:last-child{padding-bottom:0}
-.ap-tl-dot{position:absolute;left:-18px;top:3px;width:11px;height:11px;border-radius:50%;background:#0d0d16;
+.ap-tl-dot{position:absolute;left:-18px;top:3px;width:11px;height:11px;border-radius:50%;background:var(--lx-card);
   border:2px solid var(--c);box-shadow:0 0 8px color-mix(in srgb,var(--c) 70%,transparent)}
 .ap-reject{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:44px;border-radius:12px;font-size:14px;font-weight:600;
   color:#f87171;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.45);cursor:pointer;transition:.15s}
@@ -979,16 +1055,16 @@ const CSS = `
 .ap-approve{height:44px;font-size:14px;border-radius:12px}
 .ap-reject:disabled,.ap-approve:disabled{opacity:.4;cursor:not-allowed;filter:none}
 .ap-changes{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;height:44px;border-radius:12px;font-size:14px;font-weight:600;
-  color:#e8e8f2;background:rgba(255,255,255,.03);border:1px solid var(--lx-border);cursor:pointer;transition:.15s}
-.ap-changes:hover{border-color:rgba(139,92,246,.55);color:#fff}
+  color:var(--lx-text);background:var(--ap-s1);border:1px solid var(--lx-border);cursor:pointer;transition:.15s}
+.ap-changes:hover{border-color:rgba(139,92,246,.55);color:var(--lx-text)}
 .ap-spin{animation:apSpin 1s linear infinite}
 @keyframes apSpin{to{transform:rotate(360deg)}}
-.ap-prose{font-size:13px;line-height:1.7;color:#d6d6e4}
-.ap-prose h1{font-size:18px;font-weight:800;color:#fff;margin:0 0 12px}
-.ap-prose h2{font-size:15px;font-weight:700;color:#fff;margin:18px 0 8px}
-.ap-prose h3{font-size:13.5px;font-weight:700;color:#fff;margin:14px 0 6px}
+.ap-prose{font-size:13px;line-height:1.7;color:var(--lx-text)}
+.ap-prose h1{font-size:18px;font-weight:800;color:var(--lx-text);margin:0 0 12px}
+.ap-prose h2{font-size:15px;font-weight:700;color:var(--lx-text);margin:18px 0 8px}
+.ap-prose h3{font-size:13.5px;font-weight:700;color:var(--lx-text);margin:14px 0 6px}
 .ap-prose p{margin:0 0 10px}
 .ap-prose ul,.ap-prose ol{padding-left:18px;margin:0 0 10px}
-.ap-prose a{color:#60a5fa}
+.ap-prose a{color:var(--lx-blue)}
 .ap-prose img{max-width:100%;border-radius:8px}
 `;
