@@ -87,6 +87,19 @@ const WARN_PENALTY = 5;
  *  runs and is still reported — it only changes how many an article may fail and still publish. */
 export const QUALITY_PASS_THRESHOLD = Math.max(0, Math.min(100, Number(process.env.QUALITY_PASS_THRESHOLD) || 75));
 
+/** The CORE checks: the article's structure and integrity. Owner instruction (2026-11-02): for
+ *  now the gate passes whenever these hold; every other check (voice, style, table/list/Q&A,
+ *  em dashes, clichés, meta lengths, ...) still runs and is still reported with its score, but
+ *  no longer decides pass/fail. */
+export const CORE_CHECK_IDS: ReadonlySet<string> = new Set([
+  "word-count",
+  "h2-count",
+  "title-line",
+  "keyword-early",
+  "placeholders",
+  "duplicate-paragraphs",
+]);
+
 /* ---------------------------------------------------------------- word lists ------------ */
 
 /** Phrases that mark a draft as machine-written to any reader who has seen a few. Matched
@@ -550,7 +563,7 @@ export function gateArticle(body: string, opts: GateOptions = {}): QualityGate {
   const warnings = checks.filter((c) => !c.ok && c.severity === "warn").map((c) => c.detail);
   const score = Math.max(0, Math.min(100, 100 - reasons.length * BLOCK_PENALTY - warnings.length * WARN_PENALTY));
 
-  return { wordCount, sections, links, passed: score >= QUALITY_PASS_THRESHOLD, reasons, checks, score, warnings };
+  return { wordCount, sections, links, passed: checks.filter((c) => CORE_CHECK_IDS.has(c.id)).every((c) => c.ok), reasons, checks, score, warnings };
 }
 
 /** One line for logs: "QA 78/100 · 2 warnings: no internal links; …" */

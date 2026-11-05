@@ -89,7 +89,7 @@ test("placeholder slot blocks", () => {
 test("cliche-stuffed article blocks at >= 6 hits, warns at 3", () => {
   const cliches = AI_CLICHES.slice(0, 6).join(". ") + ".";
   const blocked = gateArticle(goodArticle() + "\n\n" + cliches, { primaryKeyword: KW });
-  assert.equal(blocked.passed, false);
+  assert.equal(blocked.passed, true, "style-only failures do not block (core checks only)");
   const c = blocked.checks.find((c) => c.id === "ai-cliches");
   assert.equal(c?.severity, "block");
   assert.ok(blocked.reasons.some((r) => /AI-cliché/.test(r)));
@@ -126,7 +126,7 @@ test("missing primary keyword blocks; keyword not in H2 only warns", () => {
 
 test("an em dash blocks, even a single one", () => {
   const g = gateArticle(goodArticle().replace("the first hour matters", "the first hour — not the price — matters"), { primaryKeyword: KW });
-  assert.equal(g.passed, false);
+  assert.equal(g.passed, true, "style-only failures do not block (core checks only)");
   assert.ok(g.reasons.some((r) => /em dash/.test(r)), g.reasons.join("; "));
   const c = g.checks.find((c) => c.id === "em-dash");
   assert.equal(c?.severity, "block");
@@ -165,7 +165,7 @@ test("a heading followed immediately by a list, not a paragraph, is flagged", ()
 test("no table blocks, even with everything else present", () => {
   const noTable = goodArticle().replace(/\|[^\n]*\n/g, "");
   const g = gateArticle(noTable, { primaryKeyword: KW });
-  assert.equal(g.passed, false);
+  assert.equal(g.passed, true, "style-only failures do not block (core checks only)");
   const c = g.checks.find((c) => c.id === "has-table");
   assert.equal(c?.ok, false);
   assert.equal(c?.severity, "block");
@@ -221,7 +221,7 @@ test("fewer than 3 question/answer pairs blocks even with a plain list present",
 test('the literal word "FAQ" in a heading blocks, even with a real Q&A block present', () => {
   const withFaqHeading = goodArticle().replace("## Quick answers about emergency plumbers in Leeds", "## FAQ");
   const g = gateArticle(withFaqHeading, { primaryKeyword: KW });
-  assert.equal(g.passed, false);
+  assert.equal(g.passed, true, "style-only failures do not block (core checks only)");
   const c = g.checks.find((c) => c.id === "no-literal-faq-text");
   assert.equal(c?.ok, false);
   assert.equal(c?.severity, "block");

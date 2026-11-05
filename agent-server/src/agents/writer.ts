@@ -98,10 +98,9 @@ async function fixArticle(job: Job<AgentJobData>, ctx: AgentContext) {
     metaTitle: (prevMeta.metaTitle as string) ?? undefined,
     metaDescription: (prevMeta.metaDescription as string) ?? undefined,
   });
-  const gate =
-    review.passed && baseGate.passed
-      ? baseGate
-      : { ...baseGate, passed: false, reasons: [...new Set([...baseGate.reasons, ...review.failures])] };
+  // Pass/fail = the core checks only (qualityGate.ts CORE_CHECK_IDS); the review loop still
+    // improves style but a leftover style failure no longer blocks the article.
+    const gate = baseGate;
   console.log(`[writer] FIX "${title}" review ${review.passed ? "PASSED" : "still failed"} (score ${review.score}/100) in ${review.rounds} round(s) · ${summarizeGate(gate)}`);
 
   ctx.data("score", { quality: gate.score, passed: gate.passed, words: gate.wordCount, sections: gate.sections });
@@ -308,10 +307,9 @@ export class WriterAgent extends Agent {
     // the gate's own score and checks, but `passed` only when the hard review passed too, with
     // the review's exact failures as the reasons.
     const baseGate = gateArticle(body, { primaryKeyword: topic.trim(), metaTitle: pipeline.meta.metaTitle, metaDescription: pipeline.meta.metaDescription });
-    const gate =
-      review.passed && baseGate.passed
-        ? baseGate
-        : { ...baseGate, passed: false, reasons: [...new Set([...baseGate.reasons, ...review.failures])] };
+    // Pass/fail = the core checks only (qualityGate.ts CORE_CHECK_IDS); the review loop still
+    // improves style but a leftover style failure no longer blocks the article.
+    const gate = baseGate;
     console.log(`[writer] "${title}" review ${review.passed ? "passed" : "FAILED"} (score ${review.score}/100) in ${review.rounds} round(s) · ${summarizeGate(gate)}`);
 
     ctx.data("score", { quality: gate.score, passed: gate.passed, words: gate.wordCount, sections: gate.sections });
