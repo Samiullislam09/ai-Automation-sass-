@@ -4,7 +4,7 @@ import type { WriterContext } from "../lib/writer.js";
 import { writeArticlePipeline, nimComplete, nimCompleteFast } from "../lib/writerPipeline.js";
 import { runArticleReview, checkLinkLive, type LinkRef } from "../lib/articleReview.js";
 import { researchTopic } from "../lib/research/gptResearcher.js";
-import { gateArticle, summarizeGate } from "../lib/qualityGate.js";
+import { gateArticle, summarizeGate, CORE_CHECK_IDS } from "../lib/qualityGate.js";
 import { supabase } from "../supabase.js";
 import { loadInsights, writerBlock } from "../lib/insights.js";
 import { buildBlueprint, matchOfferings, nearestCluster, type Research } from "../lib/blueprint.js";
@@ -103,7 +103,7 @@ async function fixArticle(job: Job<AgentJobData>, ctx: AgentContext) {
     const gate = baseGate;
   console.log(`[writer] FIX "${title}" review ${review.passed ? "PASSED" : "still failed"} (score ${review.score}/100) in ${review.rounds} round(s) · ${summarizeGate(gate)}`);
 
-  ctx.data("score", { quality: gate.score, passed: gate.passed, words: gate.wordCount, sections: gate.sections });
+  ctx.data("score", { quality: gate.score, passed: gate.passed, words: gate.wordCount, sections: gate.sections, blocking: gate.checks.filter((c) => CORE_CHECK_IDS.has(c.id) && !c.ok).map((c) => c.detail) });
   ctx.data("references", { links: gate.links });
 
   const meta: Record<string, unknown> = {
@@ -312,7 +312,7 @@ export class WriterAgent extends Agent {
     const gate = baseGate;
     console.log(`[writer] "${title}" review ${review.passed ? "passed" : "FAILED"} (score ${review.score}/100) in ${review.rounds} round(s) · ${summarizeGate(gate)}`);
 
-    ctx.data("score", { quality: gate.score, passed: gate.passed, words: gate.wordCount, sections: gate.sections });
+    ctx.data("score", { quality: gate.score, passed: gate.passed, words: gate.wordCount, sections: gate.sections, blocking: gate.checks.filter((c) => CORE_CHECK_IDS.has(c.id) && !c.ok).map((c) => c.detail) });
     // The real links the article actually contains — for the live "References" tab. Same
     // `gate.links` this already stored in content_items.meta, just also surfaced live instead
     // of only being readable after the fact.

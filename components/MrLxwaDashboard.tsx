@@ -1979,6 +1979,16 @@ const WriterDocScreen = ({
   );
 };
 
+/** The finished article, exactly as saved: the newest `draft` body across ALL agents of the order
+ *  (Mr. Image's draft event carries the body with the pictures embedded, so images, lists and the
+ *  table all render). Same renderer and styles as every other markdown surface. */
+const FinishedArticleScreen = ({ title, body }: { title?: string; body: string }) => (
+  <div>
+    {title && <h1 style={{ fontSize: 19, fontWeight: 600, lineHeight: 1.3, margin: "0 0 14px", color: "#20241f" }}>{title}</h1>}
+    <div className="lx-doc-md" dangerouslySetInnerHTML={{ __html: renderMarkdown(body.replace(/^#\s+.*\n+/, ""))}} />
+  </div>
+);
+
 const REVIEW_KINDS = new Set(["review_round", "review_result", "section_rewrite", "article_revise", "review_final"]);
 const REVIEW_GROUPS = ["Structure", "Snippet answers", "Writing style", "Links and sources", "Trust", "Human voice"];
 type ReviewCheckView = { id: string; label: string; group: string; ok: boolean; detail: string; section: string | null; skipped?: boolean };
@@ -2058,9 +2068,16 @@ const ReviewScreen = ({ items, running, color, label }: { items: CanvasItem[]; r
   const { setNodeRef, target } = useFollowLatest(followRows);
 
   const lastEvent = events[events.length - 1];
+  // ONE verdict: the quality gate's own (agents/writer.ts `score` item), not the review loop's
+  // soft pass. "Passed every rule" is claimed only when nothing is left failing.
+  const gateVerdict = items.filter((it) => it.kind === "score" && it.payload).slice(-1)[0]?.payload;
+  const leftFailing = checks.filter((c) => !c.ok).length;
+  const verdictPassed = gateVerdict ? gateVerdict.passed === true : !!final?.payload?.passed;
   const statusText = final
-    ? final.payload?.passed
-      ? "Passed every rule"
+    ? verdictPassed
+      ? leftFailing === 0
+        ? "Passed every rule"
+        : `Passed core checks · ${leftFailing} style note${leftFailing === 1 ? "" : "s"}`
       : "Did not pass, needs a human"
     : rewritingNow > 0
       ? `Rewriting ${rewritingNow} part${rewritingNow === 1 ? "" : "s"}…`
@@ -2071,7 +2088,7 @@ const ReviewScreen = ({ items, running, color, label }: { items: CanvasItem[]; r
         : running
           ? "Reviewing…"
           : "Review stopped";
-  const pillTone = final ? (final.payload?.passed ? "green" : "red") : "blue";
+  const pillTone = final ? (verdictPassed ? "green" : "red") : "blue";
 
   return (
     <div ref={hostRef} style={{ position: "relative" }}>
@@ -3299,7 +3316,9 @@ export default function MrLxwaDashboard({
     // Did the deterministic quality gate pass? A gate-FAILED article still finishes and lands in
     // Approvals, so "✅ All done, ready" read as a success when it actually needs review (owner,
     // 2026-10-21). The `score` item carries the real verdict.
-    const gateFailed = t.items.some((it) => it.kind === "score" && it.payload && it.payload.passed === false);
+    const gateVerdict = t.items.filter((it) => it.kind === "score" && it.payload).slice(-1)[0]?.payload;
+    const gateFailed = gateVerdict?.passed === false;
+    const blockedBy = Array.isArray(gateVerdict?.blocking) && gateVerdict.blocking.length ? String(gateVerdict.blocking[0]) : "";
     const isArticle = produced?.kind === "article";
     const title = produced?.headline?.trim() || "";
     const shortTitle = title.length > 54 ? title.slice(0, 52).replace(/\s+\S*$/, "") + "…" : title;
@@ -3315,7 +3334,7 @@ export default function MrLxwaDashboard({
       text = `⚠️ Couldn't finish: ${summary}`;
     } else if (gateFailed) {
       text = produced
-        ? `📝 Your article${named} is written, but it didn't pass the quality gate — open it in Approvals to review before publishing.`
+        ? `📝 Your article${named} is written, but it didn't pass the quality gate${blockedBy ? ` (${blockedBy})` : ""} — open it in Approvals to review before publishing.`
         : `📝 Written, but it didn't pass the quality gate — review it in Approvals.`;
     } else {
       const verb = produced && produced.count > 1 ? "are" : "is";
@@ -3654,6 +3673,13 @@ export default function MrLxwaDashboard({
   // link to the finished article. Read from every agent on the task rather than `producedItems`,
   // which is filtered to whichever agent's panel is open — the link should still work while
   // looking at Mr. SEO's or Mr. Image's step of the same order.
+  const finalDraft = articleFinished
+    ? task!.agents
+        .flatMap((p) => p.items)
+        .filter((it) => it.kind === "draft" && typeof it.payload?.body === "string" && it.payload.body.trim())
+        .sort((a, b) => a.at - b.at)
+        .slice(-1)[0]?.payload ?? null
+    : null;
   const savedContentId = task
     ? (task.agents
         .flatMap((p) => p.items)
@@ -3891,18 +3917,19 @@ export default function MrLxwaDashboard({
 
       <div className="mt-3 flex flex-col gap-4">
         <div className="relative min-w-0">
-          {/* Finished article: "Go" opens it as a full page (/dashboard/content/<id>). Sits on the
-              canvas corner, outside the scroll box, so it stays put while the article scrolls. */}
+          {/* Finished article: opens the full page (/dashboard/content/<id>). Its own row above the
+              canvas so it never covers the article. */}
           {articleFinished && savedContentId && (
-            <Link
-              href={`/dashboard/content/${savedContentId}`}
-              className="lx-pill absolute right-5 top-3 z-10 inline-flex items-center gap-1 font-semibold shadow"
-              style={{ background: "var(--lx-cyan)", color: "#04121a" }}
-              aria-label="Open the full article page"
-              title="Open the full article on a big screen"
-            >
-              Go <ArrowRight size={12} />
-            </Link>
+            <div className="mb-2 flex justify-end">
+              <Link
+                href={`/dashboard/content/${savedContentId}`}
+                className="lx-grad px-3.5 py-1.5 text-[12px]"
+                aria-label="Open the full article page"
+                title="Open the full article on a big screen"
+              >
+                <Maximize2 size={13} /> Open full article
+              </Link>
+            </div>
           )}
           {/* ONE height, not a range, and its own scrollbar.
               This was `minHeight:360, maxHeight:460`, which is a range — so the box grew and
@@ -3974,7 +4001,11 @@ export default function MrLxwaDashboard({
                           </div>
                         )}
                         <div hidden={hasReview && view !== "article"}>
-                          <WriterDocScreen items={producedItems} running={!!runningStep} color={panelAgent.color} label={panelAgent.name} scrollRef={canvasScrollRef} />
+                          {articleFinished && finalDraft ? (
+                            <FinishedArticleScreen title={finalDraft.title as string | undefined} body={String(finalDraft.body)} />
+                          ) : (
+                            <WriterDocScreen items={producedItems} running={!!runningStep} color={panelAgent.color} label={panelAgent.name} scrollRef={canvasScrollRef} />
+                          )}
                         </div>
                       </div>
                     );
