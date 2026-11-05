@@ -95,11 +95,12 @@ type AuditJob = {
   error: { message: string; cause: string | null; hint: string | null; attempt: number | null; attempts: number | null; durationMs: number | null } | null;
 };
 
-type Tab = "overview" | "issues" | "pages" | "statistics" | "compare" | "progress";
+type Tab = "overview" | "issues" | "pages" | "statistics" | "history";
 type Bucket = "Healthy" | "Broken" | "Have issues" | "Redirects" | "Blocked";
 
 const RANK: Record<Severity, number> = { block: 0, warn: 1, info: 2 };
 const ISSUES_COLLAPSED_COUNT = 5;
+const CACHE_KEY = "lx-site-audit-v1";
 const POLL_MS = 3000;
 // The server now gives up on a hung page after 75s and on the whole speed phase after 7 min
 // (agent-server performance.ts / agents/audit.ts, 2026-09-04), so a real audit is ~2-10 min;
@@ -112,15 +113,13 @@ function tone(score: number): "good" | "ok" | "bad" {
 }
 const TONE_COLOR: Record<string, string> = { good: "#34d399", ok: "#fbbf24", bad: "#f87171" };
 
-/** What a Site Health number means, in words (owner 2026-09-04: "kaunsa best hai, kaisa user
- *  samjhe"). Bands follow the house formula's own arithmetic — 100 − 25·block − 5·warn — so
- *  "Excellent" is a site with nothing serious and at most two warnings, "Poor" is a site with
- *  two or more serious problems. */
+/** What a Site Health number means, in words. The score is the average health of the crawled
+ *  pages (agent-server checks.ts), so the bands are about how many pages are healthy. */
 const HEALTH_BANDS: { min: number; label: string; meaning: string }[] = [
-  { min: 90, label: "Excellent", meaning: "Nothing serious, a couple of things worth polishing." },
-  { min: 70, label: "Good", meaning: "No more than one serious problem. Fix it and you are in the top band." },
-  { min: 50, label: "Needs work", meaning: "One or two serious problems plus a handful of warnings. Errors first." },
-  { min: 0, label: "Poor", meaning: "Several serious problems — pages Google cannot reach or read. Start with the Errors list." },
+  { min: 90, label: "Excellent", meaning: "Almost every page is healthy." },
+  { min: 70, label: "Good", meaning: "Most pages are healthy. A few have warnings or errors." },
+  { min: 50, label: "Needs work", meaning: "A large share of your pages have problems." },
+  { min: 0, label: "Poor", meaning: "Most pages have errors or cannot be reached. Start with the errors below." },
 ];
 function healthBand(score: number) {
   return HEALTH_BANDS.find((b) => score >= b.min) ?? HEALTH_BANDS[HEALTH_BANDS.length - 1];
@@ -148,14 +147,7 @@ const SEV_COLOR: Record<Severity, string> = { block: "#f87171", warn: "#fbbf24",
 const TRIGGER_LABEL: Record<NonNullable<Trigger>, string> = { manual: "Manual", schedule: "Scheduled" };
 const BUCKET_COLOR: Record<Bucket, string> = { Healthy: "#34d399", Broken: "#f87171", "Have issues": "#fb923c", Redirects: "#818cf8", Blocked: "var(--lx-mut)" };
 const BUCKET_ORDER: Bucket[] = ["Healthy", "Broken", "Have issues", "Redirects", "Blocked"];
-const TABS: { id: Tab; label: string }[] = [
-  { id: "overview", label: "Overview" },
-  { id: "issues", label: "Issues" },
-  { id: "pages", label: "Crawled Pages" },
-  { id: "statistics", label: "Statistics" },
-  { id: "compare", label: "Compare Crawls" },
-  { id: "progress", label: "Progress" },
-];
+const TABS: Tab[] = ["overview", "issues", "pages", "statistics", "history"];
 
 /** Buckets for the Statistics tab's distributions — each edge is the same number the matching
  *  check uses (30/65 title chars are `short-title`/`long-title`, 150 words is `thin-content`,
@@ -208,8 +200,11 @@ export default function AuditSection() {
   const [job, setJob] = useState<AuditJob | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
   const [pagesModal, setPagesModal] = useState<Issue | null>(null);
-  const [fixModal, setFixModal] = useState<Issue | null>(null);
-  const [historyModal, setHistoryModal] = useState(false);
+  const [openIssue, setOpenIssue] = useState<string | null>(null);
+  const [pageQuery, setPageQuery] = useState("");
+  const [pageLimit, setPageLimit] = useState(PAGE_STEP);
+  const [showMath, setShowMath] = useState(false);
+  const [printing, setPrinting] = useState(false);
   const [sevFilter, setSevFilter] = useState<"all" | Severity>("all");
   const [catFilter, setCatFilter] = useState<string>("all");
   const [bucketFilter, setBucketFilter] = useState<"all" | Bucket>("all");
@@ -222,7 +217,7 @@ export default function AuditSection() {
 
   // Default the comparison to the run before the latest, and fetch whichever run is picked.
   useEffect(() => {
-    if (tab !== "compare" || !state?.history?.length) return;
+    if (tab !== "history" || !state?.history?.length) return;
     const latestId = state.latest?.id ?? null;
     const older = state.history.filter((h) => h.id !== latestId);
     if (!compareId && older.length) setCompareId(older[older.length - 1].id);
@@ -253,6 +248,7 @@ export default function AuditSection() {
       .then((d: Payload) => {
         if (d.ok) {
           setState(d);
+          try { sessionStorage.setItem(CACHE_KEY, JSON.stringify(d)); } catch { /* too big or private mode: fine */ }
           return d;
         }
         toast("Couldn't load your audit.", "error");
@@ -281,6 +277,14 @@ export default function AuditSection() {
   }, []);
 
   useEffect(() => {
+    // Paint the last report at once; the fetch below refreshes it behind the scenes.
+    try {
+      const raw = sessionStorage.getItem(CACHE_KEY);
+      if (raw) {
+        const d: Payload = JSON.parse(raw);
+        if (d?.ok) { setState((cur) => cur ?? d); setLoading(false); }
+      }
+    } catch { /* ignore a bad cache */ }
     // A run the weekly schedule (or another tab) started is shown the same way as one started
     // here: if jobs_log says "running" when the page opens, follow it.
     load().then(async (d) => {
@@ -358,24 +362,31 @@ export default function AuditSection() {
     }
   };
 
+  /** "Export PDF" prints the WHOLE report (overview, every issue with its fix, every page,
+   *  insights), not just the tab that happens to be open, so every section is rendered first. */
+  const printReport = () => {
+    setPrinting(true);
+    window.addEventListener("afterprint", () => setPrinting(false), { once: true });
+    setTimeout(() => window.print(), 250);
+  };
+  const show = (t: Tab) => tab === t || (printing && t !== "history");
+
   const actions = (
-    <div className="flex flex-wrap items-center gap-2 lx-audit-noprint">
-      <button className="lx-grad lx-11 px-3 py-1.5" disabled={starting || !!polling} onClick={runAudit}>
+    <div className="au-actions lx-audit-noprint">
+      <button className="au-btn au-btn-pri" disabled={starting || !!polling} onClick={runAudit}>
         {starting ? "Starting…" : polling ? "Auditing…" : state?.latest ? "Re-audit" : "Audit my site"}
       </button>
-      <button className="lx-ghost" onClick={() => window.print()} title="Opens your browser's print dialog — choose 'Save as PDF' as the destination">
-        Export as PDF
+      <button className="au-btn" onClick={printReport} title="Opens your browser's print dialog. Choose 'Save as PDF' as the destination.">
+        Export PDF
       </button>
     </div>
   );
 
   const head = (
-    <div className="flex flex-wrap items-start justify-between gap-4 lx-audit-noprint">
-      <div>
-        <h1 className="text-lg font-bold">Site audit</h1>
-        <p className="lx-11 lx-mut mt-1" style={{ maxWidth: 560 }}>
-          What&apos;s broken, hidden from Google, or costing you traffic — across the whole site, not one page at a time. Runs itself every week.
-        </p>
+    <div className="au-head lx-audit-noprint">
+      <div className="min-w-0">
+        <h1 className="au-h1">Site audit</h1>
+        <p className="au-sub">What is broken, hidden from Google or costing you visitors, checked across your whole site. It also runs by itself every week.</p>
       </div>
       {actions}
     </div>
@@ -386,9 +397,7 @@ export default function AuditSection() {
   const liveJob = polling && job && job.id !== polling.sinceJobId && job.status === "running" ? job : null;
   const progressBanner = polling && <AuditProgress job={liveJob} startedAt={polling.startedAt} />;
 
-  // The last run's failure, shown until a newer report exists — the "proper error log" a
-  // person can read without opening Workspace (owner, 2026-09-04). A stalled run (no progress
-  // write for 12 minutes) is the same card with what it last reported.
+  // The last run's failure, shown until a newer report exists.
   const failedJob =
     !polling && job && (job.status === "error" || job.status === "skipped" || job.stalled) && (!state?.latest || Date.parse(job.createdAt) > Date.parse(state.latest.createdAt))
       ? job
@@ -396,19 +405,17 @@ export default function AuditSection() {
   const failureCard = failedJob && <AuditFailure job={failedJob} onRetry={runAudit} busy={starting} />;
 
   if (loading && !state) {
-    // First open: the report's own layout as a skeleton, so the page does not flash a generic
-    // header + "Loading…" and then jump to a different shape (owner, live screenshot 2026-09-04).
     return <ReportSkeleton actions={actions} />;
   }
 
   if (state && !state.schemaReady) {
     return (
-      <div className="space-y-4">
+      <div className="au-page">
+        <style dangerouslySetInnerHTML={{ __html: AUDIT_CSS }} />
         {head}
-        <div className="lx-card2 flex flex-col items-center gap-2 p-8 text-center">
-          <div className="text-2xl">🧩</div>
-          <b className="lx-12">Not set up on this database yet</b>
-          <p className="lx-11 lx-mut">Migration 020 hasn&apos;t been applied here, so there&apos;s nowhere to file a report.</p>
+        <div className="au-card au-empty">
+          <b>Not set up on this database yet</b>
+          <p>Migration 020 has not been applied here, so there is nowhere to save a report. This one is for whoever runs the database.</p>
         </div>
       </div>
     );
@@ -418,17 +425,17 @@ export default function AuditSection() {
 
   if (!r) {
     return (
-      <div className="space-y-4">
+      <div className="au-page">
+        <style dangerouslySetInnerHTML={{ __html: AUDIT_CSS }} />
         {head}
         {progressBanner}
         {failureCard}
-        <div className="lx-card2 flex flex-col items-center gap-2 p-8 text-center">
-          <div className="text-2xl">🩺</div>
-          <b className="lx-12">No audit yet</b>
-          <p className="lx-11 lx-mut" style={{ maxWidth: 460 }}>Run one now, or leave it — we check every week on our own and tell you when something changes.</p>
+        <div className="au-card au-empty">
+          <b>No audit yet</b>
+          <p>Run one now to see what is wrong on your site. It takes a few minutes. After that it runs by itself every week and shows what changed.</p>
           {!polling && (
-            <button className="lx-grad lx-11 mt-2 px-3 py-1.5" disabled={starting} onClick={runAudit}>
-              {starting ? "Starting…" : "Check my site now"}
+            <button className="au-btn au-btn-pri" disabled={starting} onClick={runAudit}>
+              {starting ? "Starting…" : "Audit my site now"}
             </button>
           )}
         </div>
@@ -437,85 +444,70 @@ export default function AuditSection() {
   }
 
   const history = state!.history;
-  const last = history[history.length - 1] ?? null;
   const diff = r.previousScore === null ? null : r.score - r.previousScore;
   const allIssues = [...r.issues].sort((a, b) => RANK[a.severity] - RANK[b.severity] || b.count - a.count);
-  const topIssues = allIssues.slice(0, ISSUES_COLLAPSED_COUNT);
   const bySev = (s: Severity) => allIssues.filter((i) => i.severity === s);
+  const fixFirst = allIssues.filter((i) => i.severity !== "info").slice(0, ISSUES_COLLAPSED_COUNT);
   const notices = bySev("info").length;
+  const band = healthBand(r.score);
 
   const vitals = r.performance ?? [];
   // "Measured" means a number came back. Reports from before performance.ts learned to call a
-  // numberless Lighthouse run a failure (2026-09-04) have ok:true rows with every metric null;
-  // those are not measurements and are not counted as any.
+  // numberless Lighthouse run a failure have ok:true rows with every metric null; those are
+  // not measurements and are not counted as any.
   const measured = vitals.filter((p) => p.ok && (p.lcpMs != null || p.cls != null || p.tbtMs != null || p.performanceScore != null));
   const avgLcp = avg(measured.map((p) => p.lcpMs));
-  const avgCls = avg(measured.map((p) => p.cls));
+  const avgCls = avgDec(measured.map((p) => p.cls), 2);
+  const avgPerf = avg(measured.map((p) => p.performanceScore));
 
   const pages = r.pages ?? [];
   const bucketCount = (b: Bucket) => pages.filter((p) => bucketOf(p) === b).length;
+  const withProblems = bucketCount("Broken") + bucketCount("Have issues");
 
-  // Thematic Reports — Semrush's own category rings. The report now ships each category's
-  // health, worked out the same way as the headline score (the average page's health in that
-  // category), so a ring and the gauge can never disagree. Reports from before that fall back
-  // to the old "checks that did not fire / checks in the category" fraction, which read 0% for
-  // a category whose three checks all fired even when only a few pages were affected.
+  // Site health by area: the report ships each category's health (same arithmetic as the
+  // headline score). Older reports fall back to checks-that-did-not-fire / checks-in-category.
   const categories = Array.from(new Set(r.catalogue.map((c) => c.category)));
-  const thematic = r.thematic?.length
+  const thematic = (r.thematic?.length
     ? r.thematic.map((t) => ({ cat: t.category, total: t.checks, fired: t.issues, pct: t.health }))
     : categories.map((cat) => {
         const total = r.catalogue.filter((c) => c.category === cat).length;
         const fired = new Set(r.issues.filter((i) => i.category === cat).map((i) => i.id)).size;
         return { cat, total, fired, pct: total ? Math.round(((total - fired) / total) * 100) : 100 };
-      });
+      })
+  ).sort((a, b) => a.pct - b.pct);
   const issueCategories = Array.from(new Set(allIssues.map((i) => i.category ?? "Other")));
 
   const filteredIssues = allIssues.filter((i) => (sevFilter === "all" || i.severity === sevFilter) && (catFilter === "all" || (i.category ?? "Other") === catFilter));
-  const domain = r.websiteUrl ? r.websiteUrl.replace(/^https?:\/\//, "") : "your site";
+  const domain = r.websiteUrl ? r.websiteUrl.replace(/^https?:\/\//, "").replace(/\/$/, "") : "your site";
+
+  const q = pageQuery.trim().toLowerCase();
+  const filteredPages = pages.filter((p) => (bucketFilter === "all" || bucketOf(p) === bucketFilter) && (!q || p.url.toLowerCase().includes(q)));
 
   const chip = (active: boolean, label: string, onClick: () => void, color?: string) => (
-    <button
-      key={label}
-      className="lx-10 rounded-full px-2.5 py-1 font-semibold"
-      style={{
-        border: `1px solid ${active ? color ?? "var(--lx-violet)" : "var(--lx-border)"}`,
-        background: active ? "rgba(139,92,246,.12)" : "transparent",
-        color: active ? color ?? "var(--lx-text)" : "var(--lx-mut)",
-        cursor: "pointer",
-      }}
-      onClick={onClick}
-    >
+    <button key={label} className={`au-chip ${active ? "on" : ""}`} style={active && color ? { borderColor: color, color } : undefined} onClick={onClick}>
       {label}
     </button>
   );
 
-  return (
-    <div className="space-y-4" id="lx-audit-report">
-      {/* Print-to-PDF: hides everything else on the page (sidebar, chat panel, nav) and shows
-          only this report — the standard "print just one element" technique, so it works
-          regardless of what the surrounding shell's own class names happen to be today or
-          later. No new dependency: every browser's own print dialog already offers "Save as
-          PDF". */}
-      <style>{`
-        @media print {
-          body * { visibility: hidden; }
-          #lx-audit-report, #lx-audit-report * { visibility: visible; }
-          #lx-audit-report { position: absolute; left: 0; top: 0; width: 100%; }
-          .lx-audit-noprint { display: none !important; }
-        }
-        @media screen { .lx-audit-print-only { display: none !important; } }
-        @media print { .lx-audit-print-only { display: block !important; } }
-      `}</style>
+  const toggleIssue = (id: string) => setOpenIssue((cur) => (cur === id ? null : id));
+  const issueCard = (i: Issue) => (
+    <IssueCard key={i.id} issue={i} open={openIssue === i.id} onToggle={() => toggleIssue(i.id)} onPages={() => setPagesModal(i)} />
+  );
 
-      {/* Real domain, shown big — Semrush's own "Site Audit: domain.com" heading, from
-          agents/audit.ts's own `target.origin` — not a static page title. */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold">Site Audit: {domain}</h1>
-          <p className="lx-10 lx-mut mt-1">
-            Updated {new Date(r.createdAt).toLocaleString()} · Pages crawled: {r.pagesChecked}
+  const TAB_LABEL: Record<Tab, string> = { overview: "Overview", issues: "Issues", pages: "Pages", statistics: "Insights", history: "History" };
+  const tabCount = (t: Tab) => (t === "issues" ? allIssues.length : t === "pages" ? pages.length : 0);
+
+  return (
+    <div className="au-page" id="lx-audit-report">
+      <style dangerouslySetInnerHTML={{ __html: AUDIT_CSS }} />
+
+      <div className="au-head">
+        <div className="min-w-0">
+          <h1 className="au-h1">Site audit: <span className="au-domain">{domain}</span></h1>
+          <p className="au-sub">
+            Checked {ago(r.createdAt)} · {r.pagesChecked} pages
             {r.trigger && ` · ${TRIGGER_LABEL[r.trigger]}`}
-            {r.seconds != null && ` · ${Math.round(r.seconds / 60) || 1} min`}
+            {r.seconds != null && ` · took ${r.seconds < 90 ? `${r.seconds} sec` : `${Math.round(r.seconds / 60)} min`}`}
           </p>
         </div>
         {actions}
@@ -523,265 +515,210 @@ export default function AuditSection() {
       {progressBanner}
       {failureCard}
 
-      {/* TABS — Semrush's own top nav (the ones this app has real data for; Statistics /
-          Compare Crawls / JS Impact are §27 rounds A and C). */}
-      <div className="lx-scroll flex gap-5 overflow-x-auto border-b lx-audit-noprint" style={{ borderColor: "var(--lx-border)" }}>
+      <div className="au-tabs lx-scroll lx-audit-noprint" role="tablist">
         {TABS.map((t) => (
-          <button key={t.id} className={`lx-tab ${tab === t.id ? "on" : ""}`} onClick={() => setTab(t.id)}>
-            {t.label}
-            {t.id === "issues" && allIssues.length > 0 && <span className="lx-10 lx-mut ml-1.5">{allIssues.length}</span>}
-            {t.id === "pages" && pages.length > 0 && <span className="lx-10 lx-mut ml-1.5">{pages.length}</span>}
+          <button key={t} role="tab" aria-selected={tab === t} className={`au-tab ${tab === t ? "on" : ""}`} onClick={() => setTab(t)}>
+            {TAB_LABEL[t]}
+            {tabCount(t) > 0 && <span className="au-tab-n">{tabCount(t)}</span>}
           </button>
         ))}
       </div>
 
-      {/* ══════════════════════════════════════════ OVERVIEW ══════════════════════════════ */}
-      {tab === "overview" && (
+      {/* ═════════════════════════════════ OVERVIEW ═════════════════════════════════ */}
+      {show("overview") && (
         <>
-          {/* LAST RUN — one line, right under the tabs (owner 2026-09-04: "last audit ka tab
-              upar karo nav ke niche"). The full history is one click away. */}
-          {last && (
-            <div className="lx-card2 flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-3 lx-audit-noprint">
-              <b className="lx-12">Last audit</b>
-              <span className="lx-11 lx-mut">{new Date(last.createdAt).toLocaleString()}</span>
-              <span className="lx-11 lx-mut">{last.trigger ? TRIGGER_LABEL[last.trigger] : "—"}</span>
-              <span className="lx-11">Score <b style={{ color: TONE_COLOR[tone(last.score)] }}>{last.score}</b></span>
-              <span className="lx-11">{last.blocks} errors · {last.warns} warnings · {last.pagesChecked} pages</span>
-              <button className="lx-11 ml-auto underline" style={{ background: "transparent", border: "none", cursor: "pointer", color: "var(--lx-cyan)" }} onClick={() => setHistoryModal(true)}>
-                View all {history.length} run{history.length === 1 ? "" : "s"} →
-              </button>
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <div className="lx-card2 p-4">
-              <b className="lx-12">Site Health</b>
-              <div className="mt-3 flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-6">
-                <ScoreGauge score={r.score} />
-                <div className="min-w-0 flex-1">
-                  <p className="lx-12">
-                    <b style={{ color: "var(--lx-violet)" }}>{healthBand(r.score).label}</b>
-                    <span className="lx-mut"> · {healthBand(r.score).meaning}</span>
-                  </p>
-                  <p className="lx-11 mt-1.5">
-                    {diff === null
-                      ? "First audit — nothing to compare it to yet."
-                      : diff === 0
-                        ? `No change since the last audit (${r.previousScore}).`
-                        : diff > 0
-                          ? `Up ${diff} since the last audit (was ${r.previousScore}).`
-                          : `Down ${Math.abs(diff)} since the last audit (was ${r.previousScore}).`}
-                  </p>
-                </div>
-              </div>
-              {/* The scale, so a number means something: which band this site is in, and what
-                  the others are. Text only — the gauge stays brand violet at every score. */}
-              <div className="mt-4 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-                {[...HEALTH_BANDS].reverse().map((b, i, arr) => {
-                  const max = i === arr.length - 1 ? 100 : arr[i + 1].min - 1;
-                  const on = healthBand(r.score).min === b.min;
-                  return (
-                    <div key={b.label} className="rounded-md px-2 py-1.5" style={{ border: `1px solid ${on ? "var(--lx-violet)" : "var(--lx-border)"}`, background: on ? "rgba(139,92,246,.12)" : "transparent" }} title={b.meaning}>
-                      <span className="lx-10 block" style={{ color: on ? "var(--lx-text)" : "var(--lx-mut)", fontWeight: on ? 700 : 500 }}>{b.label}</span>
-                      <span className="lx-10 lx-mut">{b.min}–{max}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="lx-card2 p-4">
-              <b className="lx-12">Crawled Pages</b>
-              {pages.length > 0 ? (
-                <>
-                  <div className="mt-1 flex items-center gap-3">
-                    <b className="font-extrabold" style={{ fontSize: 22, color: "var(--lx-violet)" }}>{pages.length}</b>
-                    <div className="flex h-2 flex-1 overflow-hidden rounded-full" style={{ background: "var(--lx-border)" }}>
-                      {BUCKET_ORDER.map((b) => {
-                        const n = bucketCount(b);
-                        return n > 0 ? <div key={b} style={{ width: `${(n / pages.length) * 100}%`, background: BUCKET_COLOR[b] }} /> : null;
-                      })}
-                    </div>
-                  </div>
-                  <ul className="mt-3 space-y-2">
-                    {BUCKET_ORDER.map((b) => (
-                      <CrawledRow key={b} color={BUCKET_COLOR[b]} label={b} count={bucketCount(b)} onClick={() => { setBucketFilter(b); setTab("pages"); }} />
-                    ))}
-                  </ul>
-                </>
-              ) : (
-                <p className="lx-11 lx-mut mt-3">Not on file for this report — the next audit will include a full page-by-page breakdown.</p>
-              )}
-            </div>
-          </div>
-
-          {r.aiSearch && (
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <div className="lx-card2 p-4">
-                <b className="lx-12">AI Search Health</b>
-                <p className="lx-10 lx-mut mt-1">Whether the named AI crawlers may read your site, per your own robots.txt.</p>
-                <div className="mt-3 flex items-center gap-6">
-                  <AiHealthGauge allowed={r.aiSearch.filter((b) => b.allowed).length} total={r.aiSearch.length} />
-                  <p className="lx-11 flex-1">
-                    {r.aiSearch.every((b) => b.allowed)
-                      ? "Every named AI crawler is allowed in."
-                      : `${r.aiSearch.filter((b) => !b.allowed).length} of ${r.aiSearch.length} named AI crawlers ${r.aiSearch.filter((b) => !b.allowed).length === 1 ? "is" : "are"} blocked by robots.txt.`}
-                  </p>
-                </div>
-              </div>
-              <div className="lx-card2 p-4">
-                <b className="lx-12">AI Crawler Access</b>
-                <p className="lx-10 lx-mut mt-1">Real robots.txt rules, one per named bot — a directive check, not a traffic log.</p>
-                <ul className="mt-3 space-y-2">
-                  {r.aiSearch.map((b) => (
-                    <li key={b.bot} className="flex items-center gap-2 lx-11">
-                      <span className="lx-10 shrink-0 rounded-full px-2 py-0.5 font-semibold" style={{ color: b.allowed ? "#34d399" : "#f87171", border: `1px solid ${b.allowed ? "#34d399" : "#f87171"}` }}>
-                        {b.allowed ? "Allowed" : "Blocked"}
-                      </span>
-                      <span className="flex-1">{b.label}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <SeverityCard label="Errors" sub="Fix first" count={r.blocks} color="#f87171" points={history.map((h) => h.blocks)} />
-            <SeverityCard label="Warnings" sub="Worth improving" count={r.warns} color="#fbbf24" points={history.map((h) => h.warns)} />
-          </div>
-
-          {/* THEMATIC REPORTS — Semrush's own category rings, every % an exact fraction over the
-              run's own catalogue (see the computation above). */}
-          <div className="lx-card2 p-4">
-            <b className="lx-12">Thematic Reports</b>
-            {thematic.length ? (
-              <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-                {thematic.map((t) => (
-                  <button
-                    key={t.cat}
-                    className="rounded-lg p-3 text-left"
-                    style={{ border: "1px solid var(--lx-border)", background: "transparent", cursor: "pointer" }}
-                    onClick={() => { setCatFilter(t.cat); setSevFilter("all"); setTab("issues"); }}
-                    title={`${t.total - t.fired} of ${t.total} checks passed`}
-                  >
-                    <span className="lx-11 block">{t.cat}</span>
-                    <div className="mt-1.5 flex items-center gap-2">
-                      <MiniRing pct={t.pct} />
-                      <b className="font-extrabold" style={{ fontSize: 20, color: "var(--lx-violet)" }}>{t.pct}%</b>
-                    </div>
-                    <span className="lx-10 lx-mut">{t.fired ? `${t.fired} issue${t.fired === 1 ? "" : "s"} · View details` : "No issues"}</span>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <p className="lx-11 lx-mut mt-3">Not on file for this report — the next audit will include per-category scores.</p>
-            )}
-          </div>
-
-          {r.performancePending && vitals.length === 0 && (
-            <div className="lx-card2 p-4">
-              <b className="lx-12">Core Web Vitals</b>
-              {polling ? (
-                <p className="lx-11 lx-mut mt-2">Being measured now — the rest of this report is already final; this section fills in when the browser finishes.</p>
-              ) : (
-                <p className="lx-11 mt-2" style={{ color: "#fbbf24" }}>
-                  The loading-speed check did not finish for this report — the server stopped during it (started {r.startedAt ? new Date(r.startedAt).toLocaleString() : new Date(r.createdAt).toLocaleString()}). Everything else on this page is complete. Re-audit to measure speed.
+          <section className="au-card au-hero">
+            <ScoreGauge score={r.score} />
+            <div className="au-hero-b">
+              <div className="au-verdict"><b>{band.label}</b> <span>{band.meaning}</span></div>
+              <p className="au-trend">
+                {diff === null
+                  ? "This is your first audit, so there is nothing to compare it with yet."
+                  : diff === 0
+                    ? `No change since the last audit (it was ${r.previousScore}).`
+                    : diff > 0
+                      ? `Up ${diff} points since the last audit (it was ${r.previousScore}).`
+                      : `Down ${Math.abs(diff)} points since the last audit (it was ${r.previousScore}).`}
+              </p>
+              <button className="au-link lx-audit-noprint" onClick={() => setShowMath((v) => !v)}>{showMath ? "Hide how this is worked out" : "How is this score worked out?"}</button>
+              {showMath && (
+                <p className="au-math">
+                  Every page starts at 100. A page with an error scores 0, and each warning takes 5 points off. Site Health is the average of all your pages, minus 25 points for each serious site-wide file problem (such as a missing or blocking robots.txt). Notices never change the score.
                 </p>
               )}
             </div>
-          )}
+          </section>
 
-          {vitals.length > 0 && (
-            <div className="lx-card2 p-4">
-              <b className="lx-12">Core Web Vitals</b>
-              <p className="lx-10 lx-mut mt-1">
-                Real Chrome (Lighthouse), mobile. {measured.length} of {vitals.length} sampled page{vitals.length === 1 ? "" : "s"} measured — the sample is the home page plus up to {Math.max(0, vitals.length - 1)} more, because each Lighthouse run takes 10–20 seconds. Every crawled page&apos;s response time is in Crawled Pages.
-              </p>
-              {measured.length === 0 ? (
-                <p className="lx-11 lx-mut mt-3">Nothing was measured in this run — each page below says why. The next audit tries again.</p>
-              ) : (
-                <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-                  <VitalTile label="Largest Contentful Paint" value={avgLcp != null ? `${(avgLcp / 1000).toFixed(1)}s` : "—"} good={avgLcp == null ? null : avgLcp <= 2500} hint="Good is 2.5 s or under" />
-                  <VitalTile label="Cumulative Layout Shift" value={avgCls != null ? avgCls.toFixed(2) : "—"} good={avgCls == null ? null : avgCls <= 0.1} hint="Good is 0.1 or under" />
-                </div>
-              )}
-              <div className="lx-scroll mt-3" style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 420 }}>
-                  <thead>
-                    <tr className="lx-10 lx-mut" style={{ textAlign: "left" }}>
-                      <th style={{ padding: "6px 8px", fontWeight: 600 }}>Page</th>
-                      <th style={{ padding: "6px 8px", fontWeight: 600, whiteSpace: "nowrap" }}>LCP</th>
-                      <th style={{ padding: "6px 8px", fontWeight: 600, whiteSpace: "nowrap" }}>CLS</th>
-                      <th style={{ padding: "6px 8px", fontWeight: 600, whiteSpace: "nowrap" }}>Score</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {vitals.map((p) => (
-                      <tr key={p.url} style={{ borderTop: "1px solid var(--lx-border)" }}>
-                        <td className="lx-11" style={{ padding: "8px", color: "#e6e6f2", maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={p.url}>{p.url}</td>
-                        {p.ok && (p.lcpMs != null || p.cls != null || p.performanceScore != null) ? (
-                          <>
-                            <td className="lx-11 lx-mut" style={{ padding: "8px", whiteSpace: "nowrap" }}>{p.lcpMs != null ? `${(p.lcpMs / 1000).toFixed(1)}s` : "—"}</td>
-                            <td className="lx-11 lx-mut" style={{ padding: "8px", whiteSpace: "nowrap" }}>{p.cls != null ? p.cls.toFixed(2) : "—"}</td>
-                            <td className="lx-11 lx-mut" style={{ padding: "8px", whiteSpace: "nowrap" }}>{p.performanceScore != null ? `${p.performanceScore}/100` : "—"}</td>
-                          </>
-                        ) : (
-                          <td className="lx-10 lx-mut" style={{ padding: "8px" }} colSpan={3}>Not measured{p.error ? ` — ${p.error}` : " — Lighthouse returned no numbers for this page"}</td>
-                        )}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          <div className="lx-card2 p-4">
-            <div className="flex items-center justify-between">
-              <b className="lx-12">Top issues</b>
-              {notices > 0 && <span className="lx-10 lx-mut">{notices} notice{notices === 1 ? "" : "s"} for the record</span>}
-            </div>
-            <div className="mt-3 grid grid-cols-1 gap-2">
-              {topIssues.length ? (
-                topIssues.map((i) => <IssueRow key={i.id} issue={i} onPages={() => setPagesModal(i)} onFix={() => setFixModal(i)} />)
-              ) : (
-                <div className="flex flex-col items-center gap-2 p-8 text-center">
-                  <div className="text-2xl">✨</div>
-                  <p className="lx-11 lx-mut">Nothing to fix — every check passed.</p>
-                </div>
-              )}
-            </div>
-            {allIssues.length > ISSUES_COLLAPSED_COUNT && (
-              <button className="lx-ghost lx-11 mt-3 w-full lx-audit-noprint" onClick={() => { setSevFilter("all"); setCatFilter("all"); setTab("issues"); }}>
-                View all {allIssues.length} issues →
-              </button>
-            )}
+          <div className="au-kpis">
+            <Kpi label="Pages checked" value={String(r.pagesChecked)} />
+            <Kpi label="Pages with problems" value={pages.length ? String(withProblems) : "—"} sub={pages.length ? `of ${pages.length} pages` : "not on file"} color={withProblems > 0 ? "#fb923c" : "#34d399"} onClick={pages.length ? () => { setBucketFilter("Have issues"); setTab("pages"); } : undefined} />
+            <Kpi label="Errors" value={String(r.blocks)} sub="types of problem" color={r.blocks > 0 ? "#f87171" : "#34d399"} onClick={() => { setSevFilter("block"); setCatFilter("all"); setTab("issues"); }} />
+            <Kpi label="Warnings" value={String(r.warns)} sub="types of problem" color={r.warns > 0 ? "#fbbf24" : "#34d399"} onClick={() => { setSevFilter("warn"); setCatFilter("all"); setTab("issues"); }} />
           </div>
 
-          {r.skipped.length > 0 && (
-            <div className="lx-card2 p-4">
-              <b className="lx-12">What this audit did not measure</b>
-              <ul className="mt-2 space-y-1 pl-4" style={{ listStyle: "disc" }}>
-                {r.skipped.map((s, n) => <li key={n} className="lx-10 lx-mut">{s}</li>)}
-              </ul>
+          <section className="au-card">
+            <div className="au-card-h">
+              <div><b>Fix these first</b><span className="au-hint">Biggest problems first. Tap one to see how to fix it.</span></div>
             </div>
+            {fixFirst.length ? (
+              <div className="au-list">{fixFirst.map(issueCard)}</div>
+            ) : (
+              <p className="au-ok">Nothing to fix. Every check passed.</p>
+            )}
+            {allIssues.length > fixFirst.length && (
+              <button className="au-btn au-block lx-audit-noprint" onClick={() => { setSevFilter("all"); setCatFilter("all"); setTab("issues"); }}>
+                See all {allIssues.length} findings{notices > 0 ? ` (including ${notices} notice${notices === 1 ? "" : "s"})` : ""}
+              </button>
+            )}
+          </section>
+
+          <div className="au-two">
+            <section className="au-card">
+              <div className="au-card-h"><div><b>Your pages</b><span className="au-hint">{pages.length ? `${pages.length} pages we visited` : "Page-by-page list not on file for this report"}</span></div></div>
+              {pages.length > 0 ? (
+                <>
+                  <div className="au-stack" aria-hidden>
+                    {BUCKET_ORDER.map((b) => {
+                      const n = bucketCount(b);
+                      return n > 0 ? <i key={b} style={{ width: `${(n / pages.length) * 100}%`, background: BUCKET_COLOR[b] }} /> : null;
+                    })}
+                  </div>
+                  <ul className="au-buckets">
+                    {BUCKET_ORDER.map((b) => {
+                      const n = bucketCount(b);
+                      return (
+                        <li key={b}>
+                          <button onClick={() => { setBucketFilter(b); setTab("pages"); }} disabled={n === 0}>
+                            <span className="au-dot" style={{ background: BUCKET_COLOR[b] }} />
+                            <span className="au-b-t"><b>{BUCKET_LABEL[b]}</b><small>{BUCKET_HELP[b]}</small></span>
+                            <span className="au-b-n">{n}<small>{Math.round((n / pages.length) * 100)}%</small></span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </>
+              ) : (
+                <p className="au-mut">The next audit will include the full list.</p>
+              )}
+            </section>
+
+            <section className="au-card">
+              <div className="au-card-h"><div><b>Health by area</b><span className="au-hint">Weakest first. Tap an area to see its issues.</span></div></div>
+              {thematic.length ? (
+                <ul className="au-areas">
+                  {thematic.map((t) => (
+                    <li key={t.cat}>
+                      <button onClick={() => { setCatFilter(t.cat); setSevFilter("all"); setTab("issues"); }}>
+                        <span className="au-a-top"><b>{t.cat}</b><em style={{ color: TONE_COLOR[tone(t.pct)] }}>{t.pct}%</em></span>
+                        <span className="au-bar"><i style={{ width: `${t.pct}%`, background: TONE_COLOR[tone(t.pct)] }} /></span>
+                        <small>{t.fired ? `${t.fired} issue${t.fired === 1 ? "" : "s"} found` : "No issues"} · {t.total} checks</small>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="au-mut">Not on file for this report. The next audit will include it.</p>
+              )}
+            </section>
+          </div>
+
+          {/* LOADING SPEED */}
+          <section className="au-card">
+            <div className="au-card-h">
+              <div>
+                <b>Loading speed (mobile)</b>
+                <span className="au-hint">
+                  {vitals.length > 0
+                    ? `Measured in real Chrome on ${measured.length} of ${vitals.length} sampled page${vitals.length === 1 ? "" : "s"} (the home page plus a few others, because each test takes 10 to 20 seconds).`
+                    : "Measured in real Chrome on a sample of your pages."}
+                </span>
+              </div>
+            </div>
+            {r.performancePending && vitals.length === 0 ? (
+              polling ? (
+                <p className="au-mut">Being measured right now. Everything else in this report is already final.</p>
+              ) : (
+                <p className="au-warn">The speed test did not finish for this report because the server stopped during it. Everything else is complete. Re-audit to measure speed.</p>
+              )
+            ) : vitals.length === 0 ? (
+              <p className="au-mut">Not measured in this report.</p>
+            ) : measured.length === 0 ? (
+              <p className="au-mut">Nothing could be measured this time. The reason is listed per page below, and the next audit tries again.</p>
+            ) : (
+              <div className="au-vitals">
+                <VitalTile label="Loading time" short="LCP" value={avgLcp != null ? `${(avgLcp / 1000).toFixed(1)}s` : "—"} good={avgLcp == null ? null : avgLcp <= 2500} hint="Good: 2.5 s or less" />
+                <VitalTile label="Layout jumping" short="CLS" value={avgCls != null ? avgCls.toFixed(2) : "—"} good={avgCls == null ? null : avgCls <= 0.1} hint="Good: 0.1 or less" />
+                <VitalTile label="Speed score" short="Lighthouse" value={avgPerf != null ? `${avgPerf}/100` : "—"} good={avgPerf == null ? null : avgPerf >= 90} hint="Good: 90 or more" />
+              </div>
+            )}
+            {vitals.length > 0 && (
+              <details className="au-more lx-audit-noprint">
+                <summary>Speed of each tested page</summary>
+                <div className="au-plist">
+                  {vitals.map((p) => (
+                    <div key={p.url} className="au-vrow">
+                      <span className="au-url" title={p.url}>{p.url}</span>
+                      {p.ok && (p.lcpMs != null || p.cls != null || p.performanceScore != null) ? (
+                        <span className="au-vm">
+                          <span>Load <b>{p.lcpMs != null ? `${(p.lcpMs / 1000).toFixed(1)}s` : "—"}</b></span>
+                          <span>Jump <b>{p.cls != null ? p.cls.toFixed(2) : "—"}</b></span>
+                          <span>Score <b>{p.performanceScore != null ? `${p.performanceScore}/100` : "—"}</b></span>
+                        </span>
+                      ) : (
+                        <span className="au-mut">Not measured{p.error ? `: ${p.error}` : ""}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+          </section>
+
+          {r.aiSearch && (
+            <section className="au-card">
+              <div className="au-card-h">
+                <div><b>AI search access</b><span className="au-hint">Whether AI assistants such as ChatGPT and Perplexity may read your site, according to your robots.txt. This is a rules check, not traffic.</span></div>
+              </div>
+              <p className={r.aiSearch.every((b) => b.allowed) ? "au-ok" : "au-warn"}>
+                {r.aiSearch.every((b) => b.allowed)
+                  ? `All ${r.aiSearch.length} AI crawlers we checked are allowed in.`
+                  : `${r.aiSearch.filter((b) => !b.allowed).length} of ${r.aiSearch.length} AI crawlers are blocked by your robots.txt, so those assistants cannot read your site.`}
+              </p>
+              <div className="au-bots">
+                {r.aiSearch.map((b) => (
+                  <span key={b.bot} className={`au-bot ${b.allowed ? "ok" : "no"}`}>{b.allowed ? "✓" : "✕"} {b.label}</span>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {r.skipped.length > 0 && (
+            <section className="au-card">
+              <div className="au-card-h"><div><b>Not measured in this audit</b></div></div>
+              <ul className="au-skip">{r.skipped.map((s, n) => <li key={n}>{s}</li>)}</ul>
+            </section>
           )}
         </>
       )}
 
-      {/* ══════════════════════════════════════════ ISSUES ════════════════════════════════ */}
-      {tab === "issues" && (
-        <div className="lx-card2 p-4">
-          <div className="flex flex-wrap items-center gap-2 lx-audit-noprint">
+      {/* ═════════════════════════════════ ISSUES ═════════════════════════════════ */}
+      {show("issues") && (
+        <section className="au-card">
+          <p className="au-legend">
+            <span><i style={{ background: SEV_COLOR.block }} /> <b>Error</b> hurts ranking or blocks pages. Fix first.</span>
+            <span><i style={{ background: SEV_COLOR.warn }} /> <b>Warning</b> worth improving.</span>
+            <span><i style={{ background: "var(--lx-mut)" }} /> <b>Notice</b> for your information, no score impact.</span>
+          </p>
+          <div className="au-chips lx-audit-noprint">
             {chip(sevFilter === "all", `All ${allIssues.length}`, () => setSevFilter("all"))}
             {chip(sevFilter === "block", `Errors ${bySev("block").length}`, () => setSevFilter("block"), "#f87171")}
             {chip(sevFilter === "warn", `Warnings ${bySev("warn").length}`, () => setSevFilter("warn"), "#fbbf24")}
             {chip(sevFilter === "info", `Notices ${bySev("info").length}`, () => setSevFilter("info"))}
           </div>
           {issueCategories.length > 1 && (
-            <div className="mt-2 flex flex-wrap items-center gap-2 lx-audit-noprint">
-              {chip(catFilter === "all", "All categories", () => setCatFilter("all"))}
+            <div className="au-chips lx-audit-noprint">
+              {chip(catFilter === "all", "All areas", () => setCatFilter("all"))}
               {issueCategories.map((c) => chip(catFilter === c, `${c} ${allIssues.filter((i) => (i.category ?? "Other") === c).length}`, () => setCatFilter(c)))}
             </div>
           )}
@@ -789,113 +726,99 @@ export default function AuditSection() {
             const group = filteredIssues.filter((i) => i.severity === s);
             if (!group.length) return null;
             return (
-              <div key={s} className="mt-4">
-                <div className="flex items-center gap-2 pb-2" style={{ borderBottom: `2px solid ${SEV_COLOR[s]}` }}>
-                  <b className="lx-12">{SEV_LABEL[s]}s</b>
-                  <span className="lx-11 lx-mut">({group.length})</span>
-                </div>
-                <div className="mt-2 grid grid-cols-1 gap-2">
-                  {group.map((i) => <IssueRow key={i.id} issue={i} onPages={() => setPagesModal(i)} onFix={() => setFixModal(i)} />)}
-                </div>
+              <div key={s} className="au-group">
+                <div className="au-group-h" style={{ borderColor: SEV_COLOR[s] }}><b>{SEV_LABEL[s]}s</b><span>{group.length}</span></div>
+                <div className="au-list">{group.map(issueCard)}</div>
               </div>
             );
           })}
-          {filteredIssues.length === 0 && <p className="lx-11 lx-mut mt-4">No issues match this filter.</p>}
-        </div>
+          {filteredIssues.length === 0 && <p className="au-mut" style={{ marginTop: 16 }}>{allIssues.length === 0 ? "Nothing found. Every check passed." : "No issues match these filters."}</p>}
+        </section>
       )}
 
-      {/* ══════════════════════════════════════════ CRAWLED PAGES ═════════════════════════ */}
-      {tab === "pages" && (
-        <div className="lx-card2 p-4">
+      {/* ═════════════════════════════════ PAGES ═════════════════════════════════ */}
+      {show("pages") && (
+        <section className="au-card">
           {pages.length === 0 ? (
-            <p className="lx-11 lx-mut">Not on file for this report — the next audit will include a full page-by-page breakdown.</p>
+            <p className="au-mut">Not on file for this report. The next audit will include a full page-by-page list.</p>
           ) : (
             <>
-              <div className="flex flex-wrap items-center gap-2 lx-audit-noprint">
-                {chip(bucketFilter === "all", `All ${pages.length}`, () => setBucketFilter("all"))}
-                {BUCKET_ORDER.map((b) => chip(bucketFilter === b, `${b} ${bucketCount(b)}`, () => setBucketFilter(b), BUCKET_COLOR[b]))}
+              <input className="au-search lx-audit-noprint" type="search" placeholder="Search pages by address…" value={pageQuery} onChange={(e) => { setPageQuery(e.target.value); setPageLimit(PAGE_STEP); }} aria-label="Search pages" />
+              <div className="au-chips lx-audit-noprint">
+                {chip(bucketFilter === "all", `All ${pages.length}`, () => { setBucketFilter("all"); setPageLimit(PAGE_STEP); })}
+                {BUCKET_ORDER.map((b) => chip(bucketFilter === b, `${BUCKET_LABEL[b]} ${bucketCount(b)}`, () => { setBucketFilter(b); setPageLimit(PAGE_STEP); }, BUCKET_COLOR[b]))}
               </div>
-              <div className="lx-scroll mt-3" style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 560 }}>
-                  <thead>
-                    <tr className="lx-10 lx-mut" style={{ textAlign: "left" }}>
-                      <th style={{ padding: "6px 8px", fontWeight: 600 }}>URL</th>
-                      <th style={{ padding: "6px 8px", fontWeight: 600, whiteSpace: "nowrap" }}>Status</th>
-                      <th style={{ padding: "6px 8px", fontWeight: 600, whiteSpace: "nowrap" }}>Health</th>
-                      <th style={{ padding: "6px 8px", fontWeight: 600, whiteSpace: "nowrap" }}>Response</th>
-                      <th style={{ padding: "6px 8px", fontWeight: 600 }}>Redirects to</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pages.filter((p) => bucketFilter === "all" || bucketOf(p) === bucketFilter).map((p) => {
-                      const b = bucketOf(p);
-                      return (
-                        <tr key={p.url} style={{ borderTop: "1px solid var(--lx-border)" }}>
-                          <td className="lx-11" style={{ padding: "8px", wordBreak: "break-all" }}>
-                            <a href={p.url} target="_blank" rel="noreferrer noopener" className="underline" style={{ color: "var(--lx-cyan)" }}>{p.url}</a>
-                          </td>
-                          <td className="lx-11 lx-mut" style={{ padding: "8px", whiteSpace: "nowrap" }}>{p.status ?? "—"}</td>
-                          <td className="lx-10" style={{ padding: "8px", whiteSpace: "nowrap" }}>
-                            <span className="rounded-full px-2 py-0.5 font-semibold" style={{ color: BUCKET_COLOR[b], border: `1px solid ${BUCKET_COLOR[b]}` }}>{b}</span>
-                          </td>
-                          <td className="lx-11 lx-mut" style={{ padding: "8px", whiteSpace: "nowrap" }}>{p.ms != null ? `${p.ms} ms` : "—"}</td>
-                          <td className="lx-10 lx-mut" style={{ padding: "8px", wordBreak: "break-all" }}>{p.redirectedTo ?? "—"}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+              <div className="au-prow au-prow-h"><span>Page</span><span>Status</span><span>Health</span><span>Response</span></div>
+              <div className="au-plist">
+                {filteredPages.slice(0, printing ? filteredPages.length : pageLimit).map((p) => {
+                  const b = bucketOf(p);
+                  return (
+                    <div key={p.url} className="au-prow">
+                      <span className="au-pcell">
+                        <a href={p.url} target="_blank" rel="noreferrer noopener" className="au-url">{p.url}</a>
+                        {p.redirectedTo && <small>Redirects to {p.redirectedTo}</small>}
+                        {p.error && <small className="au-err">{p.error}</small>}
+                      </span>
+                      <span className="au-pm"><em>Status</em>{p.status ?? "—"}</span>
+                      <span className="au-pm"><em>Health</em><span className="au-badge" style={{ color: BUCKET_COLOR[b], borderColor: BUCKET_COLOR[b] }}>{BUCKET_LABEL[b]}</span></span>
+                      <span className="au-pm"><em>Response</em>{p.ms != null ? `${p.ms} ms` : "—"}</span>
+                    </div>
+                  );
+                })}
               </div>
+              {filteredPages.length === 0 && <p className="au-mut" style={{ marginTop: 12 }}>No pages match.</p>}
+              {filteredPages.length > pageLimit && (
+                <button className="au-btn au-block lx-audit-noprint" onClick={() => setPageLimit((n) => n + PAGE_STEP)}>
+                  Show more ({filteredPages.length - pageLimit} left)
+                </button>
+              )}
             </>
           )}
-        </div>
+        </section>
       )}
 
-      {/* ══════════════════════════════════════════ STATISTICS ════════════════════════════ */}
-      {tab === "statistics" && (() => {
-        // Every distribution here is a count of REAL crawled pages in a bucket — the same
-        // numbers the checks judged, stored per page since 2026-09-05. An older report has the
-        // status/response columns but not the per-page measurements, and says so per card.
+      {/* ═════════════════════════════════ INSIGHTS ═════════════════════════════════ */}
+      {show("statistics") && (() => {
+        // Every distribution is a count of REAL crawled pages in a bucket, the same numbers the
+        // checks judged. An older report has status/response but not the per-page measurements.
         const html = pages.filter((p) => typeof p.titleChars === "number");
         const hasStats = html.length > 0;
-        const notOnFile = "Not on file for this report — the next audit records it per page.";
+        const notOnFile = "Not on file for this report. The next audit records it per page.";
         const statusRows = [
           { label: "200 OK", count: pages.filter((p) => p.status != null && p.status >= 200 && p.status < 300).length, color: BUCKET_COLOR.Healthy },
           { label: "3xx redirect", count: pages.filter((p) => p.status != null && p.status >= 300 && p.status < 400).length, color: BUCKET_COLOR.Redirects },
-          { label: "4xx client error", count: pages.filter((p) => p.status != null && p.status >= 400 && p.status < 500).length, color: BUCKET_COLOR.Broken },
+          { label: "4xx not found / denied", count: pages.filter((p) => p.status != null && p.status >= 400 && p.status < 500).length, color: BUCKET_COLOR.Broken },
           { label: "5xx server error", count: pages.filter((p) => p.status != null && p.status >= 500).length, color: BUCKET_COLOR.Broken },
           { label: "Unreachable", count: pages.filter((p) => p.status == null).length, color: BUCKET_COLOR.Blocked },
         ];
         const avgMs = avg(pages.map((p) => p.ms));
         return (
           <>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-              <StatTile label="Pages crawled" value={String(pages.length || r.pagesChecked)} />
-              <StatTile label="Healthy" value={pages.length ? `${Math.round((bucketCount("Healthy") / pages.length) * 100)}%` : "—"} sub={pages.length ? `${bucketCount("Healthy")} of ${pages.length}` : undefined} />
-              <StatTile label="Errors" value={String(r.blocks)} color="#f87171" />
-              <StatTile label="Warnings" value={String(r.warns)} color="#fbbf24" />
-              <StatTile label="Notices" value={String(notices)} />
-              <StatTile label="Avg. response" value={avgMs != null ? `${avgMs} ms` : "—"} sub="time to first byte" />
+            <div className="au-kpis">
+              <Kpi label="Pages visited" value={String(pages.length || r.pagesChecked)} />
+              <Kpi label="Healthy pages" value={pages.length ? `${Math.round((bucketCount("Healthy") / pages.length) * 100)}%` : "—"} sub={pages.length ? `${bucketCount("Healthy")} of ${pages.length}` : undefined} color="#34d399" />
+              <Kpi label="Avg. response" value={avgMs != null ? `${avgMs} ms` : "—"} sub="time to first byte" />
+              <Kpi label="Notices" value={String(notices)} sub="no score impact" />
             </div>
             {pages.length === 0 ? (
-              <div className="lx-card2 p-4"><p className="lx-11 lx-mut">{notOnFile}</p></div>
+              <section className="au-card"><p className="au-mut">{notOnFile}</p></section>
             ) : (
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                <Distribution title="Status codes" note="Every crawled URL, by what the server answered." rows={statusRows} />
+              <div className="au-two">
+                <Distribution title="What the server answered" note="Every visited page, by response." rows={statusRows} />
                 <Distribution
                   title="Response time"
-                  note="Time to first byte per page. Over 1.5 s is the slow-response line."
+                  note="Time until the server starts answering. Over 1.5 s is slow."
                   rows={bucketBy(pages, (p) => p.ms, [
                     { label: "Under 200 ms", test: (n) => n < 200 },
-                    { label: "200–500 ms", test: (n) => n < 500 },
-                    { label: "500 ms – 1 s", test: (n) => n < 1000 },
-                    { label: "1 – 1.5 s", test: (n) => n <= 1500 },
+                    { label: "200 to 500 ms", test: (n) => n < 500 },
+                    { label: "500 ms to 1 s", test: (n) => n < 1000 },
+                    { label: "1 to 1.5 s", test: (n) => n <= 1500 },
                     { label: "Over 1.5 s", test: () => true },
                   ])}
                 />
                 <Distribution
-                  title="Click depth"
-                  note="Clicks from the home page over internal links. Past 3 is the deep-page line."
+                  title="Clicks from the home page"
+                  note="Pages more than 3 clicks deep are hard to find."
                   empty={hasStats ? undefined : notOnFile}
                   rows={bucketBy(html, (p) => p.depth, [
                     { label: "Home page", test: (n) => n === 0 },
@@ -906,56 +829,56 @@ export default function AuditSection() {
                   ], "No link path from home")}
                 />
                 <Distribution
-                  title="Incoming internal links"
-                  note="How many other pages link to each page. Zero is an orphan."
+                  title="Links pointing to each page"
+                  note="From other pages of your site. Zero means nobody links to it."
                   empty={hasStats ? undefined : notOnFile}
                   rows={bucketBy(html, (p) => p.inLinks, [
                     { label: "0 (orphan)", test: (n) => n === 0 },
                     { label: "1", test: (n) => n === 1 },
-                    { label: "2 – 5", test: (n) => n <= 5 },
-                    { label: "6 – 20", test: (n) => n <= 20 },
+                    { label: "2 to 5", test: (n) => n <= 5 },
+                    { label: "6 to 20", test: (n) => n <= 20 },
                     { label: "21+", test: () => true },
                   ])}
                 />
                 <Distribution
                   title="Title length"
-                  note="Characters in <title>. Under 30 is short, over 65 is cut off in search results."
+                  note="Characters in the page title. Under 30 is short, over 65 gets cut off in Google."
                   empty={hasStats ? undefined : notOnFile}
                   rows={bucketBy(html, (p) => p.titleChars, [
                     { label: "Missing", test: (n) => n === 0 },
-                    { label: "1 – 29 (short)", test: (n) => n < 30 },
-                    { label: "30 – 65", test: (n) => n <= 65 },
+                    { label: "1 to 29 (short)", test: (n) => n < 30 },
+                    { label: "30 to 65 (good)", test: (n) => n <= 65 },
                     { label: "66+ (long)", test: () => true },
                   ])}
                 />
                 <Distribution
                   title="Description length"
-                  note="Characters in the meta description. Google shows roughly the first 160."
+                  note="Characters in the meta description. Google shows about the first 160."
                   empty={hasStats ? undefined : notOnFile}
                   rows={bucketBy(html, (p) => p.descriptionChars, [
                     { label: "Missing", test: (n) => n === 0 },
-                    { label: "1 – 69", test: (n) => n < 70 },
-                    { label: "70 – 160", test: (n) => n <= 160 },
-                    { label: "161+", test: () => true },
+                    { label: "1 to 69 (short)", test: (n) => n < 70 },
+                    { label: "70 to 160 (good)", test: (n) => n <= 160 },
+                    { label: "161+ (long)", test: () => true },
                   ])}
                 />
                 <Distribution
-                  title="Word count"
-                  note="Visible words per page, site furniture removed. Under 150 is thin; over 4,000 is too long for AI answers."
+                  title="Words per page"
+                  note="Under 150 words is thin content."
                   empty={hasStats ? undefined : notOnFile}
                   rows={bucketBy(html, (p) => p.words, [
                     { label: "Under 150 (thin)", test: (n) => n < 150 },
-                    { label: "150 – 500", test: (n) => n < 500 },
-                    { label: "500 – 1,500", test: (n) => n < 1500 },
-                    { label: "1,500 – 4,000", test: (n) => n <= 4000 },
+                    { label: "150 to 500", test: (n) => n < 500 },
+                    { label: "500 to 1,500", test: (n) => n < 1500 },
+                    { label: "1,500 to 4,000", test: (n) => n <= 4000 },
                     { label: "Over 4,000", test: () => true },
                   ])}
                 />
                 <Distribution
-                  title="Issues by category"
-                  note="Distinct checks that fired in each category — the same rows the Issues tab lists."
+                  title="Issue types by area"
+                  note="Number of different problems found in each area."
                   rows={issueCategories.map((c) => ({ label: c, count: allIssues.filter((i) => (i.category ?? "Other") === c).length }))}
-                  unit="checks"
+                  unit="issue types"
                 />
               </div>
             )}
@@ -963,18 +886,9 @@ export default function AuditSection() {
         );
       })()}
 
-      {/* ══════════════════════════════════════════ COMPARE CRAWLS ════════════════════════ */}
-      {tab === "compare" && (() => {
+      {/* ═════════════════════════════════ HISTORY ═════════════════════════════════ */}
+      {tab === "history" && (() => {
         const older = history.filter((h) => h.id !== r.id);
-        if (!older.length) {
-          return (
-            <div className="lx-card2 flex flex-col items-center gap-2 p-8 text-center">
-              <div className="text-2xl">🔁</div>
-              <b className="lx-12">Nothing to compare yet</b>
-              <p className="lx-11 lx-mut" style={{ maxWidth: 460 }}>A comparison needs two runs. The next audit — yours or the weekly one — will show what got fixed and what is new.</p>
-            </div>
-          );
-        }
         const a = compareRun;
         const latestById = new Map(allIssues.map((i) => [i.id, i]));
         const olderById = new Map((a?.issues ?? []).map((i) => [i.id, i]));
@@ -987,215 +901,459 @@ export default function AuditSection() {
         };
         return (
           <>
-            <div className="lx-card2 flex flex-wrap items-center gap-3 px-4 py-3 lx-audit-noprint">
-              <b className="lx-12">Compare this run with</b>
-              <select
-                className="lx-11 rounded-md px-2 py-1"
-                style={{ background: "transparent", border: "1px solid var(--lx-border)", color: "var(--lx-text)" }}
-                value={compareId ?? ""}
-                onChange={(e) => setCompareId(e.target.value || null)}
-              >
-                {[...older].reverse().map((h) => (
-                  <option key={h.id} value={h.id}>
-                    {new Date(h.createdAt).toLocaleString()} · score {h.score}{h.trigger ? ` · ${TRIGGER_LABEL[h.trigger]}` : ""}
-                  </option>
-                ))}
-              </select>
-              <span className="lx-10 lx-mut">This run: {new Date(r.createdAt).toLocaleString()}</span>
+            <div className="au-three">
+              <section className="au-card">
+                <div className="au-card-h"><div><b>Site Health over time</b></div></div>
+                <b className="au-big" style={{ color: "var(--lx-violet)" }}>{r.score}</b>
+                {history.length > 1 ? <AreaTrend points={history.map((h) => h.score)} color="#8b5cf6" /> : <p className="au-mut">One audit so far. A trend needs two.</p>}
+              </section>
+              <SeverityCard label="Errors" sub="types of problem, over time" count={r.blocks} color="#f87171" points={history.map((h) => h.blocks)} />
+              <SeverityCard label="Warnings" sub="types of problem, over time" count={r.warns} color="#fbbf24" points={history.map((h) => h.warns)} />
             </div>
-            {compareError && <div className="lx-card2 p-4"><p className="lx-11" style={{ color: "#f87171" }}>{compareError}</p></div>}
-            {!a && !compareError && <div className="lx-card2 p-4"><p className="lx-11 lx-mut">Loading that run…</p></div>}
-            {a && (
-              <>
-                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                  <StatTile label="Site Health" value={`${a.score} → ${r.score}`} sub={delta(r.score, a.score)} />
-                  <StatTile label="Errors" value={`${a.blocks} → ${r.blocks}`} sub={delta(r.blocks, a.blocks)} color="#f87171" />
-                  <StatTile label="Warnings" value={`${a.warns} → ${r.warns}`} sub={delta(r.warns, a.warns)} color="#fbbf24" />
-                  <StatTile label="Pages crawled" value={`${a.pagesChecked} → ${r.pagesChecked}`} sub={delta(r.pagesChecked, a.pagesChecked)} />
-                </div>
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                  <div className="lx-card2 p-4">
-                    <b className="lx-12" style={{ color: "#34d399" }}>Fixed since then</b>
-                    <span className="lx-11 lx-mut ml-2">({fixed.length})</span>
-                    <div className="mt-3 grid grid-cols-1 gap-2">
-                      {fixed.length ? fixed.map((i) => <CompareRow key={i.id} severity={i.severity} what={i.what} category={i.category ?? undefined} note={`was ${i.count} ${i.count === 1 ? "page" : "pages"}`} />) : <p className="lx-11 lx-mut">Nothing from that run has gone away.</p>}
-                    </div>
-                  </div>
-                  <div className="lx-card2 p-4">
-                    <b className="lx-12" style={{ color: "#f87171" }}>New since then</b>
-                    <span className="lx-11 lx-mut ml-2">({fresh.length})</span>
-                    <div className="mt-3 grid grid-cols-1 gap-2">
-                      {fresh.length ? fresh.map((i) => <IssueRow key={i.id} issue={i} onPages={() => setPagesModal(i)} onFix={() => setFixModal(i)} />) : <p className="lx-11 lx-mut">No new kinds of issue.</p>}
-                    </div>
-                  </div>
-                </div>
-                <div className="lx-card2 p-4">
-                  <b className="lx-12">Still open</b>
-                  <span className="lx-11 lx-mut ml-2">({still.length}) — page counts then → now</span>
-                  <div className="mt-3 grid grid-cols-1 gap-2">
-                    {still.length ? (
-                      still.map((i) => {
-                        const then = olderById.get(i.id)!.count;
-                        return <CompareRow key={i.id} severity={i.severity} what={i.what} category={i.category} note={`${then} → ${i.count} ${i.count === 1 ? "page" : "pages"}${then === i.count ? "" : ` (${delta(i.count, then)})`}`} onClick={i.pages?.length ? () => setPagesModal(i) : undefined} />;
-                      })
-                    ) : (
-                      <p className="lx-11 lx-mut">Nothing carried over.</p>
-                    )}
-                  </div>
-                </div>
-              </>
-            )}
+
+            <section className="au-card">
+              <div className="au-card-h"><div><b>What changed since an earlier audit</b></div></div>
+              {!older.length ? (
+                <p className="au-mut">A comparison needs two audits. After the next one (yours or the weekly one) this shows what got fixed and what is new.</p>
+              ) : (
+                <>
+                  <label className="au-cmp lx-audit-noprint">
+                    <span>Compare with</span>
+                    <select value={compareId ?? ""} onChange={(e) => setCompareId(e.target.value || null)}>
+                      {[...older].reverse().map((h) => (
+                        <option key={h.id} value={h.id}>{new Date(h.createdAt).toLocaleDateString()} · score {h.score}{h.trigger ? ` · ${TRIGGER_LABEL[h.trigger]}` : ""}</option>
+                      ))}
+                    </select>
+                  </label>
+                  {compareError && <p className="au-warn">{compareError}</p>}
+                  {!a && !compareError && <p className="au-mut">Loading that audit…</p>}
+                  {a && (
+                    <>
+                      <div className="au-kpis">
+                        <Kpi label="Site Health" value={`${a.score} → ${r.score}`} sub={delta(r.score, a.score)} />
+                        <Kpi label="Errors" value={`${a.blocks} → ${r.blocks}`} sub={delta(r.blocks, a.blocks)} color="#f87171" />
+                        <Kpi label="Warnings" value={`${a.warns} → ${r.warns}`} sub={delta(r.warns, a.warns)} color="#fbbf24" />
+                        <Kpi label="Pages checked" value={`${a.pagesChecked} → ${r.pagesChecked}`} sub={delta(r.pagesChecked, a.pagesChecked)} />
+                      </div>
+                      <div className="au-group"><div className="au-group-h" style={{ borderColor: "#34d399" }}><b>Fixed</b><span>{fixed.length}</span></div>
+                        <div className="au-list">{fixed.length ? fixed.map((i) => <CompareRow key={i.id} severity={i.severity} what={i.what} category={i.category ?? undefined} note={`was on ${i.count} ${i.count === 1 ? "page" : "pages"}`} />) : <p className="au-mut">Nothing from that audit has gone away.</p>}</div></div>
+                      <div className="au-group"><div className="au-group-h" style={{ borderColor: "#f87171" }}><b>New</b><span>{fresh.length}</span></div>
+                        <div className="au-list">{fresh.length ? fresh.map(issueCard) : <p className="au-mut">No new kinds of problem.</p>}</div></div>
+                      <div className="au-group"><div className="au-group-h" style={{ borderColor: "var(--lx-mut)" }}><b>Still open</b><span>{still.length}</span></div>
+                        <div className="au-list">{still.length ? still.map((i) => {
+                          const then = olderById.get(i.id)!.count;
+                          return <CompareRow key={i.id} severity={i.severity} what={i.what} category={i.category} note={`${then} → ${i.count} ${i.count === 1 ? "page" : "pages"}${then === i.count ? "" : ` (${delta(i.count, then)})`}`} onClick={i.pages?.length ? () => setPagesModal(i) : undefined} />;
+                        }) : <p className="au-mut">Nothing carried over.</p>}</div></div>
+                    </>
+                  )}
+                </>
+              )}
+            </section>
+
+            <section className="au-card">
+              <div className="au-card-h"><div><b>Every audit</b><span className="au-hint">{history.length} run{history.length === 1 ? "" : "s"}, newest first.</span></div></div>
+              <HistoryTable rows={history} />
+            </section>
           </>
         );
       })()}
 
-      {/* ══════════════════════════════════════════ PROGRESS ══════════════════════════════ */}
-      {tab === "progress" && (
-        <>
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <div className="lx-card2 p-4">
-              <b className="lx-12">Site Health over time</b>
-              <b className="mt-1 block font-extrabold leading-none" style={{ fontSize: 34, color: "var(--lx-violet)" }}>{r.score}</b>
-              {history.length > 1 ? <AreaTrend points={history.map((h) => h.score)} color="#8b5cf6" /> : <p className="lx-10 lx-mut mt-2">One run so far — a trend needs two.</p>}
-            </div>
-            <SeverityCard label="Errors" sub="over time" count={r.blocks} color="#f87171" points={history.map((h) => h.blocks)} />
-            <SeverityCard label="Warnings" sub="over time" count={r.warns} color="#fbbf24" points={history.map((h) => h.warns)} />
-          </div>
-          <div className="lx-card2 p-4">
-            <b className="lx-12">Every run</b>
-            <HistoryTable rows={history} />
-          </div>
-        </>
-      )}
-
       {pagesModal && <PagesModal issue={pagesModal} pages={pages} onClose={() => setPagesModal(null)} />}
-      {fixModal && <FixModal issue={fixModal} onClose={() => setFixModal(null)} onPages={() => { setPagesModal(fixModal); setFixModal(null); }} />}
-      {historyModal && <HistoryModal rows={history} onClose={() => setHistoryModal(false)} />}
     </div>
   );
 }
 
-/** One issue, Semrush's own row: severity edge, the issue + its real page-count as one
- *  clickable line, a separate "How to fix" link on the right. Shared by the Overview's top-5
- *  and the Issues tab so the two can never drift. */
-function IssueRow({ issue: i, onPages, onFix }: { issue: Issue; onPages: () => void; onFix: () => void }) {
+const BUCKET_LABEL: Record<Bucket, string> = { Healthy: "Healthy", Broken: "Broken", "Have issues": "Have issues", Redirects: "Redirects", Blocked: "Blocked" };
+const BUCKET_HELP: Record<Bucket, string> = {
+  Healthy: "No errors or warnings",
+  Broken: "Not found, server error or unreachable",
+  "Have issues": "Errors or warnings on the page",
+  Redirects: "Send visitors to another address",
+  Blocked: "Blocked for Google by robots.txt",
+};
+const PAGE_STEP = 40;
+
+/** "3 hours ago" / "yesterday" / a date, so the report's age is obvious without reading a
+ *  timestamp. Past a week it is the plain date. */
+function ago(iso: string): string {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "";
+  const mins = Math.round((Date.now() - t) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} hour${hrs === 1 ? "" : "s"} ago`;
+  const days = Math.round(hrs / 24);
+  if (days < 8) return days === 1 ? "yesterday" : `${days} days ago`;
+  return `on ${new Date(t).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`;
+}
+
+/** Mean to `dp` decimals of whatever pages actually measured. Needed for CLS (0.05 must not be
+ *  rounded to a whole number the way `avg` does it). */
+function avgDec(nums: (number | null)[], dp: number): number | null {
+  const real = nums.filter((n): n is number => typeof n === "number");
+  if (!real.length) return null;
+  const k = 10 ** dp;
+  return Math.round((real.reduce((a, b) => a + b, 0) / real.length) * k) / k;
+}
+
+function Kpi({ label, value, sub, color, onClick }: { label: string; value: string; sub?: string; color?: string; onClick?: () => void }) {
+  const inner = (
+    <>
+      <span className="au-k-l">{label}</span>
+      <b className="au-k-v" style={color ? { color } : undefined}>{value}</b>
+      {sub && <span className="au-k-s">{sub}</span>}
+    </>
+  );
+  return onClick ? <button className="au-kpi au-kpi-btn" onClick={onClick}>{inner}</button> : <div className="au-kpi">{inner}</div>;
+}
+
+/** One finding, as an accordion: what is wrong and how many pages, and on tap the plain fix and
+ *  a way to the affected pages. Used by Overview, Issues and History so they cannot drift. */
+function IssueCard({ issue: i, open, onToggle, onPages }: { issue: Issue; open: boolean; onToggle: () => void; onPages: () => void }) {
+  const n = i.pages?.length ? i.count : i.count > 1 ? i.count : 0;
   return (
-    <div className="rounded-lg py-2.5 pl-3 pr-3" style={{ borderLeft: `3px solid ${SEV_COLOR[i.severity]}`, background: "rgba(255,255,255,.02)" }}>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-        <span className="lx-10 shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 font-semibold" style={{ color: SEV_COLOR[i.severity], border: `1px solid ${SEV_COLOR[i.severity]}` }}>
-          {SEV_LABEL[i.severity]}
-        </span>
-        <button className="lx-11 min-w-0 flex-1 text-left" style={{ background: "transparent", border: "none", cursor: i.pages?.length ? "pointer" : "default", color: "#e6e6f2" }} onClick={() => i.pages?.length && onPages()}>
+    <div className={`au-issue ${open ? "open" : ""}`} style={{ borderLeftColor: SEV_COLOR[i.severity] }}>
+      <button className="au-issue-h" onClick={onToggle} aria-expanded={open}>
+        <span className="au-sev" style={{ color: SEV_COLOR[i.severity], borderColor: SEV_COLOR[i.severity] }}>{SEV_LABEL[i.severity]}</span>
+        <span className="au-issue-t">
           <b>{i.what}</b>
-          {i.pages?.length > 0 && (
-            <span className="ml-1.5 underline lx-audit-noprint" style={{ color: "var(--lx-cyan)" }}>
-              {i.count > i.pages.length ? `${i.pages.length} of ` : ""}{i.count} {i.count === 1 ? "page" : "pages"}
-            </span>
-          )}
-        </button>
-        {i.category && <span className="lx-10 lx-mut shrink-0">{i.category}</span>}
-        <button className="lx-10 shrink-0 underline lx-audit-noprint" style={{ background: "transparent", border: "none", cursor: "pointer", color: "var(--lx-violet)" }} onClick={onFix}>
-          How to fix
-        </button>
+          <small>{n > 0 ? `${n} ${n === 1 ? "page" : "pages"} affected` : "Affects the whole site"}{i.category ? ` · ${i.category}` : ""}</small>
+        </span>
+        <span className="au-chev" aria-hidden>{open ? "−" : "+"}</span>
+      </button>
+      <div className="au-fix">
+        <b>How to fix</b>
+        <p>{i.fix}</p>
+        {i.pages?.length > 0 && (
+          <>
+            <button className="au-btn au-btn-sm lx-audit-noprint" onClick={onPages}>See the {i.count > i.pages.length ? `first ${i.pages.length} of ${i.count}` : i.count} affected page{i.count === 1 ? "" : "s"}</button>
+            <ul className="au-print-pages">
+              {i.pages.map((p) => <li key={p}>{p}</li>)}
+              {i.count > i.pages.length && <li>…and {i.count - i.pages.length} more</li>}
+            </ul>
+          </>
+        )}
       </div>
-      {/* Printed report shows the fix and the pages inline — a PDF has no click. */}
-      <p className="lx-audit-print-only lx-11 mt-1.5" style={{ display: "none" }}>{i.fix}</p>
-      {i.pages?.length > 0 && (
-        <ul className="lx-audit-print-only mt-2 space-y-1" style={{ display: "none" }}>
-          {i.pages.map((p) => <li key={p} className="lx-11" style={{ wordBreak: "break-all" }}>{p}</li>)}
-          {i.count > i.pages.length && <li className="lx-10 lx-mut">…and {i.count - i.pages.length} more</li>}
-        </ul>
-      )}
     </div>
   );
 }
 
+
+/** Bottom sheet on a phone, centred card on a desktop. */
 function Modal({ label, onClose, children, maxWidth = 640 }: { label: string; onClose: () => void; children: React.ReactNode; maxWidth?: number }) {
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, [onClose]);
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.6)" }} onClick={onClose} role="dialog" aria-modal="true" aria-label={label}>
-      <div className="lx-card2 flex w-full flex-col p-5" style={{ maxWidth, maxHeight: "85vh" }} onClick={(e) => e.stopPropagation()}>
+    <div className="au-modal" onClick={onClose} role="dialog" aria-modal="true" aria-label={label}>
+      <style dangerouslySetInnerHTML={{ __html: AUDIT_CSS }} />
+      <div className="au-sheet" style={{ maxWidth }} onClick={(e) => e.stopPropagation()}>
         {children}
       </div>
     </div>
   );
 }
 
-/** "How to fix" — Semrush's own popup. Real content only: this app's own `fix` sentence for
- *  the check, its severity and category, and a way through to the affected pages. No invented
- *  "About the issue" paragraph — the check never produced one. */
-function FixModal({ issue: i, onClose, onPages }: { issue: Issue; onClose: () => void; onPages: () => void }) {
-  return (
-    <Modal label={`How to fix: ${i.what}`} onClose={onClose}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="lx-10 rounded-full px-2 py-0.5 font-semibold" style={{ color: SEV_COLOR[i.severity], border: `1px solid ${SEV_COLOR[i.severity]}` }}>{SEV_LABEL[i.severity]}</span>
-            {i.category && <span className="lx-10 lx-mut">{i.category}</span>}
-          </div>
-          <b className="lx-13 mt-2 block">{i.what}</b>
-        </div>
-        <button className="lx-icobtn shrink-0" onClick={onClose} aria-label="Close">✕</button>
-      </div>
-      <div className="mt-4 rounded-lg p-4" style={{ background: "rgba(139,92,246,.08)", border: "1px solid rgba(139,92,246,.25)" }}>
-        <b className="lx-11 block" style={{ color: "var(--lx-violet)" }}>How to fix</b>
-        <p className="lx-11 mt-1.5" style={{ lineHeight: 1.6 }}>{i.fix}</p>
-      </div>
-      {i.pages?.length > 0 && (
-        <button className="lx-ghost lx-11 mt-4 self-start" onClick={onPages}>
-          See the {i.count} affected page{i.count === 1 ? "" : "s"} →
-        </button>
-      )}
-    </Modal>
-  );
-}
-
 function HistoryTable({ rows }: { rows: HistoryRow[] }) {
   return (
-    <div className="lx-scroll mt-3" style={{ overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 420 }}>
-        <thead>
-          <tr className="lx-10 lx-mut" style={{ textAlign: "left" }}>
-            <th style={{ padding: "6px 8px", fontWeight: 600 }}>Date</th>
-            <th style={{ padding: "6px 8px", fontWeight: 600 }}>Triggered</th>
-            <th style={{ padding: "6px 8px", fontWeight: 600, whiteSpace: "nowrap" }}>Score</th>
-            <th style={{ padding: "6px 8px", fontWeight: 600, whiteSpace: "nowrap" }}>Errors</th>
-            <th style={{ padding: "6px 8px", fontWeight: 600, whiteSpace: "nowrap" }}>Warnings</th>
-            <th style={{ padding: "6px 8px", fontWeight: 600, whiteSpace: "nowrap" }}>Pages</th>
-          </tr>
-        </thead>
-        <tbody>
-          {[...rows].reverse().map((h) => (
-            <tr key={h.id} style={{ borderTop: "1px solid var(--lx-border)" }}>
-              <td className="lx-11" style={{ padding: "8px", color: "#e6e6f2", whiteSpace: "nowrap" }}>{new Date(h.createdAt).toLocaleString()}</td>
-              <td className="lx-11 lx-mut" style={{ padding: "8px" }}>{h.trigger ? TRIGGER_LABEL[h.trigger] : "—"}</td>
-              <td className="lx-11" style={{ padding: "8px", color: TONE_COLOR[tone(h.score)], fontWeight: 700 }}>{h.score}</td>
-              <td className="lx-11 lx-mut" style={{ padding: "8px" }}>{h.blocks}</td>
-              <td className="lx-11 lx-mut" style={{ padding: "8px" }}>{h.warns}</td>
-              <td className="lx-11 lx-mut" style={{ padding: "8px" }}>{h.pagesChecked}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="au-hist">
+      <div className="au-hrow au-hrow-h"><span>Date</span><span>Score</span><span>Errors</span><span>Warnings</span><span>Pages</span></div>
+      {[...rows].reverse().map((h) => (
+        <div key={h.id} className="au-hrow">
+          <span className="au-h-d">{new Date(h.createdAt).toLocaleString()}<small>{h.trigger ? TRIGGER_LABEL[h.trigger] : ""}</small></span>
+          <span><em>Score</em><b style={{ color: TONE_COLOR[tone(h.score)] }}>{h.score}</b></span>
+          <span><em>Errors</em>{h.blocks}</span>
+          <span><em>Warnings</em>{h.warns}</span>
+          <span><em>Pages</em>{h.pagesChecked}</span>
+        </div>
+      ))}
     </div>
   );
 }
 
-function HistoryModal({ rows, onClose }: { rows: HistoryRow[]; onClose: () => void }) {
+/** Every affected address for one finding, with what the server answered for it. */
+function PagesModal({ issue, pages, onClose }: { issue: Issue; pages: CrawledPage[]; onClose: () => void }) {
+  const byUrl = new Map(pages.map((p) => [p.url, p]));
   return (
-    <Modal label="Audit history" onClose={onClose} maxWidth={780}>
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <b className="lx-13">Audit history</b>
-          <p className="lx-11 lx-mut mt-1">{rows.length} run{rows.length === 1 ? "" : "s"} — manual and scheduled, newest first.</p>
+    <Modal label={issue.what} onClose={onClose} maxWidth={760}>
+      <div className="au-sheet-h">
+        <div className="min-w-0">
+          <b>{issue.what}</b>
+          <p>{issue.count} page{issue.count === 1 ? "" : "s"} affected{issue.fix ? `. ${issue.fix}` : ""}</p>
         </div>
-        <button className="lx-icobtn shrink-0" onClick={onClose} aria-label="Close">✕</button>
+        <button className="au-x" onClick={onClose} aria-label="Close">✕</button>
       </div>
-      <div className="lx-scroll flex-1" style={{ overflowY: "auto" }}>
-        <HistoryTable rows={rows} />
+      <div className="lx-scroll au-sheet-b">
+        {issue.pages.map((url) => {
+          const p = byUrl.get(url);
+          return (
+            <div key={url} className="au-prow au-prow-m">
+              <span className="au-pcell">
+                <a href={url} target="_blank" rel="noreferrer noopener" className="au-url">{url}</a>
+                {p?.redirectedTo && <small>Redirects to {p.redirectedTo}</small>}
+              </span>
+              <span className="au-pm"><em>Status</em>{p?.status ?? "—"}</span>
+            </div>
+          );
+        })}
+        {issue.count > issue.pages.length && <p className="au-mut" style={{ marginTop: 10 }}>…and {issue.count - issue.pages.length} more not listed individually (the report keeps the first {issue.pages.length}).</p>}
       </div>
     </Modal>
   );
 }
+
+/** Errors / Warnings card for the History tab: the big number plus its trend. */
+function SeverityCard({ label, sub, count, color, points }: { label: string; sub: string; count: number; color: string; points: number[] }) {
+  return (
+    <section className="au-card">
+      <div className="au-card-h"><div><b><i className="au-dot" style={{ background: color }} /> {label}</b><span className="au-hint">{sub}</span></div></div>
+      <b className="au-big" style={{ color }}>{count}</b>
+      {points.length > 1 ? <AreaTrend points={points} color={color} /> : <p className="au-mut">One audit so far. A trend needs two.</p>}
+    </section>
+  );
+}
+
+/** A distribution as a bar list: count and share beside each bar, the full label on hover. */
+function Distribution({ title, note, rows, empty, unit = "pages" }: { title: string; note?: string; rows: { label: string; count: number; color?: string }[]; empty?: string; unit?: string }) {
+  const total = rows.reduce((a, b) => a + b.count, 0);
+  const max = Math.max(1, ...rows.map((x) => x.count));
+  return (
+    <section className="au-card">
+      <div className="au-card-h"><div><b>{title}</b>{note && <span className="au-hint">{note}</span>}</div></div>
+      {empty ? (
+        <p className="au-mut">{empty}</p>
+      ) : (
+        <ul className="au-dist">
+          {rows.map((x) => (
+            <li key={x.label} title={`${x.label}: ${x.count} of ${total} ${unit}`}>
+              <span className="au-d-l">{x.label}</span>
+              <span className="au-d-b"><i style={{ width: `${(x.count / max) * 100}%`, background: x.color ?? "var(--lx-violet)" }} /></span>
+              <b>{x.count}</b>
+              <small>{total ? Math.round((x.count / total) * 100) : 0}%</small>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function CompareRow({ severity, what, category, note, onClick }: { severity: Severity; what: string; category?: string; note: string; onClick?: () => void }) {
+  return (
+    <div className="au-issue" style={{ borderLeftColor: SEV_COLOR[severity] }}>
+      <button className="au-issue-h" onClick={onClick} style={{ cursor: onClick ? "pointer" : "default" }}>
+        <span className="au-sev" style={{ color: SEV_COLOR[severity], borderColor: SEV_COLOR[severity] }}>{SEV_LABEL[severity]}</span>
+        <span className="au-issue-t"><b>{what}</b><small>{note}{category ? ` · ${category}` : ""}</small></span>
+      </button>
+    </div>
+  );
+}
+
+/** `good` null = no number was measured: shown as exactly that, never as "Needs work". */
+function VitalTile({ label, short, value, good, hint }: { label: string; short: string; value: string; good: boolean | null; hint?: string }) {
+  const color = good === null ? "var(--lx-mut)" : good ? "#34d399" : "#fbbf24";
+  return (
+    <div className="au-vital">
+      <span className="au-k-l">{label} <small>({short})</small></span>
+      <b className="au-k-v" style={{ color }}>{value}</b>
+      <span className="au-v-s" style={{ color }}>{good === null ? "Not measured" : good ? "Good" : "Needs work"}</span>
+      {hint && <span className="au-k-s">{hint}</span>}
+    </div>
+  );
+}
+
+/* One stylesheet for the whole page, on the theme tokens (so light and dark both work), mobile
+   first: one column on a phone, two or three from 720px. Injected with dangerouslySetInnerHTML
+   because React escapes ">" inside a <style> text child. */
+const AUDIT_CSS = `
+.au-page{display:flex;flex-direction:column;gap:14px;min-width:0;max-width:1100px;margin:0 auto;width:100%}
+.au-page *{box-sizing:border-box}
+.au-head{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:12px}
+.au-h1{font-size:20px;font-weight:700;letter-spacing:-.01em;line-height:1.25;color:var(--lx-text);overflow-wrap:anywhere}
+.au-domain{color:var(--lx-violet)}
+.au-sub{margin-top:4px;font-size:12.5px;line-height:1.5;color:var(--lx-mut);max-width:620px}
+.au-actions{display:flex;gap:8px;flex-wrap:wrap}
+.au-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:36px;padding:0 14px;border-radius:9px;
+  background:var(--lx-in);border:1px solid var(--lx-border);color:var(--lx-text);font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;transition:.15s}
+.au-btn:hover:not(:disabled){border-color:var(--lx-sel-border)}
+.au-btn:disabled{opacity:.55;cursor:not-allowed}
+.au-btn-pri{background:#4f46e5;border-color:#6366f1;color:#fff}
+.au-btn-pri:hover:not(:disabled){background:#5b52ea;border-color:#818cf8}
+.au-btn-sm{height:32px;padding:0 12px;font-size:12px}
+.au-block{width:100%;margin-top:12px}
+.au-link{background:none;border:none;padding:0;margin-top:8px;font-size:12px;font-weight:600;color:#8f95ff;cursor:pointer;text-align:left}
+.au-link:hover{text-decoration:underline}
+.au-tabs{display:flex;gap:4px;overflow-x:auto;border-bottom:1px solid var(--lx-border);position:sticky;top:-1px;z-index:5;background:var(--lx-bg);scrollbar-width:none}
+.au-tabs::-webkit-scrollbar{display:none}
+.au-tab{flex-shrink:0;display:inline-flex;align-items:center;gap:6px;height:42px;padding:0 14px;background:none;border:none;border-bottom:2px solid transparent;
+  color:var(--lx-mut);font-size:13px;font-weight:600;cursor:pointer;margin-bottom:-1px}
+.au-tab:hover{color:var(--lx-text)}
+.au-tab.on{color:var(--lx-text);border-bottom-color:#818cf8}
+.au-tab-n{padding:1px 7px;border-radius:999px;background:var(--lx-in);font-size:10.5px;color:var(--lx-mut)}
+.au-page{--au-line:color-mix(in srgb,var(--lx-text) 13%,transparent)}
+.au-card{padding:16px;border-radius:14px;background:var(--lx-card);border:1px solid var(--au-line);min-width:0}
+.au-card-h{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:12px}
+.au-card-h b{font-size:14px;font-weight:700;color:var(--lx-text);display:block}
+.au-hint{display:block;margin-top:3px;font-size:12px;line-height:1.5;color:var(--lx-mut);font-weight:400}
+.au-mut{font-size:12.5px;line-height:1.55;color:var(--lx-mut)}
+.au-ok{font-size:13px;line-height:1.5;color:#34d399;font-weight:600}
+.au-warn{font-size:12.5px;line-height:1.55;color:#fbbf24}
+.au-empty{display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;padding:32px 20px}
+.au-empty b{font-size:15px;color:var(--lx-text)}
+.au-empty p{max-width:440px;font-size:12.5px;line-height:1.6;color:var(--lx-mut)}
+.au-hero{display:flex;align-items:center;gap:18px}
+.au-hero-b{min-width:0;flex:1;display:flex;flex-direction:column;align-items:flex-start}
+.au-verdict{font-size:14px;line-height:1.5;color:var(--lx-mut)}
+.au-verdict b{font-size:17px;color:var(--lx-text)}
+.au-trend{margin-top:6px;font-size:13px;line-height:1.5;color:var(--lx-text)}
+.au-math{margin-top:8px;padding:10px 12px;border-radius:10px;background:var(--lx-in);font-size:12px;line-height:1.6;color:var(--lx-mut)}
+.au-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.au-kpi{display:flex;flex-direction:column;gap:3px;padding:12px 14px;border-radius:12px;background:var(--lx-card);border:1px solid var(--au-line);text-align:left;min-width:0;font-family:inherit}
+.au-kpi-btn{cursor:pointer;transition:.15s}
+.au-kpi-btn:hover{border-color:var(--lx-sel-border)}
+.au-k-l{font-size:11.5px;color:var(--lx-mut);line-height:1.3}
+.au-k-l small{font-size:10.5px}
+.au-k-v{font-size:22px;font-weight:800;line-height:1.1;color:var(--lx-text);font-variant-numeric:tabular-nums}
+.au-k-s{font-size:11px;color:var(--lx-mut);line-height:1.35}
+.au-two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.au-three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.au-list{display:flex;flex-direction:column;gap:8px}
+.au-issue{border-radius:10px;border:1px solid var(--au-line);border-left:3px solid var(--lx-mut);background:var(--lx-in);overflow:hidden;min-width:0}
+.au-issue-h{display:flex;align-items:center;gap:10px;width:100%;padding:11px 12px;background:none;border:none;color:inherit;text-align:left;cursor:pointer;font-family:inherit}
+.au-issue-t{display:block;flex:1;min-width:0}
+.au-issue-t b{display:block;font-size:13px;font-weight:650;line-height:1.4;color:var(--lx-text)}
+.au-issue-t small{display:block;margin-top:2px;font-size:11.5px;color:var(--lx-mut)}
+.au-sev{flex-shrink:0;padding:2px 8px;border-radius:999px;border:1px solid;font-size:10.5px;font-weight:700;white-space:nowrap}
+.au-chev{flex-shrink:0;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;border-radius:7px;color:var(--lx-mut);font-size:16px;background:var(--lx-card)}
+.au-fix{display:none;padding:2px 14px 14px;border-top:1px solid var(--lx-border);background:var(--lx-in)}
+.au-issue.open .au-fix{display:block}
+.au-fix b{display:block;margin-top:10px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--lx-violet)}
+.au-fix p{margin:4px 0 10px;font-size:13px;line-height:1.6;color:var(--lx-text)}
+.au-print-pages{display:none}
+.au-group{margin-top:16px}
+.au-group-h{display:flex;align-items:center;gap:8px;padding-bottom:8px;margin-bottom:8px;border-bottom:2px solid}
+.au-group-h b{font-size:13px;color:var(--lx-text)}
+.au-group-h span{font-size:12px;color:var(--lx-mut)}
+.au-legend{display:flex;flex-direction:column;gap:4px;margin-bottom:12px;font-size:12px;line-height:1.5;color:var(--lx-mut)}
+.au-legend i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
+.au-legend b{color:var(--lx-text)}
+.au-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.au-chip{height:30px;padding:0 12px;border-radius:999px;background:transparent;border:1px solid var(--lx-border);color:var(--lx-mut);font-size:12px;font-weight:600;cursor:pointer}
+.au-chip:hover{color:var(--lx-text)}
+.au-chip.on{background:var(--lx-sel-bg);border-color:var(--lx-sel-border);color:var(--lx-text)}
+.au-search{width:100%;height:38px;margin-bottom:10px;padding:0 12px;border-radius:10px;background:var(--lx-in);border:1px solid var(--lx-border);color:var(--lx-text);font-size:13px;outline:none}
+.au-search:focus{border-color:var(--lx-sel-border)}
+.au-stack{display:flex;height:10px;border-radius:999px;overflow:hidden;background:var(--lx-border)}
+.au-stack i{display:block;height:100%}
+.au-buckets{list-style:none;margin:12px 0 0;padding:0;display:flex;flex-direction:column}
+.au-buckets button{display:flex;align-items:center;gap:10px;width:100%;padding:9px 6px;background:none;border:none;border-radius:8px;color:inherit;text-align:left;cursor:pointer;font-family:inherit}
+.au-buckets button:hover:not(:disabled){background:var(--lx-in)}
+.au-buckets button:disabled{cursor:default;opacity:.55}
+.au-dot{display:inline-block;flex-shrink:0;width:9px;height:9px;border-radius:50%}
+.au-b-t{flex:1;min-width:0}
+.au-b-t b{display:block;font-size:13px;font-weight:600;color:var(--lx-text)}
+.au-b-t small{display:block;font-size:11.5px;color:var(--lx-mut)}
+.au-b-n{display:flex;flex-direction:column;align-items:flex-end;font-size:15px;font-weight:700;color:var(--lx-text);font-variant-numeric:tabular-nums}
+.au-b-n small{font-size:11px;font-weight:500;color:var(--lx-mut)}
+.au-areas{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.au-areas button{display:block;width:100%;padding:9px 6px;background:none;border:none;border-radius:8px;color:inherit;text-align:left;cursor:pointer;font-family:inherit}
+.au-areas button:hover{background:var(--lx-in)}
+.au-a-top{display:flex;justify-content:space-between;gap:8px;font-size:13px}
+.au-a-top b{font-weight:600;color:var(--lx-text)}
+.au-a-top em{font-style:normal;font-weight:700;font-variant-numeric:tabular-nums}
+.au-bar{display:block;height:6px;margin:6px 0 4px;border-radius:999px;background:var(--lx-border);overflow:hidden}
+.au-bar i{display:block;height:100%;border-radius:999px}
+.au-areas small{font-size:11.5px;color:var(--lx-mut)}
+.au-vitals{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.au-vital{display:flex;flex-direction:column;gap:3px;padding:12px 14px;border-radius:12px;background:var(--lx-in);border:1px solid var(--au-line)}
+.au-v-s{font-size:12px;font-weight:700}
+.au-more{margin-top:12px}
+.au-more summary{cursor:pointer;font-size:12.5px;font-weight:600;color:#8f95ff;padding:4px 0}
+.au-vrow{display:flex;flex-direction:column;gap:4px;padding:9px 0;border-top:1px solid var(--lx-border)}
+.au-vm{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12px;color:var(--lx-mut)}
+.au-vm b{color:var(--lx-text)}
+.au-bots{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.au-bot{padding:5px 11px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid}
+.au-bot.ok{color:#34d399;border-color:rgba(52,211,153,.45)}
+.au-bot.no{color:#f87171;border-color:rgba(248,113,113,.5)}
+.au-skip{margin:0;padding-left:18px;list-style:disc;font-size:12.5px;line-height:1.6;color:var(--lx-mut)}
+.au-plist{display:flex;flex-direction:column}
+.au-prow{display:grid;grid-template-columns:minmax(0,1fr) 70px 120px 90px;align-items:center;gap:12px;padding:10px 4px;border-top:1px solid var(--lx-border);font-size:12.5px;color:var(--lx-text)}
+.au-prow-h{border-top:none;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--lx-mut)}
+.au-prow-m{grid-template-columns:minmax(0,1fr) 70px}
+.au-pcell{display:flex;flex-direction:column;gap:2px;min-width:0}
+.au-pcell small{font-size:11px;color:var(--lx-mut);overflow-wrap:anywhere}
+.au-err{color:#f87171!important}
+.au-url{color:var(--lx-cyan);text-decoration:none;overflow-wrap:anywhere;font-size:12.5px;line-height:1.45}
+.au-url:hover{text-decoration:underline}
+.au-vrow .au-url{color:var(--lx-text)}
+.au-pm em{display:none;font-style:normal;color:var(--lx-mut);margin-right:6px}
+.au-badge{display:inline-block;padding:1px 9px;border-radius:999px;border:1px solid;font-size:11px;font-weight:600}
+.au-dist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px}
+.au-dist li{display:grid;grid-template-columns:130px minmax(0,1fr) 34px 38px;align-items:center;gap:8px;font-size:12.5px;color:var(--lx-text)}
+.au-d-l{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.au-d-b{height:8px;border-radius:999px;background:var(--lx-border);overflow:hidden}
+.au-d-b i{display:block;height:100%;border-radius:999px}
+.au-dist b{text-align:right}
+.au-dist small{text-align:right;font-size:11px;color:var(--lx-mut)}
+.au-big{display:block;font-size:34px;line-height:1.1;font-weight:800;font-variant-numeric:tabular-nums}
+.au-cmp{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:12px;font-size:12.5px;color:var(--lx-mut)}
+.au-cmp select{height:36px;max-width:100%;padding:0 10px;border-radius:9px;background:var(--lx-in);border:1px solid var(--lx-border);color:var(--lx-text);font-size:12.5px}
+.au-hist{display:flex;flex-direction:column}
+.au-hrow{display:grid;grid-template-columns:minmax(0,1.6fr) repeat(4,minmax(0,1fr));gap:10px;align-items:center;padding:10px 4px;border-top:1px solid var(--lx-border);font-size:12.5px;color:var(--lx-text)}
+.au-hrow-h{border-top:none;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--lx-mut)}
+.au-hrow em{display:none;font-style:normal;color:var(--lx-mut);margin-right:6px}
+.au-h-d small{display:block;font-size:11px;color:var(--lx-mut)}
+.au-modal{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(4,4,10,.66)}
+.au-sheet{display:flex;flex-direction:column;width:100%;max-height:86vh;border-radius:16px;background:var(--lx-card);border:1px solid var(--lx-border);box-shadow:0 30px 80px rgba(0,0,0,.5);overflow:hidden}
+.au-sheet-h{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:16px;border-bottom:1px solid var(--lx-border)}
+.au-sheet-h b{font-size:15px;color:var(--lx-text);line-height:1.35}
+.au-sheet-h p{margin-top:4px;font-size:12px;line-height:1.5;color:var(--lx-mut)}
+.au-sheet-b{flex:1;min-height:0;overflow-y:auto;padding:6px 16px 16px}
+.au-x{flex-shrink:0;width:30px;height:30px;border-radius:8px;background:var(--lx-in);border:1px solid var(--lx-border);color:var(--lx-mut);cursor:pointer}
+@media (max-width:899px){
+  .au-three{grid-template-columns:1fr}
+}
+@media (max-width:719px){
+  .au-two{grid-template-columns:1fr}
+  .au-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .au-vitals{grid-template-columns:1fr}
+  .au-h1{font-size:18px}
+  .au-head .au-actions{width:100%}
+  .au-head .au-btn{flex:1;height:40px}
+  .au-card{padding:14px;border-radius:12px}
+  .au-hero{flex-direction:column;align-items:flex-start;gap:14px}
+  .au-prow{display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px;padding:12px 2px}
+  .au-prow-h{display:none}
+  .au-prow .au-pcell{flex:1 1 100%}
+  .au-pm em{display:inline}
+  .au-dist li{grid-template-columns:104px minmax(0,1fr) 30px 34px}
+  .au-hrow{grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 10px}
+  .au-hrow-h{display:none}
+  .au-hrow .au-h-d{grid-column:1/-1}
+  .au-hrow em{display:inline}
+  .au-modal{align-items:flex-end;padding:0}
+  .au-sheet{max-width:none!important;max-height:90dvh;border-radius:18px 18px 0 0}
+  .au-tab{padding:0 9px;font-size:12.5px;gap:4px}
+  .au-cmp select{width:100%}
+}
+@media (max-width:360px){
+  .au-kpis{grid-template-columns:1fr 1fr}
+  .au-k-v{font-size:20px}
+}
+@media print{
+  body *{visibility:hidden}
+  #lx-audit-report,#lx-audit-report *{visibility:visible}
+  #lx-audit-report{position:absolute;left:0;top:0;width:100%;max-width:none}
+  .lx-audit-noprint{display:none!important}
+  .au-fix{display:block!important}
+  .au-print-pages{display:block;margin:0 0 8px;padding-left:16px;font-size:11px;word-break:break-all}
+  .au-tabs{display:none}
+}
+`;
 
 /** The report's shape while it loads — heading, tab strip, the Overview's card grid — drawn as
  *  soft blocks in the same places the real content lands. No numbers, no words that could be
@@ -1218,7 +1376,7 @@ function ReportSkeleton({ actions }: { actions: React.ReactNode }) {
         {actions}
       </div>
       <div className="flex gap-5 overflow-hidden border-b pb-3" style={{ borderColor: "var(--lx-border)" }}>
-        {TABS.map((t) => <div key={t.id} className="shrink-0">{block(t.label.length * 7 + 8, 12)}</div>)}
+        {TABS.map((t) => <div key={t} className="shrink-0">{block(t.length * 7 + 20, 12)}</div>)}
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="lx-card2 p-4">
@@ -1334,50 +1492,6 @@ function ElapsedLabel({ startedAt }: { startedAt: number }) {
   return <span className="lx-10 lx-mut shrink-0">{m}:{String(s).padStart(2, "0")}</span>;
 }
 
-/** The full page list for one issue (or "all crawled pages") — Semrush's own "see more" popup:
- *  a full-page modal, one page, every real URL this audit actually has on file for it (up to
- *  the 100 checks.ts now samples per issue — see its own PAGE_SAMPLE comment). */
-function PagesModal({ issue, pages, onClose }: { issue: Issue; pages: CrawledPage[]; onClose: () => void }) {
-  const byUrl = new Map(pages.map((p) => [p.url, p]));
-  return (
-    <Modal label={issue.what} onClose={onClose} maxWidth={780}>
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <b className="lx-13">{issue.what}</b>
-          <p className="lx-11 lx-mut mt-1">{issue.count} page{issue.count === 1 ? "" : "s"}{issue.fix ? ` · ${issue.fix}` : ""}</p>
-        </div>
-        <button className="lx-icobtn shrink-0" onClick={onClose} aria-label="Close">✕</button>
-      </div>
-      <div className="lx-scroll mt-3 flex-1" style={{ overflowY: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr className="lx-10 lx-mut" style={{ textAlign: "left", position: "sticky", top: 0, background: "var(--lx-panel)" }}>
-              <th style={{ padding: "6px 4px", fontWeight: 600 }}>URL</th>
-              <th style={{ padding: "6px 4px", fontWeight: 600, whiteSpace: "nowrap" }}>Status</th>
-              <th style={{ padding: "6px 4px", fontWeight: 600, whiteSpace: "nowrap" }}>Redirects to</th>
-            </tr>
-          </thead>
-          <tbody>
-            {issue.pages.map((url) => {
-              const p = byUrl.get(url);
-              return (
-                <tr key={url} style={{ borderTop: "1px solid var(--lx-border)" }}>
-                  <td className="lx-11" style={{ padding: "8px 4px", wordBreak: "break-all" }}>
-                    <a href={url} target="_blank" rel="noreferrer noopener" className="underline" style={{ color: "var(--lx-cyan)" }}>{url}</a>
-                  </td>
-                  <td className="lx-11 lx-mut" style={{ padding: "8px 4px", whiteSpace: "nowrap" }}>{p?.status ?? "—"}</td>
-                  <td className="lx-10 lx-mut" style={{ padding: "8px 4px", wordBreak: "break-all" }}>{p?.redirectedTo ?? "—"}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        {issue.count > issue.pages.length && <p className="lx-10 lx-mut mt-2 px-1">…and {issue.count - issue.pages.length} more not listed individually.</p>}
-      </div>
-    </Modal>
-  );
-}
-
 /** The score, as a ring — the one visual a Semrush-style report leads with. Pure SVG, no
  *  charting dependency: one number between 0 and 100 is a single arc. Brand colour, not a
  *  red/amber/green tone — Semrush's own Site Health gauge doesn't shift colour by score either.
@@ -1407,71 +1521,6 @@ function ScoreGauge({ score }: { score: number }) {
   );
 }
 
-/** Thematic Reports' small ring — same brand violet as the Site Health gauge. */
-function MiniRing({ pct }: { pct: number }) {
-  const rad = 12;
-  const c = 2 * Math.PI * rad;
-  const filled = (Math.max(0, Math.min(100, pct)) / 100) * c;
-  return (
-    <svg width={30} height={30} viewBox="0 0 30 30" aria-hidden>
-      <circle cx={15} cy={15} r={rad} fill="none" stroke="var(--lx-border)" strokeWidth={4} />
-      <circle cx={15} cy={15} r={rad} fill="none" stroke="var(--lx-violet)" strokeWidth={4} strokeLinecap="round" strokeDasharray={`${filled} ${c}`} transform="rotate(-90 15 15)" />
-    </svg>
-  );
-}
-
-/** AI Search Health — real robots.txt evaluation, as a ring: N of M named crawlers allowed.
- *  Green when every bot is let in, amber otherwise — genuinely measured, never a Semrush-style
- *  "traffic score" this app has no log to compute. */
-function AiHealthGauge({ allowed, total }: { allowed: number; total: number }) {
-  const rad = 34;
-  const c = 2 * Math.PI * rad;
-  const pct = total > 0 ? Math.round((allowed / total) * 100) : 0;
-  const filled = (pct / 100) * c;
-  const color = allowed === total ? "#34d399" : "#fb923c";
-  return (
-    <div className="relative shrink-0" style={{ width: 92, height: 92 }} aria-label={`${allowed} of ${total} AI crawlers allowed`}>
-      <svg width={92} height={92} viewBox="0 0 92 92">
-        <circle cx={46} cy={46} r={rad} fill="none" stroke="var(--lx-border)" strokeWidth={8} />
-        <circle cx={46} cy={46} r={rad} fill="none" stroke={color} strokeWidth={8} strokeLinecap="round" strokeDasharray={`${filled} ${c}`} transform="rotate(-90 46 46)" />
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <b className="font-extrabold leading-none" style={{ fontSize: 20, color }}>{pct}%</b>
-        <span className="lx-10 lx-mut" style={{ fontSize: 9 }}>{allowed}/{total} allowed</span>
-      </div>
-    </div>
-  );
-}
-
-function CrawledRow({ color, label, count, onClick }: { color: string; label: string; count: number; onClick?: () => void }) {
-  return (
-    <li>
-      <button className="flex w-full items-center gap-2 lx-11 text-left" style={{ background: "transparent", border: "none", cursor: onClick ? "pointer" : "default", color: "inherit", padding: 0 }} onClick={onClick}>
-        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />
-        <span className="flex-1">{label}</span>
-        <b style={{ color: "var(--lx-violet)" }}>{count}</b>
-      </button>
-    </li>
-  );
-}
-
-/** Errors/Warnings card — the big number plus a real trend line under it, Semrush's own layout
- *  for these two. `points` is that severity's count on every past run, oldest first; a single
- *  point (first-ever audit) draws no line — "nothing to compare it to yet". */
-function SeverityCard({ label, sub, count, color, points }: { label: string; sub: string; count: number; color: string; points: number[] }) {
-  return (
-    <div className="lx-card2 p-4">
-      <div className="flex items-center gap-2">
-        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />
-        <b className="lx-12">{label}</b>
-      </div>
-      <b className="mt-1 block font-extrabold leading-none" style={{ fontSize: 34, color }}>{count}</b>
-      <span className="lx-10 lx-mut">{sub}</span>
-      {points.length > 1 && <AreaTrend points={points} color={color} />}
-    </div>
-  );
-}
-
 /** A filled line chart with a dot per run, pure SVG — Semrush draws its Errors/Warnings history
  *  this way. Headroom (PAD) so a line that is flat AT THE MAX (every run had the same count —
  *  the exact case that once rendered as a solid block, found live 2026-09-05) keeps visible
@@ -1495,76 +1544,3 @@ function AreaTrend({ points, color }: { points: number[]; color: string }) {
   );
 }
 
-/** One number, named — the Statistics / Compare tabs' headline row. Text stays in text tokens;
- *  `color` is only ever a status colour the rest of this file already uses. */
-function StatTile({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
-  return (
-    <div className="rounded-lg px-3 py-2.5" style={{ border: "1px solid var(--lx-border)" }}>
-      <span className="lx-10 lx-mut">{label}</span>
-      <b className="mt-1 block font-extrabold leading-none" style={{ fontSize: 20, color: color ?? "var(--lx-violet)" }}>{value}</b>
-      {sub && <span className="lx-10 lx-mut">{sub}</span>}
-    </div>
-  );
-}
-
-/** A distribution as a bar list — one brand hue for one series (a status colour per row only
- *  where the row IS a status, e.g. 4xx), a thin bar scaled to the largest bucket, the count and
- *  its share as text beside it, the full label on hover. Rows are the table view. */
-function Distribution({ title, note, rows, empty, unit = "pages" }: { title: string; note?: string; rows: { label: string; count: number; color?: string }[]; empty?: string; unit?: string }) {
-  const total = rows.reduce((a, b) => a + b.count, 0);
-  const max = Math.max(1, ...rows.map((x) => x.count));
-  return (
-    <div className="lx-card2 p-4">
-      <b className="lx-12">{title}</b>
-      {note && <p className="lx-10 lx-mut mt-1">{note}</p>}
-      {empty ? (
-        <p className="lx-11 lx-mut mt-3">{empty}</p>
-      ) : (
-        <ul className="mt-3 space-y-1.5">
-          {rows.map((x) => (
-            <li key={x.label} className="flex items-center gap-2 lx-11" title={`${x.label}: ${x.count} of ${total} ${unit}`}>
-              <span className="shrink-0 truncate" style={{ width: 128 }}>{x.label}</span>
-              <div className="h-2 flex-1 overflow-hidden rounded-full" style={{ background: "var(--lx-border)" }}>
-                <div style={{ width: `${(x.count / max) * 100}%`, height: "100%", borderRadius: 4, background: x.color ?? "var(--lx-violet)" }} />
-              </div>
-              <b className="shrink-0 text-right" style={{ width: 36 }}>{x.count}</b>
-              <span className="lx-10 lx-mut shrink-0 text-right" style={{ width: 36 }}>{total ? Math.round((x.count / total) * 100) : 0}%</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-/** Compare Crawls row for an issue that has no page list to open (the older run's, or one
- *  shown for its count change) — severity pill, the sentence, the count note. */
-function CompareRow({ severity, what, category, note, onClick }: { severity: Severity; what: string; category?: string; note: string; onClick?: () => void }) {
-  return (
-    <div className="rounded-lg py-2.5 pl-3 pr-3" style={{ borderLeft: `3px solid ${SEV_COLOR[severity]}`, background: "rgba(255,255,255,.02)" }}>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-        <span className="lx-10 shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 font-semibold" style={{ color: SEV_COLOR[severity], border: `1px solid ${SEV_COLOR[severity]}` }}>{SEV_LABEL[severity]}</span>
-        <button className="lx-11 min-w-0 flex-1 text-left" style={{ background: "transparent", border: "none", cursor: onClick ? "pointer" : "default", color: "#e6e6f2" }} onClick={onClick}>
-          <b>{what}</b>
-          <span className="ml-1.5 lx-mut">{note}</span>
-        </button>
-        {category && <span className="lx-10 lx-mut shrink-0">{category}</span>}
-      </div>
-    </div>
-  );
-}
-
-/** `good` null = no number was measured — shown as exactly that, never as "Needs work". */
-function VitalTile({ label, value, good, hint }: { label: string; value: string; good: boolean | null; hint?: string }) {
-  const color = good === null ? "var(--lx-mut)" : good ? "#34d399" : "#fbbf24";
-  return (
-    <div className="rounded-lg px-3 py-2.5" style={{ border: "1px solid var(--lx-border)" }}>
-      <span className="lx-10 lx-mut">{label}</span>
-      <div className="mt-1 flex items-baseline gap-1.5">
-        <b className="font-extrabold" style={{ fontSize: 22, color }}>{value}</b>
-        <span className="lx-10" style={{ color }}>{good === null ? "Not measured" : good ? "Good" : "Needs work"}</span>
-      </div>
-      {hint && <span className="lx-10 lx-mut">{hint}</span>}
-    </div>
-  );
-}
