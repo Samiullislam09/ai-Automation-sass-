@@ -3,9 +3,11 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowRight, CalendarDays, ChevronRight, Loader2, RotateCw, ScrollText } from "lucide-react";
 import {
-  buildDays, fetchReportData, fmtDate, dayName, summarise, REPORT_CSS,
+  buildDays, fetchReportItems, fetchReportRuns, fmtDate, dayName, summarise, REPORT_CSS,
   type Day, type Item, type Run,
 } from "@/components/dashboard/report-day";
+
+const DAYS_STEP = 30;
 
 /** /dashboard/reports — a clean list of days. One row per day with a plain-English line, and
  *  the day itself opens as its OWN PAGE at /dashboard/reports/[YYYY-MM-DD] (owner, 2026-09-05:
@@ -14,22 +16,30 @@ import {
  *
  *  Real workspace data only: GET /api/content (status=all) and GET /api/schedule/history. */
 
-export default function ReportsSection() {
-  const [items, setItems] = useState<Item[] | null>(null);
+export default function ReportsSection({ initialItems, truncated: initialTruncated }: { initialItems?: Item[]; truncated?: boolean }) {
+  // The server hands the rows over on first paint, so there is no empty "Loading…" screen. The
+  // run receipts are slower (they read the job log) and arrive a moment later.
+  const [items, setItems] = useState<Item[] | null>(initialItems ?? null);
+  const [truncated, setTruncated] = useState(!!initialTruncated);
   const [runs, setRuns] = useState<Run[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [shown, setShown] = useState(DAYS_STEP);
 
   const load = useCallback(async () => {
     setBusy(true);
-    const d = await fetchReportData();
+    const [d, r] = await Promise.all([fetchReportItems(), fetchReportRuns()]);
     setError(d.error);
-    setItems(d.items);
-    setRuns(d.runs);
+    if (!d.error) { setItems(d.items); setTruncated(d.truncated); }
+    else setItems((cur) => cur ?? []);
+    setRuns(r);
     setBusy(false);
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (initialItems) void fetchReportRuns().then(setRuns);
+    else void load();
+  }, [load, initialItems]);
 
   const days: Day[] = useMemo(() => buildDays(items ?? [], runs), [items, runs]);
 
@@ -50,11 +60,11 @@ export default function ReportsSection() {
       <style dangerouslySetInnerHTML={{ __html: REPORT_CSS }} />
 
       <section className="rp-panel flex min-w-0 flex-1 flex-col">
-        <header className="flex flex-wrap items-center gap-3 px-4 pt-4 pb-3" style={{ borderBottom: "1px solid var(--lx-border)" }}>
+        <header className="rp-head flex flex-wrap items-center gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <h1 className="rp-h1">Reports</h1>
-              <ScrollText size={18} style={{ color: "#3b82f6" }} />
+              <ScrollText size={18} style={{ color: "var(--lx-violet)" }} />
             </div>
             <p className="rp-sub">Pick a day to read the full report.</p>
           </div>
@@ -63,7 +73,7 @@ export default function ReportsSection() {
           </button>
         </header>
 
-        <div className="lx-scroll flex-1 overflow-y-auto px-4 pb-4">
+        <div className="lx-scroll rp-body flex-1 overflow-y-auto">
           {error && <p className="lx-11 mt-3" style={{ color: "#f87171" }}>{error}</p>}
 
           {/* this week, in five plain numbers */}
@@ -76,7 +86,7 @@ export default function ReportsSection() {
           </div>
 
           {items === null ? (
-            <div className="rp-loading mt-3"><Loader2 size={18} className="rp-spin lx-mut" /><span className="lx-11 lx-mut ml-2">Loading…</span></div>
+            <div className="mt-3 space-y-2" aria-busy="true"><div className="rp-skel" style={{ height: 58 }} /><div className="rp-skel" style={{ height: 58 }} /><div className="rp-skel" style={{ height: 58 }} /></div>
           ) : days.length === 0 ? (
             <div className="rp-empty mt-3">
               <CalendarDays size={20} className="lx-mut" />
@@ -90,7 +100,7 @@ export default function ReportsSection() {
             <>
               <div className="rp-listhead mt-4">Daily reports</div>
               <div className="mt-2 space-y-1.5">
-                {days.map((d) => (
+                {days.slice(0, shown).map((d) => (
                   <Link key={d.key} href={`/dashboard/reports/${d.key}`} className="rp-row">
                     <span className="rp-date">
                       <b>{new Date(d.iso).getDate()}</b>
@@ -112,6 +122,10 @@ export default function ReportsSection() {
                   </Link>
                 ))}
               </div>
+              {days.length > shown && (
+                <div className="rp-more"><button className="rp-btn" onClick={() => setShown((n) => n + DAYS_STEP)}>Show older days ({days.length - shown} more)</button></div>
+              )}
+              {truncated && <p className="rp-note">Showing your most recent work. Older items are not included here.</p>}
             </>
           )}
         </div>

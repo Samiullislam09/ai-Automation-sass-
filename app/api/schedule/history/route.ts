@@ -54,7 +54,8 @@ export async function GET() {
   const [{ data: content }, { data: chainJobs }] = await Promise.all([
     supabase
       .from("content_items")
-      .select("id, title, status, meta, created_at")
+      // Only the four things a run row reads out of `meta`, not the whole (fat) column.
+      .select("id, title, status, created_at, scheduleRunId:meta->>scheduleRunId, wordCount:meta->wordCount, publishedUrl:meta->>publishedUrl, publishError:meta->>publishError")
       .eq("tenant_id", tenantId)
       .eq("type", "article")
       .gte("created_at", since)
@@ -88,7 +89,7 @@ export async function GET() {
     };
 
     const runId: string | null = run.detail?.scheduleRunId ?? null;
-    const stamped = runId ? items.filter((c: any) => c.meta?.scheduleRunId === runId) : [];
+    const stamped = runId ? items.filter((c: any) => c.scheduleRunId === runId) : [];
     // Exact match wins whenever there is one. The window is only for runs that predate the id.
     const linkedBy: "run-id" | "time" = runId && stamped.length ? "run-id" : "time";
     const matched = linkedBy === "run-id" ? stamped : items.filter((c: any) => inWindow(c.created_at));
@@ -97,10 +98,10 @@ export async function GET() {
       id: String(c.id),
       title: c.title ?? "(untitled)",
       status: c.status,
-      words: c.meta?.wordCount ?? null,
+      words: c.wordCount ?? null,
       at: c.created_at,
-      publishedUrl: c.meta?.publishedUrl ?? null,
-      publishError: c.meta?.publishError ?? null,
+      publishedUrl: c.publishedUrl ?? null,
+      publishError: c.publishError ?? null,
     }));
 
     const windowJobs = jobs.filter((j: any) => inWindow(j.created_at));

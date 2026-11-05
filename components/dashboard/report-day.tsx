@@ -113,17 +113,27 @@ export function buildDays(items: Item[], runs: Run[]): Day[] {
   return out.sort((a, b) => +new Date(b.iso) - +new Date(a.iso));
 }
 
-/** Loads both endpoints once. Shared so the list and the day page agree on the data. */
-export async function fetchReportData(): Promise<{ items: Item[]; runs: Run[]; error: string }> {
+/** The content rows (slim, see lib/reports-data.ts). The pages are handed these by the server on
+ *  first paint; this is only for Refresh. */
+export async function fetchReportItems(): Promise<{ items: Item[]; truncated: boolean; error: string }> {
   try {
-    const [c, h] = await Promise.all([
-      fetch("/api/content?status=all", { cache: "no-store" }).then((r) => r.json()),
-      fetch("/api/schedule/history", { cache: "no-store" }).then((r) => r.json()).catch(() => ({ ok: false })),
-    ]);
-    if (!c.ok) return { items: [], runs: [], error: c.error ?? "Could not load your content." };
-    return { items: c.items ?? [], runs: h?.ok ? (h.runs ?? []) : [], error: "" };
+    const c = await fetch("/api/reports", { cache: "no-store" }).then((r) => r.json());
+    if (!c.ok) return { items: [], truncated: false, error: c.error ?? "Could not load your reports." };
+    return { items: c.items ?? [], truncated: !!c.truncated, error: "" };
   } catch (e: any) {
-    return { items: [], runs: [], error: e?.message ?? "Network error." };
+    return { items: [], truncated: false, error: e?.message ?? "Network error." };
+  }
+}
+
+/** The automatic-run receipts. Slower than the content rows (it reads the job log), so the pages
+ *  paint first and add these when they arrive. [] when unavailable: a missing receipt is not an
+ *  error worth blocking the report for. */
+export async function fetchReportRuns(): Promise<Run[]> {
+  try {
+    const h = await fetch("/api/schedule/history", { cache: "no-store" }).then((r) => r.json());
+    return h?.ok ? (h.runs ?? []) : [];
+  } catch {
+    return [];
   }
 }
 
@@ -275,12 +285,14 @@ function Row({ it, why }: { it: Item; why?: boolean }) {
           </span>
         )}
       </span>
-      {it.meta?.publishedUrl && (
-        <a href={it.meta.publishedUrl} target="_blank" rel="noreferrer" className="rp-live" title={it.meta.publishedUrl}>
-          <ExternalLink size={11} /> live
-        </a>
-      )}
-      <span className={"lx-pill " + st.pill}>{st.label}</span>
+      <span className="rp-tags">
+        {it.meta?.publishedUrl && (
+          <a href={it.meta.publishedUrl} target="_blank" rel="noreferrer" className="rp-live" title={it.meta.publishedUrl}>
+            <ExternalLink size={11} /> live
+          </a>
+        )}
+        <span className={"lx-pill " + st.pill}>{st.label}</span>
+      </span>
       <Link href={`/dashboard/content/${it.id}`} className="rp-open" title="Open it"><ChevronRight size={15} /></Link>
     </div>
   );
@@ -291,31 +303,31 @@ function Row({ it, why }: { it: Item; why?: boolean }) {
    child selector into a hydration mismatch. */
 export const REPORT_CSS = `
 .rp-wrap{display:flex;height:100%;min-height:0;container-type:inline-size;container-name:rp}
-.rp-panel{background:#0a0a11;border:1px solid var(--lx-border);border-radius:16px;min-width:0;width:100%}
-.rp-h1{font-size:22px;font-weight:800;letter-spacing:-.02em;line-height:1.1;color:#fff}
+.rp-panel{background:var(--lx-panel);border:1px solid var(--lx-border);border-radius:16px;min-width:0;width:100%}
+.rp-h1{font-size:22px;font-weight:800;letter-spacing:-.02em;line-height:1.1;color:var(--lx-text)}
 .rp-sub{font-size:12px;color:var(--lx-mut);margin-top:2px}
 .rp-icobtn{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:9px;
-  border:1px solid var(--lx-border);background:#0d0d16;color:#9a9ab2;cursor:pointer;transition:.15s;flex-shrink:0;text-decoration:none}
-.rp-icobtn:hover:not(:disabled){color:#fff;border-color:rgba(139,92,246,.55)}
+  border:1px solid var(--lx-border);background:var(--lx-card);color:var(--lx-mut);cursor:pointer;transition:.15s;flex-shrink:0;text-decoration:none}
+.rp-icobtn:hover:not(:disabled){color:var(--lx-text);border-color:var(--lx-sel-border)}
 .rp-week{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:8px}
 .rp-week-c{position:relative;display:flex;flex-direction:column;gap:1px;padding:11px 12px;border-radius:11px;
-  background:#0d0d16;border:1px solid var(--lx-border);text-decoration:none;min-width:0}
+  background:var(--lx-card);border:1px solid var(--lx-border);text-decoration:none;min-width:0}
 .rp-week-c.link{transition:.15s}
-.rp-week-c.link:hover{border-color:rgba(139,92,246,.5);background:#101019}
+.rp-week-c.link:hover{border-color:var(--lx-sel-border);background:var(--lx-in)}
 .rp-week-n{font-size:22px;font-weight:800;line-height:1.05;font-variant-numeric:tabular-nums}
-.rp-week-l{font-size:11.5px;font-weight:600;color:#e8e8f2}
+.rp-week-l{font-size:11.5px;font-weight:600;color:var(--lx-text)}
 .rp-week-s{font-size:10px;color:var(--lx-dim)}
 .rp-week-go{position:absolute;top:10px;right:10px;color:var(--lx-dim)}
 .rp-listhead{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--lx-mut)}
 .rp-row{display:flex;align-items:center;gap:11px;width:100%;padding:10px 12px;border-radius:12px;text-align:left;
-  background:#0d0d16;border:1px solid var(--lx-border);cursor:pointer;transition:.15s;text-decoration:none}
-.rp-row:hover{border-color:rgba(139,92,246,.5);background:#101019}
-.rp-row:hover .rp-go{color:#fff;transform:translateX(2px)}
+  background:var(--lx-card);border:1px solid var(--lx-border);cursor:pointer;transition:.15s;text-decoration:none}
+.rp-row:hover{border-color:var(--lx-sel-border);background:var(--lx-in)}
+.rp-row:hover .rp-go{color:var(--lx-text);transform:translateX(2px)}
 .rp-date{display:flex;flex-direction:column;align-items:center;justify-content:center;width:42px;height:42px;flex-shrink:0;
-  border-radius:11px;background:#0a0a11;border:1px solid var(--lx-border)}
-.rp-date b{font-size:16px;font-weight:800;color:#fff;line-height:1.05}
+  border-radius:11px;background:var(--lx-panel);border:1px solid var(--lx-border)}
+.rp-date b{font-size:16px;font-weight:800;color:var(--lx-text);line-height:1.05}
 .rp-date i{font-size:9px;font-style:normal;color:var(--lx-mut);text-transform:uppercase;letter-spacing:.04em}
-.rp-row-t{display:flex;align-items:baseline;gap:8px;font-size:13px;font-weight:700;color:#fff}
+.rp-row-t{display:flex;align-items:baseline;gap:8px;font-size:13px;font-weight:700;color:var(--lx-text)}
 .rp-row-t em{font-size:10.5px;font-weight:500;font-style:normal;color:var(--lx-dim)}
 .rp-row-s{display:block;margin-top:2px;font-size:11.5px;color:var(--lx-mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rp-dots{display:flex;gap:4px;flex-shrink:0}
@@ -324,31 +336,31 @@ export const REPORT_CSS = `
 .rp-dots i.amber{background:#f59e0b;box-shadow:0 0 7px rgba(245,158,11,.7)}
 .rp-dots i.red{background:#ef4444;box-shadow:0 0 7px rgba(239,68,68,.7)}
 .rp-go{flex-shrink:0;transition:.15s}
-.rp-loading{display:flex;align-items:center;justify-content:center;padding:26px;border-radius:12px;background:#0d0d16;
+.rp-loading{display:flex;align-items:center;justify-content:center;padding:26px;border-radius:12px;background:var(--lx-card);
   border:1px solid var(--lx-border)}
 .rp-empty{display:flex;flex-direction:column;align-items:center;text-align:center;padding:30px 20px;border-radius:12px;
-  background:#0d0d16;border:1px dashed var(--lx-border)}
+  background:var(--lx-card);border:1px dashed var(--lx-border)}
 .rp-link{color:#818cf8;text-decoration:none}
 .rp-link:hover{text-decoration:underline}
-.rp-lead{font-size:14px;line-height:1.65;color:#d6d6e4}
-.rp-lead b{color:#fff}
+.rp-lead{font-size:14px;line-height:1.65;color:var(--lx-text)}
+.rp-lead b{color:var(--lx-text)}
 .rp-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:8px;margin-top:14px}
-.rp-tile{padding:10px 12px;border-radius:11px;background:color-mix(in srgb,var(--c) 8%,#0d0d16);
+.rp-tile{padding:10px 12px;border-radius:11px;background:color-mix(in srgb,var(--c) 8%,var(--lx-card));
   border:1px solid color-mix(in srgb,var(--c) 32%,transparent)}
 .rp-tile-n{font-size:20px;font-weight:800;line-height:1.05;color:var(--c);font-variant-numeric:tabular-nums}
 .rp-tile-l{margin-top:2px;font-size:10.5px;color:var(--lx-mut)}
 .rp-sec{margin-top:18px}
-.rp-sec-h{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:#fff}
+.rp-sec-h{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:var(--lx-text)}
 .rp-action{display:inline-flex;align-items:center;gap:4px;margin-left:auto;font-size:11.5px;font-weight:600;
   color:#818cf8;text-decoration:none}
 .rp-action:hover{text-decoration:underline}
-.rp-block{padding:11px 12px;border-radius:11px;background:#0d0d16;border:1px solid var(--lx-border)}
-.rp-item{display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:11px;background:#0d0d16;
+.rp-block{padding:11px 12px;border-radius:11px;background:var(--lx-card);border:1px solid var(--lx-border)}
+.rp-item{display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:11px;background:var(--lx-card);
   border:1px solid var(--lx-border);transition:.15s}
-.rp-item:hover{border-color:rgba(139,92,246,.4)}
+.rp-item:hover{border-color:var(--lx-sel-border)}
 .rp-item-ico{display:flex;align-items:center;justify-content:center;width:30px;height:30px;flex-shrink:0;border-radius:9px;
   color:#a5b4fc;background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.3)}
-.rp-item-t{display:block;font-size:12.5px;font-weight:600;color:#fff;text-decoration:none;
+.rp-item-t{display:block;font-size:12.5px;font-weight:600;color:var(--lx-text);text-decoration:none;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rp-item-t:hover{text-decoration:underline}
 .rp-item-s{display:block;margin-top:2px;font-size:10.5px;color:var(--lx-mut)}
@@ -357,12 +369,43 @@ export const REPORT_CSS = `
   text-decoration:none;white-space:nowrap}
 .rp-live:hover{text-decoration:underline}
 .rp-open{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;flex-shrink:0;border-radius:7px;
-  color:#8b8ba0;transition:.15s}
-.rp-open:hover{color:#fff;background:rgba(255,255,255,.07)}
+  color:var(--lx-mut);transition:.15s}
+.rp-open:hover{color:var(--lx-text);background:rgba(255,255,255,.07)}
 .rp-log-l{display:flex;gap:8px;align-items:baseline;padding:5px 0}
 .rp-log-l+.rp-log-l{border-top:1px solid var(--lx-border)}
 .rp-nav{display:flex;align-items:center;gap:6px}
 @container rp (max-width:560px){.rp-row-t em{display:none}}
 .rp-spin{animation:rpSpin 1s linear infinite}
 @keyframes rpSpin{to{transform:rotate(360deg)}}
+.rp-tags{display:contents}
+.rp-more{display:flex;justify-content:center;margin-top:10px}
+.rp-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:36px;padding:0 16px;border-radius:9px;
+  background:var(--lx-in);border:1px solid var(--lx-border);color:var(--lx-text);font-size:12.5px;font-weight:600;cursor:pointer}
+.rp-btn:hover{border-color:var(--lx-sel-border)}
+.rp-note{margin-top:10px;font-size:11.5px;color:var(--lx-mut)}
+.rp-skel{border-radius:12px;background:linear-gradient(90deg,var(--lx-card),var(--lx-in),var(--lx-card));background-size:200% 100%;
+  animation:rpShim 1.3s ease-in-out infinite}
+@keyframes rpShim{from{background-position:200% 0}to{background-position:-200% 0}}
+.rp-body{padding:0 16px 20px}
+.rp-head{padding:16px 16px 12px;border-bottom:1px solid var(--lx-border)}
+@media (max-width:639px){
+  .rp-panel{border-radius:12px}
+  .rp-head{padding:14px 12px 12px}
+  .rp-body{padding:0 12px 16px}
+  .rp-h1{font-size:19px}
+  .rp-week{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .rp-week .rp-week-c:last-child:nth-child(odd){grid-column:1/-1}
+  .rp-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .rp-tiles .rp-tile:last-child:nth-child(odd){grid-column:1/-1}
+  .rp-row{padding:10px}
+  .rp-row-s{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .rp-item{display:grid;grid-template-columns:30px minmax(0,1fr) 26px;align-items:start;gap:6px 9px}
+  .rp-item-ico{grid-row:1}
+  .rp-item .min-w-0{grid-column:2}
+  .rp-open{grid-column:3;grid-row:1}
+  .rp-tags{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;grid-column:2/-1}
+  .rp-item-t{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .rp-lead{font-size:13.5px}
+  .rp-icobtn{width:38px;height:38px}
+}
 `;
