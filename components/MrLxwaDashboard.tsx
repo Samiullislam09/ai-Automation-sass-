@@ -3668,11 +3668,17 @@ export default function MrLxwaDashboard({
   // exactly where the reader put it), and only from the bottom of the box: `scrollHeight` is read
   // after the commit that added the item, so this never guesses where the new content is.
   useEffect(() => {
-    if (!runningStep) return;
     const el = canvasScrollRef.current;
     if (!el) return;
+    // Mr. Keyword stays pinned to the top: the Google results page (logo, search bar, tabs) must
+    // be seen as a real page, not scrolled away to the newest row (owner, 2026-11-02).
+    if (panelAgent?.id === "keyword") {
+      el.scrollTo({ top: 0 });
+      return;
+    }
+    if (!runningStep) return;
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [producedItems.length, runningStep?.key, runningStep?.progressLabel]);
+  }, [panelAgent?.id, producedItems.length, runningStep?.key, runningStep?.progressLabel]);
   // This agent's OWN sentences only. Used to also let through the task-level, agent-less lines
   // ("On it — 5 steps", "Writing the article. Starting now…") on every agent's tab as "the frame
   // every agent's work sits inside" — but that meant Mr. Keyword's own screen opened with the
