@@ -935,6 +935,32 @@ export default function ArticleApprovalSection({
           </div>
         </aside>
       </div>
+
+      {/* Phone / tablet: the rail is stacked far below the article, so the decision is pinned to
+          the bottom of the screen instead. Same handlers as the rail, never a second code path. */}
+      {(pending_ || isLive) && (
+        <div className="aa-mbar" role="toolbar" aria-label="Review actions">
+          {isLive ? (
+            <a className="aa-mbar-main" href={meta.publishedUrl!} target="_blank" rel="noreferrer">
+              <ExternalLink size={15} /> View published article
+            </a>
+          ) : (
+            <>
+              <button className="aa-mbar-sec danger" onClick={reject} disabled={!!busy}><X size={15} /> Reject</button>
+              <button
+                className="aa-mbar-sec"
+                onClick={() => { setAskOpen(true); setTimeout(() => document.querySelector(".aa-ask")?.scrollIntoView({ behavior: "smooth", block: "center" }), 60); }}
+                disabled={revising || !!busy}
+              >
+                <Pencil size={15} /> Changes
+              </button>
+              <button className="aa-mbar-main" onClick={approve} disabled={!!busy || dirty} title={dirty ? "Save your changes first" : "Approve and publish this article"}>
+                <Send size={15} /> {busy === "approve" ? "Publishing…" : "Approve & Publish"}
+              </button>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1052,6 +1078,13 @@ const CSS = `
 .lxpv-article{max-width:720px;margin:0 auto;padding:22px 48px 52px}
 @media (max-width:640px){.lxpv-article{padding:16px 20px 36px}}
 .aa-empty{padding:40px;text-align:center;font-size:13px;color:#6b7280}
+/* Long words and URLs must wrap, never widen the page. Tables and code scroll inside themselves. */
+.aa-hero-title,.aa-hero-sub,.aa-hero-input,.lxpv-article{overflow-wrap:anywhere;word-break:break-word}
+.lxpv-article img,.aa-lead img,.aa-fig img{max-width:100%;height:auto}
+.lxpv-article table{display:block;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.lxpv-article pre{max-width:100%;overflow-x:auto}
+.lxpv-article pre code{white-space:pre-wrap}
+.aa-mbar{display:none}
 
 /* ---- pictures. Real media rows only — this page never renders a placeholder. ---- */
 .aa-lead{margin:0;padding:0 48px}
@@ -1119,6 +1152,19 @@ const CSS = `
 .aa-rail{position:sticky;top:calc(var(--aa-bar-h) + 16px);display:flex;flex-direction:column;gap:12px;min-width:0;
   max-height:calc(100vh - var(--aa-bar-h) - 32px);overflow-y:auto;scrollbar-width:thin}
 @media (max-width:1000px){.aa-rail{position:static;max-height:none;overflow:visible}}
+@media (max-width:1000px){
+  .aa-grid{padding-bottom:calc(92px + env(safe-area-inset-bottom))}
+  .aa-mbar{position:fixed;left:0;right:0;bottom:0;z-index:35;display:flex;align-items:stretch;gap:8px;
+    padding:10px 12px calc(10px + env(safe-area-inset-bottom));background:rgba(255,255,255,.96);backdrop-filter:blur(8px);
+    border-top:1px solid #e5e7eb;box-shadow:0 -8px 24px rgba(15,23,42,.08)}
+  .aa-mbar-main,.aa-mbar-sec{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:11px;
+    font-size:13px;font-weight:600;white-space:nowrap;text-decoration:none;cursor:pointer;border:1px solid transparent}
+  .aa-mbar-main{flex:1 1 0;color:#fff;background:#4f46e5}
+  .aa-mbar-main:disabled{opacity:.45;cursor:not-allowed}
+  .aa-mbar-sec{flex:0 0 auto;padding:0 14px;color:#374151;background:#fff;border-color:#d1d5db}
+  .aa-mbar-sec.danger{color:#b91c1c;border-color:#fecaca;background:#fff5f5}
+  .aa-mbar-sec:disabled{opacity:.45}
+}
 .aa-box{display:flex;flex-direction:column;gap:9px;padding:13px;background:#fff;border:1px solid #e8eaee;
   border-radius:12px;box-shadow:0 1px 2px rgba(15,23,42,.04)}
 .aa-box-h{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#9aa2ad}
