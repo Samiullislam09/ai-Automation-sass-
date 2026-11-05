@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { CircleCheck } from "lucide-react";
-import { PLANS } from "@/lib/store";
+import { PLANS, TOKEN_COST } from "@/lib/store";
 import { usePlan } from "./AuthLink";
 
 /** The three plans: Free, Pro and Max.
@@ -33,7 +33,10 @@ export function Plans() {
           const p = PLANS[id];
           const on = selected === id;
           const isCurrent = current === id;
-          const bullets = [`${p.tokens} tokens / month`, p.tagline, "Human approval on every action"];
+          // What the plan gets you, derived from the real token costs (an article costs TOKEN_COST.article).
+          const articles = Math.floor(p.tokens / TOKEN_COST.article);
+          const extra = id === "free" ? "No card needed" : id === "starter" ? "Stories and posts too" : "Premium writing model + lead generation";
+          const bullets = [`About ${articles} article${articles === 1 ? "" : "s"} a month (${p.tokens} tokens)`, "Every live agent included", extra, "Human approval on every action"];
           const higher = current ? p.price > PLANS[current].price : false;
           return (
             <div key={id} role="radio" aria-checked={on} tabIndex={0}

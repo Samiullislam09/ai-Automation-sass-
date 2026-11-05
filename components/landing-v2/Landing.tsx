@@ -1,7 +1,7 @@
 import "./landing.css";
 import { Nav } from "./Nav";
 import { Hero } from "./Hero";
-import { ValueStrip } from "./ValueStrip";
+import { StackAgents } from "./StackAgents";
 import { Integrations } from "./Integrations";
 import { Workflow } from "./Workflow";
 import { Pricing } from "./Pricing";
@@ -23,7 +23,7 @@ export default function Landing() {
       <Nav />
       <main>
         <Hero />
-        <ValueStrip />
+        <StackAgents />
         <Integrations />
         <Workflow />
         <Pricing />

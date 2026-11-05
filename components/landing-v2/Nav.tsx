@@ -7,6 +7,7 @@ import { Logo } from "./Logo";
 
 const LINKS = [
   { href: "#features", label: "Features" },
+  { href: "#team", label: "Team" },
   { href: "#pricing", label: "Pricing" },
   { href: "#faq", label: "FAQs" },
   { href: "#agencies", label: "Agencies" },
@@ -20,7 +21,7 @@ export function Nav() {
         <div className="mx-auto flex w-full max-w-[1360px] items-center max-lg:gap-3">
           <Link href="/" className="flex shrink-0 items-center"><Logo /></Link>
           <div className="flex flex-1 items-center justify-between">
-            <nav className="mx-auto flex items-center gap-[60px] max-lg:hidden">
+            <nav className="mx-auto flex items-center gap-[44px] max-xl:gap-[32px] max-lg:hidden">
               {LINKS.map(l => (
                 <a key={l.href} href={l.href} className="flex min-h-[44px] items-center text-[16px] leading-[24px] text-[#0a0a0a] transition-colors hover:text-[#5d646d]">{l.label}</a>
               ))}
