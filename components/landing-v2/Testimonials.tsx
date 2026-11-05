@@ -9,7 +9,7 @@ import { BRAND } from "@/lib/brand";
  * attributable customer feedback before launch (or remove the section). */
 const REVIEWS_HEADLINE = ["1M+ downloads.", "15K+ reviews. And counting."];
 const REVIEWS: { name: string; initials: string; role: string; quote: string; tint: string; ink: string }[] = [
-  { name: "Aisha Khan", initials: "AK", role: "Blog owner", tint: "#e9f6ef", ink: "#0b7a4f", quote: "Sample review. The approval step is what sold me: nothing goes live until I say yes, and the drafts already sound like my brand. Placeholder text for the design." },
+  { name: "Aisha Khan", initials: "AK", role: "Blog owner", tint: "#efecff", ink: "#5242d8", quote: "Sample review. The approval step is what sold me: nothing goes live until I say yes, and the drafts already sound like my brand. Placeholder text for the design." },
   { name: "Ravi Menon", initials: "RM", role: "Agency founder", tint: "#e4f1fa", ink: "#1d5e8c", quote: "Sample review. Managing several client sites from one queue saves hours every week. This is placeholder text and will be replaced with real feedback." },
   { name: "Sara Ahmed", initials: "SA", role: "Local business owner", tint: "#fdf0e3", ink: "#9a5a12", quote: "Sample review. I just tell the chat what I need, in my own language, and it gets started. Placeholder copy for layout purposes only." },
   { name: "Daniel Brooks", initials: "DB", role: "Marketing lead", tint: "#f1ebfb", ink: "#5b3b9a", quote: "Sample review. Keyword picks come from real search data and the labels make it obvious what is measured and what is a suggestion. Placeholder." },
@@ -58,7 +58,7 @@ export function Testimonials() {
           const x = Math.sign(d) * slot.x;
           return (
             <article key={r.name} aria-hidden={d !== 0}
-              className="absolute left-1/2 top-1/2 flex h-[410px] min-h-[410px] w-[454px] flex-col gap-[22px] overflow-hidden rounded-[24px] border border-transparent px-9 pb-[30px] pt-[34px] [background:linear-gradient(#fff,#fff)_padding-box,linear-gradient(-8.5deg,#39d47a_4%,#16bfa6_50%,#009cd0_96%)_border-box] max-[601px]:h-[460px] max-[601px]:min-h-[460px] max-[601px]:w-[508px] max-[601px]:gap-6 max-[601px]:px-10 max-[601px]:pb-[34px] max-[601px]:pt-[38px]"
+              className="absolute left-1/2 top-1/2 flex h-[410px] min-h-[410px] w-[454px] flex-col gap-[22px] overflow-hidden rounded-[24px] border border-transparent px-9 pb-[30px] pt-[34px] [background:linear-gradient(#fff,#fff)_padding-box,linear-gradient(-8.5deg,#a78bfa_4%,#6a5af0_50%,#3b82f6_96%)_border-box] max-[601px]:h-[460px] max-[601px]:min-h-[460px] max-[601px]:w-[508px] max-[601px]:gap-6 max-[601px]:px-10 max-[601px]:pb-[34px] max-[601px]:pt-[38px]"
               style={{
                 transform: `translate(-50%,-50%) translateX(${x + drag * slot.p}px) scale(${slot.s})`,
                 opacity: slot.o, filter: `blur(${slot.b}px)`, zIndex: slot.z, pointerEvents: slot.o === 0 ? "none" : "auto",

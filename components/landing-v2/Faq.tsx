@@ -44,7 +44,7 @@ export function Faq() {
           <nav role="tablist" className="lv-noscroll mt-[calc(24px*var(--mk-scale))] flex flex-col gap-1 max-[901px]:-mx-6 max-[901px]:w-[calc(100%+48px)] max-[901px]:flex-row max-[901px]:gap-2 max-[901px]:overflow-x-auto max-[901px]:px-6 max-[601px]:-mx-4 max-[601px]:w-[calc(100%+32px)] max-[601px]:px-4">
             {keys.map(k => (
               <button key={k} role="tab" aria-selected={cat === k} onClick={() => { setCat(k); setOpen(0); }}
-                className={`h-[51px] rounded-[12px] py-[13px] pl-[14px] pr-[18px] text-left text-[20px] font-medium leading-[30px] transition-colors hover:bg-[#fafafa] hover:text-[#0a0a0a] max-[901px]:h-[44px] max-[901px]:w-max max-[901px]:min-w-max max-[901px]:flex-none max-[901px]:rounded-[22px] max-[901px]:border max-[901px]:px-4 max-[901px]:py-2.5 max-[901px]:text-[16px] max-[901px]:leading-[22px] max-[901px]:whitespace-nowrap ${cat === k ? "bg-[#f5f5f5] font-semibold text-[#0a0a0a] max-[901px]:border-[#39d47a]" : "text-[#6e736f] max-[901px]:border-[#e7e8e6]"}`}>{k}</button>
+                className={`h-[51px] rounded-[12px] py-[13px] pl-[14px] pr-[18px] text-left text-[20px] font-medium leading-[30px] transition-colors hover:bg-[#fafafa] hover:text-[#0a0a0a] max-[901px]:h-[44px] max-[901px]:w-max max-[901px]:min-w-max max-[901px]:flex-none max-[901px]:rounded-[22px] max-[901px]:border max-[901px]:px-4 max-[901px]:py-2.5 max-[901px]:text-[16px] max-[901px]:leading-[22px] max-[901px]:whitespace-nowrap ${cat === k ? "bg-[#f5f5f5] font-semibold text-[#0a0a0a] max-[901px]:border-[#a78bfa]" : "text-[#6e736f] max-[901px]:border-[#e7e8e6]"}`}>{k}</button>
             ))}
           </nav>
         </div>
@@ -54,7 +54,7 @@ export function Faq() {
             return (
               <article key={it.q}
                 className={`h-auto overflow-hidden rounded-[16px] px-6 py-5 transition-[border-color,box-shadow] duration-[250ms] max-[601px]:px-[13px] max-[601px]:py-[11px] ${on
-                  ? "border-[1.5px] border-transparent shadow-[0_10px_24px_-6px_rgba(15,23,20,0.1)] [background:linear-gradient(#fff,#fff)_padding-box,linear-gradient(-8.5deg,#39d47a_4%,#16bfa6_50%,#009cd0_96%)_border-box]"
+                  ? "border-[1.5px] border-transparent shadow-[0_10px_24px_-6px_rgba(15,23,20,0.1)] [background:linear-gradient(#fff,#fff)_padding-box,linear-gradient(-8.5deg,#a78bfa_4%,#6a5af0_50%,#3b82f6_96%)_border-box]"
                   : "border border-[#e7e8e6] bg-white shadow-[0_4px_12px_-3px_rgba(15,23,20,0.06)]"}`}>
                 <button type="button" aria-expanded={on} onClick={() => setOpen(on ? null : k)} className="flex h-10 w-full items-center justify-between text-left text-[#0a0a0a]">
                   <span className="text-[20px] font-semibold leading-[1.4] tracking-[-0.24px] max-[601px]:text-[16px]">{it.q}</span>

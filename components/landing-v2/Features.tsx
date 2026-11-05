@@ -13,16 +13,16 @@ function Visual({ f, narrow }: { f: F; narrow?: boolean }) {
   const Icon = f.icon;
   return (
     <div aria-hidden className={`overflow-hidden border border-[#f8f8f8] max-lg:rounded-[20px] ${narrow ? "rounded-[20px]" : "rounded-[24px]"}`}>
-      <div className={`relative flex w-full items-center justify-center bg-[linear-gradient(160deg,#e5f6ea_0%,#d9eef3_100%)] ${narrow ? "aspect-[297/215]" : "aspect-[580/272]"}`}>
+      <div className={`relative flex w-full items-center justify-center bg-[linear-gradient(160deg,#efecff_0%,#e4e9ff_100%)] ${narrow ? "aspect-[297/215]" : "aspect-[580/272]"}`}>
         <div className="w-[78%] max-w-[360px] rounded-[18px] bg-white p-4 shadow-[0_18px_40px_-14px_rgba(26,46,77,0.28)]">
           <div className="mb-3 flex items-center gap-2">
-            <span className="grid h-7 w-7 place-items-center rounded-lg bg-[#e5f6ea] text-[#2fb574]"><Icon size={16} /></span>
+            <span className="grid h-7 w-7 place-items-center rounded-lg bg-[#efecff] text-[#6a5af0]"><Icon size={16} /></span>
             <span className="text-[13px] font-semibold text-[#0a0a0a]">{f.tag}</span>
           </div>
           <div className="grid gap-2">
             {f.lines.map(l => (
               <div key={l} className="flex items-center gap-2 rounded-lg border border-[#eef0f2] px-3 py-2 text-[12.5px] text-[#404040]">
-                <Check size={12} className="shrink-0 text-[#2fb574]" /><span className="truncate">{l}</span>
+                <Check size={12} className="shrink-0 text-[#6a5af0]" /><span className="truncate">{l}</span>
               </div>
             ))}
           </div>
@@ -49,7 +49,7 @@ function Card({ f, narrow }: { f: F; narrow?: boolean }) {
 export function Features() {
   return (
     <section id="features" aria-labelledby="features-heading" className="sec-features relative mx-auto w-full max-w-[1440px] scroll-mt-[84px] text-[#0a0a0a]">
-      <div aria-hidden className="absolute inset-y-0 left-10 right-10 max-w-[1360px] overflow-hidden rounded-t-[60px] border border-transparent [background:linear-gradient(180deg,#e5f6ea_-86.7%,#fff_49.1%)_padding-box,linear-gradient(180deg,#e5e5e5_0%,#fff_89.576%)_border-box] max-lg:inset-x-0 max-[901px]:rounded-t-[32px]" />
+      <div aria-hidden className="absolute inset-y-0 left-10 right-10 max-w-[1360px] overflow-hidden rounded-t-[60px] border border-transparent [background:linear-gradient(180deg,#efecff_-86.7%,#fff_49.1%)_padding-box,linear-gradient(180deg,#e5e5e5_0%,#fff_89.576%)_border-box] max-lg:inset-x-0 max-[901px]:rounded-t-[32px]" />
       <div className="relative z-[2] mx-auto w-[1200px] max-w-[calc(100%-48px)] py-[calc(100px*var(--mk-scale))] max-md:w-full max-md:max-w-none max-md:px-4">
         <div className="mx-auto flex w-[900px] max-w-full flex-col items-center gap-[calc(16px*var(--mk-scale))] text-center max-md:w-full max-md:max-w-[370px]">
           <h2 id="features-heading" className="lv-h2">Everything you need to <span className="max-md:block">grow your site</span></h2>

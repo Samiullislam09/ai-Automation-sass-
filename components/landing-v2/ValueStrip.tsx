@@ -6,7 +6,7 @@ import { BRAND } from "@/lib/brand";
 const ITEMS = [
   { icon: Search, label: "Real search data", color: "#2563eb" },
   { icon: PenLine, label: "Your brand's tone", color: "#7c5cff" },
-  { icon: ShieldCheck, label: "Approval on every step", color: "#2fb574" },
+  { icon: ShieldCheck, label: "Approval on every step", color: "#6a5af0" },
   { icon: Send, label: "WordPress ready", color: "#21759B" },
 ];
 

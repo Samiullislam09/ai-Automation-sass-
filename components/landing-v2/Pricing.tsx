@@ -43,9 +43,9 @@ export function Pricing() {
 
   return (
     <section id="pricing" className="sec-pricing relative mx-auto w-full max-w-[1440px] scroll-mt-[84px] text-[#0a0a0a] max-lg:pb-9">
-      <div className="absolute inset-x-[40px] inset-y-0 max-w-[1360px] overflow-hidden rounded-t-[60px] bg-[linear-gradient(180deg,#e5f6ea_-86.7%,#fff_49.1%)] max-[901px]:rounded-t-[32px] max-lg:inset-x-0" />
+      <div className="absolute inset-x-[40px] inset-y-0 max-w-[1360px] overflow-hidden rounded-t-[60px] bg-[linear-gradient(180deg,#efecff_-86.7%,#fff_49.1%)] max-[901px]:rounded-t-[32px] max-lg:inset-x-0" />
       <div className="absolute inset-x-[40px] top-0 h-[733px] w-auto max-w-[1360px] overflow-hidden rounded-[44px] opacity-50 max-lg:inset-x-0 max-lg:w-full"
-        style={{ background: "linear-gradient(180deg,rgba(255,255,255,0) 63.165%,#fff 100%),radial-gradient(ellipse 680px 366.5px at 612px -73.3px,rgba(255,255,255,0.5) 0%,rgba(255,255,255,0) 100%),radial-gradient(ellipse 544px 293.2px at 40.8px 696.35px,rgba(101,217,162,0.8) 0%,rgba(101,217,162,0) 100%),radial-gradient(ellipse 612px 329.85px at 54.4px 58.64px,rgba(169,233,201,0.95) 0%,rgba(169,233,201,0) 100%),radial-gradient(ellipse 816px 439.8px at 1196.8px 183.25px,rgba(63,180,220,0.9) 0%,rgba(63,180,220,0) 100%),#8fd2e0" }} />
+        style={{ background: "linear-gradient(180deg,rgba(255,255,255,0) 63.165%,#fff 100%),radial-gradient(ellipse 680px 366.5px at 612px -73.3px,rgba(255,255,255,0.5) 0%,rgba(255,255,255,0) 100%),radial-gradient(ellipse 544px 293.2px at 40.8px 696.35px,rgba(139,108,255,0.8) 0%,rgba(139,108,255,0) 100%),radial-gradient(ellipse 612px 329.85px at 54.4px 58.64px,rgba(196,181,253,0.95) 0%,rgba(196,181,253,0) 100%),radial-gradient(ellipse 816px 439.8px at 1196.8px 183.25px,rgba(99,140,250,0.9) 0%,rgba(99,140,250,0) 100%),#a99cf6" }} />
 
       <div className="relative z-[2] mx-auto w-[1200px] max-w-[calc(100%-48px)] pb-[100px] pt-[100px] max-lg:w-full max-lg:max-w-none max-lg:pb-7 max-lg:pt-8">
         <div className="mx-auto flex w-[773px] max-w-full flex-col items-center gap-[14px] text-center max-lg:w-[min(440px,calc(100%-32px))] max-lg:gap-3">
@@ -66,7 +66,7 @@ export function Pricing() {
                 const on = sel.includes(t.id);
                 return (
                   <button key={t.id} type="button" aria-pressed={on} aria-label={t.label} onClick={() => toggle(t.id)}
-                    className={`relative flex aspect-square h-[60px] w-[60px] flex-[0_0_60px] items-center justify-center rounded-[15px] bg-white p-0 transition-all ${on ? "border-[1.6px] border-[#2fb574] bg-white shadow-[0_4px_12px_rgba(46,181,115,0.18)]" : "border-[1.6px] border-[#f0e8e1] !bg-[#f8f5f2] hover:!bg-[#f3eee9]"}`}>
+                    className={`relative flex aspect-square h-[60px] w-[60px] flex-[0_0_60px] items-center justify-center rounded-[15px] bg-white p-0 transition-all ${on ? "border-[1.6px] border-[#6a5af0] bg-white shadow-[0_4px_12px_rgba(106,90,240,0.18)]" : "border-[1.6px] border-[#f0e8e1] !bg-[#f8f5f2] hover:!bg-[#f3eee9]"}`}>
                     <t.icon size={26} style={{ color: on ? t.color : "#a7a29d" }} className={on ? "" : "opacity-60"} />
                     {on && <span className="absolute -right-1 -top-1 grid h-[18px] w-[18px] place-items-center rounded-full bg-[#0a0a0a] text-white"><Check size={11} strokeWidth={3} /></span>}
                   </button>
@@ -93,7 +93,7 @@ export function Pricing() {
             </div>
           </div>
 
-          <div className="grid h-[38px] w-[38px] flex-[0_0_38px] place-items-center self-center rounded-full bg-[linear-gradient(90deg,#39d47a_4%,#16bfa6_50%,#009cd0_96%)] text-[16px] font-medium leading-[1.5] text-white shadow-[0_4px_12px_-3px_rgba(13,13,26,0.22)]" aria-hidden>VS</div>
+          <div className="grid h-[38px] w-[38px] flex-[0_0_38px] place-items-center self-center rounded-full bg-[linear-gradient(90deg,#a78bfa_4%,#6a5af0_50%,#3b82f6_96%)] text-[16px] font-medium leading-[1.5] text-white shadow-[0_4px_12px_-3px_rgba(13,13,26,0.22)]" aria-hidden>VS</div>
 
           {/* RIGHT: the plan */}
           <article className="group relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-[24px] bg-white p-[9px] shadow-[0_10px_30px_-6px_rgba(15,15,26,0.1),0_2px_6px_rgba(15,15,26,0.05)]">
@@ -103,12 +103,12 @@ export function Pricing() {
                 const on = yearly === y;
                 return (
                   <button key={String(y)} type="button" role="radio" aria-checked={on} onClick={() => setYearly(y)}
-                    className={`relative flex min-w-0 cursor-pointer flex-col rounded-[18px] border-2 border-transparent p-4 text-left transition-colors duration-200 max-[1279px]:p-3 ${on ? "bg-[#edf6ef]" : "bg-[#efeff1] hover:bg-[#e8e8eb]"}`}>
+                    className={`relative flex min-w-0 cursor-pointer flex-col rounded-[18px] border-2 border-transparent p-4 text-left transition-colors duration-200 max-[1279px]:p-3 ${on ? "bg-[#f1eeff]" : "bg-[#efeff1] hover:bg-[#e8e8eb]"}`}>
                     {on && <span aria-hidden className="pointer-events-none absolute -inset-[2px] rounded-[18px] p-[2px] lv-ring" />}
                     {y && <span className="absolute left-1/2 top-0 z-[2] -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full bg-[#0a0a0a] px-3 py-[3px] text-[12px] font-medium text-white shadow-[0_2px_6px_rgba(15,15,26,0.18)]">Save ${monthlyPerYear - yearlyPerYear}</span>}
                     <div className="flex items-center justify-between gap-2">
                       <h3 className="text-[16px] font-semibold leading-[1.5] tracking-[-0.096px] text-[#111114]">{y ? "Pay once a year" : "Pay monthly"}</h3>
-                      <span aria-hidden className={`flex h-[20px] w-[20px] shrink-0 items-center justify-center rounded-full ${on ? "bg-[#16bfa6]" : "border-[1.5px] border-[#b8b8be] bg-white"}`}>{on && <span className="h-[7px] w-[7px] rounded-full bg-white" />}</span>
+                      <span aria-hidden className={`flex h-[20px] w-[20px] shrink-0 items-center justify-center rounded-full ${on ? "bg-[#6a5af0]" : "border-[1.5px] border-[#b8b8be] bg-white"}`}>{on && <span className="h-[7px] w-[7px] rounded-full bg-white" />}</span>
                     </div>
                     <div className="mt-3 flex flex-wrap items-baseline gap-x-[6px] text-[#111114]">
                       <strong className="text-[40px] font-semibold leading-[1.05] tracking-[-1.28px] max-[1279px]:text-[32px] max-[1279px]:tracking-[-1.02px]">${y ? PLAN.yearly : PLAN.monthly}</strong>
@@ -122,14 +122,14 @@ export function Pricing() {
             </div>
 
             <div className="px-1">
-              <div className="mt-3 flex items-center gap-[12px] rounded-[16px] bg-[#E5F6EA] px-[16px] py-[14px]">
+              <div className="mt-3 flex items-center gap-[12px] rounded-[16px] bg-[#efecff] px-[16px] py-[14px]">
                 <span className="relative flex h-11 w-11 shrink-0 items-center justify-center">
-                  <span aria-hidden className="absolute -inset-1.5 rounded-[16px] bg-[radial-gradient(circle_at_center,rgba(48,166,109,0.5),transparent_70%)] [animation:lv-halo_2.2s_ease-in-out_infinite] motion-reduce:animate-none" />
-                  <span className="relative flex h-11 w-11 items-center justify-center rounded-[12px] bg-white text-[#30A66D] ring-1 ring-[#9FD9BB] shadow-[0_5px_12px_-2px_rgba(48,166,109,0.45),0_0_0_4px_rgba(48,166,109,0.14)] transition-[scale] duration-200 ease-out group-hover:scale-[1.08]"><ShieldCheck size={22} /></span>
+                  <span aria-hidden className="absolute -inset-1.5 rounded-[16px] bg-[radial-gradient(circle_at_center,rgba(106,90,240,0.5),transparent_70%)] [animation:lv-halo_2.2s_ease-in-out_infinite] motion-reduce:animate-none" />
+                  <span className="relative flex h-11 w-11 items-center justify-center rounded-[12px] bg-white text-[#6a5af0] ring-1 ring-[#c4b8ff] shadow-[0_5px_12px_-2px_rgba(106,90,240,0.45),0_0_0_4px_rgba(106,90,240,0.14)] transition-[scale] duration-200 ease-out group-hover:scale-[1.08]"><ShieldCheck size={22} /></span>
                 </span>
                 <span className="flex min-w-0 flex-col gap-[3px]">
-                  <span className="min-w-0 text-[16px] font-semibold leading-[1.3] tracking-[-0.3px] text-[#0a0a0a] max-[400px]:text-[15px]">You approve <span className="text-[19px] font-bold tracking-[-0.4px] text-[#30A66D]">every</span> action</span>
-                  <span className="text-[13px] leading-[1.35] tracking-[-0.1px] text-[#4A5550]">Nothing is published <span className="font-semibold text-[#30A66D]">without your yes</span></span>
+                  <span className="min-w-0 text-[16px] font-semibold leading-[1.3] tracking-[-0.3px] text-[#0a0a0a] max-[400px]:text-[15px]">You approve <span className="text-[19px] font-bold tracking-[-0.4px] text-[#6a5af0]">every</span> action</span>
+                  <span className="text-[13px] leading-[1.35] tracking-[-0.1px] text-[#4A5550]">Nothing is published <span className="font-semibold text-[#6a5af0]">without your yes</span></span>
                 </span>
               </div>
             </div>

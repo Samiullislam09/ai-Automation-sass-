@@ -19,7 +19,7 @@ function Panel({ i }: { i: number }) {
     <div className="absolute bottom-12 left-12 right-12 top-[124px] grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] items-center gap-12 overflow-hidden rounded-[32px] bg-white p-14 shadow-[0_30px_60px_-20px_rgba(26,46,77,0.35)]">
       <div className="flex flex-col items-start gap-6">
         <span className="inline-flex items-center gap-2 text-[16px] font-medium text-[#404040]">
-          <span className="grid h-7 w-7 place-items-center rounded-md bg-[#e5f6ea] text-[#2fb574]"><Icon size={16} /></span>{t.label}
+          <span className="grid h-7 w-7 place-items-center rounded-md bg-[#efecff] text-[#6a5af0]"><Icon size={16} /></span>{t.label}
         </span>
         <h3 className="text-[40px] font-medium leading-[1.1] tracking-[-0.02em] text-[#0a0a0a]">{t.title}</h3>
         <p className="max-w-[360px] text-[17px] leading-[1.5] text-[#737373]">{t.body}</p>
@@ -32,7 +32,7 @@ function Panel({ i }: { i: number }) {
         <div className="grid gap-3">
           {t.lines.map((l, k) => (
             <div key={l} className="flex items-center gap-3 rounded-xl border border-[#2a3238] bg-[#1d2327] px-5 py-4 text-[16px] text-[#e5e7e8]">
-              <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#1f3a2b] text-[#39d47a]"><Check size={14} /></span>
+              <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#2a2552] text-[#a78bfa]"><Check size={14} /></span>
               <span className="min-w-0 flex-1 truncate">{l}</span>
               <span className="text-[12px] text-[#6b757c]">Step {k + 1}</span>
             </div>
@@ -69,7 +69,7 @@ export function Hero() {
         <div className="flex flex-col items-center gap-[32px] md:gap-[80px] md:pt-[84px]">
           <div className="flex flex-col items-center gap-[36px] pt-[48px] md:pt-0">
             <div className="flex h-[26px] items-center gap-1.5 rounded-full border border-[#ffe3d5] bg-white py-1 pl-1.5 pr-3">
-              <span className="block h-4 w-4 rounded-full bg-[linear-gradient(135deg,#39d47a,#009cd0)]" />
+              <span className="block h-4 w-4 rounded-full bg-[linear-gradient(135deg,#a78bfa,#3b82f6)]" />
               <span className="whitespace-nowrap text-[11px] font-medium leading-[1.2] text-[#737373]">Human-approved at every step</span>
             </div>
             <div className="flex flex-col items-center gap-[28px]">
@@ -85,7 +85,7 @@ export function Hero() {
                   <span>Start free</span><ArrowRight size={18} />
                 </Link>
                 <span className="flex h-10 items-center gap-2 px-4 text-[16px] font-semibold text-[#0a0a0a] max-[601px]:text-[14px]">
-                  <span className="h-2 w-2 rounded-full bg-[#2fb574]" />Connect your site in minutes
+                  <span className="h-2 w-2 rounded-full bg-[#6a5af0]" />Connect your site in minutes
                 </span>
               </div>
             </div>
@@ -94,11 +94,11 @@ export function Hero() {
           <div className="hidden w-full justify-center md:flex">
             <Stage>
               <div className="relative h-[683px] w-[1216px] shrink-0 overflow-hidden rounded-[44px]"
-                style={{ backgroundColor: "#8fd2e0", backgroundImage: "radial-gradient(ellipse 608px 341.5px at 547.2px -68.3px, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0) 100%), radial-gradient(ellipse 486.4px 273.2px at 36.48px 648.85px, rgba(101,217,162,0.8) 0%, rgba(101,217,162,0) 100%), radial-gradient(ellipse 547.2px 307.35px at 48.64px 54.64px, rgba(169,233,201,0.95) 0%, rgba(169,233,201,0) 100%), radial-gradient(ellipse 729.6px 409.8px at 1070.1px 170.75px, rgba(63,180,220,0.9) 0%, rgba(63,180,220,0) 100%)" }}>
+                style={{ backgroundColor: "#a99cf6", backgroundImage: "radial-gradient(ellipse 608px 341.5px at 547.2px -68.3px, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0) 100%), radial-gradient(ellipse 486.4px 273.2px at 36.48px 648.85px, rgba(139,108,255,0.8) 0%, rgba(139,108,255,0) 100%), radial-gradient(ellipse 547.2px 307.35px at 48.64px 54.64px, rgba(196,181,253,0.95) 0%, rgba(196,181,253,0) 100%), radial-gradient(ellipse 729.6px 409.8px at 1070.1px 170.75px, rgba(99,140,250,0.9) 0%, rgba(99,140,250,0) 100%)" }}>
                 <div role="tablist" aria-label="Product tools" className="absolute left-12 top-12 h-14 w-[1120px]">
                   {TABS.map((t, k) => (
                     <button key={t.label} role="tab" aria-selected={i === k} aria-label={t.label} onClick={() => setI(k)}
-                      className={`absolute top-0 flex h-14 w-14 items-center justify-center rounded-[20px] border-4 border-white transition-all duration-[250ms] hover:-translate-y-0.5 ${i === k ? "bg-[#e5f6ea] text-[#0a0a0a]" : "bg-[#e2e5ea] text-[#8a929c]"}`}
+                      className={`absolute top-0 flex h-14 w-14 items-center justify-center rounded-[20px] border-4 border-white transition-all duration-[250ms] hover:-translate-y-0.5 ${i === k ? "bg-[#efecff] text-[#0a0a0a]" : "bg-[#e2e5ea] text-[#8a929c]"}`}
                       style={{ left: 342 + k * 76, filter: "drop-shadow(0 10px 10px rgba(26,46,77,0.16))" }}>
                       <t.icon size={26} />
                     </button>

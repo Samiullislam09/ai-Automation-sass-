@@ -27,12 +27,12 @@ export function StickyCta() {
       className={`fixed inset-x-3 bottom-[calc(16px+env(safe-area-inset-bottom))] z-40 mx-auto max-w-[720px] rounded-full border border-[#e5e5e5] bg-white p-[6px] shadow-[0_12px_38px_-10px_rgba(16,24,40,0.28)] transition-[transform,opacity] duration-500 lg:hidden motion-reduce:transition-none ${show ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-[140%] opacity-0"}`}>
       <div className="flex items-center gap-[10px]">
         <div role="group" aria-label="Choose a plan" className="relative grid min-w-0 flex-1 grid-cols-2 gap-[3px] rounded-full bg-[#eef2f5] p-1">
-          <span aria-hidden className="pointer-events-none absolute bottom-1 left-1 top-1 w-[calc(50%-5.5px)] rounded-full border border-[#a7dcc1] bg-white shadow-[0_2px_8px_rgba(16,24,40,0.08)] transition-transform duration-300"
+          <span aria-hidden className="pointer-events-none absolute bottom-1 left-1 top-1 w-[calc(50%-5.5px)] rounded-full border border-[#c4b8ff] bg-white shadow-[0_2px_8px_rgba(16,24,40,0.08)] transition-transform duration-300"
             style={{ transform: yearly ? "translateX(calc(100% + 3px))" : "none" }} />
           {[false, true].map(y => (
             <button key={String(y)} type="button" aria-pressed={yearly === y} onClick={() => setYearly(y)}
               className="relative z-[1] flex min-h-[46px] flex-col items-center justify-center gap-[2px] rounded-full px-2 py-1">
-              <span className={`text-[12px] font-medium leading-[14px] ${yearly === y ? "text-[#2f9e6f]" : "text-[#5d646d]"}`}>{y ? "Yearly" : "Monthly"}</span>
+              <span className={`text-[12px] font-medium leading-[14px] ${yearly === y ? "text-[#6a5af0]" : "text-[#5d646d]"}`}>{y ? "Yearly" : "Monthly"}</span>
               <span className={`whitespace-nowrap text-[18px] font-extrabold leading-5 max-[360px]:text-[16px] ${yearly === y ? "text-[#0a0a0a]" : "text-[#8d949c]"}`}>${y ? PLAN.yearly : PLAN.monthly}</span>
             </button>
           ))}

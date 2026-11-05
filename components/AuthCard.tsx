@@ -192,7 +192,7 @@ export function AuthCard({ mode }: { mode: "login" | "signup" }) {
 
 const CSS = `
 .lg-page{min-height:100vh;background:#fff;
-  background-image:radial-gradient(ellipse 60% 340px at 50% -40px,#d3eedd 0%,rgba(229,246,234,.55) 45%,rgba(255,255,255,0) 100%);
+  background-image:radial-gradient(ellipse 60% 340px at 50% -40px,#d9d2ff 0%,rgba(239,236,255,.55) 45%,rgba(255,255,255,0) 100%);
   background-repeat:no-repeat;
   font-family:"Google Sans Flex","Plus Jakarta Sans",system-ui,sans-serif;color:#1d2125;-webkit-font-smoothing:antialiased;
   display:flex;justify-content:center;padding:48px 16px 56px;box-sizing:border-box}
@@ -214,7 +214,7 @@ const CSS = `
 .lg-field label{display:block;margin-bottom:8px;font-size:16px;font-weight:600;color:#1d2125}
 .lg-field input{width:100%;height:48px;padding:0 20px;border-radius:999px;border:1px solid #d9d9de;background:#fff;color:#1d2125;font-size:16px;outline:none;transition:border-color .15s,box-shadow .15s}
 .lg-field input::placeholder{color:#8b8d98}
-.lg-field input:focus{border-color:#2fb574;box-shadow:0 0 0 3px rgba(47,181,116,.15)}
+.lg-field input:focus{border-color:#6a5af0;box-shadow:0 0 0 3px rgba(106,90,240,.15)}
 .lg-pwwrap{position:relative}
 .lg-pwwrap input{padding-right:52px}
 .lg-eye{position:absolute;right:14px;top:50%;transform:translateY(-50%);display:flex;width:28px;height:28px;align-items:center;justify-content:center;border:none;background:none;color:#8b8d98;cursor:pointer}
@@ -225,13 +225,13 @@ const CSS = `
 .lg-check span{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;margin-top:3px;border-radius:4px;border:1px solid rgba(0,5,31,.45);background:#fff;flex-shrink:0}
 .lg-check input:checked+span{background:#1d2125;border-color:#1d2125}
 .lg-check input:checked+span::after{content:"";width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg);margin-top:-2px}
-.lg-check input:focus-visible+span{outline:2px solid #2fb574;outline-offset:2px}
+.lg-check input:focus-visible+span{outline:2px solid #6a5af0;outline-offset:2px}
 .lg-check em{font-style:normal}
 .lg-terms{margin:4px 0 12px}
 .lg-link{background:none;border:none;padding:0;color:#1d2125;font-size:inherit;text-decoration:underline;cursor:pointer;font-weight:inherit}
-.lg-link:hover{color:#2fb574}
+.lg-link:hover{color:#6a5af0}
 .lg-error{margin:0 0 8px;font-size:14px;color:#dc2626}
-.lg-notice{margin:0 0 8px;font-size:14px;color:#1f7a4d}
+.lg-notice{margin:0 0 8px;font-size:14px;color:#5242d8}
 .lg-switch{margin:20px 0 0;text-align:center;font-size:15px;color:#737373}
 .lg-legal{margin:14px 0 0;text-align:center;font-size:13px;line-height:1.5;color:#8b8d98}
 @media (max-width:480px){.lg-page{padding-top:32px}.lg-h1{font-size:26px}}

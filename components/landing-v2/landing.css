@@ -16,7 +16,7 @@
 .lv2 .lv-sub{ font-size:var(--mk-subtitle); line-height:1.5; color:#737373; font-weight:400; letter-spacing:0; }
 .lv2 .lv-title{ font-size:var(--mk-title); line-height:1.2; font-weight:500; letter-spacing:-.01em; color:#0a0a0a; }
 .lv2 .lv-body{ font-size:var(--mk-body); line-height:var(--mk-body-leading); font-weight:400; color:#737373; }
-.lv2 .lv-grad-text{ background:linear-gradient(-8.5deg,#39d47a 4%,#16bfa6 50%,#009cd0 96%); -webkit-background-clip:text; background-clip:text; color:transparent; font-weight:600; }
+.lv2 .lv-grad-text{ background:linear-gradient(-8.5deg,#a78bfa 4%,#6a5af0 50%,#3b82f6 96%); -webkit-background-clip:text; background-clip:text; color:transparent; font-weight:600; }
 
 /* Section top margins — the same numbers the reference uses at each breakpoint */
 .lv2 .sec-models{ margin-top:var(--section-gap); }
@@ -55,7 +55,7 @@
 .lv2 .lv-noscroll{ scrollbar-width:none; } .lv2 .lv-noscroll::-webkit-scrollbar{ display:none; }
 
 /* gradient hairline border used by the section panels (masked 1px ring) */
-.lv2 .lv-panel{ position:relative; overflow:hidden; border-top-left-radius:60px; border-top-right-radius:60px; background:linear-gradient(180deg,#e5f6ea -86.7%,#fff 49.1%); }
+.lv2 .lv-panel{ position:relative; overflow:hidden; border-top-left-radius:60px; border-top-right-radius:60px; background:linear-gradient(180deg,#efecff -86.7%,#fff 49.1%); }
 .lv2 .lv-panel::before{ content:""; position:absolute; inset:0; border-top-left-radius:60px; border-top-right-radius:60px; padding:1px; pointer-events:none;
   background:linear-gradient(180deg,#e5e5e5 0%,#fff 84.9%);
   -webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0); -webkit-mask-composite:xor; mask:linear-gradient(#fff 0 0) content-box exclude,linear-gradient(#fff 0 0); }
@@ -67,6 +67,6 @@ body:has(.lv2)::before{ display:none; }
 
 /* gradient ring (2px) used on the plan card and open FAQ items */
 .lv2 .lv-ring{ position:absolute; inset:0; border-radius:inherit; padding:2px; pointer-events:none;
-  background:linear-gradient(318.1deg,#39d47a 4%,#16bfa6 50%,#009cd0 96%);
+  background:linear-gradient(318.1deg,#a78bfa 4%,#6a5af0 50%,#3b82f6 96%);
   -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0); -webkit-mask-composite:xor;
   mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0); }

@@ -24,7 +24,7 @@ const AUDIENCES: { id: string; label: string; steps: Step[] }[] = [
 function Media({ step, label }: { step: Step; label: string }) {
   return (
     <div className="relative z-[1] aspect-[609.81/394.031] w-full max-w-[609.81px] overflow-hidden rounded-[16.418px] shadow-[0_11.727px_28.145px_rgba(20,31,26,0.1)]">
-      <div className="absolute inset-0 flex h-full w-full flex-col border-[1.173px] border-[#e6eae8] bg-[linear-gradient(131.98deg,#ffffff_0%,#e8f0ec_73.529%)] p-6 max-md:p-4">
+      <div className="absolute inset-0 flex h-full w-full flex-col border-[1.173px] border-[#e6eae8] bg-[linear-gradient(131.98deg,#ffffff_0%,#ece9fb_73.529%)] p-6 max-md:p-4">
         <div className="mb-4 flex items-center gap-2">
           <span className="h-2 w-2 rounded-full bg-[#ff5f57]" /><span className="h-2 w-2 rounded-full bg-[#febc2e]" /><span className="h-2 w-2 rounded-full bg-[#28c840]" />
           <span className="ml-3 rounded-md bg-[#eef3f0] px-3 py-1 text-[11px] text-[#6e726f]">{label} · {step.mock.tag}</span>
@@ -32,7 +32,7 @@ function Media({ step, label }: { step: Step; label: string }) {
         <div className="flex flex-1 flex-col justify-center gap-3">
           {step.mock.rows.map((r, k) => (
             <div key={r} className="flex items-center gap-3 rounded-xl border border-[#e6eae8] bg-white px-4 py-3 text-[15px] text-[#17171a] max-md:py-2.5 max-md:text-[13px]">
-              <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#e5f6ea] text-[#2fb574]"><Check size={13} /></span>
+              <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#efecff] text-[#6a5af0]"><Check size={13} /></span>
               <span className="min-w-0 flex-1 truncate">{r}</span>
               <span className="text-[11px] text-[#9da39e]">Step {k + 1}</span>
             </div>
@@ -75,7 +75,7 @@ export function Workflow() {
                     {k > 0 && <div className="h-px w-full bg-[#e7e9e6]" />}
                     <button type="button" aria-expanded={on} onClick={() => setOpen(k)}
                       className={`relative flex w-full items-start gap-4 px-[34px] py-[30px] text-left transition-[background] duration-300 max-lg:px-5 max-lg:py-5 ${on ? "bg-white lg:min-h-[285px] xl:h-[285px]" : "bg-[#fbfcfb] lg:h-[88px]"}`}>
-                      {on && <span aria-hidden className="absolute left-0 top-0 h-full w-[3px] bg-[linear-gradient(-88.8deg,#39d47a_4%,#16bfa6_50%,#009cd0_96%)]" />}
+                      {on && <span aria-hidden className="absolute left-0 top-0 h-full w-[3px] bg-[linear-gradient(-88.8deg,#a78bfa_4%,#6a5af0_50%,#3b82f6_96%)]" />}
                       <span className={`flex h-[28px] w-[22px] shrink-0 items-center justify-center ${on ? "text-[#17171a]" : "text-[#9da39e]"}`}><s.icon size={22} /></span>
                       <span className={`flex min-w-0 flex-1 flex-col transition-[gap] duration-300 ${on ? "gap-2" : "gap-0"}`}>
                         <span className={`text-[20px] leading-[28px] tracking-[-0.3px] max-md:text-[18px] ${on ? "font-semibold text-[#17171a]" : "font-medium text-[#9da39e]"}`}>{s.title}</span>
@@ -92,7 +92,7 @@ export function Workflow() {
                 );
               })}
             </div>
-            <div className="relative flex flex-1 items-center justify-center overflow-hidden bg-[#e7f1eb] px-7 py-6 max-lg:hidden">
+            <div className="relative flex flex-1 items-center justify-center overflow-hidden bg-[#ece9fb] px-7 py-6 max-lg:hidden">
               <div aria-hidden className="pointer-events-none absolute left-1/2 top-1/2 h-[404px] w-[548.286px] -translate-x-1/2 -translate-y-1/2">
                 {[[-58.6, 71.2, 442.5, 236.5, 500.2, 28], [-39.2, 215.5, 500.2, 203.6, 538.7, 22], [115.4, -385.4, 140, 380.3, 404, -70], [317.4, -255.5, 128.2, 260.2, 288.6, -64], [-77.5, 321.3, 555.3, 160.9, 577.1, 16]].map(([l, t, w, h, lw, rot], i) => (
                   <div key={i} className="absolute" style={{ left: l, top: t, width: w, height: h }}>
