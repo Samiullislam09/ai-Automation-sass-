@@ -71,7 +71,7 @@ const NETWORK_LABEL: Record<string, string> = { facebook: "Facebook", instagram:
 
 /** Which agent authored a row — by type; the writer/social agents are the only ones that create content_items. */
 const AGENT_BY_TYPE: Record<string, string> = { article: "Mr. Writer", social: "Miss Social", gbp: "Mr. Writer", image_set: "Mr. Image", web_story: "Mr. Story" };
-const TYPE_LABEL: Record<string, string> = { article: "Blog Post", social: "Social Post", gbp: "GBP Post", image_set: "Images", web_story: "Web Story" };
+const TYPE_LABEL: Record<string, string> = { article: "Article", social: "Social post", gbp: "Google post", image_set: "Images", web_story: "Web story" };
 
 const STATUS: Record<string, { label: string; color: string; bg: string; border: string }> = {
   awaiting_approval: { label: "Pending Review", color: "#fbbf24", bg: "rgba(251,191,36,.10)", border: "rgba(251,191,36,.35)" },
@@ -84,12 +84,14 @@ const STATUS: Record<string, { label: string; color: string; bg: string; border:
 const statusOf = (s: string) => STATUS[s] ?? { label: s, color: "var(--lx-mut)", bg: "var(--ap-s1)", border: "var(--ap-s2)" };
 
 /** Tile colour per type — the mockup gives every article its own tinted icon tile. */
-const TILE: Record<string, { from: string; to: string; border: string; glow: string; Icon: React.ElementType }> = {
-  article: { from: "#0f1a3a", to: "#1a0f3a", border: "rgba(99,102,241,.6)",  glow: "rgba(99,102,241,.35)",  Icon: FileText },
-  social:  { from: "#1a0f3a", to: "#2a0f3a", border: "rgba(168,85,247,.6)",  glow: "rgba(168,85,247,.35)",  Icon: Megaphone },
-  gbp:     { from: "#0a1f1a", to: "#0a2a1f", border: "rgba(34,197,94,.55)",  glow: "rgba(34,197,94,.3)",    Icon: MapPin },
-  image_set: { from: "#2a0f22", to: "#3a0f2a", border: "rgba(244,114,182,.6)", glow: "rgba(244,114,182,.35)", Icon: ImageIcon },
-  web_story: { from: "#0f2a2a", to: "#0f1a3a", border: "rgba(56,189,248,.6)",  glow: "rgba(56,189,248,.35)",  Icon: Sparkles },
+/** One colour per kind of work, used on the tile, the label above the title and the filter, so an
+ *  article, a set of pictures and a web story can never be mistaken for each other. */
+const TILE: Record<string, { from: string; to: string; border: string; glow: string; fg: string; Icon: React.ElementType }> = {
+  article:   { from: "#1e2a6b", to: "#2b2f8f", border: "rgba(129,140,248,.8)", glow: "rgba(99,102,241,.4)",  fg: "#a5b4fc", Icon: FileText },
+  social:    { from: "#4a1d6e", to: "#5b21b6", border: "rgba(192,132,252,.8)", glow: "rgba(168,85,247,.4)",  fg: "#d8b4fe", Icon: Megaphone },
+  gbp:       { from: "#0f4d33", to: "#116140", border: "rgba(74,222,128,.75)", glow: "rgba(34,197,94,.35)",  fg: "#86efac", Icon: MapPin },
+  image_set: { from: "#7a1f4a", to: "#9d174d", border: "rgba(244,114,182,.8)", glow: "rgba(244,114,182,.4)", fg: "#f9a8d4", Icon: ImageIcon },
+  web_story: { from: "#0e5a6b", to: "#0e7490", border: "rgba(103,232,249,.75)", glow: "rgba(34,211,238,.4)", fg: "#67e8f9", Icon: Sparkles },
 };
 const tileOf = (t: string) => TILE[t] ?? TILE.article;
 
@@ -477,11 +479,12 @@ export default function ApprovalsSection({
                   <div className="ap-c-a flex min-w-0 items-center gap-4">
                     <span className="ap-tile"><Tile tile={tile} size={38} /></span>
                     <div className="min-w-0">
+                      <span className="ap-type" style={{ color: tile.fg }}>{TYPE_LABEL[c.type] ?? c.type}</span>
                       <ClampTitle text={c.title || "Untitled"} />
                       <div className="ap-meta lx-10 lx-mut mt-1.5 flex items-center gap-1.5 overflow-hidden whitespace-nowrap">
                         <span className="ap-inline-status"><StatusPill s={c.status} /></span>
                         <span className="ap-m-x truncate">{categoryOf(c)}</span><i className="ap-sep ap-m-x" /><span className="ap-m-x">{agentOf(c)}</span><i className="ap-sep ap-m-x" />
-                        <span className="ap-m-x">{typeof c.meta?.wordCount === "number" ? `${c.meta.wordCount.toLocaleString()} words` : "— words"}</span><i className="ap-sep ap-m-x" /><span className="ap-m-x">{TYPE_LABEL[c.type] ?? c.type}</span>
+                        <span className="ap-m-x">{typeof c.meta?.wordCount === "number" ? `${c.meta.wordCount.toLocaleString()} words` : "— words"}</span>
                         <i className="ap-sep ap-inline-date" /><span className="ap-inline-date">{fmtBoth(c.updated_at ?? c.created_at)}</span>
                       </div>
                       {(kidsOf.get(c.id)?.length ?? 0) > 0 && (
@@ -621,12 +624,12 @@ function Tile({ tile, size = 60 }: { tile: ReturnType<typeof tileOf>; size?: num
     <span
       className="flex shrink-0 items-center justify-center"
       style={{
-        width: size, height: size, borderRadius: Math.round(size * 0.28), color: "#e8e8ff",
+        width: size, height: size, borderRadius: Math.round(size * 0.28), color: "#fff",
         background: `linear-gradient(135deg,${tile.from},${tile.to})`, border: `1px solid ${tile.border}`,
         boxShadow: "inset 0 1px 0 var(--ap-s1), 0 1px 2px rgba(0,0,0,.35)",
       }}
     >
-      <tile.Icon size={Math.round(size * 0.44)} strokeWidth={1.7} />
+      <tile.Icon size={Math.round(size * 0.48)} strokeWidth={1.9} />
     </span>
   );
 }
@@ -891,11 +894,14 @@ function Drawer({ c, loading, busy, tab, setTab, onClose, onApprove, onReject, o
   const events = useMemo(() => historyOf(c), [c]);
   const pending = c.status === "awaiting_approval";
   const copyOnly = c.type === "social" && !!c.meta?.copyOnly;
-  const approveLabel = copyOnly ? "Mark ready" : c.type === "article" || kids.length ? "Approve & publish" : "Approve";
+  const approveLabel = copyOnly ? "Mark ready" : c.type === "article" || kids.length ? "Approve & publish"
+    : c.type === "image_set" ? "Approve images" : c.type === "web_story" ? "Approve story" : "Approve";
   const hint = kids.length
     ? `Publishes the article together with its ${kids.map((k) => (TYPE_LABEL[k.type] ?? k.type).toLowerCase()).join(" and ")}.`
     : c.type === "article" ? "Publishes this article to your connected site."
     : copyOnly ? "Marks it ready to copy. Nothing is posted anywhere."
+    : c.type === "image_set" ? "Keeps these pictures. They go live with the article."
+    : c.type === "web_story" ? "Keeps this story. It goes live with the article."
     : "Approves this item.";
   const bodyHtml = useMemo(() => (c.type === "article" && c.body ? renderMarkdown(c.body) : ""), [c.type, c.body]);
   const scroller = useRef<HTMLDivElement>(null);
@@ -1032,8 +1038,8 @@ function Drawer({ c, loading, busy, tab, setTab, onClose, onApprove, onReject, o
         ) : (
           <p className="ap-foot-hint ap-foot-state">This item is <b>{st.label.toLowerCase()}</b>, so there is nothing left to decide.</p>
         )}
-        {c.type !== "article" && (
-          <button className="ap-changes" onClick={onCopy}><Copy size={14} /> Copy text</button>
+        {(c.type === "social" || c.type === "gbp") && (
+          <button className="ap-copy" onClick={onCopy}><Copy size={13} /> Copy text</button>
         )}
       </div>
     </>
@@ -1097,6 +1103,7 @@ const CSS = `
 .light .ap-root .ap-act-b{color:#0e7490}
 .light .ap-root .ap-panel,.light .ap-root .ap-card,.light .ap-root .ap-row{box-shadow:0 1px 2px rgba(22,32,60,.06)}
 .light .ap-root .ap-drawer{box-shadow:0 20px 60px rgba(22,32,60,.22)}
+.ap-type{display:block;margin-bottom:2px;font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase}
 .ap-kids{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .ap-kid{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:999px;font-size:10.5px;font-weight:600;cursor:pointer;
   color:var(--lx-mut);background:var(--ap-s1);border:1px solid var(--lx-border);transition:.15s}
@@ -1187,6 +1194,7 @@ const CSS = `
 @container ap (max-width:620px){
   /* phone: a compact card. Only what decides the action stays: status, date, image count. */
   .ap-m-x{display:none!important}
+  .ap-type{font-size:9.5px!important}
   .ap-tile>span{width:32px!important;height:32px!important}
   .ap-row{padding:10px 12px}
   .ap-grid{row-gap:8px}
@@ -1332,10 +1340,13 @@ button.ap-stat.on{border-color:var(--c);box-shadow:0 0 0 1px var(--c),inset 0 0 
 .ap-tl-item:last-child{padding-bottom:0}
 .ap-tl-dot{position:absolute;left:-18px;top:3px;width:11px;height:11px;border-radius:50%;background:var(--lx-card);
   border:2px solid var(--c);box-shadow:0 0 8px color-mix(in srgb,var(--c) 70%,transparent)}
-.ap-foot{padding:12px 16px 16px;border-top:1px solid var(--lx-border);display:grid;gap:10px}
-.ap-foot-hint{margin:0;font-size:11.5px;line-height:1.45;color:var(--lx-mut)}
+.ap-foot{padding:12px 16px 14px;border-top:1px solid var(--lx-border);display:grid;gap:8px;background:var(--lx-panel)}
+.ap-foot-hint{margin:0;font-size:11.5px;line-height:1.4;color:var(--lx-mut);text-align:center}
 .ap-foot-state b{color:var(--lx-text);font-weight:600}
-.ap-foot-btns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.7fr);gap:10px}
+.ap-foot-btns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.6fr);gap:10px}
+.ap-copy{justify-self:center;display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border:none;background:none;
+  font-size:12px;font-weight:600;color:var(--lx-mut);cursor:pointer;border-radius:8px}
+.ap-copy:hover{color:var(--lx-text);background:var(--ap-s1)}
 .ap-openlink{margin-left:auto;display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:11px;font-weight:600;
   color:var(--lx-blue);text-decoration:none}
 .ap-openlink:hover{text-decoration:underline}
