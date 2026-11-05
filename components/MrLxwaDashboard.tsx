@@ -2774,9 +2774,11 @@ export default function MrLxwaDashboard({
         .then((r) => r.json())
         .then((d) => { if (alive && d.ok) setApprovalsCount(d.items?.length ?? 0); })
         .catch(() => {});
-    load();
+    // Deferred: the badge is decoration, so its request waits until the page's own data has had
+    // the network to itself (it was racing the page's list on every navigation).
+    const first = setTimeout(load, 2500);
     const stop = startPolling(load, 60_000);
-    return () => { alive = false; stop(); };
+    return () => { alive = false; clearTimeout(first); stop(); };
   }, []);
 
   const [nav, setNav] = useState("Dashboard");

@@ -21,10 +21,21 @@ import { createAdminClient } from "./admin";
  *  app still goes through the caller's normal RLS-scoped client — this is the one lookup
  *  that is inherently self-scoped already (explicitly filtered to the caller's own
  *  `userData.user.id`), so running it with elevated privileges gives up no real isolation. */
+/** user id -> tenant id, remembered briefly per server instance. Every page render and every API
+ *  call used to run the membership query again (an extra database round trip on each one);
+ *  a user's workspace almost never changes, so a short memory removes it from the hot path.
+ *  Only a real, found tenant is stored, never a miss, so the self-healing bootstrap below is
+ *  unchanged. */
+const TENANT_TTL_MS = 5 * 60_000;
+const tenantMemo = new Map<string, { id: string; at: number }>();
+
 export async function getCurrentTenantId(supabase: SupabaseClient): Promise<string | null> {
   const { data: userData, error: userErr } = await supabase.auth.getUser();
   if (userErr) console.error("[getCurrentTenantId] auth.getUser() error:", userErr.message);
   if (!userData.user) return null;
+
+  const memo = tenantMemo.get(userData.user.id);
+  if (memo && Date.now() - memo.at < TENANT_TTL_MS) return memo.id;
 
   const admin = createAdminClient();
 
@@ -48,7 +59,11 @@ export async function getCurrentTenantId(supabase: SupabaseClient): Promise<stri
     return null;
   }
 
-  if (membership?.tenant_id) return membership.tenant_id;
+  if (membership?.tenant_id) {
+    if (tenantMemo.size > 500) tenantMemo.clear();
+    tenantMemo.set(userData.user.id, { id: membership.tenant_id, at: Date.now() });
+    return membership.tenant_id;
+  }
 
   // No membership yet — bootstrap one now.
   const { data: tenant, error: tenantErr } = await admin

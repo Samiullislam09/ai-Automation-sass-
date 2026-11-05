@@ -58,6 +58,7 @@ type ContentItem = {
 };
 
 const PAGE_SIZE = 10;
+const LIST_CACHE_KEY = "ap:list:v1";
 
 const NETWORK_LABEL: Record<string, string> = { facebook: "Facebook", instagram: "Instagram", linkedin: "LinkedIn", x: "X (Twitter)" };
 
@@ -149,15 +150,31 @@ export default function ApprovalsSection({
   const [sort, setSort] = useState<"newest" | "oldest" | "title">("newest");
   const [page, setPage] = useState(1);
 
+  // Stale-while-revalidate: the list from the last visit paints instantly and the network
+  // refresh replaces it quietly. The spinner only shows on a true first load.
+  const hasData = useRef(false);
   const load = () => {
-    setLoading(true);
+    if (!hasData.current) setLoading(true);
     fetch("/api/content?status=all")
       .then((r) => r.json())
-      .then((data) => { if (data.ok) setItems(data.items); else toast(data.error || "Couldn't load approvals.", "error"); })
+      .then((data) => {
+        if (data.ok) {
+          hasData.current = true;
+          setItems(data.items);
+          try { sessionStorage.setItem(LIST_CACHE_KEY, JSON.stringify(data.items)); } catch { /* quota or private mode: fine */ }
+        } else toast(data.error || "Couldn't load approvals.", "error");
+      })
       .catch(() => toast("Couldn't load approvals — try refreshing.", "error"))
       .finally(() => setLoading(false));
   };
-  useEffect(load, []);
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(LIST_CACHE_KEY);
+      const cached = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(cached) && cached.length) { hasData.current = true; setItems(cached); setLoading(false); }
+    } catch { /* unreadable cache: just load */ }
+    load();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Default selection = first pending item (the mockup opens with the top pending article).
   // Runs ONCE after the first load — it used to re-fire on every render where selectedId was
@@ -415,7 +432,7 @@ export default function ApprovalsSection({
                     <Tile tile={tile} size={38} />
                     <div className="min-w-0">
                       <ClampTitle text={c.title || "Untitled"} />
-                      <div className="lx-10 lx-mut mt-1.5 flex items-center gap-1.5 overflow-hidden whitespace-nowrap">
+                      <div className="ap-meta lx-10 lx-mut mt-1.5 flex items-center gap-1.5 overflow-hidden whitespace-nowrap">
                         <span className="truncate">{categoryOf(c)}</span><i className="ap-sep" /><span>{agentOf(c)}</span><i className="ap-sep" />
                         <span>{typeof c.meta?.wordCount === "number" ? `${c.meta.wordCount.toLocaleString()} words` : "— words"}</span><i className="ap-sep" /><span>{TYPE_LABEL[c.type] ?? c.type}</span>
                         <i className="ap-sep ap-inline-date" /><span className="ap-inline-date">{fmtBoth(c.updated_at ?? c.created_at)}</span>
@@ -1003,6 +1020,20 @@ const CSS = `
   .ap-c-s{justify-self:start}
   .ap-c-u{display:none}
   .ap-inline-date{display:inline}
+}
+@container ap (max-width:620px){
+  /* phone: titles wrap to two lines, filters become a tidy two-up grid, nothing is cut off */
+  .ap-title{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .ap-tip{display:none}
+  .ap-meta{white-space:normal;flex-wrap:wrap;row-gap:4px}
+  .ap-row{padding:12px 14px}
+  .ap-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .ap-stat:last-child:nth-child(odd){grid-column:1/-1}
+  .ap-search{width:100%!important;flex:1 1 100%}
+  .ap-select{flex:1 1 calc(50% - 8px);min-width:0}
+  .ap-select select{width:100%;min-width:0}
+  .ap-pager button{min-width:36px;height:36px}
+  .ap-act,.ap-kebab,.ap-icobtn{min-width:36px;min-height:36px}
 }
 .ap-head{padding:0 18px;font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--lx-mut)}
 .ap-row{background:var(--lx-card);border:1px solid var(--lx-border);border-radius:12px;padding:16px 18px;cursor:pointer;
