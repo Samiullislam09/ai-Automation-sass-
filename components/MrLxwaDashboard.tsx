@@ -2853,8 +2853,15 @@ export default function MrLxwaDashboard({
   }, [task?.task_id]);
   useEffect(() => {
     if (!workingAgent) return;
-    const el = compactStripRef.current?.querySelector<HTMLElement>(`[data-agent-id="${workingAgent.id}"]`);
-    el?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    const strip = compactStripRef.current;
+    const el = strip?.querySelector<HTMLElement>(`[data-agent-id="${workingAgent.id}"]`);
+    if (!strip || !el) return;
+    // Scroll ONLY the strip sideways. scrollIntoView() also scrolls every ancestor — including
+    // the page — vertically, which dragged the dashboard down so the Live View opened already
+    // scrolled (owner 2026-11-02: "live view scroll hoke ata hai, top pe dikhna chahiye").
+    const sr = strip.getBoundingClientRect();
+    const er = el.getBoundingClientRect();
+    strip.scrollTo({ left: strip.scrollLeft + (er.left - sr.left) - (sr.width - er.width) / 2, behavior: "smooth" });
   }, [workingAgent?.id]);
   const [showPanel, setShowPanel] = useState(!!workingAgent);
   useEffect(() => {
