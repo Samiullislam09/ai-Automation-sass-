@@ -2849,7 +2849,9 @@ export default function MrLxwaDashboard({
   };
   const openAssistant = () => {
     setDesktopAssistantOpen(true);
-    try { localStorage.setItem("lx-assistant", "open"); } catch { /* fine */ }
+    // Opening from the tab on a page other than the Dashboard is for this visit only; on the
+    // Dashboard it also clears an earlier "closed".
+    try { if (pathname === "/dashboard") localStorage.setItem("lx-assistant", "open"); } catch { /* fine */ }
   };
   // The shell stays mounted while pages change, so the route-dependent bits are synced on every
   // navigation: drawers close, and the assistant opens by default only on the Dashboard home.
@@ -2859,7 +2861,10 @@ export default function MrLxwaDashboard({
     let pref: string | null = null;
     try { pref = localStorage.getItem("lx-assistant"); } catch { /* fine */ }
     // Your own choice wins; with none, it is open on the Dashboard and tucked away elsewhere.
-    setDesktopAssistantOpen(pref === "open" ? true : pref === "closed" ? false : pathname === "/dashboard");
+    // Only the Dashboard shows the chat by default (and honours "closed"). Every other page starts
+    // with it tucked away, so it never covers the page you came for; the "Ask Mr. Lxwa" tab opens
+    // it for that visit.
+    setDesktopAssistantOpen(pathname === "/dashboard" && pref !== "closed");
   }, [pathname]);
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null);
   // The chat's progress strip: one line by default, opens on the chevron (owner, 2026-08-31 —

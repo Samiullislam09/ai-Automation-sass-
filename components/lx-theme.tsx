@@ -84,6 +84,8 @@ export const LX_CSS = `
 /* Phones: pages get the width. Taps are at least 40px tall, and nothing may push the page
    sideways. */
 @media (max-width:639px){
+  /* a page whose own panel should run edge to edge cancels the shell's 6px */
+  .lx-root .lx-bleed{margin:-6px;height:calc(100% + 12px)}
   .lx-root .lx-main{padding-bottom:max(12px,env(safe-area-inset-bottom))}
   .lx-root .lx-icobtn{min-width:40px;min-height:40px}
   .lx-root{overflow-x:hidden}

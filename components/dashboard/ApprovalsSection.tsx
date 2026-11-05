@@ -398,7 +398,7 @@ export default function ApprovalsSection({
   /* ---- render ---------------------------------------------------------------------------- */
 
   return (
-    <div className="ap-root flex h-full min-h-0 gap-3">
+    <div className="ap-root lx-bleed flex h-full min-h-0 gap-3">
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
 
       {/* ============ centre column ============ */}
@@ -475,13 +475,13 @@ export default function ApprovalsSection({
                 <div key={c.id} className={`ap-grid ap-row ${selected ? "on" : ""}`} onClick={() => openDetail(c)}>
                   {/* article */}
                   <div className="ap-c-a flex min-w-0 items-center gap-4">
-                    <Tile tile={tile} size={38} />
+                    <span className="ap-tile"><Tile tile={tile} size={38} /></span>
                     <div className="min-w-0">
                       <ClampTitle text={c.title || "Untitled"} />
                       <div className="ap-meta lx-10 lx-mut mt-1.5 flex items-center gap-1.5 overflow-hidden whitespace-nowrap">
                         <span className="ap-inline-status"><StatusPill s={c.status} /></span>
-                        <span className="truncate">{categoryOf(c)}</span><i className="ap-sep" /><span>{agentOf(c)}</span><i className="ap-sep" />
-                        <span>{typeof c.meta?.wordCount === "number" ? `${c.meta.wordCount.toLocaleString()} words` : "— words"}</span><i className="ap-sep" /><span>{TYPE_LABEL[c.type] ?? c.type}</span>
+                        <span className="ap-m-x truncate">{categoryOf(c)}</span><i className="ap-sep ap-m-x" /><span className="ap-m-x">{agentOf(c)}</span><i className="ap-sep ap-m-x" />
+                        <span className="ap-m-x">{typeof c.meta?.wordCount === "number" ? `${c.meta.wordCount.toLocaleString()} words` : "— words"}</span><i className="ap-sep ap-m-x" /><span className="ap-m-x">{TYPE_LABEL[c.type] ?? c.type}</span>
                         <i className="ap-sep ap-inline-date" /><span className="ap-inline-date">{fmtBoth(c.updated_at ?? c.created_at)}</span>
                       </div>
                       {(kidsOf.get(c.id)?.length ?? 0) > 0 && (
@@ -1185,6 +1185,20 @@ const CSS = `
   .ap-inline-date{display:inline}
 }
 @container ap (max-width:620px){
+  /* phone: a compact card. Only what decides the action stays: status, date, image count. */
+  .ap-m-x{display:none!important}
+  .ap-tile>span{width:32px!important;height:32px!important}
+  .ap-row{padding:10px 12px}
+  .ap-grid{row-gap:8px}
+  .ap-meta{margin-top:4px!important;flex-wrap:nowrap;white-space:nowrap}
+  .ap-kids{margin-top:4px;gap:4px}
+  .ap-kid{height:20px;font-size:10px;padding:0 7px}
+  .ap-c-x .ap-btn{height:32px;font-size:12px;border-radius:8px}
+  .ap-c-x .ap-kebab{flex:0 0 32px;width:32px;height:32px}
+  .ap-c-x{justify-content:flex-end}
+  .ap-c-x .ap-btn{flex:0 0 auto;min-width:88px}
+}
+@container ap (max-width:620px){
   /* phone: titles wrap to two lines, filters become a tidy two-up grid, nothing is cut off */
   .ap-inline-status{display:inline-flex}
   .ap-btn{padding:0 8px}
@@ -1251,7 +1265,7 @@ const CSS = `
   background:linear-gradient(135deg,#4f46e5,#7c3aed)}
 /* phone: the panel gives its edges back, the drawer becomes a full-screen sheet */
 @media (max-width:639px){
-  .ap-root .ap-main{border-radius:12px}
+  .ap-root .ap-main{border-radius:0;border-left:none;border-right:none}
   .ap-root .ap-hdr{padding:12px 12px 10px}
   .ap-drawer{top:0;right:0;bottom:0;left:0;width:100%;border-radius:0;border:none}
   .ap-drawer .ap-foot{padding-bottom:max(16px,env(safe-area-inset-bottom))}
