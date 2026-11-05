@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
+import { loadChatHistory } from "@/lib/chat-history";
 
 /** The chat sidebar's list — every conversation this workspace has had with Mr Lxwa,
  *  newest activity first, with a preview so the list is scannable without opening each one.
@@ -16,35 +17,13 @@ export async function GET() {
   const tenantId = await getCurrentTenantId(supabase);
   if (!tenantId) return NextResponse.json({ ok: false, error: "Not signed in." }, { status: 401 });
 
-  const { data, error } = await supabase
-    .from("chat_conversations")
-    .select("id, title, created_at, updated_at")
-    .eq("tenant_id", tenantId)
-    .order("updated_at", { ascending: false })
-    .limit(40);
-
-  if (error) {
-    // Migration 011 not applied — the chat still works, it just won't remember. Say which,
+  const h = await loadChatHistory(supabase, tenantId);
+  if (h.error) {
+    // Migration 011 not applied: the chat still works, it just won't remember. Say which,
     // rather than showing an empty list that looks like the history was lost.
-    return NextResponse.json({ ok: false, error: error.message, needsMigration: /chat_conversations|relation/i.test(error.message) }, { status: 500 });
+    return NextResponse.json({ ok: false, error: h.error, needsMigration: /chat_conversations|relation/i.test(h.error) }, { status: 500 });
   }
-
-  const conversations = data ?? [];
-  let latestMessages: { id: string; messages: unknown[] } | null = null;
-  if (conversations[0]) {
-    const { data: messages } = await supabase
-      .from("chat_messages")
-      .select("role, content, created_at, kind, tone")
-      .eq("conversation_id", conversations[0].id)
-      .eq("tenant_id", tenantId)
-      .order("created_at", { ascending: true })
-      .limit(200);
-    // A failure here is not fatal — the client already knows to fall back to its own
-    // per-conversation fetch when `latestMessages` is missing.
-    if (messages) latestMessages = { id: conversations[0].id, messages };
-  }
-
-  return NextResponse.json({ ok: true, conversations, latestMessages });
+  return NextResponse.json({ ok: true, conversations: h.conversations, latestMessages: h.latestMessages });
 }
 
 /** Start a fresh one. No message rows yet — /api/chat fills those in as they're sent. */

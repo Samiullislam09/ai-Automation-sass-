@@ -40,6 +40,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { renderMarkdown } from "@/lib/md";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import ChatHistory from "@/components/ChatHistory";
 import { LxGlobalStyle } from "@/components/lx-theme";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useLiveEvents, isTerminalTask, isTerminalStep, isFlowing, useNow, elapsedMs, clock, type TaskState } from "@/lib/live";
@@ -2584,11 +2585,34 @@ const boldText = (text: string, key: string): React.ReactNode[] => {
 /*  MAIN COMPONENT                                                            */
 /* ========================================================================== */
 
+/** The chat as the server already read it: the list for the history, and the newest
+ *  conversation's messages, so the panel paints with them and never sits on "Connecting". */
+export type InitialChat = {
+  conversations: { id: string; title: string | null; created_at?: string; updated_at: string }[];
+  latestMessages: { id: string; messages: unknown[] } | null;
+};
+
+function toThread(messages: any[]): ThreadMsg[] {
+  return (messages ?? [])
+    .filter((m: any) => m.role === "user" || m.role === "assistant")
+    .map(
+      (m: any): ThreadMsg => ({
+        who: m.role === "user" ? "user" : "ai",
+        text: String(m.content ?? ""),
+        time: m.created_at
+          ? new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }).toUpperCase()
+          : "",
+      })
+    );
+}
+
 export default function MrLxwaDashboard({
   tenantId = null,
+  initialChat = null,
   children,
 }: {
   tenantId?: string | null;
+  initialChat?: InitialChat | null;
   /** When provided (a real /dashboard/** sub-page's own content — e.g. Connect), this
    *  replaces the default workflow/agent-network content in the main slot. The shell around
    *  it (sidebar, mobile topbar, Assistant chat) stays exactly the same, so navigating
@@ -2617,12 +2641,15 @@ export default function MrLxwaDashboard({
   // active conversation from the server instead (chat_conversations.updated_at), the same way
   // reloading ChatGPT does, so there is nothing here to go stale. Null until the first message
   // of a brand new chat is sent, or until a past conversation is reopened.
-  const convId = useRef<string | null>(null);
+  // Seeded by the layout on the server: the chat panel's first paint already has its history.
+  const seedThread = initialChat?.latestMessages ? toThread(initialChat.latestMessages.messages as any[]) : null;
+  const convId = useRef<string | null>(seedThread && seedThread.length ? initialChat!.latestMessages!.id : null);
   // History sidebar (2026-09-04) — the list from GET /api/chat/conversations, and whether it's
   // showing. Populated lazily (on mount, and again whenever the panel opens) rather than kept
   // live-subscribed; a chat list changing under someone else's tab is not a case this needs to
   // handle instantly.
-  const [convs, setConvs] = useState<{ id: string; title: string | null; updated_at: string }[]>([]);
+  // Seeded by the layout on the server: the chat panel's first paint already has its history.
+  const [convs, setConvs] = useState<{ id: string; title: string | null; updated_at: string }[]>(initialChat?.conversations ?? []);
   const [showHistory, setShowHistory] = useState(false);
   // THE ONE ORDER THIS SCREEN IS ABOUT — scoped to the chat you're actually looking at
   // (2026-09-04). Used to be the tenant's single most recent task, full stop, which meant an
@@ -2815,12 +2842,19 @@ export default function MrLxwaDashboard({
   // effect, so it never fights a click that already changed it this visit.
   const [desktopAssistantOpen, setDesktopAssistantOpen] = useState(() => pathname === "/dashboard");
   const closeAssistant = () => { setBotOpen(false); setDesktopAssistantOpen(false); };
+  // The shell stays mounted while pages change, so the route-dependent bits are synced on every
+  // navigation: drawers close, and the assistant opens by default only on the Dashboard home.
+  useEffect(() => {
+    setSideOpen(false);
+    setBotOpen(false);
+    setDesktopAssistantOpen(pathname === "/dashboard");
+  }, [pathname]);
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null);
   // The chat's progress strip: one line by default, opens on the chevron (owner, 2026-08-31 —
   // the expanded card was permanently eating the chat's own room).
   const [stripOpen, setStripOpen] = useState(false);
   const [msg, setMsg] = useState("");
-  const [thread, setThread] = useState<ThreadMsg[]>([]);
+  const [thread, setThread] = useState<ThreadMsg[]>(seedThread ?? []);
   const [chatBusy, setChatBusy] = useState(false);
   const chatRef = useRef<HTMLDivElement>(null);
   const msgInputRef = useRef<HTMLTextAreaElement>(null);
@@ -3150,18 +3184,7 @@ export default function MrLxwaDashboard({
 
   // Shared with the mount effect below, which already has its messages in hand (folded into
   // the conversations-list response) and must not re-fetch them just to reuse this mapping.
-  const messagesToThread = (messages: any[]): ThreadMsg[] =>
-    (messages ?? [])
-      .filter((m: any) => m.role === "user" || m.role === "assistant")
-      .map(
-        (m: any): ThreadMsg => ({
-          who: m.role === "user" ? "user" : "ai",
-          text: String(m.content ?? ""),
-          time: m.created_at
-            ? new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }).toUpperCase()
-            : "",
-        })
-      );
+  const messagesToThread = toThread;
 
   async function openConversation(id: string) {
     try {
@@ -3198,6 +3221,12 @@ export default function MrLxwaDashboard({
   useEffect(() => {
     if (helloSent.current) return;
     helloSent.current = true;
+    if (initialChat) {
+      // The server already sent the history: nothing to fetch. Only a brand-new workspace (no
+      // conversation yet) or an empty newest one needs the greeting.
+      if (!seedThread || seedThread.length === 0) void stream("__hello__");
+      return;
+    }
     (async () => {
       // Resume the most recently active conversation, same rule a reload of ChatGPT follows —
       // `chat_conversations.updated_at` already moves on every real turn (app/api/chat/route.ts's
@@ -4341,48 +4370,17 @@ export default function MrLxwaDashboard({
             <X size={14} />
           </button>
 
-          {/* History dropdown — same job as components/kit.tsx's older BossChat sidebar, as a
-              popover instead of a persistent panel: this chat is narrower and already competes
-              for room with the live progress strip below it. */}
+          {/* Chat history: grouped by day, searchable, closes on any outside click, and can open
+              large. See components/ChatHistory.tsx. */}
           {showHistory && (
-            <div
-              className="lx-card2 lx-scroll"
-              style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 260, maxHeight: 360, overflowY: "auto", zIndex: 30, padding: 6 }}
-            >
-              <button
-                className="lx-ghost lx-11 flex w-full items-center gap-2"
-                style={{ padding: "7px 9px" }}
-                onClick={newChat}
-              >
-                <Plus size={13} /> New Chat
-              </button>
-              <div className="lx-10 lx-mut mt-1.5 px-1.5">History</div>
-              {convs.length === 0 && <div className="lx-10 lx-mut px-1.5 py-2">No past chats yet.</div>}
-              {convs.map((c) => (
-                <div
-                  key={c.id}
-                  className="flex items-center gap-1 rounded-lg px-1.5 py-1.5"
-                  style={{ background: c.id === convId.current ? "rgba(139,92,246,.12)" : undefined }}
-                >
-                  <button
-                    className="lx-11 min-w-0 flex-1 truncate text-left"
-                    style={{ background: "transparent", border: "none", color: c.id === convId.current ? "var(--lx-text)" : "var(--lx-mut)", cursor: "pointer" }}
-                    onClick={() => openConversation(c.id)}
-                    title={c.title ?? "Untitled chat"}
-                  >
-                    {c.title || "Untitled chat"}
-                  </button>
-                  <button
-                    className="lx-icobtn shrink-0"
-                    style={{ width: 22, height: 22, border: "none", background: "transparent" }}
-                    aria-label="Delete chat"
-                    onClick={() => deleteConversation(c.id)}
-                  >
-                    <X size={11} />
-                  </button>
-                </div>
-              ))}
-            </div>
+            <ChatHistory
+              convs={convs}
+              activeId={convId.current}
+              onOpen={openConversation}
+              onDelete={deleteConversation}
+              onNew={newChat}
+              onClose={() => setShowHistory(false)}
+            />
           )}
         </div>
       </div>
@@ -4409,8 +4407,8 @@ export default function MrLxwaDashboard({
               uses) — the opening line above is the model's actual "__hello__" reply, not a
               scripted mock, and everything below is genuinely sent/received. */}
           {thread.length === 0 && (
-            <div className="flex items-center gap-2 lx-11 lx-mut">
-              <Robo size={24} /> Connecting to Mr. Lxwa…
+            <div className="lx-chat-skel" aria-label="Loading the conversation">
+              <i /><i /><i />
             </div>
           )}
           {thread.map((m, i) =>
@@ -4853,14 +4851,14 @@ export default function MrLxwaDashboard({
             (owner, 2026-09-05: the Audit page's "Export as PDF" half-covered by it). The
             reserved strip is only on >=lg, which is the only size that button exists at. */}
         <main className="lx-scroll lx-main flex-1 overflow-y-auto p-1.5 sm:p-4">
-          {children ?? (
+          {pathname === "/dashboard" || children == null ? (
             <>
               {Workflow}
               <Collapse open={panelOpen}>{AgentPanel}</Collapse>
               {Network}
               {BottomBar}
             </>
-          )}
+          ) : children}
         </main>
       </div>
 

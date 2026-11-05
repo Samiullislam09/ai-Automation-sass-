@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { chatTitle, isWeakTitle } from "@/lib/chat-title";
 import { cookies } from "next/headers";
 import "@/lib/dns-fix";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -140,9 +141,13 @@ async function saveTurn(tenantId: string, conversationId: string, question: stri
       { conversation_id: conversationId, tenant_id: tenantId, role: "assistant", content: answer },
     ]);
     const { data: conv } = await supabase.from("chat_conversations").select("title").eq("id", conversationId).maybeSingle();
+    // Named for what the chat is about. A greeting names nothing, so the next real request
+    // does (an earlier "hi" title is replaced the same way).
+    const named = chatTitle(question);
+    const needsTitle = !conv?.title || isWeakTitle(conv.title);
     await supabase
       .from("chat_conversations")
-      .update({ updated_at: new Date().toISOString(), ...(conv?.title ? {} : { title: question.trim().slice(0, 80) }) })
+      .update({ updated_at: new Date().toISOString(), ...(needsTitle && named ? { title: named } : {}) })
       .eq("id", conversationId)
       .eq("tenant_id", tenantId);
   } catch (e: any) {

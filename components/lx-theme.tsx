@@ -64,6 +64,12 @@ export const LX_CSS = `
 .light .lx-root .lx-pill.mut,
 .light .lx-root .lx-listening{background:rgba(22,32,60,.04)}
 
+.lx-chat-skel{display:grid;gap:10px;padding:4px 0}
+.lx-chat-skel i{display:block;height:44px;width:78%;border-radius:12px;background:linear-gradient(90deg,var(--lx-border) 25%,rgba(139,92,246,.14) 50%,var(--lx-border) 75%);background-size:200% 100%;animation:lxChatShim 1.3s linear infinite}
+.lx-chat-skel i:nth-child(2){width:62%;margin-left:auto}
+@keyframes lxChatShim{to{background-position:-200% 0}}
+@media (prefers-reduced-motion:reduce){.lx-chat-skel i{animation:none}}
+
 /* ---- responsive foundation (every dashboard page inherits this) --------------------------------
    The reserved scrollbar gutter only makes sense where scrollbars take space (mouse, desktop).
    On a phone it was an empty strip down one side, so the page looked off-centre. */
@@ -276,6 +282,10 @@ export const LX_CSS = `
 .lx-net-host{container-type:inline-size}
 .lx-net{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
 .lx-net-brain{order:-1;grid-column:1 / -1}
+/* Each card carries an inline grid-area name (t1, l1, b, ...) for the wide layout. Below 440px
+   that layout does not exist, so an unknown area name pushed the cards into phantom columns off
+   to the right and left only one card on screen. On a phone they simply flow, two per row. */
+@container (max-width:439px){ .lx-net > [data-net]{grid-area:auto!important} }
 @container (min-width:440px){
   .lx-net{grid-template-columns:repeat(12,1fr);grid-template-rows:repeat(4,auto);
     grid-template-areas:
