@@ -162,6 +162,9 @@ type ThreadMsg = {
    *  the reply, ticking live as each step's status changes. Never a separate, invented list —
    *  absent entirely until a real task_steps row exists for this order. */
   planSteps?: { label: string; status: string }[];
+  /** ISO time the message was saved. Only set on messages read back from the database; it is how
+   *  a reloaded acknowledgement is matched to the order it placed (see "re-attach" below). */
+  at?: string;
 };
 
 type AgentStatus = "Completed" | "Working" | "Waiting" | "Planned";
@@ -2598,6 +2601,7 @@ function toThread(messages: any[]): ThreadMsg[] {
         time: m.created_at
           ? new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }).toUpperCase()
           : "",
+        at: m.created_at ?? undefined,
       })
     );
 }
@@ -3307,11 +3311,45 @@ export default function MrLxwaDashboard({
    *  caught mid-update — the live (non-terminal) phase above has no such guarantee, which is
    *  fine there: showing one event slightly behind is harmless, the risk is only ever in what
    *  gets written down as final. */
+  // Re-attach after a reload. The saved acknowledgement ("Sure, I'm writing a new article…") is a
+  // plain message with no link to the order it placed, so it came back as a bare sentence while
+  // the strip below showed "Done 5/5" (owner, 2026-11-06). The real link is the order's own
+  // chat id plus its creation time: the acknowledgement is the first assistant message saved at
+  // or after the order was created. Tag it with the order's id and the effect below rebuilds the
+  // checklist, the result and the "View in Live Visual" button from the real task rows.
+  const threadTaskIds = thread.map((m) => m.taskId).filter(Boolean).join(",");
   useEffect(() => {
-    const id = orderedTaskId.current;
-    if (!id) return;
+    const cid = convId.current;
+    if (!cid) return;
+    const mine = live.tasks.filter((t) => t.conversation_id === cid && t.createdAt);
+    if (!mine.length) return;
+    setThread((p) => {
+      let next = p;
+      for (const t of mine) {
+        if (next.some((m) => m.taskId === t.task_id)) continue;
+        const startMs = t.createdAt as number;
+        const idx = next.findIndex((m) => {
+          if (m.who !== "ai" || m.taskId || !m.at) return false;
+          const at = Date.parse(m.at);
+          return at >= startMs - 3_000 && at - startMs < 15 * 60_000;
+        });
+        if (idx < 0) continue;
+        if (next === p) next = [...p];
+        next[idx] = { ...next[idx], taskId: t.task_id };
+      }
+      return next;
+    });
+  }, [live.tasks, thread.length]);
+
+  useEffect(() => {
+    // Every order this chat placed, not just the one placed in this tab: after a reload the
+    // reply bubbles come back from the database as plain text (only the acknowledgement was ever
+    // saved), and the live status — the plan, the result, "View in Live Visual" — has to be
+    // rebuilt from the real task rows or the chat looks like nothing happened.
+    const ids = Array.from(new Set([orderedTaskId.current, ...threadTaskIds.split(",")].filter((x): x is string => !!x)));
+    for (const id of ids) {
     const t = live.byTask[id];
-    if (!t) return;
+    if (!t) continue;
 
     // NOT just `!isTerminalTask(t.status)` — the same class of status/steps desync as
     // `taskActive` above, only in the opposite direction: here `t.status` can stay non-terminal
@@ -3370,10 +3408,13 @@ export default function MrLxwaDashboard({
         }
         return p;
       });
-      return;
+      continue;
     }
 
-    if (reportedTaskIds.current.has(id)) return;
+    if (reportedTaskIds.current.has(id)) continue;
+    // A finished order whose steps never loaded has nothing to rebuild a summary from; leave the
+    // saved text alone rather than overwrite it with a vaguer one.
+    if (t.steps.length === 0 && !orderedTaskId.current) continue;
     reportedTaskIds.current.add(id);
 
     const summary =
@@ -3424,21 +3465,26 @@ export default function MrLxwaDashboard({
         ? `✅ All done! Your ${produced.count > 1 ? `${produced.count} ` : ""}${plural(produced.kind, produced.count)}${produced.count > 1 ? "" : named} ${tail}.`
         : `✅ All done — ${summary}`;
     }
-    if (!text) return;
+    if (!text) continue;
     const chip = !isArticle && title && title.length <= 40 ? title : undefined;
     const cta = produced ? { label: "View in Live Visual", agentId: produced.agentId ?? undefined } : undefined;
+    const finalPlan = t.steps.map((st) => ({
+      label: [...allAgents, bossAgent, publishAgent].find((a) => a.id === st.agent_id)?.name ?? st.agent_id,
+      status: st.status,
+    }));
     setThread((p) => {
       const i = p.findIndex((m) => m.taskId === id);
-      if (i < 0) return [...p, { who: "ai", text, time: nowTime(), taskId: id, chip, cta }];
+      if (i < 0) return [...p, { who: "ai", text, time: nowTime(), taskId: id, chip, cta, planSteps: finalPlan }];
       const next = [...p];
-      next[i] = { ...next[i], text, live: false, chip, cta };
+      next[i] = { ...next[i], text, live: false, chip, cta, planSteps: finalPlan.length ? finalPlan : next[i].planSteps };
       return next;
     });
+    } // end of the per-order loop
 
     // The final summary is the deterministic `text` above (built from the task's REAL status +
     // what it actually produced). The old model-narration "upgrade" that replaced it is gone
     // (2026-10-20) — it added an LLM call and sometimes rewrote a true summary into a wrong one.
-  }, [live.byTask]);
+  }, [live.byTask, threadTaskIds]);
 
   /** Per-step narration is DISABLED (owner, 2026-10-20). The model-written "Mr. X ne ... kiya" line
    *  per step was noisy AND frequently wrong — it read each step's produced-count off a live array
