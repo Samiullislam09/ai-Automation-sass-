@@ -10,6 +10,10 @@
  *
  *   · `osm`    — OpenStreetMap via Nominatim. Free, no key, wired today. Local businesses by
  *                category and area, with website and phone where the map has them.
+ *   · `web`    — the open web via Serper's search API. WIRED, on whenever a Serper key is set. The
+ *                source for companies a map does not know (consultancies, manufacturers, agencies):
+ *                it searches the way a person would and keeps the results that are a business's own
+ *                website, not a directory, a news story or a "Top 10" list.
  *   · `serper` — Google Maps via Serper.dev. WIRED. SERPER_API_KEY — 2,500 free searches, NO
  *                card. The free, no-card route to real Google Maps leads (name, phone, website).
  *   · `places` — Google Places direct. WIRED. GOOGLE_PLACES_API_KEY (needs a card at Google).
@@ -48,7 +52,7 @@ export const OSM_ATTRIBUTION = "© OpenStreetMap contributors (ODbL)";
 
 // ── the shape a source returns ──────────────────────────────────────────────────────────────
 
-export type SourceId = "osm" | "places" | "serper" | "apollo" | "jobs";
+export type SourceId = "osm" | "places" | "serper" | "apollo" | "jobs" | "web";
 
 export type Candidate = {
   name: string;
@@ -586,6 +590,171 @@ function countryCodeFor(geo: string | null): string | undefined {
   return undefined;
 }
 
+// ── source · the open web via Serper search (WIRED) — companies a map does not list ──────────
+
+/** Sites that ARE the answer to a search but are not a business we can write to: social networks,
+ *  encyclopedias, news, job and review sites, marketplaces, directories and aggregators. A result
+ *  here is a page ABOUT businesses, not a business. Matched against the registrable end of the
+ *  host, so "uk.linkedin.com" and "www.linkedin.com" are both caught. Deliberately a list of
+ *  well-known giants, not a guess: an unknown site gets the benefit of the doubt and is judged by
+ *  the research and fit steps downstream, which read the actual page. */
+const WEB_NOT_A_COMPANY = new RegExp(
+  "(^|\\.)(" +
+    [
+      "linkedin\\.com", "facebook\\.com", "instagram\\.com", "twitter\\.com", "x\\.com", "youtube\\.com", "tiktok\\.com",
+      "pinterest\\.com", "reddit\\.com", "quora\\.com", "medium\\.com", "wikipedia\\.org", "wikihow\\.com",
+      "google\\.[a-z.]+", "bing\\.com", "yahoo\\.com", "amazon\\.[a-z.]+", "ebay\\.[a-z.]+", "alibaba\\.com", "aliexpress\\.com",
+      "indeed\\.com", "glassdoor\\.[a-z.]+", "naukri\\.com", "bayt\\.com", "monster\\.com", "ziprecruiter\\.com",
+      "yelp\\.com", "tripadvisor\\.[a-z.]+", "trustpilot\\.com", "g2\\.com", "capterra\\.com", "clutch\\.co", "sortlist\\.com",
+      "yellowpages\\.[a-z.]+", "justdial\\.com", "indiamart\\.com", "tradeindia\\.com", "dubaiyellowpages\\.[a-z.]+",
+      "crunchbase\\.com", "zoominfo\\.com", "dnb\\.com", "opencorporates\\.com", "kompass\\.com", "europages\\.[a-z.]+",
+      "gov\\.[a-z]{2}", "[a-z]+\\.gov", "[a-z0-9-]+\\.edu", "[a-z0-9-]+\\.ac\\.[a-z]{2}","github\\.com", "gitlab\\.com", "slideshare\\.net", "scribd\\.com",
+      "pdfcoffee\\.com", "issuu\\.com", "blogspot\\.com", "wordpress\\.com", "wixsite\\.com", "substack\\.com",
+    ].join("|") +
+    ")$",
+  "i",
+);
+
+/** A page that talks about companies instead of being one: "Top 10 ISO consultants in Dubai", a blog
+ *  post, a news story, a comparison. Judged from the title and the path, both of which are in the
+ *  search result itself, so no extra request is spent finding out. */
+const WEB_LISTICLE_TITLE =
+  /^(top|best|leading|list of|find|search)\b|(^|\s)(top|best)\s+\d+\b|\b(directory|directories|companies list|business list|list of|listings?|ranking|rankings|reviews? of|vs\.?|compared|comparison|alternatives?|how to|what is|guide to|ultimate guide|yellow ?pages|jobs? in|vacancies)\b/i;
+/** A host that is itself a directory or job board, whatever its title says ("hidubai.com",
+ *  "yellowpages-uae.com", "gulftalent.com"). Catches the long tail the named list above cannot. */
+const WEB_DIRECTORY_HOST = /(directory|yellow-?pages|business-?list|listings?|classifieds?|vacanc|hidubai|bayt|gulftalent)/i;
+const WEB_ARTICLE_PATH = /\/(blog|blogs|news|article|articles|press|insights?|resources?|magazine|post|posts|stories|story|careers?|jobs?|tag|category|forum|questions?|wiki)(\/|$)|\/(top|best)-\d+|\/20\d\d\//i;
+
+/** One search result → a lead candidate, or null when it is not a company's own site. Exported for
+ *  the tests, which run it with no network. */
+export function webResultToCandidate(r: any): Candidate | null {
+  const link = String(r?.link ?? "").trim();
+  const title = String(r?.title ?? "").trim();
+  if (!link || !title) return null;
+  let u: URL;
+  try {
+    u = new URL(link);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+  const host = u.hostname.toLowerCase().replace(/^www\./, "");
+  if (WEB_NOT_A_COMPANY.test(host) || WEB_DIRECTORY_HOST.test(host)) return null;
+  if (WEB_ARTICLE_PATH.test(u.pathname)) return null;
+  if (WEB_LISTICLE_TITLE.test(title)) return null;
+  // A direct file (a PDF brochure, a spreadsheet) is not a page we can read as a business.
+  if (/\.(pdf|docx?|xlsx?|pptx?|zip)$/i.test(u.pathname)) return null;
+
+  // "Acme Safety Consultants | ISO 45001 in Dubai" → "Acme Safety Consultants". The brand is what
+  // comes before the first separator; the rest is the page's own pitch.
+  const parts = title.split(/\s[|–—·»]\s|\s-\s|:\s/).map((x) => x.trim()).filter(Boolean);
+  // A page title often leads with the page's job ("About Us | Assent Steel", "Contact RMC
+  // Consultancy"). Drop that lead-in; when nothing but a generic word is left, take the brand
+  // from the other half of the title, and failing that from the domain itself.
+  const GENERIC = /^(home|homepage|welcome|about( us)?|contact( us)?|services|products|index|official (site|website))$/i;
+  const cleaned = parts.map((x) => x.replace(/^(?:Contact|About)(?: Us)?\s+(?=(?!Us\b)[A-Z])/, "").trim()).filter((x) => x && !GENERIC.test(x));
+  const domainName = host.split(".")[0].replace(/[-_]+/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+  const name = (cleaned[0] ?? domainName).slice(0, 90);
+  if (name.length < 2) return null;
+
+  return {
+    name,
+    // The home page, not the page that ranked: the research step reads a company's own site, and
+    // the page that ranked is often one service page that says little about who they are.
+    website: u.origin,
+    domain: domainOf(u.origin),
+    phone: null,
+    address: null,
+    categories: [],
+    source: "web",
+    sourceRef: host,
+    attribution: "Found by web search",
+    country: countryFrom(`${r?.snippet ?? ""} ${title}`),
+  };
+}
+
+/** Call one Serper endpoint, rotating through the key pool the way the Maps search does. Returns
+ *  null when no key could answer — a missing answer is a report line, never an exception. */
+async function serperCall(path: "search" | "places", body: Record<string, unknown>, fetchImpl: typeof fetch): Promise<any | null> {
+  for (const key of serperKeys()) {
+    if (serperDeadKeys.has(key)) continue;
+    try {
+      const res = await fetchImpl(`https://${SERPER_HOST}/${path}`, {
+        method: "POST",
+        headers: { "X-API-KEY": key, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (res.status === 402 || res.status === 429) {
+        serperDeadKeys.add(key);
+        console.warn(`[leads/web] key exhausted (HTTP ${res.status}) — rotating to the next`);
+        continue;
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 140)}`);
+      return await res.json();
+    } catch (e: any) {
+      console.warn(`[leads/web] ${path} failed:`, e?.message);
+      return null;
+    }
+  }
+  return null;
+}
+
+/** Off switch for the whole source: LEADS_WEB_SEARCH=0. Each query costs one Serper search, the same
+ *  as a Maps query, so a tenant on a tight quota can keep Maps only. */
+export function webSearchEnabled(): boolean {
+  return serperConfigured() && process.env.LEADS_WEB_SEARCH !== "0";
+}
+
+/** Appended to every web query. A generic query such as "manufacturing companies in Dubai" is
+ *  answered mostly by directories and "Top 10" pages, which are pages ABOUT companies. Google's own
+ *  operators remove them at the source, so the 20 results a search returns are spent on actual
+ *  company sites instead of being filtered out afterwards. */
+const WEB_EXCLUDE = '-directory -"top 10" -"top 20" -list -listing -jobs -vacancies -yellowpages -linkedin -facebook -wikipedia';
+
+/** How many search queries one run may spend on the open web. Small on purpose: 2 terms × 2 phrasings. */
+const WEB_TERMS_PER_RUN = 2;
+
+/** Companies from the open web for this ICP.
+ *
+ *  Two phrasings per term. The term as typed finds the companies that rank for it; the same term
+ *  with "contact" finds the ones that publish how to reach them, which is exactly the page the
+ *  research step needs an email or a form from. Results are deduped by domain, so a company that
+ *  turns up for both phrasings is one lead. */
+export async function webSearch(icp: Icp, limit: number, fetchImpl: typeof fetch = fetch): Promise<Candidate[]> {
+  if (!webSearchEnabled()) return [];
+  const out: Candidate[] = [];
+  const seen = new Set<string>();
+  const gl = countryCodeFor(icp.geo);
+
+  for (const term of icp.searchTerms.slice(0, WEB_TERMS_PER_RUN)) {
+    for (const phrasing of [term, `${term} company contact`]) {
+      // Serper's FREE accounts reject Google operators ("Query pattern not allowed for free
+      // accounts", found live 2026-11-06), so the exclusions are opt-in for paid accounts only.
+      // Without them the result filter in webResultToCandidate does the same job after the fact.
+      const q = process.env.LEADS_WEB_OPERATORS === "1" ? `${phrasing} ${WEB_EXCLUDE}` : phrasing;
+      if (out.length >= limit) break;
+      const cacheKey = `web:${q.toLowerCase()}:${gl ?? ""}`;
+      const hit = cached<Candidate[]>(cacheKey);
+      const rows =
+        hit ??
+        (await throttled(SERPER_HOST, SERPER_GAP_MS, async () => {
+          const json = await serperCall("search", { q, num: 20, ...(gl ? { gl } : {}) }, fetchImpl);
+          return Array.isArray(json?.organic) ? json.organic.map(webResultToCandidate).filter((c: Candidate | null): c is Candidate => !!c) : ([] as Candidate[]);
+        }));
+      if (!hit) remember(cacheKey, rows);
+      for (const c of rows) {
+        const key = c.domain ?? c.sourceRef ?? c.name.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(c);
+        if (out.length >= limit) break;
+      }
+    }
+  }
+  return out;
+}
+
 export function placesConfigured(): boolean {
   return !!process.env.GOOGLE_PLACES_API_KEY;
 }
@@ -829,6 +998,25 @@ export async function discover(icp: Icp, limit: number, deps: DiscoverDeps = {})
   reports.push({
     id: "serper", label: "Google Maps (Serper)", configured: serperConfigured(), wired: true,
     envVars: ["SERPER_API_KEY"], used: serperConfigured(), found: serperFound, note: serperNote,
+  });
+
+  // The open web (Serper search). Maps only knows businesses with a map pin; this finds the
+  // companies that just have a website — consultancies, manufacturers, agencies, B2B in general.
+  let webFound = 0;
+  let webNote = webSearchEnabled() ? "" : serperConfigured() ? "switched off (LEADS_WEB_SEARCH=0)" : "no SERPER_API_KEY — web search is off";
+  if (webSearchEnabled()) {
+    try {
+      const rows = await webSearch(icp, limit, fetchImpl);
+      candidates.push(...rows);
+      webFound = rows.length;
+      webNote = rows.length ? "Company websites found by web search" : "Web search returned no company sites for this search";
+    } catch (e: any) {
+      webNote = `Web search failed: ${String(e?.message ?? e).slice(0, 120)}`;
+    }
+  }
+  reports.push({
+    id: "web", label: "Web search", configured: serperConfigured(), wired: true,
+    envVars: ["SERPER_API_KEY"], used: webSearchEnabled(), found: webFound, note: webNote,
   });
 
   // Google Places — the best local source. Runs first when its key is set; OSM then tops up.

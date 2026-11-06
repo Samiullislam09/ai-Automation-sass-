@@ -23,6 +23,9 @@ const {
   parseRobots,
   placesConfigured,
   robotsAllows,
+  webResultToCandidate,
+  webSearch,
+  webSearchEnabled,
 } = await import("./sources.js");
 const { buildIcp } = await import("./icp.js");
 
@@ -384,4 +387,80 @@ test("countryFromAddress pulls the country off a Google Maps address and canonic
   assert.equal(countryFromAddress(""), null);
   assert.equal(countryFromAddress(null), null);
   assert.equal(countryFromAddress("12345"), null); // a bare postcode is not a country
+});
+
+// ── the open-web source ─────────────────────────────────────────────────────────────────────
+
+test("web results: a company's own site becomes a candidate, rooted at its home page", () => {
+  const c = webResultToCandidate({ title: "Acme Safety Consultants | ISO 45001 in Dubai", link: "https://www.acmesafety.ae/services/iso-45001", snippet: "Based in Dubai, UAE" });
+  assert.ok(c);
+  assert.equal(c!.name, "Acme Safety Consultants");
+  assert.equal(c!.website, "https://www.acmesafety.ae");
+  assert.equal(c!.domain, "acmesafety.ae");
+  assert.equal(c!.source, "web");
+  assert.equal(c!.country, "United Arab Emirates");
+});
+
+test("web results: the company name is the brand, not the page's job", () => {
+  const nm = (title: string, link: string) => webResultToCandidate({ title, link })!.name;
+  assert.equal(nm("Contact RMC Consultancy", "https://rmcconsultancy.ae/contact"), "RMC Consultancy");
+  assert.equal(nm("About Us | Assent Steel", "https://assentsteel.com/about"), "Assent Steel");
+  assert.equal(nm("About Us", "https://assentsteel.com/about"), "Assentsteel");
+  assert.equal(nm("Home", "https://madar-uae.com/"), "Madar Uae");
+});
+
+test("web results: social, directories, news, lists, files and bad links are not leads", () => {
+  const no = (r: any) => assert.equal(webResultToCandidate(r), null, JSON.stringify(r));
+  no({ title: "Acme | LinkedIn", link: "https://ae.linkedin.com/company/acme" });
+  no({ title: "Best ISO consultants", link: "https://clutch.co/consultants" });
+  no({ title: "Acme - Wikipedia", link: "https://en.wikipedia.org/wiki/Acme" });
+  no({ title: "Top 10 ISO consultants in Dubai", link: "https://somesite.com/consultants" });
+  no({ title: "ISO guide", link: "https://somesite.com/blog/iso-guide" });
+  no({ title: "Top Manufacturing Companies in Dubai", link: "https://hidubai.com/manufacturing" });
+  no({ title: "Companies List", link: "https://dubaiindustrialcity.ae/list" });
+  no({ title: "Manufacturing Industries in UAE", link: "https://yellowpages-uae.com/m" });
+  no({ title: "Senior Engineer jobs in Dubai", link: "https://example-hr.com/x" });
+  no({ title: "Brochure", link: "https://acme.com/files/brochure.pdf" });
+  no({ title: "Ministry", link: "https://mtc.gov.ae/en" });
+  no({ title: "Uni", link: "https://www.some.edu/dept" });
+  no({ title: "", link: "https://acme.com" });
+  no({ title: "Acme", link: "not a url" });
+  no({ title: "Acme", link: "ftp://acme.com" });
+});
+
+test("webSearch: queries Serper's search endpoint, dedupes by domain, honours the off switch", async () => {
+  __resetSourceCaches();
+  const prev = { k: process.env.SERPER_API_KEY, ks: process.env.SERPER_API_KEYS, off: process.env.LEADS_WEB_SEARCH };
+  process.env.SERPER_API_KEY = "test-key-web";
+  delete process.env.SERPER_API_KEYS;
+  delete process.env.LEADS_WEB_SEARCH;
+  try {
+    const seen: any[] = [];
+    const fetchImpl = (async (input: any, init: any) => {
+      seen.push({ url: String(input), body: JSON.parse(init.body) });
+      return new Response(JSON.stringify({ organic: [
+        { title: "Acme Safety | Home", link: "https://acmesafety.ae/" },
+        { title: "Acme Safety Contact", link: "https://acmesafety.ae/contact" },
+        { title: "Beta Consulting", link: "https://www.betaconsulting.com/about" },
+        { title: "Acme on LinkedIn", link: "https://www.linkedin.com/company/acme" },
+      ] }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as unknown as typeof fetch;
+    const icp = (buildIcp({ profile: null, query: "ISO consultants in Dubai", count: 5 }) as any).icp;
+    assert.ok(webSearchEnabled());
+    const rows = await webSearch(icp, 10, fetchImpl);
+    assert.deepEqual(rows.map((r) => r.domain).sort(), ["acmesafety.ae", "betaconsulting.com"]);
+    assert.ok(seen.every((c) => c.url === "https://google.serper.dev/search"));
+    assert.ok(seen.every((c) => c.body.gl === "ae"), "the geo narrows the search to its country");
+    assert.ok(seen.some((c) => / company contact$/.test(c.body.q)), "also asks for the pages that publish contact details");
+    assert.ok(seen.every((c) => !/-directory/.test(c.body.q)), "no Google operators on a free account (Serper rejects them)");
+
+    process.env.LEADS_WEB_SEARCH = "0";
+    assert.equal(webSearchEnabled(), false);
+    assert.deepEqual(await webSearch(icp, 10, fetchImpl), []);
+  } finally {
+    for (const [name, v] of [["SERPER_API_KEY", prev.k], ["SERPER_API_KEYS", prev.ks], ["LEADS_WEB_SEARCH", prev.off]] as const) {
+      if (v === undefined) delete process.env[name]; else process.env[name] = v;
+    }
+    __resetSourceCaches();
+  }
 });
