@@ -8,6 +8,7 @@ import { buildIcp, buildIcpFromBuyerSegment, describeIcp } from "../lib/leads/ic
 import { getLeadSettings, patchLeadSettings, leadsDailyStatus } from "../lib/outreach/settings.js";
 import { discover, describeSources, fetchPageForResearch, countryForGeo } from "../lib/leads/sources.js";
 import { buildFindLeadsOutput, runPipeline, type LeadRecord, type PipelineDeps } from "../lib/leads/pipeline.js";
+import { makeScraplingAwareFetcher, scraplingConfigured } from "../lib/leads/scraplingClient.js";
 import { POLICY, RunLedger, assertDraftOnly, domainOf, nameKey, phoneKey, stripWww, type SenderIdentity, type SuppressionEntry } from "../lib/leads/compliance.js";
 
 /** Mr. Lead — finds businesses that match the tenant's ICP and drafts the first message.
@@ -204,8 +205,21 @@ export class LeadsAgent extends Agent {
     ctx.progress(0.25, `${fresh.length} found — reading their websites`);
 
     // ── 5 · the pipeline ──────────────────────────────────────────────────────────────────
+    // Scrapling service (scrapling-service/), opt-in via SCRAPLING_SERVICE_URL — reads a lead's
+    // own site and hands back email/phone/WhatsApp already extracted, falling back to the plain
+    // cheerio reader when the service is off or unreachable (see scraplingClient.ts's own header
+    // for exactly what it will and will not do).
+    const byDomain = new Map(fresh.map((c) => [c.domain ?? domainOf(c.website), c] as const));
+    const candidateForUrl = (url: string) => {
+      try {
+        return byDomain.get(domainOf(new URL(url).origin));
+      } catch {
+        return undefined;
+      }
+    };
+    if (scraplingConfigured()) ctx.log("reading lead websites through the Scrapling service");
     const deps: PipelineDeps = {
-      fetchPage: (url) => fetchPageForResearch(url),
+      fetchPage: makeScraplingAwareFetcher((url) => fetchPageForResearch(url), candidateForUrl),
       llmJson: (prompt) => completeJson(prompt),
       now: () => new Date(),
     };
