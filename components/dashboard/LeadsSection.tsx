@@ -1,145 +1,165 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CalendarClock, ChevronDown, Download, Ellipsis, Mail, Plus, Search, SlidersHorizontal, Sparkles, PenLine, TriangleAlert, UserRound, Users, X } from "lucide-react";
+import dynamic from "next/dynamic";
 import { useStore } from "@/lib/store";
-import BuyerProfilePanel from "./BuyerProfilePanel";
+import { C, D, STAGE, SOURCE_LABEL, SORT_LABEL, REJECT_REASONS, ago, scoreColor, isToday, fmtDay, siteLabel, initials, cityOf, countryOf, phoneDisplay, StageChip, Tag, WaGlyph, RejectMenu, type Lead, type Gen } from "./leads/shared";
+import type { Flt } from "./leads/FilterPanel";
 
-/** /dashboard/leads — a premium, light, CRM-style lead board (owner supplied a reference mockup,
- *  2026-09-30). Self-contained LIGHT surface, like the WhatsApp page, because the dashboard theme
- *  is dark and this screen is meant to read as a serious B2B automation CRM.
+// Opened on demand, so they are not part of the page's first download.
+const LeadDrawer = dynamic(() => import("./leads/LeadDrawer"), { ssr: false });
+const FilterPanel = dynamic(() => import("./leads/FilterPanel"), { ssr: false });
+const AddLeadModal = dynamic(() => import("./leads/AddLeadModal"), { ssr: false });
+const LeadGenPanel = dynamic(() => import("./leads/LeadGenPanel"), { ssr: false });
+const BuyerProfilePanel = dynamic(() => import("./BuyerProfilePanel"), { ssr: false });
+
+
+/** /dashboard/leads — a light, CRM-style lead board.
  *
- *  WHAT IS REAL. Every KPI and count comes from /api/leads/board, computed from the tenant's own
- *  rows — never a placeholder number. Where the mockup assumes something the product does not yet
- *  have, it is derived honestly, not invented: "AI Agent" = messages Mr. Brain drafted
- *  (answered_by 'brain'), "You" = messages the human sent, "Client/Converted" = stage 'won'.
- *  There is one human today, so "employee" means you, and no roster is faked.
+ *  Layout (top to bottom): header (title, count, one primary action) → four summary cards →
+ *  ONE card holding the pipeline tabs, the search/filter/sort toolbar, a bulk-action bar and the
+ *  lead table (a compact list on phones) → a slide-over detail drawer.
  *
- *  Layout: KPI cards (click to filter) → filter tabs with counts → a dense table on desktop /
- *  cards on mobile → a slide-over detail drawer. Every lead row has a WhatsApp button that deep-
- *  links straight into that conversation on the WhatsApp page. 100% responsive. */
+ *  Colour system: the brand purple + slate neutrals, and only three meanings of colour:
+ *  green = good news (a reply, a win), amber = needs you, red = negative. Stage chips are neutral
+ *  with a coloured dot so a column of them reads calmly. No emoji; icons are lucide / SVG.
+ *
+ *  WHAT IS REAL. Every number comes from /api/leads/board (the tenant's own rows), counted on the
+ *  client in one pass. "AI" = a message Mr. Brain drafted, "You" = a message a person sent. Nothing
+ *  here is a placeholder. */
 
-const C = {
-  bg: "#f6f7f9", panel: "#ffffff", ink: "#0f172a", sub: "#64748b", line: "#e9edf2",
-  brand: "#4f46e5", brandSoft: "#eef2ff", green: "#16a34a", greenSoft: "#e7f6ec",
-  amber: "#d97706", amberSoft: "#fdf2e3", red: "#dc2626", redSoft: "#fdeaea",
-  blue: "#2563eb", blueSoft: "#e8f0fe", violet: "#7c3aed", violetSoft: "#f1ebfd", graySoft: "#f1f5f9",
-};
-
-type Lead = {
-  id: string; company: string | null; name: string | null; email?: string | null;
-  phone: string | null; whatsapp?: string | null; website?: string | null; city?: string | null; country?: string | null;
-  source: string | null; icp_score: number | null; reason: string | null; draft?: string | null;
-  stage: string; created_at: string; notes?: string | null;
-  source_segment?: string | null; source_query?: string | null; classification?: string | null;
-  score_breakdown?: { score?: number; band?: string; components?: { id: string; group: string; points: number; max: number; why: string }[] } | null;
-  reject_reason?: string | null; observation?: string | null; evidence?: any;
-  approved_at?: string | null; contacted_at?: string | null; replied_at?: string | null;
-  ai_messaged: boolean; human_messaged: boolean; messaged: boolean; converted: boolean; is_client: boolean;
-  last_out_at: string | null; last_out_body: string | null; last_in_at: string | null; last_in_body: string | null;
-  needs_attention?: boolean | null; needs_attention_reason?: string | null; last_intent?: string | null;
-  meeting?: { id: string; status: string; start_at: string | null; meet_link: string | null } | null;
-};
-type Kpis = { total: number; messaged: number; converted: number; ai_messaged: number; employee_messaged: number; not_messaged: number; new: number; engaged: number; client: number };
-type Gen = { running: boolean; running_since?: string | null; running_found?: number | null; running_label?: string | null; running_done?: number | null; running_total?: number | null; last_run_at: string | null; last_status: string | null; last_found: number | null; last_saved?: number | null; last_note: string | null; last_needs?: string[]; last_question?: string | null };
-
-const STAGE: Record<string, { label: string; fg: string; bg: string }> = {
-  new: { label: "New", fg: C.blue, bg: C.blueSoft },
-  // Approval gate inverted (2026-10-01): everything arrives approved; a straggler row written
-  // under the old policy reads as Approved too until the board API's sweep renames it.
-  pending_approval: { label: "Approved", fg: C.green, bg: C.greenSoft },
-  approved: { label: "Approved", fg: C.green, bg: C.greenSoft },
-  rejected: { label: "Rejected", fg: C.sub, bg: C.graySoft },
-  contacted: { label: "Contacted", fg: C.blue, bg: C.blueSoft },
-  delivered: { label: "Delivered", fg: C.blue, bg: C.blueSoft },
-  read: { label: "Read", fg: C.violet, bg: C.violetSoft },
-  replied: { label: "Engaged", fg: C.green, bg: C.greenSoft },
-  in_conversation: { label: "Engaged", fg: C.green, bg: C.greenSoft },
-  interested: { label: "Interested", fg: C.violet, bg: C.violetSoft },
-  meeting_requested: { label: "Meeting asked", fg: "#92400e", bg: "#fef3c7" },
-  meeting_scheduled: { label: "Meeting set", fg: "#92400e", bg: "#fef3c7" },
-  meeting_done: { label: "Met", fg: C.violet, bg: C.violetSoft },
-  ready_to_buy: { label: "Ready to buy", fg: "#9a3412", bg: "#ffedd5" },
-  won: { label: "Won", fg: C.green, bg: C.greenSoft },
-  lost: { label: "Lost", fg: C.red, bg: C.redSoft },
-  opted_out: { label: "Opted out", fg: C.red, bg: C.redSoft },
-  invalid: { label: "Invalid", fg: C.sub, bg: C.graySoft },
-  failed: { label: "Failed", fg: C.red, bg: C.redSoft },
-};
-// The real-world source a lead came from, not the tool/API name. "serper" is just the API we
-// query Google Maps through, so a lead from it IS a Google Maps / Google Business listing.
-const SOURCE_LABEL: Record<string, string> = { serper: "Google Maps", osm: "OpenStreetMap", places: "Google Places", jobs: "Job board", web: "Web search", manual: "Manual", apollo: "Apollo" };
-const SORT_LABEL: Record<string, string> = { newest: "Newest", oldest: "Oldest", score: "Score", name: "Name" };
-
-function ago(iso: string | null): string {
-  if (!iso) return "—";
-  const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
-  if (m < 1) return "just now";
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const days = Math.floor(h / 24);
-  if (days === 1) return "yesterday";
-  if (days < 7) return `${days}d ago`;
-  return `${Math.floor(days / 7)}w ago`;
-}
-function scoreColor(s: number | null) { return s == null ? C.sub : s >= 70 ? C.green : s >= 40 ? C.amber : C.red; }
-function isToday(iso: string) { return Date.now() - new Date(iso).getTime() < 86_400_000; }
-function fmtDay(iso: string) { return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" }); }
-function siteLabel(url: string) { return url.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, ""); }
-function initials(l: Lead) { return (l.company || l.name || "?").slice(0, 2).toUpperCase(); }
-function cityOf(l: Lead): string { return (l.city ?? "").trim(); }
-function countryOf(l: Lead): string { return (l.country ?? "").trim(); }
-
-// Common country → dialling code, so a bare local number can be shown with its country code when
-// we actually KNOW the country. We never guess a code for a lead whose country we don't have.
-const COUNTRY_DIAL: Record<string, string> = {
-  india: "+91", "united arab emirates": "+971", uae: "+971", "u.a.e": "+971",
-  "united states": "+1", usa: "+1", "united states of america": "+1",
-  "united kingdom": "+44", uk: "+44", "u.k": "+44", canada: "+1", australia: "+61",
-  pakistan: "+92", "saudi arabia": "+966", qatar: "+974", kuwait: "+965", oman: "+968",
-  bahrain: "+973", singapore: "+65", germany: "+49", france: "+33", spain: "+34", italy: "+39",
-};
-/** The phone, shown with its country code. If it already has one (+ or 00) it's left alone;
- *  otherwise, only when the lead's country is known, the code is prepended and a local trunk 0
- *  dropped. Never invents a code for an unknown country. */
-function phoneDisplay(l: Lead): string {
-  const raw = (l.whatsapp || l.phone || "").trim();
-  if (!raw) return "—";
-  if (/^(\+|00)/.test(raw)) return raw;
-  const dial = l.country ? COUNTRY_DIAL[l.country.trim().toLowerCase()] : null;
-  return dial ? `${dial} ${raw.replace(/^0+/, "")}` : raw;
-}
-
-function EyeIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M1.5 12S5 5 12 5s10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12z" />
-      <circle cx="12" cy="12" r="2.5" />
-    </svg>
-  );
-}
-
+const REPLIED_STAGES = ["replied", "in_conversation", "interested"];
+const OUT = ["rejected", "opted_out", "invalid", "failed"];
 const TAB_MATCH: Record<string, (l: Lead) => boolean> = {
   all: () => true,
-  new: (l) => Date.now() - new Date(l.created_at).getTime() < 86_400_000, // added in the last 24h
-  // "Engaged" = leads you've started a conversation with (messaged or they replied), so the tab
-  // matches the "Engaged" KPI card (kpis.messaged) — the two used to disagree (KPI 4, tab 0).
-  engaged: (l) => l.messaged || ["replied", "in_conversation", "interested"].includes(l.stage),
+  // Needs you: Mr Lxwa flagged it for a human, and it isn't already dead.
+  needs: (l) => !!l.needs_attention && !OUT.includes(l.stage),
+  new: (l) => isToday(l.created_at), // added in the last 24h
+  // Engaged = they answered. Contacted = we wrote, they have not answered yet. No overlap.
+  engaged: (l) => REPLIED_STAGES.includes(l.stage) || !!l.last_in_at,
+  contacted: (l) => l.messaged && !(REPLIED_STAGES.includes(l.stage) || !!l.last_in_at) && !OUT.includes(l.stage),
+  // Hot = a meeting is in play, or they are ready to buy.
+  hot: (l) => ["meeting_requested", "meeting_scheduled", "meeting_done", "ready_to_buy"].includes(l.stage),
+  won: (l) => l.converted,
+  rejected: (l) => l.stage === "rejected",
+  // kept so older links / saved states still resolve
   meetings: (l) => ["meeting_requested", "meeting_scheduled", "meeting_done"].includes(l.stage),
   ready_to_buy: (l) => l.stage === "ready_to_buy",
-  rejected: (l) => l.stage === "rejected",
   converted: (l) => l.converted,
   client: (l) => l.is_client,
   ai_messaged: (l) => l.ai_messaged,
   employee_messaged: (l) => l.human_messaged,
   not_messaged: (l) => !l.messaged,
 };
+// The last board we loaded. Kept at module level (survives client-side navigation) and in
+// sessionStorage (survives a reload), so the page paints from it immediately and refreshes behind it.
+type Board = { leads: Lead[]; gen: Gen | null };
+const CACHE_KEY = "lx-leads-board-v2";
+let boardCache: Board | null = null;
+function readCache(): Board | null {
+  if (boardCache) return boardCache;
+  try { const raw = sessionStorage.getItem(CACHE_KEY); if (raw) { const b = JSON.parse(raw) as Board; if (Array.isArray(b.leads)) { boardCache = b; return b; } } } catch {}
+  return null;
+}
+const PIPE: [string, string][] = [
+  ["needs", "Needs you"], ["all", "All"], ["new", "New"], ["contacted", "Contacted"],
+  ["engaged", "Engaged"], ["hot", "Hot"], ["won", "Won"], ["rejected", "Rejected"],
+];
+
+/* ------------------------------------------------------------------ small pieces */
+
+function Stat({ label, value, sub, tone, active, onClick }: { label: string; value?: number; sub?: string; tone?: "amber"; active: boolean; onClick: () => void }) {
+  return (
+    <button onClick={onClick} aria-pressed={active} className="rounded-2xl px-4 py-3.5 text-left transition hover:shadow-sm"
+      style={{ background: C.panel, border: `1px solid ${active ? C.brand : C.line}` }}>
+      <span className="block text-[12px] font-medium" style={{ color: C.sub }}>{label}</span>
+      <span className="mt-0.5 block text-[24px] font-bold leading-tight" style={{ color: tone === "amber" && (value ?? 0) > 0 ? C.amber : C.ink }}>{value ?? "—"}</span>
+      {sub && <span className="mt-0.5 block truncate text-[11.5px]" style={{ color: C.sub }}>{sub}</span>}
+    </button>
+  );
+}
+
+function ScoreBar({ s }: { s: number | null }) {
+  if (s == null) return <span className="text-[12px]" style={{ color: C.sub }}>—</span>;
+  return (
+    <div className="flex items-center gap-2" title={`Lead score ${s} / 100`}>
+      <span className="w-6 text-[12.5px] font-semibold tabular-nums" style={{ color: C.ink }}>{s}</span>
+      <span className="h-1.5 w-14 overflow-hidden rounded-full" style={{ background: C.graySoft }}>
+        <i className="block h-full rounded-full" style={{ width: `${Math.min(100, Math.max(4, s))}%`, background: scoreColor(s) }} />
+      </span>
+    </div>
+  );
+}
+
+/** The one question a CRM row answers: what happened last, and who did it. */
+function ActivityCell({ l }: { l: Lead }) {
+  const inAt = l.last_in_at ? new Date(l.last_in_at).getTime() : 0;
+  const outAt = l.last_out_at ? new Date(l.last_out_at).getTime() : 0;
+  if (!inAt && !outAt) {
+    return <span className="text-[12px]" style={{ color: C.sub }}>{isToday(l.created_at) ? "Added today" : `Added ${fmtDay(l.created_at)}`}</span>;
+  }
+  const replied = inAt >= outAt;
+  const who = replied ? "Lead" : l.ai_messaged && l.human_messaged ? "AI + You" : l.ai_messaged ? "AI" : "You";
+  const tag = replied ? { c: C.green, b: C.greenSoft } : who === "You" ? { c: C.ink, b: C.graySoft } : { c: C.brandInk, b: C.brandSoft };
+  const snippet = (replied ? l.last_in_body : l.last_out_body) ?? "";
+  return (
+    <div className="min-w-0">
+      <div className="flex items-center gap-1.5">
+        <span className="rounded-md px-1.5 py-0.5 text-[11px] font-semibold" style={{ color: tag.c, background: tag.b }}>{who}</span>
+        <span className="text-[11.5px]" style={{ color: C.sub }}>{replied ? "replied" : "sent"} · {ago(replied ? l.last_in_at : l.last_out_at)}</span>
+      </div>
+      {snippet && <div className="mt-0.5 truncate text-[12px]" style={{ color: C.sub, maxWidth: 260 }}>{snippet}</div>}
+    </div>
+  );
+}
+
+/** Row actions. `lg` is the phone version: labelled, 44px tall, easy to hit. */
+function LeadActions({ l, setStage, busy, waLink, size }: { l: Lead; setStage: (l: Lead, s: string, reason?: string) => void; busy: string | null; waLink: (l: Lead) => string; size: "sm" | "lg" }) {
+  const num = l.whatsapp || l.phone;
+  const lg = size === "lg";
+  if (l.stage === "rejected") {
+    return <button className={`rounded-lg px-3 text-[12.5px] font-semibold disabled:opacity-60 ${lg ? "h-11 w-full" : "h-8"}`} style={{ color: C.brandInk, background: C.brandSoft }} disabled={busy === l.id} onClick={() => setStage(l, "approved")}>Restore lead</button>;
+  }
+  if (l.stage === "opted_out") return <span className="text-[12px]" style={{ color: C.sub }}>Opted out</span>;
+  const base = `inline-flex items-center justify-center gap-1.5 rounded-lg text-[12.5px] font-semibold ${lg ? "h-11 flex-1" : "h-8 w-8"}`;
+  const on = { background: C.panel, border: `1px solid ${C.line}` };
+  const off = { background: C.graySoft, color: "#cbd5e1" };
+  return (
+    <div className={`flex items-center gap-1.5 ${lg ? "w-full" : ""}`}>
+      {num
+        ? <a href={waLink(l)} aria-label={`Open WhatsApp chat with ${l.company || l.name || "lead"}`} title="WhatsApp chat" className={base} style={{ ...on, color: "#16a34a", textDecoration: "none" }}><WaGlyph size={lg ? 16 : 15} />{lg && <span style={{ color: C.ink }}>WhatsApp</span>}</a>
+        : <span aria-label="No WhatsApp number" title="No WhatsApp number" className={base} style={off}><WaGlyph size={lg ? 16 : 15} />{lg && <span>WhatsApp</span>}</span>}
+      {l.email
+        ? <a href={`mailto:${l.email}`} aria-label={`Email ${l.email}`} title={`Email ${l.email}`} onClick={(e) => e.stopPropagation()} className={base} style={{ ...on, color: C.brand, textDecoration: "none" }}><Mail size={lg ? 16 : 15} />{lg && <span style={{ color: C.ink }}>Email</span>}</a>
+        : <span aria-label="No email" title="No email" className={base} style={off}><Mail size={lg ? 16 : 15} />{lg && <span>Email</span>}</span>}
+      <RejectMenu variant="icon" large={lg} disabled={busy === l.id} onPick={(reason) => setStage(l, "rejected", reason)} />
+    </div>
+  );
+}
+
+function SkeletonRows({ table }: { table: boolean }) {
+  const bar = (w: string, h = 10) => <span className="block animate-pulse rounded-md" style={{ width: w, height: h, background: C.graySoft }} />;
+  return (
+    <div aria-busy="true" aria-label="Loading leads">
+      {Array.from({ length: 6 }, (_, i) => (
+        <div key={i} className={`flex items-center gap-3 px-4 py-3.5 ${table ? "" : "flex-col items-start"}`} style={{ borderBottom: `1px solid ${C.line}` }}>
+          <span className="block h-8 w-8 shrink-0 animate-pulse rounded-full" style={{ background: C.graySoft }} />
+          <div className="flex-1 space-y-2">{bar("38%", 12)}{bar("22%")}</div>
+          {table && <>{bar("70px", 20)}{bar("70px")}{bar("22%")}</>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ the page */
 
 export default function LeadsSection() {
   const { toast } = useStore();
   const [leads, setLeads] = useState<Lead[] | null>(null);
-  const [kpis, setKpis] = useState<Kpis | null>(null);
   const [tab, setTab] = useState("all");
   const [q, setQ] = useState("");
+  const [qInput, setQInput] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [selected, setSelected] = useState<Lead | null>(null);
   const [addOpen, setAddOpen] = useState(false);
@@ -147,36 +167,84 @@ export default function LeadsSection() {
   const [err, setErr] = useState("");
   const [gen, setGen] = useState<Gen | null>(null);
   const [genBusy, setGenBusy] = useState(false);
-  // The lead-generation panel under the KPI cards: closed → nothing; manual → the inline
+  // The lead-generation panel under the summary cards: closed → nothing; manual → the inline
   // "what & where" form; live → the real-time progress card; done → the "found N" summary.
   const [genPanel, setGenPanel] = useState<"closed" | "manual" | "live" | "done">("closed");
   const [genTarget, setGenTarget] = useState<number | null>(null);
   const [genMenuOpen, setGenMenuOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const wasRunning = useRef(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [dateRange, setDateRange] = useState("all"); // all | today | 7d | 30d
   const [sort, setSort] = useState("newest"); // newest | oldest | score | name
-  const [sortOpen, setSortOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
-  // Advanced filters (spec section 7), applied on top of the tab + search. Empty = no constraint.
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  // Advanced filters, applied on top of the tab + search. Empty = no constraint.
   const [flt, setFlt] = useState<{ status: string[]; source: string[]; city: string[]; ai: string; you: string; converted: string; client: string; score: string }>(
     { status: [], source: [], city: [], ai: "any", you: "any", converted: "any", client: "any", score: "any" }
   );
 
+  const lastBody = useRef("");
   const load = useCallback(async () => {
     try {
-      const d = await fetch("/api/leads/board").then((r) => r.json());
-      if (d.ok) { setLeads(d.leads); setKpis(d.kpis); setGen(d.gen ?? null); setErr(""); }
+      // The server sends an ETag, so an unchanged board comes back as a tiny 304 the browser answers from cache.
+      const text = await fetch("/api/leads/board").then((r) => r.text());
+      if (text === lastBody.current) { setErr(""); return; } // identical to what is on screen: no work
+      const d = JSON.parse(text);
+      if (d.ok) { lastBody.current = text; setLeads(d.leads); setGen(d.gen ?? null); setErr(""); }
       else setErr(d.error ?? "Could not load leads.");
     } catch (e: any) { setErr(e?.message ?? "Network error."); }
   }, []);
-  useEffect(() => { load(); }, [load]);
+
+  // First paint from the last board we saw (if any), then refresh in the background.
+  useEffect(() => {
+    const c = readCache();
+    if (c) { setLeads(c.leads); setGen(c.gen); }
+    load();
+  }, [load]);
+
+  // Keep the cache current (including optimistic changes), written when the browser is idle.
+  useEffect(() => {
+    if (!leads) return;
+    boardCache = { leads, gen };
+    const t = setTimeout(() => { try { sessionStorage.setItem(CACHE_KEY, JSON.stringify(boardCache)); } catch {} }, 600);
+    return () => clearTimeout(t);
+  }, [leads, gen]);
+
+  // Warm the on-demand chunks while the browser is idle, so the first click on a lead or on Filters is instant.
+  useEffect(() => {
+    const warm = () => { import("./leads/LeadDrawer"); import("./leads/FilterPanel"); };
+    const w = window as any;
+    const id = w.requestIdleCallback ? w.requestIdleCallback(warm, { timeout: 4000 }) : setTimeout(warm, 1500);
+    return () => { if (w.cancelIdleCallback && w.requestIdleCallback) w.cancelIdleCallback(id); else clearTimeout(id); };
+  }, []);
+
+  // The drawer's heavy fields (draft, evidence, score breakdown...) are not in the list; fetch them for the one lead
+  // that was opened, once.
+  const [details, setDetails] = useState<Record<string, Partial<Lead>>>({});
+  useEffect(() => {
+    const id = selected?.id;
+    if (!id || details[id]) return;
+    let alive = true;
+    fetch(`/api/leads/${id}`).then((r) => r.json()).then((d) => { if (alive) setDetails((m) => ({ ...m, [id]: d?.ok ? (d.detail ?? {}) : {} })); }).catch(() => { if (alive) setDetails((m) => ({ ...m, [id]: {} })); });
+    return () => { alive = false; };
+  }, [selected?.id, details]);
+
+  // typing in the search box filters after a short pause, not on every keystroke
+  useEffect(() => { const t = setTimeout(() => setQ(qInput), 200); return () => clearTimeout(t); }, [qInput]);
 
   // While a discovery job is running, poll so the live panel's "found so far" grows by itself.
   useEffect(() => {
     if (!gen?.running) return;
-    const id = setInterval(load, 5000);
+    const id = setInterval(async () => {
+      if (document.hidden) return;
+      try {
+        const d = await fetch("/api/leads/board?mode=gen").then((r) => r.json());
+        if (d?.ok) { setGen(d.gen); if (!d.gen?.running) load(); } // the run ended: pull the new leads once
+      } catch {}
+    }, 4000);
     return () => clearInterval(id);
   }, [gen?.running, load]);
 
@@ -223,9 +291,28 @@ export default function LeadsSection() {
       setLeads((prev) => prev?.map((x) => (x.id === l.id ? { ...x, stage, ...(rejectReason ? { reject_reason: rejectReason } : {}) } : x)) ?? prev);
       setSelected((s) => (s && s.id === l.id ? { ...s, stage, ...(rejectReason ? { reject_reason: rejectReason } : {}) } : s));
       toast(rejectReason ? "Rejected — I'll use that to find better leads." : "Updated.");
-      load();
     } catch (e: any) { toast(e?.message ?? "Network error.", "error"); }
     finally { setBusy(null); }
+  };
+
+  /** Reject every selected lead with one reason (a few requests at a time, not all at once). */
+  const bulkReject = async (reason: string) => {
+    const ids = Array.from(sel);
+    if (!ids.length) return;
+    setBulkBusy(true);
+    const okIds: string[] = [];
+    try {
+      for (let i = 0; i < ids.length; i += 6) {
+        const chunk = ids.slice(i, i + 6);
+        const res = await Promise.all(chunk.map((id) =>
+          fetch(`/api/leads/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stage: "rejected", reject_reason: reason }) }).then((r) => r.json()).catch(() => ({ ok: false }))
+        ));
+        chunk.forEach((id, k) => { if (res[k]?.ok) okIds.push(id); });
+      }
+      setLeads((prev) => prev?.map((x) => (okIds.includes(x.id) ? { ...x, stage: "rejected", reject_reason: reason } : x)) ?? prev);
+      toast(okIds.length === ids.length ? `Rejected ${okIds.length} lead${okIds.length === 1 ? "" : "s"}.` : `Rejected ${okIds.length} of ${ids.length}. The rest could not be updated.`, okIds.length ? undefined : "error");
+      setSel(new Set());
+    } finally { setBulkBusy(false); }
   };
 
   const filtered = useMemo(() => {
@@ -244,7 +331,7 @@ export default function LeadsSection() {
       if (!match(l)) return false;
       if (flt.status.length && !flt.status.includes(l.stage)) return false;
       if (flt.source.length && !flt.source.includes(l.source ?? "")) return false;
-      if (flt.city.length && !flt.city.includes(countryOf(l))) return false; // `city` key now holds Country values (filter relabelled)
+      if (flt.city.length && !flt.city.includes(countryOf(l))) return false; // `city` key holds Country values (filter relabelled)
       if (flt.ai === "yes" && !l.ai_messaged) return false;
       if (flt.ai === "no" && l.ai_messaged) return false;
       if (flt.you === "yes" && !l.human_messaged) return false;
@@ -271,13 +358,33 @@ export default function LeadsSection() {
     return [...rows].sort(cmp[sort] ?? cmp.newest);
   }, [leads, tab, q, flt, dateRange, sort]);
 
+  // Every tab count and summary number in ONE pass over the leads (was several passes per render).
+  const counts = useMemo(() => {
+    const c = { all: 0, needs: 0, new: 0, contacted: 0, engaged: 0, hot: 0, won: 0, rejected: 0, ai: 0, human: 0 } as Record<string, number>;
+    for (const l of leads ?? []) {
+      c.all++;
+      if (TAB_MATCH.needs(l)) c.needs++;
+      if (TAB_MATCH.new(l)) c.new++;
+      if (TAB_MATCH.contacted(l)) c.contacted++;
+      if (TAB_MATCH.engaged(l)) c.engaged++;
+      if (TAB_MATCH.hot(l)) c.hot++;
+      if (l.converted) c.won++;
+      if (l.stage === "rejected") c.rejected++;
+      if (l.ai_messaged) c.ai++;
+      if (l.human_messaged) c.human++;
+    }
+    return c;
+  }, [leads]);
+
   const activeFilterCount =
     flt.status.length + flt.source.length + flt.city.length +
     ["ai", "you", "converted", "client", "score"].filter((k) => (flt as any)[k] !== "any").length;
+  const clearAll = () => { setFlt({ status: [], source: [], city: [], ai: "any", you: "any", converted: "any", client: "any", score: "any" }); setDateRange("all"); setQInput(""); setQ(""); setTab("all"); };
 
-  const exportCsv = () => {
+  const exportCsv = (only?: Lead[]) => {
+    const list = only ?? filtered;
     const rows = [["Company", "Name", "Phone", "Email", "Website", "Country", "Source", "Status", "Score", "AI Messaged", "You Messaged", "Client", "Created"]];
-    for (const l of filtered) rows.push([
+    for (const l of list) rows.push([
       l.company ?? "", l.name ?? "", phoneDisplay(l), l.email ?? "", l.website ?? "", countryOf(l), l.source ?? "", l.stage,
       String(l.icp_score ?? ""), l.ai_messaged ? "yes" : "no", l.human_messaged ? "yes" : "no", l.is_client ? "yes" : "no",
       new Date(l.created_at).toISOString(),
@@ -290,105 +397,107 @@ export default function LeadsSection() {
   };
 
   const waLink = (l: Lead) => `/dashboard/whatsapp?lead=${l.id}`;
-  // Filter list is now countries (the City column was replaced by Country). The `flt.city` key is
-  // kept internally to avoid churn; it holds country values.
+  // Filter list is countries (the City column was replaced by Country). The `flt.city` key is kept
+  // internally to avoid churn; it holds country values.
   const cities = useMemo(() => Array.from(new Set((leads ?? []).map(countryOf).filter(Boolean))).sort(), [leads]);
 
-  // Pagination (client-side over the filtered+sorted rows). Reset to page 1 whenever the view
-  // changes, so a filter never leaves you stranded on an empty page.
-  useEffect(() => { setPage(1); }, [tab, q, flt, dateRange, sort, perPage]);
+  // Pagination (client-side over the filtered+sorted rows). Reset to page 1 and clear the selection
+  // whenever the view changes, so a filter never leaves you stranded or acting on rows you can't see.
+  useEffect(() => { setPage(1); setSel(new Set()); }, [tab, q, flt, dateRange, sort, perPage]);
   const totalPages = Math.max(1, Math.ceil(filtered.length / perPage));
   const pageSafe = Math.min(page, totalPages);
   const paged = filtered.slice((pageSafe - 1) * perPage, pageSafe * perPage);
+  const allOnPage = paged.length > 0 && paged.every((l) => sel.has(l.id));
+  const toggleOne = (id: string) => setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const toggleAll = () => setSel((s) => { const n = new Set(s); if (allOnPage) paged.forEach((l) => n.delete(l.id)); else paged.forEach((l) => n.add(l.id)); return n; });
+  const selectedLeads = useMemo(() => (leads ?? []).filter((l) => sel.has(l.id)), [leads, sel]);
+  const hasView = !!q || activeFilterCount > 0 || dateRange !== "all" || tab !== "all";
+
+  const card = { background: C.panel, border: `1px solid ${C.line}` };
+  const btn = "flex h-10 items-center gap-1.5 rounded-xl px-3.5 text-[13px] font-semibold";
 
   return (
-    <div className="-m-3 min-h-[calc(100%+1.5rem)] p-3 sm:-m-4 sm:min-h-[calc(100%+2rem)] sm:p-4" style={{ background: C.bg, color: C.ink, colorScheme: "light" }}>
-      {/* Kill Chrome's dark autofill fill on this light surface: an input it thinks is an email
-          field gets a black background (and the parent dashboard is dark). Force a white inset. */}
-      <style>{`
+    <div className="lx-leads -m-3 min-h-[calc(100%+1.5rem)] p-3 sm:-m-4 sm:min-h-[calc(100%+2rem)] sm:p-4" style={{ background: C.bg, color: C.ink, colorScheme: "light" }}>
+      {/* Kill Chrome's dark autofill on this light surface, and give every control a visible keyboard focus ring. */}
+      <style dangerouslySetInnerHTML={{ __html: `
         .lx-input{background:#fff !important;color:#0f172a !important;color-scheme:light}
         .lx-input::placeholder{color:#94a3b8}
         .lx-input:-webkit-autofill,.lx-input:-webkit-autofill:hover,.lx-input:-webkit-autofill:focus,.lx-input:-webkit-autofill:active{
           -webkit-box-shadow:0 0 0 1000px #fff inset !important;box-shadow:0 0 0 1000px #fff inset !important;
           -webkit-text-fill-color:#0f172a !important;caret-color:#0f172a;transition:background-color 9999s ease-in-out 0s}
         .lx-input:focus{outline:none !important;box-shadow:none !important}
-      `}</style>
-      {/* header — title left; Buyer Profile / Export / Add Lead on the right (Filters moved into
-          the search row below, to match the reference design) */}
-      <div className="mb-4 flex items-center justify-between gap-2">
+        /* the search wrapper owns the border; the bare input inside it must not draw its own */
+        .lx-leads input.lx-input{border:0 !important;padding:0 !important;border-radius:0 !important;background:transparent !important;height:100%}
+        .lx-leads :is(button,a,select,[role=tab]):focus-visible{outline:2px solid #6a5af0;outline-offset:2px}
+        .lx-leads input[type=checkbox]{accent-color:#6a5af0;width:16px;height:16px;padding:0;border-radius:4px;cursor:pointer}
+        /* the dashboard global input/select rule (full width, dark fill, padding) must not reach this page's controls */
+        .lx-leads select{width:auto;min-width:0;max-width:100%;height:40px;padding:0 12px;background:#fff !important;color:#0f172a !important;border:1px solid #e9edf2;border-radius:12px;color-scheme:light;font-size:13px}
+      ` }} />
+
+      {/* header: title + count on the left, one primary action on the right */}
+      <div className="mb-4 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-[22px] font-bold leading-tight" style={{ color: C.ink }}>Leads</h1>
-          <p className="hidden text-[12.5px] sm:block" style={{ color: C.sub }}>Manage, track &amp; automate your leads</p>
+          <h1 className="text-[22px] font-bold leading-tight">Leads</h1>
+          <p className="mt-0.5 text-[13px]" style={{ color: C.sub }}>
+            {leads === null ? "Loading your leads…" : (
+              <>{counts.all} lead{counts.all === 1 ? "" : "s"}
+                {counts.needs > 0 && <> · <button onClick={() => setTab("needs")} className="font-semibold hover:underline" style={{ color: C.amber }}>{counts.needs} need{counts.needs === 1 ? "s" : ""} you</button></>}
+              </>
+            )}
+          </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <button className="flex h-10 items-center gap-1.5 rounded-xl px-3.5 text-[13px] font-semibold" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.ink }} onClick={() => setBuyerOpen(true)} title="Ideal Customers — who buys from you, so Mr. Lead finds buyers not competitors">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 12a4 4 0 100-8 4 4 0 000 8zM4 21a8 8 0 0116 0" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
-            <span className="hidden md:inline">Ideal Customers</span>
-            <span className="md:hidden">Buyers</span>
+          <button className={`${btn} max-sm:w-10 max-sm:justify-center max-sm:px-0`} style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.ink }} onClick={() => setAddOpen(true)} aria-label="Add lead">
+            <Plus size={16} /><span className="max-sm:hidden">Add lead</span>
           </button>
-          <button className="flex h-10 items-center gap-1.5 rounded-xl px-3.5 text-[13px] font-semibold" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.ink }} onClick={exportCsv} title="Export CSV">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
-            <span className="hidden md:inline">Export</span>
-          </button>
-          <button className="flex h-10 items-center gap-1.5 rounded-xl px-4 text-[13px] font-semibold text-white" style={{ background: C.brand }} onClick={() => setAddOpen(true)}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" /></svg>
-            <span className="hidden sm:inline">Add Lead</span>
-          </button>
+          <div className="relative">
+            <button className={`${btn} text-white disabled:opacity-60`} style={{ background: C.brand }} onClick={() => setGenMenuOpen((o) => !o)} disabled={gen?.running || genBusy} aria-haspopup="menu" aria-expanded={genMenuOpen}>
+              <Sparkles size={16} />
+              <span>{gen?.running ? "Searching…" : <><span className="max-sm:hidden">Generate leads</span><span className="sm:hidden">Generate</span></>}</span>
+              {!gen?.running && <ChevronDown size={14} />}
+            </button>
+            {genMenuOpen && !gen?.running && (
+              <>
+                <div className="fixed inset-0 z-[95]" onClick={() => setGenMenuOpen(false)} />
+                <div role="menu" className="absolute right-0 z-[96] mt-2 w-72 max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl shadow-xl" style={card}>
+                  <button role="menuitem" className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-[#fafbfc]" onClick={() => { setGenMenuOpen(false); findLeads("", 10, ""); }}>
+                    <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg" style={{ background: C.brandSoft, color: C.brand }}><Sparkles size={16} /></span>
+                    <span><span className="block text-[13px] font-semibold">Auto</span><span className="block text-[12px]" style={{ color: C.sub }}>Finds real buyers for your business from your Ideal Customers</span></span>
+                  </button>
+                  <button role="menuitem" className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-[#fafbfc]" style={{ borderTop: `1px solid ${C.line}` }} onClick={() => { setGenMenuOpen(false); setGenPanel("manual"); }}>
+                    <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg" style={{ background: C.graySoft, color: C.ink }}><PenLine size={16} /></span>
+                    <span><span className="block text-[13px] font-semibold">Manual</span><span className="block text-[12px]" style={{ color: C.sub }}>You choose which businesses, which city and how many</span></span>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+          <div className="relative">
+            <button className="grid h-10 w-10 place-items-center rounded-xl" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.ink }} onClick={() => setMoreOpen((o) => !o)} aria-label="More actions" aria-haspopup="menu" aria-expanded={moreOpen}><Ellipsis size={18} /></button>
+            {moreOpen && (
+              <>
+                <div className="fixed inset-0 z-[95]" onClick={() => setMoreOpen(false)} />
+                <div role="menu" className="absolute right-0 z-[96] mt-2 w-56 overflow-hidden rounded-2xl py-1 shadow-xl" style={card}>
+                  <button role="menuitem" className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-[13px] hover:bg-[#fafbfc]" onClick={() => { setMoreOpen(false); exportCsv(); }}><Download size={15} style={{ color: C.sub }} />Export CSV{hasView ? " (current view)" : ""}</button>
+                  <button role="menuitem" className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-[13px] hover:bg-[#fafbfc]" onClick={() => { setMoreOpen(false); setBuyerOpen(true); }}><UserRound size={15} style={{ color: C.sub }} />Ideal customers</button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* toolbar — a full-width search, then Filters and Generate Leads, like the reference. The
-          search has the same quiet border as the KPI cards and no focus ring. */}
-      <div className="mb-4 flex flex-wrap items-center gap-2.5 sm:flex-nowrap">
-        <div className="flex h-11 min-w-0 basis-full items-center gap-2.5 rounded-xl px-3.5 sm:basis-0 sm:flex-1" style={{ background: "#fff", border: `1px solid ${C.line}` }}>
-          <svg className="shrink-0" width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke={C.sub} strokeWidth="2" /><path d="M21 21l-4-4" stroke={C.sub} strokeWidth="2" strokeLinecap="round" /></svg>
-          <input type="search" name="lead-search" autoComplete="off" spellCheck={false} className="lx-input w-full min-w-0 border-0 text-[13.5px]" style={{ background: "#fff" }} placeholder="Search by name, email, phone, or company…" value={q} onChange={(e) => setQ(e.target.value)} />
-        </div>
-        <div className="relative shrink-0">
-          <button className="flex h-11 items-center gap-1.5 rounded-xl px-3.5 text-[13px] font-semibold" style={{ background: filtersOpen || activeFilterCount ? C.brandSoft : C.panel, border: `1px solid ${filtersOpen || activeFilterCount ? C.brand : C.line}`, color: activeFilterCount || filtersOpen ? C.brand : C.ink }} onClick={() => setFiltersOpen((o) => !o)} title="Filters">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M3 5h18M6 12h12M10 19h4" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" /></svg>
-            <span className="hidden sm:inline">Filters</span>
-            {activeFilterCount ? <span className="rounded-full px-1.5 text-[11px] text-white" style={{ background: C.brand }}>{activeFilterCount}</span> : null}
-          </button>
-          {filtersOpen && <FilterPanel flt={flt} setFlt={setFlt} cities={cities} dateRange={dateRange} setDateRange={setDateRange} onClose={() => setFiltersOpen(false)} onClear={() => { setFlt({ status: [], source: [], city: [], ai: "any", you: "any", converted: "any", client: "any", score: "any" }); setDateRange("all"); }} />}
-        </div>
-        <div className="relative shrink-0 max-sm:flex-1">
-          <button className="flex h-11 items-center gap-1.5 rounded-xl px-4 max-sm:w-full max-sm:justify-center text-[13px] font-semibold text-white disabled:opacity-60" style={{ background: C.brand }} onClick={() => setGenMenuOpen((o) => !o)} disabled={gen?.running || genBusy}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6l2.1 2.1m0-12.8l-2.1 2.1M7.7 16.3l-2.1 2.1" stroke="#fff" strokeWidth="1.8" strokeLinecap="round"/></svg>
-            <span>{gen?.running ? "Searching…" : "Generate Leads"}</span>
-            {!gen?.running && <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>}
-          </button>
-          {genMenuOpen && !gen?.running && (
-            <>
-              <div className="fixed inset-0 z-[95]" onClick={() => setGenMenuOpen(false)} />
-              <div className="absolute right-0 z-[96] mt-2 w-64 overflow-hidden rounded-2xl shadow-xl" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
-                <button className="block w-full px-4 py-3 text-left hover:bg-[#fafbfc]" onClick={() => { setGenMenuOpen(false); findLeads("", 10, ""); }}>
-                  <div className="text-[13px] font-bold" style={{ color: C.ink }}>✨ Auto</div>
-                  <div className="text-[11.5px]" style={{ color: C.sub }}>Finds real buyers for your business from your Ideal Customers</div>
-                </button>
-                <button className="block w-full px-4 py-3 text-left hover:bg-[#fafbfc]" style={{ borderTop: `1px solid ${C.line}` }} onClick={() => { setGenMenuOpen(false); setGenPanel("manual"); }}>
-                  <div className="text-[13px] font-bold" style={{ color: C.ink }}>✍️ Manual</div>
-                  <div className="text-[11.5px]" style={{ color: C.sub }}>You choose what businesses, which city, how many</div>
-                </button>
-              </div>
-            </>
-          )}
-        </div>
+      {err && <div role="alert" className="mb-3 rounded-xl px-4 py-3 text-[13px]" style={{ background: C.redSoft, color: C.red }}>{err}</div>}
+
+      {/* four summary numbers; each is also a shortcut to its tab */}
+      <div className="mb-4 grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+        <Stat label="Total leads" value={leads ? counts.all : undefined} sub={leads ? `AI sent ${counts.ai} · You sent ${counts.human}` : undefined} active={tab === "all"} onClick={() => setTab("all")} />
+        <Stat label="Needs you" value={leads ? counts.needs : undefined} sub="Flagged for a human" tone="amber" active={tab === "needs"} onClick={() => setTab("needs")} />
+        <Stat label="Engaged" value={leads ? counts.engaged : undefined} sub="They replied" active={tab === "engaged"} onClick={() => setTab("engaged")} />
+        <Stat label="Won" value={leads ? counts.won : undefined} sub="Now clients" active={tab === "won"} onClick={() => setTab("won")} />
       </div>
 
-      {err && <div className="mb-3 rounded-xl px-4 py-3 text-[13px]" style={{ background: C.redSoft, color: C.red }}>{err}</div>}
-
-      {/* KPI cards — five, colourful, responsive (Converted removed) */}
-      <div className="mb-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
-        <Kpi icon="users" label="Total Leads" value={kpis?.total} tone={C.brand} bg={C.brandSoft} active={tab === "all"} onClick={() => setTab("all")} />
-        <Kpi icon="chat" label="Engaged" value={kpis?.messaged} tone={C.blue} bg={C.blueSoft} active={tab === "engaged"} onClick={() => setTab("engaged")} />
-        <Kpi icon="bot" label="AI Messaged" value={kpis?.ai_messaged} tone={C.violet} bg={C.violetSoft} active={tab === "ai_messaged"} onClick={() => setTab("ai_messaged")} />
-        <Kpi icon="person" label="You Messaged" value={kpis?.employee_messaged} tone={C.amber} bg={C.amberSoft} active={tab === "employee_messaged"} onClick={() => setTab("employee_messaged")} />
-        <Kpi icon="mute" label="Not Messaged" value={kpis?.not_messaged} tone={C.sub} bg={C.graySoft} active={tab === "not_messaged"} onClick={() => setTab("not_messaged")} />
-      </div>
-
-      {/* live lead-generation panel — the manual form, the real-time progress card, or the
-          "done" summary, right under the KPIs where the owner's reference mockup puts it */}
+      {/* live lead-generation panel — the manual form, the real-time progress card, or the "done" summary */}
       {genPanel !== "closed" && (
         <LeadGenPanel
           mode={genPanel}
@@ -411,205 +520,153 @@ export default function LeadsSection() {
         />
       )}
 
-      <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
-        {([
-          ["all", "All Leads", kpis?.total],
-          ["new", "New", kpis?.new],
-          ["engaged", "Engaged", kpis?.messaged],
-          ["meetings", "📅 Meetings", (leads ?? []).filter(TAB_MATCH.meetings).length],
-          ["ready_to_buy", "🔥 Ready to buy", (leads ?? []).filter(TAB_MATCH.ready_to_buy).length],
-          ["client", "⭐ Clients", kpis?.client],
-          ["not_messaged", "Not Messaged", kpis?.not_messaged],
-          ["rejected", "Rejected", (leads ?? []).filter((l) => l.stage === "rejected").length],
-        ] as [string, string, number | undefined][]).map(([k, label, n]) => (
-          <button key={k} onClick={() => setTab(k)} className="flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-semibold"
-            style={tab === k ? { background: C.brandSoft, color: C.brand } : { background: C.panel, color: C.sub, border: `1px solid ${C.line}` }}>
-            {label}{n != null && <span className="rounded-full px-1.5 text-[11px]" style={{ background: tab === k ? "#fff" : C.graySoft, color: tab === k ? C.brand : C.sub }}>{n}</span>}
-          </button>
-        ))}
+      {/* ONE card: pipeline tabs, toolbar, bulk bar, then the leads */}
+      <div className="overflow-hidden rounded-2xl" style={card}>
+        <div role="tablist" aria-label="Lead pipeline" className="lx-lscroll flex overflow-x-auto px-2 max-sm:[mask-image:linear-gradient(to_right,transparent,#000_14px,#000_calc(100%-14px),transparent)]" style={{ borderBottom: `1px solid ${C.line}` }}>
+          {PIPE.map(([k, label]) => {
+            const on = tab === k; const n = counts[k] ?? 0;
+            return (
+              <button key={k} role="tab" aria-selected={on} onClick={() => setTab(k)} className="relative flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-3 text-[13px] font-semibold max-sm:py-3.5"
+                style={{ color: on ? C.brandInk : C.sub }}>
+                {k === "needs" && n > 0 && <span className="h-1.5 w-1.5 rounded-full" style={{ background: "#d97706" }} />}
+                {label}
+                <span className="rounded-full px-1.5 text-[11px] tabular-nums" style={{ background: on ? C.brandSoft : C.graySoft, color: on ? C.brandInk : C.sub }}>{leads ? n : "–"}</span>
+                {on && <span aria-hidden className="absolute inset-x-2 bottom-0 h-[2px] rounded-full" style={{ background: C.brand }} />}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex min-w-0 flex-wrap items-center gap-2 p-3 sm:flex-nowrap">
+          <div className="flex h-10 min-w-0 basis-full items-center gap-2.5 rounded-xl border bg-white px-3 focus-within:border-[#6a5af0] sm:basis-0 sm:flex-1" style={{ borderColor: C.line }}>
+            <Search size={16} className="shrink-0" style={{ color: C.sub }} />
+            <input type="search" name="lead-search" aria-label="Search leads" autoComplete="off" spellCheck={false} className="lx-input w-full min-w-0 border-0 text-[13.5px]" placeholder="Search name, email, phone or company…" value={qInput} onChange={(e) => setQInput(e.target.value)} />
+            {qInput && <button aria-label="Clear search" onClick={() => { setQInput(""); setQ(""); }} className="grid h-6 w-6 shrink-0 place-items-center rounded-full" style={{ background: C.graySoft, color: C.sub }}><X size={13} /></button>}
+          </div>
+          <div className="relative shrink-0 max-sm:flex-1">
+            <button className="flex h-10 items-center gap-1.5 rounded-xl px-3.5 text-[13px] font-semibold max-sm:w-full max-sm:justify-center"
+              style={{ background: filtersOpen || activeFilterCount ? C.brandSoft : C.panel, border: `1px solid ${filtersOpen || activeFilterCount ? C.brand : C.line}`, color: activeFilterCount || filtersOpen ? C.brandInk : C.ink }}
+              onClick={() => setFiltersOpen((o) => !o)} aria-haspopup="dialog" aria-expanded={filtersOpen}>
+              <SlidersHorizontal size={15} /><span>Filters</span>
+              {activeFilterCount ? <span className="rounded-full px-1.5 text-[11px] text-white" style={{ background: C.brand }}>{activeFilterCount}</span> : null}
+            </button>
+            {filtersOpen && <FilterPanel flt={flt} setFlt={setFlt} cities={cities} dateRange={dateRange} setDateRange={setDateRange} onClose={() => setFiltersOpen(false)} onClear={() => { setFlt({ status: [], source: [], city: [], ai: "any", you: "any", converted: "any", client: "any", score: "any" }); setDateRange("all"); }} />}
+          </div>
+          <select aria-label="Sort leads" value={sort} onChange={(e) => setSort(e.target.value)} className="shrink-0 font-semibold max-sm:min-w-0 max-sm:flex-1">
+            {Object.entries(SORT_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+        </div>
+
+        {sel.size > 0 && (
+          <div className="flex flex-wrap items-center gap-2 px-4 py-2.5" style={{ background: C.brandSoft, borderTop: `1px solid ${C.line}`, borderBottom: `1px solid ${C.line}` }}>
+            <span className="text-[13px] font-semibold" style={{ color: C.brandInk }}>{sel.size} selected</span>
+            <span className="flex-1" />
+            <RejectMenu variant="button" disabled={bulkBusy} onPick={bulkReject} />
+            <button className="h-9 rounded-xl px-3 text-[12.5px] font-semibold disabled:opacity-60" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.ink }} disabled={bulkBusy} onClick={() => exportCsv(selectedLeads)}>Export</button>
+            <button className="h-9 rounded-xl px-3 text-[12.5px] font-semibold" style={{ color: C.brandInk }} onClick={() => setSel(new Set())}>Clear</button>
+          </div>
+        )}
+
+        {leads === null ? (
+          <SkeletonRows table />
+        ) : filtered.length === 0 ? (
+          <div className="px-6 py-14 text-center">
+            <span className="mx-auto grid h-12 w-12 place-items-center rounded-full" style={{ background: C.brandSoft, color: C.brand }}><Users size={22} /></span>
+            <p className="mt-3 text-[15px] font-semibold">{counts.all === 0 ? "No leads yet" : "No leads match this view"}</p>
+            <p className="mx-auto mt-1 max-w-sm text-[13px]" style={{ color: C.sub }}>
+              {counts.all === 0 ? "Let Mr. Lead find buyers for you, add one yourself, or ask in chat: “find me leads for restaurants in Dubai”." : "Try a different tab, or clear your search and filters."}
+            </p>
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              {counts.all === 0 ? (
+                <>
+                  <button className={`${btn} text-white`} style={{ background: C.brand }} onClick={() => setGenMenuOpen(true)}><Sparkles size={16} />Generate leads</button>
+                  <button className={btn} style={{ background: C.panel, border: `1px solid ${C.line}` }} onClick={() => setAddOpen(true)}><Plus size={16} />Add lead</button>
+                </>
+              ) : <button className={btn} style={{ background: C.panel, border: `1px solid ${C.line}` }} onClick={clearAll}>Clear search and filters</button>}
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* desktop / tablet: a compact table */}
+            <div className="hidden md:block">
+              <div className="lx-lscroll overflow-x-auto">
+                <table className="w-full border-collapse" style={{ minWidth: 880 }}>
+                  <thead>
+                    <tr className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: C.sub, textAlign: "left", borderTop: `1px solid ${C.line}`, borderBottom: `1px solid ${C.line}`, background: "#fafbfc" }}>
+                      <th className="w-10 py-2.5 pl-4"><input type="checkbox" checked={allOnPage} onChange={toggleAll} aria-label="Select all leads on this page" /></th>
+                      <th className="px-3 py-2.5">Lead</th><th className="px-3 py-2.5">Stage</th><th className="px-3 py-2.5">Score</th><th className="px-3 py-2.5">Last activity</th><th className="px-3 py-2.5">Source</th><th className="px-3 py-2.5 pr-4">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paged.map((l) => {
+                      const isSel = sel.has(l.id);
+                      return (
+                        <tr key={l.id} className="cursor-pointer text-[13px] hover:bg-[#fafbfc]" style={{ borderBottom: `1px solid ${C.line}`, background: isSel ? "#faf9ff" : undefined }} onClick={() => setSelected(l)}>
+                          <td className="py-3 pl-4" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={isSel} onChange={() => toggleOne(l.id)} aria-label={`Select ${l.company || l.name || "lead"}`} /></td>
+                          <td className="px-3 py-3">
+                            <div className="flex items-center gap-2.5">
+                              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[11.5px] font-bold" style={{ background: C.brandSoft, color: C.brandInk }}>{initials(l)}</span>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="truncate font-semibold" style={{ maxWidth: 190 }}>{l.company || l.name || "Untitled"}</span>
+                                  {l.needs_attention && <span title={l.needs_attention_reason ?? "Mr Lxwa replied but flagged this for you"} className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 text-[10.5px] font-semibold" style={{ color: C.amber, background: C.amberSoft }}><TriangleAlert size={10} />Needs you</span>}
+                                </div>
+                                <div className="truncate text-[12px]" style={{ color: C.sub, maxWidth: 230 }}>{phoneDisplay(l)}{countryOf(l) ? ` · ${countryOf(l)}` : ""}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-3 py-3"><StageChip stage={l.stage} /></td>
+                          <td className="px-3 py-3"><ScoreBar s={l.icp_score} /></td>
+                          <td className="px-3 py-3"><ActivityCell l={l} /></td>
+                          <td className="whitespace-nowrap px-3 py-3 text-[12.5px]" style={{ color: C.sub }}>{SOURCE_LABEL[l.source ?? ""] ?? l.source ?? "—"}</td>
+                          <td className="px-3 py-3 pr-4" onClick={(e) => e.stopPropagation()}><LeadActions l={l} setStage={setStage} busy={busy} waLink={waLink} size="sm" /></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* phones: one tidy list, a lead per block, big tap targets */}
+            <div className="md:hidden" style={{ borderTop: `1px solid ${C.line}` }}>
+              {paged.map((l) => (
+                <div key={l.id} className="px-4 py-3.5" style={{ borderBottom: `1px solid ${C.line}` }}>
+                  <button className="flex w-full items-start gap-3 text-left" onClick={() => setSelected(l)} aria-label={`Open ${l.company || l.name || "lead"}`}>
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[12px] font-bold" style={{ background: C.brandSoft, color: C.brandInk }}>{initials(l)}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-start justify-between gap-2">
+                        <span className="truncate text-[14.5px] font-semibold">{l.company || l.name || "Untitled"}</span>
+                        <span className="shrink-0 text-[12px] font-semibold tabular-nums" style={{ color: scoreColor(l.icp_score) }}>{l.icp_score ?? "—"}</span>
+                      </span>
+                      <span className="mt-0.5 block truncate text-[12.5px]" style={{ color: C.sub }}>{phoneDisplay(l)}{countryOf(l) ? ` · ${countryOf(l)}` : ""}</span>
+                      <span className="mt-2 flex flex-wrap items-center gap-1.5">
+                        <StageChip stage={l.stage} />
+                        {l.needs_attention && <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-semibold" style={{ color: C.amber, background: C.amberSoft }}><TriangleAlert size={11} />Needs you</span>}
+                      </span>
+                      <span className="mt-2 block"><ActivityCell l={l} /></span>
+                    </span>
+                  </button>
+                  <div className="mt-3"><LeadActions l={l} setStage={setStage} busy={busy} waLink={waLink} size="lg" /></div>
+                </div>
+              ))}
+            </div>
+
+            <Pagination page={pageSafe} totalPages={totalPages} perPage={perPage} total={filtered.length} setPage={setPage} setPerPage={setPerPage} />
+          </>
+        )}
       </div>
 
-      {leads === null ? (
-        <div className="rounded-2xl p-10 text-center text-[13px]" style={{ background: C.panel, border: `1px solid ${C.line}`, color: C.sub }}>Loading…</div>
-      ) : filtered.length === 0 ? (
-        <div className="rounded-2xl p-12 text-center" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
-          <div className="text-2xl">🧭</div>
-          <p className="mt-2 text-[13px]" style={{ color: C.sub }}>No leads here. Add one, or ask in chat &quot;find me leads for restaurants in Dubai&quot;.</p>
-        </div>
-      ) : (
-        <>
-          <div className="hidden overflow-hidden rounded-2xl md:block" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
-            <div className="lx-lscroll overflow-x-auto">
-              {/* compact on purpose: small type, tight padding, no Status column (everything
-                  arrives approved) — so far more rows fit on one screen */}
-              <table className="w-full border-collapse" style={{ minWidth: 980 }}>
-                <thead>
-                  <tr className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: C.sub, textAlign: "left", borderBottom: `1px solid ${C.line}` }}>
-                    <Th>Lead</Th><Th>Score</Th><Th>Messaged</Th><Th>Contact</Th><Th>Source</Th><Th>Added</Th><Th>Country</Th><Th>Actions</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paged.map((l) => (
-                    <tr key={l.id} className="cursor-pointer text-[12.5px] hover:bg-[#fafbfc]" style={{ borderBottom: `1px solid ${C.line}` }} onClick={() => setSelected(l)}>
-                      <td className="px-2.5 py-2">
-                        <div className="flex items-center gap-2">
-                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10.5px] font-bold text-white" style={{ background: C.brand }}>{initials(l)}</span>
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5">
-                              <span className="truncate font-semibold" style={{ color: C.ink, maxWidth: 150 }}>{l.company || l.name || "Untitled"}</span>
-                              {l.needs_attention && <span title={l.needs_attention_reason ?? "Mr Lxwa replied but flagged this for you"} className="shrink-0 rounded px-1 text-[10px] font-semibold" style={{ color: "#92400e", background: "#fef3c7" }}>⚠ Needs you</span>}
-                              {l.stage === "rejected" && <span className="shrink-0 rounded px-1 text-[10px] font-semibold" style={{ color: C.red, background: C.redSoft }}>Rejected</span>}
-                              {l.stage === "opted_out" && <span className="shrink-0 rounded px-1 text-[10px] font-semibold" style={{ color: C.red, background: C.redSoft }}>Opted out</span>}
-                            </div>
-                            <div className="truncate text-[11px]" style={{ color: C.sub, maxWidth: 150 }}>{phoneDisplay(l)}</div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-2.5 py-2"><span className="rounded-md px-1.5 py-0.5 text-[11.5px] font-bold" style={{ color: scoreColor(l.icp_score), background: C.graySoft }}>{l.icp_score ?? "—"}</span></td>
-                      <td className="px-2.5 py-2" style={{ whiteSpace: "nowrap" }}><MessagedCell l={l} /></td>
-                      {/* Contact: email on top, website below — one column, like the Lead cell stacks name + phone */}
-                      <td className="px-2.5 py-2">
-                        {l.email
-                          ? <a href={`mailto:${l.email}`} className="block truncate" style={{ color: C.blue, maxWidth: 180 }} onClick={(e) => e.stopPropagation()}>{l.email}</a>
-                          : <span style={{ color: C.sub }}>—</span>}
-                        {l.website
-                          ? <a href={l.website.startsWith("http") ? l.website : `https://${l.website}`} target="_blank" rel="noreferrer" className="block truncate text-[11px]" style={{ color: C.sub, maxWidth: 180 }} onClick={(e) => e.stopPropagation()}>{siteLabel(l.website)}</a>
-                          : <span className="block text-[11px]" style={{ color: C.line }}>—</span>}
-                      </td>
-                      <td className="px-2.5 py-2" style={{ color: C.sub, whiteSpace: "nowrap" }}>{SOURCE_LABEL[l.source ?? ""] ?? l.source ?? "—"}</td>
-                      <td className="px-2.5 py-2" style={{ whiteSpace: "nowrap" }}><AddedCell iso={l.created_at} /></td>
-                      <td className="px-2.5 py-2" style={{ color: C.sub, whiteSpace: "nowrap" }}>{countryOf(l) || "—"}</td>
-                      <td className="px-2.5 py-2" onClick={(e) => e.stopPropagation()}>{rowActions(l, setStage, busy, waLink)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <Pagination page={pageSafe} totalPages={totalPages} perPage={perPage} total={filtered.length} setPage={setPage} setPerPage={setPerPage} />
-          </div>
-
-          <div className="space-y-2.5 md:hidden">
-            {paged.map((l) => (
-              <div key={l.id} className="rounded-2xl p-3.5" style={{ background: C.panel, border: `1px solid ${C.line}` }} onClick={() => setSelected(l)}>
-                <div className="mb-2 flex items-start gap-2.5">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[12px] font-bold text-white" style={{ background: C.brand }}>{initials(l)}</span>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate font-semibold" style={{ color: C.ink }}>{l.company || l.name || "Untitled"}</div>
-                    <div className="truncate text-[12px]" style={{ color: C.sub }}>{phoneDisplay(l)}{countryOf(l) ? ` · ${countryOf(l)}` : ""} · {SOURCE_LABEL[l.source ?? ""] ?? l.source ?? "—"}</div>
-                    {(l.email || l.website) && (
-                      <div className="truncate text-[11.5px]" style={{ color: C.blue }}>{l.email ?? ""}{l.email && l.website ? " · " : ""}{l.website ? siteLabel(l.website) : ""}</div>
-                    )}
-                  </div>
-                  <span className="rounded-md px-2 py-0.5 text-[12px] font-bold" style={{ color: scoreColor(l.icp_score), background: C.graySoft }}>{l.icp_score ?? "—"}</span>
-                </div>
-                <div className="mb-2.5 flex flex-wrap items-center gap-1.5">
-                  <AddedCell iso={l.created_at} />
-                  <MessagedCell l={l} />
-                  {l.needs_attention && <Tag tone="#92400e" soft="#fef3c7">⚠ Needs you</Tag>}
-                  {l.stage === "rejected" && <Tag tone={C.red} soft={C.redSoft}>Rejected</Tag>}
-                  {l.stage === "opted_out" && <Tag tone={C.red} soft={C.redSoft}>Opted out</Tag>}
-                </div>
-                <div onClick={(e) => e.stopPropagation()}>{rowActions(l, setStage, busy, waLink)}</div>
-              </div>
-            ))}
-          </div>
-
-          {/* mobile pagination — the same control, in its own card under the lead cards */}
-          <div className="rounded-2xl md:hidden" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
-            <Pagination page={pageSafe} totalPages={totalPages} perPage={perPage} total={filtered.length} setPage={setPage} setPerPage={setPerPage} />
-          </div>
-        </>
-      )}
-
-      {selected && <Drawer lead={selected} onClose={() => setSelected(null)} setStage={setStage} busy={busy} waLink={waLink} />}
-      <AddLeadModal open={addOpen} onClose={() => setAddOpen(false)} onAdded={() => { setAddOpen(false); load(); }} toast={toast} />
-      <BuyerProfilePanel open={buyerOpen} onClose={() => setBuyerOpen(false)} toast={toast} />
+      {selected && <LeadDrawer lead={{ ...selected, ...(details[selected.id] ?? {}) }} loadingDetail={!details[selected.id]} onClose={() => setSelected(null)} setStage={setStage} busy={busy} waLink={waLink} />}
+      {addOpen && <AddLeadModal open={addOpen} onClose={() => setAddOpen(false)} onAdded={() => { setAddOpen(false); load(); }} toast={toast} />}
+      {buyerOpen && <BuyerProfilePanel open={buyerOpen} onClose={() => setBuyerOpen(false)} toast={toast} />}
     </div>
-  );
-}
-
-const REJECT_REASONS: { key: string; label: string }[] = [
-  { key: "competitor", label: "Competitor" },
-  { key: "wrong_industry", label: "Wrong industry" },
-  { key: "wrong_city", label: "Wrong city" },
-  { key: "too_small", label: "Too small" },
-  { key: "too_large", label: "Too large" },
-  { key: "already_served", label: "Already served" },
-  { key: "duplicate", label: "Duplicate" },
-  { key: "other", label: "Other" },
-];
-
-/** The reject control: a ✕ (or a labelled button) that opens a little menu of reasons. The reason
- *  is the whole point of Phase 6 — "Competitor" and "Wrong industry" teach the finder to stop
- *  surfacing that domain, the rest feed the metrics — so rejecting always asks why. */
-function RejectMenu({ onPick, disabled, variant }: { onPick: (reason: string) => void; disabled?: boolean; variant: "icon" | "button" }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="relative">
-      {variant === "icon" ? (
-        <button className="rounded-lg p-1.5 disabled:opacity-60" style={{ color: open ? C.red : C.sub, background: open ? C.redSoft : "transparent" }} title="Reject this lead" disabled={disabled} onClick={() => setOpen((o) => !o)}
-          onMouseEnter={(e) => { e.currentTarget.style.color = C.red; e.currentTarget.style.background = C.redSoft; }}
-          onMouseLeave={(e) => { if (!open) { e.currentTarget.style.color = C.sub; e.currentTarget.style.background = "transparent"; } }}>
-          <svg width="13" height="13" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
-        </button>
-      ) : (
-        <button className="rounded-xl px-3.5 py-2 text-[13px] font-semibold disabled:opacity-60" style={{ color: C.red, background: C.redSoft }} disabled={disabled} onClick={() => setOpen((o) => !o)}>Reject…</button>
-      )}
-      {open && (
-        <>
-          <div className="fixed inset-0 z-[105]" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-[106] mt-1 w-44 overflow-hidden rounded-xl py-1 shadow-lg" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
-            <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide" style={{ color: C.sub }}>Why reject?</div>
-            {REJECT_REASONS.map((r) => (
-              <button key={r.key} className="block w-full px-3 py-1.5 text-left text-[12.5px]" style={{ color: C.ink }} onClick={() => { setOpen(false); onPick(r.key); }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = C.graySoft)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>{r.label}</button>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-function rowActions(l: Lead, setStage: (l: Lead, s: string, reason?: string) => void, busy: string | null, waLink: (l: Lead) => string) {
-  const num = l.whatsapp || l.phone;
-  // Every lead arrives approved now, so the default action is Message, with a quiet ✕ to
-  // reject the ones the user doesn't want. A rejected lead gets one Restore button back.
-  if (l.stage === "rejected") {
-    return <button className="rounded-lg px-2.5 py-1 text-[11.5px] font-semibold disabled:opacity-60" style={{ color: C.brand, background: C.brandSoft }} disabled={busy === l.id} onClick={() => setStage(l, "approved")}>Restore</button>;
-  }
-  if (l.stage === "opted_out") return <span className="text-[12px]" style={{ color: C.sub }}>—</span>;
-  return (
-    <div className="flex items-center gap-1.5">
-      {/* WhatsApp — compact, its own brand green, like the real app */}
-      {num ? (
-        <a href={waLink(l)} title="WhatsApp chat" className="inline-flex h-7 w-7 items-center justify-center rounded-lg" style={{ background: "#25D366", color: "#fff", textDecoration: "none" }}>
-          <WaGlyph size={14} />
-        </a>
-      ) : <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg" style={{ background: C.graySoft, color: C.line }}><WaGlyph size={14} /></span>}
-      {/* Email — opens the mail client now; the inbox-style email chat comes later (like WhatsApp) */}
-      {l.email ? (
-        <a href={`mailto:${l.email}`} title={`Email ${l.email}`} onClick={(e) => e.stopPropagation()} className="inline-flex h-7 w-7 items-center justify-center rounded-lg" style={{ background: C.brandSoft, color: C.brand, textDecoration: "none" }}>
-          <MailIcon size={14} />
-        </a>
-      ) : <span title="No email" className="inline-flex h-7 w-7 items-center justify-center rounded-lg" style={{ background: C.graySoft, color: C.line }}><MailIcon size={14} /></span>}
-      <RejectMenu variant="icon" disabled={busy === l.id} onPick={(reason) => setStage(l, "rejected", reason)} />
-    </div>
-  );
-}
-
-function MailIcon({ size = 14 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2.5" y="4.5" width="19" height="15" rx="2.5" />
-      <path d="M3 6l9 7 9-7" />
-    </svg>
   );
 }
 
 function PageBtn({ disabled, onClick, label }: { disabled: boolean; onClick: () => void; label: string }) {
   return (
-    <button disabled={disabled} onClick={onClick} className="flex h-8 w-8 items-center justify-center rounded-lg text-[15px] disabled:opacity-40"
+    <button disabled={disabled} onClick={onClick} aria-label={label === "‹" ? "Previous page" : "Next page"} className="flex h-8 w-8 items-center justify-center rounded-lg text-[15px] disabled:opacity-40 max-sm:h-10 max-sm:w-10"
       style={{ background: C.panel, color: C.ink, border: `1px solid ${C.line}` }}>{label}</button>
   );
 }
@@ -635,7 +692,7 @@ function Pagination({ page, totalPages, perPage, total, setPage, setPerPage }: {
           {pageNumbers(page, totalPages).map((p, i) =>
             p === "…"
               ? <span key={`e${i}`} className="px-1 text-[12px]" style={{ color: C.sub }}>…</span>
-              : <button key={p} onClick={() => setPage(p as number)} className="h-8 min-w-8 rounded-lg px-2 text-[12.5px] font-semibold"
+              : <button key={p} onClick={() => setPage(p as number)} className="h-8 min-w-8 rounded-lg px-2 text-[12.5px] font-semibold max-sm:h-10 max-sm:min-w-10"
                   style={p === page ? { background: C.brand, color: "#fff" } : { background: C.panel, color: C.ink, border: `1px solid ${C.line}` }}>{p}</button>
           )}
           <PageBtn disabled={page >= totalPages} onClick={() => setPage(page + 1)} label="›" />
@@ -678,589 +735,5 @@ function pageNumbers(current: number, total: number): (number | "…")[] {
   return out;
 }
 
-/** "Added" — a little green Today badge for fresh rows, a short date for the rest. */
-function AddedCell({ iso }: { iso: string }) {
-  return isToday(iso)
-    ? <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold" style={{ color: C.green, background: C.greenSoft }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: C.green }} />Today</span>
-    : <span className="text-[12px]" style={{ color: C.sub }}>{fmtDay(iso)}</span>;
-}
 
-/** Who has messaged this lead — one green, human answer: the AI agent, you, both, or no one. */
-function MessagedCell({ l }: { l: Lead }) {
-  if (l.ai_messaged || l.human_messaged) {
-    const who = l.ai_messaged && l.human_messaged ? "AI + You" : l.ai_messaged ? "AI Agent" : "You";
-    return (
-      <span className="inline-flex items-center gap-1.5">
-        <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold" style={{ color: C.green, background: C.greenSoft }}>
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke={C.green} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
-          {who}
-        </span>
-        {l.last_out_at && <span className="text-[10.5px]" style={{ color: C.sub }}>{ago(l.last_out_at)}</span>}
-      </span>
-    );
-  }
-  return <span className="text-[11.5px]" style={{ color: C.sub }}>Not yet</span>;
-}
 
-function Kpi({ icon, label, value, tone, bg, active, onClick }: { icon: string; label: string; value?: number; tone: string; bg: string; active: boolean; onClick: () => void }) {
-  // active = a hairline 1px outline at ~25% opacity — present but quiet, per the owner
-  return (
-    <button onClick={onClick} className="flex items-center gap-2.5 rounded-2xl px-3 py-3 text-left transition" style={{ background: bg, border: `1px solid ${active ? `${tone}40` : "transparent"}` }}>
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white" style={{ background: tone }}><KpiIcon name={icon} /></span>
-      <span className="min-w-0">
-        <span className="block truncate text-[11px] font-semibold leading-tight" style={{ color: tone }}>{label}</span>
-        <span className="block text-[20px] font-bold leading-tight" style={{ color: C.ink }}>{value ?? "—"}</span>
-      </span>
-    </button>
-  );
-}
-function KpiIcon({ name }: { name: string }) {
-  const p: Record<string, React.ReactNode> = {
-    users: <path d="M16 19v-1a4 4 0 00-4-4H6a4 4 0 00-4 4v1M9 10a3 3 0 100-6 3 3 0 000 6zm13 9v-1a4 4 0 00-3-3.9M16 4.1a4 4 0 010 7.8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" fill="none" />,
-    chat: <path d="M21 12a8 8 0 01-11.6 7.1L3 21l1.9-6.4A8 8 0 1121 12z" stroke="currentColor" strokeWidth="1.7" fill="none" strokeLinejoin="round" />,
-    check: <path d="M20 6L9 17l-5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />,
-    bot: <path d="M12 7V4m-4 6h8a2 2 0 012 2v5a2 2 0 01-2 2H8a2 2 0 01-2-2v-5a2 2 0 012-2zm1 4h.01M15 11h.01" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" fill="none" />,
-    person: <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8z" stroke="currentColor" strokeWidth="1.7" fill="none" strokeLinecap="round" />,
-    mute: <path d="M3 3l18 18M9 5a3 3 0 016 0v4m-6 2v1a3 3 0 003 3" stroke="currentColor" strokeWidth="1.7" fill="none" strokeLinecap="round" />,
-  };
-  return <svg width="17" height="17" viewBox="0 0 24 24">{p[name] ?? null}</svg>;
-}
-function StageChip({ stage }: { stage: string }) {
-  const s = STAGE[stage] ?? { label: stage, fg: C.sub, bg: C.graySoft };
-  return (
-    <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-semibold" style={{ color: s.fg, background: s.bg }}>
-      <span className="h-1.5 w-1.5 rounded-full" style={{ background: s.fg }} />{s.label}
-    </span>
-  );
-}
-function Tag({ children, tone, soft }: { children: React.ReactNode; tone: string; soft: string }) {
-  return <span className="rounded-md px-2 py-0.5 text-[11px] font-semibold" style={{ color: tone, background: soft }}>{children}</span>;
-}
-function Th({ children }: { children: React.ReactNode }) { return <th className="px-2.5 py-2">{children}</th>; }
-function WaGlyph({ size = 14 }: { size?: number }) {
-  // The real WhatsApp mark: a speech bubble with a handset. Filled white on the green pill.
-  return (
-    <svg width={size} height={size} viewBox="0 0 32 32" fill="currentColor" aria-hidden>
-      <path d="M16 3C9.2 3 3.7 8.5 3.7 15.3c0 2.4.7 4.7 1.9 6.7L3.5 29l7.2-1.9c1.9 1 4 1.6 6.2 1.6h.1c6.8 0 12.3-5.5 12.3-12.3S22.8 3 16 3zm0 22.4c-1.9 0-3.8-.5-5.4-1.5l-.4-.2-4.3 1.1 1.1-4.2-.3-.4a10 10 0 01-1.6-5.4c0-5.6 4.6-10.1 10.2-10.1 2.7 0 5.2 1 7.1 2.9a10 10 0 013 7.2c0 5.6-4.6 10.1-10.2 10.1zm5.6-7.6c-.3-.2-1.8-.9-2.1-1-.3-.1-.5-.2-.7.2s-.8 1-1 1.2c-.2.2-.4.2-.7.1-.3-.2-1.3-.5-2.5-1.5-.9-.8-1.5-1.8-1.7-2.1-.2-.3 0-.5.1-.7l.5-.6c.2-.2.2-.3.3-.5.1-.2.1-.4 0-.5l-1-2.3c-.2-.6-.5-.5-.7-.5h-.6c-.2 0-.5.1-.8.4-.3.3-1 1-1 2.5s1.1 2.9 1.2 3.1c.2.2 2.2 3.4 5.4 4.8.7.3 1.3.5 1.7.6.7.2 1.4.2 1.9.1.6-.1 1.8-.7 2-1.4.3-.7.3-1.3.2-1.4-.1-.2-.3-.3-.6-.4z" />
-    </svg>
-  );
-}
-
-function MeetingCard({ meeting, onClose }: { meeting: NonNullable<Lead["meeting"]>; onClose: () => void }) {
-  const { toast } = useStore();
-  const [busy, setBusy] = useState(false);
-  const when = meeting.start_at ? new Date(meeting.start_at).toLocaleString([], { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : null;
-  const cancel = async () => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      const r = await fetch("/api/whatsapp/meeting", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "cancel", meetingId: meeting.id }) }).then((x) => x.json());
-      if (r.ok) { toast("Meeting cancelled."); onClose(); } else toast(r.error ?? "Could not cancel.", "error");
-    } catch (e: any) { toast(e?.message ?? "Network error.", "error"); } finally { setBusy(false); }
-  };
-  return (
-    <div className="mb-4 rounded-xl p-3" style={{ background: "#eef6ff", border: "1px solid #bfdbfe" }}>
-      <div className="mb-1 text-[12px] font-bold" style={{ color: "#1e40af" }}>📅 {meeting.status === "scheduled" ? "Meeting booked" : "Slots offered — awaiting reply"}</div>
-      {when && <div className="text-[13px]" style={{ color: C.ink }}>{when}</div>}
-      {meeting.meet_link && <a href={meeting.meet_link} target="_blank" rel="noreferrer" className="mt-1 block truncate text-[12.5px] font-semibold" style={{ color: C.blue }}>Join Google Meet →</a>}
-      {meeting.status === "scheduled" && (
-        <button onClick={cancel} disabled={busy} className="mt-2 rounded-lg px-2.5 py-1 text-[11.5px] font-semibold disabled:opacity-60" style={{ color: "#b42318", background: "#fdeaea" }}>{busy ? "Cancelling…" : "Cancel meeting"}</button>
-      )}
-    </div>
-  );
-}
-
-function Drawer({ lead, onClose, setStage, busy, waLink }: { lead: Lead; onClose: () => void; setStage: (l: Lead, s: string, reason?: string) => void; busy: string | null; waLink: (l: Lead) => string }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
-  const timeline = [
-    lead.created_at && { dot: C.blue, label: "Lead created", at: lead.created_at },
-    lead.approved_at && { dot: C.green, label: "Approved", at: lead.approved_at },
-    lead.contacted_at && { dot: C.violet, label: "First message sent", at: lead.contacted_at },
-    lead.last_in_at && { dot: C.amber, label: "They replied", at: lead.last_in_at },
-  ].filter(Boolean) as { dot: string; label: string; at: string }[];
-  return (
-    <div className="fixed inset-0 z-[90] flex justify-end" style={{ background: "rgba(15,23,42,.35)" }} onClick={onClose}>
-      <div className="lx-lscroll h-full w-full max-w-sm overflow-y-auto p-5" style={{ background: C.panel }} onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-start justify-between">
-          <div className="flex items-center gap-3">
-            <span className="flex h-11 w-11 items-center justify-center rounded-full text-[15px] font-bold text-white" style={{ background: C.brand }}>{initials(lead)}</span>
-            <div>
-              <div className="text-[15px] font-bold" style={{ color: C.ink }}>{lead.company || lead.name || "Lead"}</div>
-              <div className="text-[12px]" style={{ color: C.sub }}>{lead.country || lead.city || SOURCE_LABEL[lead.source ?? ""] || ""}</div>
-            </div>
-          </div>
-          <button onClick={onClose} className="rounded-full p-1.5" style={{ background: C.graySoft, color: C.sub }} aria-label="Close">
-            <svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
-          </button>
-        </div>
-        <div className="mb-4 flex items-center gap-2">
-          <span className="rounded-lg px-2.5 py-1 text-[13px] font-bold" style={{ color: scoreColor(lead.icp_score), background: C.graySoft }}>{lead.icp_score ?? "—"}/100</span>
-          <StageChip stage={lead.stage} />
-          {lead.needs_attention && <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11.5px] font-semibold" style={{ color: "#92400e", background: "#fef3c7" }}>⚠ Needs you</span>}
-        </div>
-        {lead.needs_attention && lead.needs_attention_reason && (
-          <div className="mb-4 rounded-xl px-3 py-2 text-[12.5px]" style={{ color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a" }}>
-            Mr Lxwa replied but flagged this for you: <b>{lead.needs_attention_reason}</b>
-          </div>
-        )}
-        {lead.meeting && <MeetingCard meeting={lead.meeting} onClose={onClose} />}
-        <div className="mb-4 space-y-2 text-[13px]" style={{ color: C.ink }}>
-          {(lead.whatsapp || lead.phone) && <Row icon="phone" v={lead.whatsapp || lead.phone!} />}
-          {lead.email && <Row icon="mail" v={lead.email} />}
-          {lead.website && <Row icon="web" v={lead.website} href={lead.website.startsWith("http") ? lead.website : `https://${lead.website}`} />}
-        </div>
-
-        {/* Lead details — always shown, "—" when absent, so the panel never looks empty. */}
-        <div className="mb-5 rounded-2xl p-4" style={{ background: C.bg, border: `1px solid ${C.line}` }}>
-          <div className="mb-3 text-[13px] font-bold" style={{ color: C.ink }}>Lead details</div>
-          <Detail k="Company" v={lead.company} />
-          <Detail k="Contact" v={lead.name} />
-          <Detail k="Email" v={lead.email ?? null} />
-          <Detail k="Website" v={lead.website ?? null} />
-          <Detail k="Country" v={lead.country ?? null} />
-          <Detail k="City" v={lead.city ?? null} />
-          <Detail k="Source" v={SOURCE_LABEL[lead.source ?? ""] ?? lead.source ?? null} />
-          <Detail k="Created" v={new Date(lead.created_at).toLocaleDateString()} last />
-        </div>
-        <div className="mb-5 grid grid-cols-2 gap-2">
-          {lead.stage === "rejected" ? (
-            <button className="col-span-2 rounded-xl py-2.5 text-[13px] font-semibold" style={{ color: C.brand, background: C.brandSoft }} disabled={busy === lead.id} onClick={() => setStage(lead, "approved")}>Restore this lead</button>
-          ) : (
-            <>
-              <a href={waLink(lead)} className="flex items-center justify-center gap-2 rounded-xl py-2.5 text-[13px] font-semibold text-white" style={{ background: "#25D366", textDecoration: "none" }}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 21a9 9 0 10-8-4.9L3 21l4.9-1A9 9 0 0012 21z" stroke="#fff" strokeWidth="1.8" strokeLinejoin="round" /></svg>
-                WhatsApp chat
-              </a>
-              <div className="flex justify-center"><RejectMenu variant="button" disabled={busy === lead.id} onPick={(reason) => setStage(lead, "rejected", reason)} /></div>
-            </>
-          )}
-        </div>
-        <div className="mb-5 rounded-2xl p-4" style={{ background: C.bg, border: `1px solid ${C.line}` }}>
-          <div className="mb-3 text-[13px] font-bold" style={{ color: C.ink }}>Automation status</div>
-          <StatusRow label="AI Agent" on={lead.ai_messaged} at={lead.ai_messaged ? lead.last_out_at : null} tone={C.green} soft={C.greenSoft} />
-          <StatusRow label="You" on={lead.human_messaged} at={lead.human_messaged ? lead.last_out_at : null} tone={C.green} soft={C.greenSoft} />
-          <StatusRow label="Client" on={lead.is_client} tone={C.green} soft={C.greenSoft} last />
-        </div>
-        {(lead.reason || lead.observation || lead.source_segment || lead.score_breakdown) && (
-          <div className="mb-5 rounded-2xl p-4" style={{ background: C.bg, border: `1px solid ${C.line}` }}>
-            <div className="mb-2 text-[13px] font-bold" style={{ color: C.ink }}>Why this lead</div>
-            {(lead.observation || lead.reason) && <p className="mb-2 text-[12.5px]" style={{ color: C.sub }}>{lead.observation || lead.reason}</p>}
-            {lead.evidence?.quote && <p className="mb-2 border-l-2 pl-2 text-[12px] italic" style={{ borderColor: C.line, color: C.sub }}>“{lead.evidence.quote}”</p>}
-            <div className="flex flex-wrap gap-1.5">
-              {lead.classification && <Tag tone={lead.classification === "buyer" ? C.green : C.amber} soft={lead.classification === "buyer" ? C.greenSoft : C.amberSoft}>{lead.classification === "buyer" ? "Buyer ✓" : lead.classification}</Tag>}
-              {lead.source_segment && <Tag tone={C.brand} soft={C.brandSoft}>Segment: {lead.source_segment}</Tag>}
-              {lead.source_query && <Tag tone={C.sub} soft={C.graySoft}>Found via “{lead.source_query}”</Tag>}
-            </div>
-            {/* verified buying signals, from the stored score breakdown */}
-            {(() => {
-              const sig = lead.score_breakdown?.components?.find((c) => c.id === "buying-signals");
-              return sig && sig.points > 0 ? <p className="mt-2 text-[12px]" style={{ color: C.green }}>✓ {sig.why}</p> : null;
-            })()}
-            {/* the score, explained group by group */}
-            {lead.score_breakdown?.components && (
-              <div className="mt-3 space-y-1">
-                {Object.entries(
-                  lead.score_breakdown.components.reduce((acc: Record<string, { p: number; m: number }>, c) => {
-                    const g = acc[c.group] ?? { p: 0, m: 0 };
-                    acc[c.group] = { p: g.p + c.points, m: g.m + c.max };
-                    return acc;
-                  }, {}),
-                ).map(([group, v]) => (
-                  <div key={group} className="flex items-center justify-between text-[11.5px]" style={{ color: C.sub }}>
-                    <span className="capitalize">{group === "fit" ? "Buyer fit" : group === "timing" ? "Health & size" : group}</span>
-                    <span className="font-semibold" style={{ color: C.ink }}>{v.p}/{v.m}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-        {lead.stage === "rejected" && lead.reject_reason && (
-          <div className="mb-5 rounded-xl p-3 text-[12px]" style={{ background: C.redSoft, color: C.red }}>
-            Rejected as: {REJECT_REASONS.find((r) => r.key === lead.reject_reason)?.label ?? lead.reject_reason}
-            {(lead.reject_reason === "competitor" || lead.reject_reason === "wrong_industry") && <span style={{ color: C.sub }}> — this domain won’t be surfaced again.</span>}
-          </div>
-        )}
-        <div>
-          <div className="mb-2 text-[13px] font-bold" style={{ color: C.ink }}>Timeline</div>
-          <div className="space-y-3">
-            {timeline.map((t, i) => (
-              <div key={i} className="flex gap-2.5">
-                <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: t.dot }} />
-                <div>
-                  <div className="text-[12.5px] font-medium" style={{ color: C.ink }}>{t.label}</div>
-                  <div className="text-[11.5px]" style={{ color: C.sub }}>{new Date(t.at).toLocaleString()}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-function Row({ icon, v, href }: { icon: string; v: string; href?: string }) {
-  const paths: Record<string, React.ReactNode> = {
-    phone: <path d="M22 16.9v3a2 2 0 01-2.2 2 19.8 19.8 0 01-8.6-3.1 19.5 19.5 0 01-6-6A19.8 19.8 0 012 4.2 2 2 0 014 2h3a2 2 0 012 1.7c.1.9.3 1.8.6 2.6a2 2 0 01-.5 2.1L8 9.6a16 16 0 006 6l1.2-1.1a2 2 0 012.1-.5c.8.3 1.7.5 2.6.6A2 2 0 0122 16.9z" stroke="currentColor" strokeWidth="1.6" fill="none" />,
-    mail: <path d="M4 6h16v12H4zM4 7l8 6 8-6" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinejoin="round" />,
-    web: <path d="M12 21a9 9 0 100-18 9 9 0 000 18zM3 12h18" stroke="currentColor" strokeWidth="1.5" fill="none" />,
-  };
-  const body = <span className="inline-flex items-center gap-2"><span style={{ color: C.sub }}><svg width="15" height="15" viewBox="0 0 24 24">{paths[icon]}</svg></span>{v}</span>;
-  return href ? <a href={href} target="_blank" rel="noreferrer" className="block" style={{ color: C.brand }}>{body}</a> : <div>{body}</div>;
-}
-function Detail({ k, v, last }: { k: string; v: string | null | undefined; last?: boolean }) {
-  return (
-    <div className="flex items-start justify-between gap-3" style={{ paddingBottom: last ? 0 : 8, marginBottom: last ? 0 : 8, borderBottom: last ? "none" : `1px solid ${C.line}` }}>
-      <span className="text-[12px]" style={{ color: C.sub }}>{k}</span>
-      <span className="max-w-[60%] truncate text-right text-[12.5px] font-medium" style={{ color: v ? C.ink : C.sub }}>{v || "—"}</span>
-    </div>
-  );
-}
-function StatusRow({ label, on, at, tone, soft, last }: { label: string; on: boolean; at?: string | null; tone: string; soft: string; last?: boolean }) {
-  return (
-    <div className="flex items-center justify-between" style={{ paddingBottom: last ? 0 : 10, marginBottom: last ? 0 : 10, borderBottom: last ? "none" : `1px solid ${C.line}` }}>
-      <span className="text-[12.5px]" style={{ color: C.ink }}>{label}</span>
-      <div className="text-right">
-        <span className="rounded-md px-2 py-0.5 text-[11.5px] font-semibold" style={{ color: on ? tone : C.sub, background: on ? soft : C.graySoft }}>{on ? "Messaged" : "Not messaged"}</span>
-        {at && <div className="text-[10.5px]" style={{ color: C.sub }}>{ago(at)}</div>}
-      </div>
-    </div>
-  );
-}
-
-function AddLeadModal({ open, onClose, onAdded, toast }: { open: boolean; onClose: () => void; onAdded: () => void; toast: (m: string, t?: "error") => void }) {
-  const [f, setF] = useState({ company: "", name: "", phone: "", email: "", city: "", website: "" });
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    if (!open) setF({ company: "", name: "", phone: "", email: "", city: "", website: "" });
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    if (open) document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
-  if (!open) return null;
-  const save = async () => {
-    if (!f.company.trim()) { toast("Enter a company or contact name.", "error"); return; }
-    if (f.phone.replace(/[^0-9]/g, "").length < 8) { toast("Enter a full phone number with country code.", "error"); return; }
-    setBusy(true);
-    try {
-      const r = await fetch("/api/leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ company: f.company.trim(), name: f.name.trim(), phone: f.phone.replace(/[^0-9+]/g, ""), email: f.email.trim(), city: f.city.trim(), website: f.website.trim() }) }).then((x) => x.json());
-      if (!r.ok) { toast(r.error ?? "Could not add.", "error"); return; }
-      toast("Lead added — approved and ready to message.");
-      onAdded();
-    } catch (e: any) { toast(e?.message ?? "Network error.", "error"); }
-    finally { setBusy(false); }
-  };
-  const field = (key: keyof typeof f, label: string, ph: string) => (
-    <div className="mb-3">
-      <label className="mb-1 block text-[12px] font-medium" style={{ color: C.sub }}>{label}</label>
-      <input className="w-full rounded-xl px-3.5 py-2.5 text-[13px] outline-none" style={{ background: C.bg, border: `1px solid ${C.line}`, color: C.ink }} placeholder={ph} value={f[key]} onChange={(e) => setF((s) => ({ ...s, [key]: e.target.value }))} />
-    </div>
-  );
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,.45)" }} onClick={onClose}>
-      <div className="w-full max-w-sm rounded-2xl p-6" style={{ background: C.panel }} onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-[16px] font-bold" style={{ color: C.ink }}>Add a lead</h2>
-        <p className="mb-4 mt-1 text-[12.5px]" style={{ color: C.sub }}>It goes straight to Approved, so you can message it right away.</p>
-        {field("company", "Company", "Gulf Steel LLC")}
-        {field("name", "Contact name", "Ahmed Khan")}
-        {field("phone", "Phone (with country code)", "+971 50 123 4567")}
-        {field("email", "Email", "ahmed@gulfsteel.ae")}
-        {field("city", "City", "Dubai")}
-        {field("website", "Website", "gulfsteel.ae")}
-        <div className="flex justify-end gap-2">
-          <button className="rounded-xl px-4 py-2 text-[13px] font-semibold" style={{ background: C.graySoft, color: C.sub }} onClick={onClose}>Cancel</button>
-          <button className="rounded-xl px-5 py-2 text-[13px] font-semibold text-white" style={{ background: C.brand }} onClick={save} disabled={busy}>{busy ? "Adding…" : "Add lead"}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ── advanced filter popover ─────────────────────────────────────────────────────────────── */
-type Flt = { status: string[]; source: string[]; city: string[]; ai: string; you: string; converted: string; client: string; score: string };
-function FilterPanel({ flt, setFlt, cities, dateRange, setDateRange, onClose, onClear }: { flt: Flt; setFlt: (f: Flt) => void; cities: string[]; dateRange: string; setDateRange: (v: string) => void; onClose: () => void; onClear: () => void }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  const STATUSES: [string, string][] = [["approved", "Approved"], ["contacted", "Contacted"], ["replied", "Engaged"], ["won", "Won"], ["lost", "Lost"], ["rejected", "Rejected"], ["opted_out", "Opted out"]];
-  const SOURCES: [string, string][] = [["serper", "Google Maps"], ["osm", "OpenStreetMap"], ["places", "Google Places"], ["jobs", "Job board"], ["web", "Web search"], ["manual", "Manual"]];
-  const toggle = (arr: string[], v: string) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
-
-  const Chip = ({ on, label, onClick }: { on: boolean; label: string; onClick: () => void }) => (
-    <button onClick={onClick} className="rounded-lg px-2.5 py-1.5 text-[12px] font-medium transition" style={on ? { background: C.brand, color: "#fff" } : { background: C.bg, color: C.sub, border: `1px solid ${C.line}` }}>{label}</button>
-  );
-  const Seg = ({ value, set }: { value: string; set: (v: string) => void }) => (
-    <div className="flex overflow-hidden rounded-lg" style={{ border: `1px solid ${C.line}` }}>
-      {[["any", "Any"], ["yes", "Yes"], ["no", "No"]].map(([v, l], i) => (
-        <button key={v} onClick={() => set(v)} className="px-3 py-1 text-[12px] font-semibold" style={{ background: value === v ? C.brand : C.panel, color: value === v ? "#fff" : C.sub, borderLeft: i ? `1px solid ${C.line}` : "none" }}>{l}</button>
-      ))}
-    </div>
-  );
-  const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
-    <div className="mb-3.5">
-      <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide" style={{ color: C.sub }}>{title}</div>
-      {children}
-    </div>
-  );
-
-  return (
-    <>
-      <div className="fixed inset-0 z-[95]" onClick={onClose} />
-      <div className="absolute right-0 z-[96] mt-2 w-[340px] max-w-[92vw] rounded-2xl shadow-xl" style={{ background: C.panel, border: `1px solid ${C.line}` }} onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: `1px solid ${C.line}` }}>
-          <b className="text-[14px]" style={{ color: C.ink }}>Filters</b>
-          <button className="text-[12px] font-semibold" style={{ color: C.brand }} onClick={onClear}>Clear all</button>
-        </div>
-
-        <div className="lx-lscroll max-h-[60vh] overflow-y-auto px-4 py-3.5">
-          <Section title="Date added">
-            <div className="flex flex-wrap gap-1.5">
-              {[["all", "All time"], ["today", "Today"], ["7d", "Last 7 days"], ["30d", "Last 30 days"]].map(([v, l]) => (
-                <Chip key={v} on={dateRange === v} label={l} onClick={() => setDateRange(v)} />
-              ))}
-            </div>
-          </Section>
-
-          <Section title="Lead status">
-            <div className="flex flex-wrap gap-1.5">
-              {STATUSES.map(([v, l]) => <Chip key={v} on={flt.status.includes(v)} label={l} onClick={() => setFlt({ ...flt, status: toggle(flt.status, v) })} />)}
-            </div>
-          </Section>
-
-          <Section title="Source">
-            <div className="flex flex-wrap gap-1.5">
-              {SOURCES.map(([v, l]) => <Chip key={v} on={flt.source.includes(v)} label={l} onClick={() => setFlt({ ...flt, source: toggle(flt.source, v) })} />)}
-            </div>
-          </Section>
-
-          {cities.length > 0 && (
-            <Section title="Country">
-              <div className="flex flex-wrap gap-1.5">
-                {cities.map((c) => <Chip key={c} on={flt.city.includes(c)} label={c} onClick={() => setFlt({ ...flt, city: toggle(flt.city, c) })} />)}
-              </div>
-            </Section>
-          )}
-
-          <div className="mb-2.5 flex items-center justify-between"><span className="text-[12.5px]" style={{ color: C.ink }}>AI Agent messaged</span><Seg value={flt.ai} set={(v) => setFlt({ ...flt, ai: v })} /></div>
-          <div className="mb-2.5 flex items-center justify-between"><span className="text-[12.5px]" style={{ color: C.ink }}>You messaged</span><Seg value={flt.you} set={(v) => setFlt({ ...flt, you: v })} /></div>
-          <div className="mb-2.5 flex items-center justify-between"><span className="text-[12.5px]" style={{ color: C.ink }}>Converted</span><Seg value={flt.converted} set={(v) => setFlt({ ...flt, converted: v })} /></div>
-          <div className="mb-3.5 flex items-center justify-between"><span className="text-[12.5px]" style={{ color: C.ink }}>Client</span><Seg value={flt.client} set={(v) => setFlt({ ...flt, client: v })} /></div>
-
-          <Section title="Lead score">
-            <div className="flex flex-wrap gap-1.5">
-              {[["any", "Any"], ["0-25", "0–25"], ["26-50", "26–50"], ["51-75", "51–75"], ["76-100", "76–100"]].map(([v, l]) => (
-                <Chip key={v} on={flt.score === v} label={l} onClick={() => setFlt({ ...flt, score: v })} />
-              ))}
-            </div>
-          </Section>
-        </div>
-
-        <div className="px-4 py-3" style={{ borderTop: `1px solid ${C.line}` }}>
-          <button className="w-full rounded-xl py-2.5 text-[13px] font-semibold text-white" style={{ background: C.brand }} onClick={onClose}>Done</button>
-        </div>
-      </div>
-    </>
-  );
-}
-
-/* ── live lead-generation panel (under the KPI cards) ────────────────────────────────────────
- *  Three faces of one card. manual → the "what & where" form, inline, no modal. live → the
- *  real-time progress card from the owner's reference mockup (ring, found/target, step trail).
- *  done → the result summary with a "View new leads" shortcut. The numbers are real: "found so
- *  far" counts rows that actually landed since the run started; the step trail is the one
- *  honest animation — the server records no per-step signal, so steps advance on elapsed time
- *  and snap to "Saving to database" the moment real rows appear. */
-const LEADS_PER_RUN_MAX = 25; // client-side convenience cap; per-plan/day enforcement is a TODO (server-side)
-const GEN_STEPS = ["Searching sources", "Filtering leads", "Verifying info", "Saving to database"];
-
-function LeadGenPanel({ mode, gen, busy, target, foundSoFar, onStart, onClose, onViewNew, onOpenBuyerProfile }: {
-  mode: "manual" | "live" | "done";
-  gen: Gen | null;
-  busy: boolean;
-  target: number | null;
-  foundSoFar: number;
-  onStart: (query: string, count: number, city: string) => void;
-  onClose: () => void;
-  onViewNew: () => void;
-  onOpenBuyerProfile: () => void;
-}) {
-  // An Auto run that stopped because it needs the Site Brain first (it auto-drafts the buyer
-  // profile itself, so that is no longer a blocker) is NOT a failed/empty search — show a clear
-  // call to action rather than a misleading "found 0".
-  const needsBuyerProfile = mode === "done" && Array.isArray(gen?.last_needs) && (gen!.last_needs!.includes("site_brain") || gen!.last_needs!.includes("buyer_profile"));
-  const [what, setWhat] = useState("");
-  const [city, setCity] = useState("");
-  const [count, setCount] = useState(10);
-  const [, tick] = useState(0);
-  useEffect(() => {
-    if (mode !== "live") return;
-    const id = setInterval(() => tick((n) => n + 1), 2000);
-    return () => clearInterval(id);
-  }, [mode]);
-
-  const startedAt = gen?.running_since ? new Date(gen.running_since).getTime() : Date.now();
-  const elapsedS = Math.max(0, (Date.now() - startedAt) / 1000);
-  const step = mode === "done" ? GEN_STEPS.length : foundSoFar > 0 ? 3 : Math.min(2, Math.floor(elapsedS / 20));
-  // Progress blends two real signals: how many leads are found vs the target, and how far through
-  // the candidate list the run is — so the bar still moves while sites are being read, before the
-  // first lead lands. Whichever is higher wins; capped at 95% until the run actually finishes.
-  const byFound = target ? (foundSoFar / Math.max(1, target)) * 100 : 0;
-  const byConsidered = gen?.running_total ? ((gen.running_done ?? 0) / gen.running_total) * 70 : 0;
-  const pct = mode === "done" ? 100 : (target || gen?.running_total) ? Math.min(95, Math.max(3, Math.round(Math.max(byFound, byConsidered)))) : null;
-  const failed = mode === "done" && gen?.last_status === "error";
-  // The real count the run saved. last_saved is the truest (rows written); last_found is the
-  // pipeline's count; fall back to what we tallied live so the panel never wrongly says 0.
-  const doneFound = gen?.last_saved ?? gen?.last_found ?? foundSoFar;
-
-  const examples = [["Restaurants", "Dubai"], ["ISO consultants", "Mumbai"], ["Dental clinics", "Abu Dhabi"], ["Manufacturers", "Pune"]];
-  const go = () => {
-    const n = Math.max(1, Math.min(LEADS_PER_RUN_MAX, count));
-    const w = what.trim();
-    if (!w) return;
-    const c = city.trim();
-    onStart(c ? `${w} in ${c}` : w, n, c);
-  };
-
-  const R = 24, CIRC = 2 * Math.PI * R;
-  const ring = (
-    <div className="relative h-16 w-16 shrink-0">
-      <svg width="64" height="64" viewBox="0 0 64 64" className={mode === "live" && pct == null ? "animate-spin" : undefined} style={{ transform: pct != null ? "rotate(-90deg)" : undefined }}>
-        <circle cx="32" cy="32" r={R} fill="none" stroke={C.line} strokeWidth="5" />
-        <circle cx="32" cy="32" r={R} fill="none" stroke={failed ? C.red : C.green} strokeWidth="5" strokeLinecap="round"
-          strokeDasharray={`${((pct ?? 25) / 100) * CIRC} ${CIRC}`} style={{ transition: "stroke-dasharray .6s" }} />
-      </svg>
-      <span className="absolute inset-0 flex items-center justify-center text-[13px] font-bold" style={{ color: failed ? C.red : C.green }}>
-        {mode === "done" ? (failed ? "!" : "✓") : pct != null ? `${pct}%` : foundSoFar}
-      </span>
-    </div>
-  );
-
-  return (
-    <div className="mb-4 overflow-hidden rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
-      <div className="flex items-center justify-between gap-3 px-4 py-3" style={{ borderBottom: `1px solid ${C.line}` }}>
-        <div className="flex min-w-0 items-center gap-2.5">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[16px]" style={{ background: C.blueSoft }}>🚀</span>
-          <div className="min-w-0">
-            <div className="truncate text-[14px] font-bold" style={{ color: C.ink }}>{mode === "manual" ? "Generate leads" : "Live Lead Generation"}</div>
-            <div className="truncate text-[11.5px]" style={{ color: C.sub }}>
-              {mode === "manual" ? "Tell Mr. Lead what to look for — he does the rest." : mode === "live" ? "Watch your leads being generated in real-time." : needsBuyerProfile ? "One step first — confirm who buys from you." : failed ? "The last run hit a problem." : "Run finished."}
-            </div>
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {mode === "live" && (
-            <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-semibold" style={{ color: C.green, background: C.greenSoft }}>
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ background: C.green }} />Running
-            </span>
-          )}
-          {mode === "done" && !failed && !needsBuyerProfile && (
-            <button className="rounded-lg px-3 py-1.5 text-[12px] font-semibold text-white" style={{ background: C.brand }} onClick={onViewNew}>View new leads</button>
-          )}
-          {mode !== "live" && (
-            <button onClick={onClose} className="rounded-full p-1.5" style={{ background: C.graySoft, color: C.sub }} aria-label="Close">
-              <svg width="14" height="14" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
-            </button>
-          )}
-        </div>
-      </div>
-
-      {needsBuyerProfile ? (
-        <div className="p-4">
-          <div className="flex items-start gap-3 rounded-xl p-3.5" style={{ background: C.amberSoft }}>
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[15px]" style={{ background: "#fff" }}>🧭</span>
-            <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-bold" style={{ color: C.amber }}>Read your website first</div>
-              <div className="mt-0.5 text-[12.5px]" style={{ color: C.ink }}>
-                {gen?.last_question ?? "I work out who buys from you automatically — but I need to read your website once first. Run the site analysis (Site Brain), then press Auto again."}
-              </div>
-              <button className="mt-3 rounded-xl px-4 py-2 text-[12.5px] font-semibold text-white" style={{ background: C.brand }} onClick={onOpenBuyerProfile}>Open Ideal Customers</button>
-            </div>
-          </div>
-        </div>
-      ) : mode === "manual" ? (
-        <div className="p-4">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label className="mb-1 block text-[12px] font-medium" style={{ color: C.sub }}>What businesses?</label>
-              <input className="w-full rounded-xl px-3.5 py-2.5 text-[13px] outline-none" style={{ background: C.bg, border: `1px solid ${C.line}`, color: C.ink, colorScheme: "light" }} placeholder="e.g. ISO certification consultants" value={what} onChange={(e) => setWhat(e.target.value)} autoFocus />
-            </div>
-            <div>
-              <label className="mb-1 block text-[12px] font-medium" style={{ color: C.sub }}>Which city or area?</label>
-              <input className="w-full rounded-xl px-3.5 py-2.5 text-[13px] outline-none" style={{ background: C.bg, border: `1px solid ${C.line}`, color: C.ink, colorScheme: "light" }} placeholder="e.g. Dubai" value={city} onChange={(e) => setCity(e.target.value)} />
-            </div>
-          </div>
-          <div className="mt-2.5 flex flex-wrap gap-1.5">
-            {examples.map(([w, c]) => (
-              <button key={w} className="rounded-lg px-2.5 py-1 text-[11.5px] font-medium" style={{ background: C.brandSoft, color: C.brand }} onClick={() => { setWhat(w); setCity(c); }}>{w} · {c}</button>
-            ))}
-          </div>
-          <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex-1 sm:max-w-xs">
-              <label className="mb-1 block text-[12px] font-medium" style={{ color: C.sub }}>How many? <b style={{ color: C.ink }}>{count}</b> <span className="text-[11px]">(max {LEADS_PER_RUN_MAX})</span></label>
-              <input type="range" min={1} max={LEADS_PER_RUN_MAX} value={count} onChange={(e) => setCount(Number(e.target.value))} className="w-full" style={{ accentColor: C.brand }} />
-            </div>
-            <button className="rounded-xl px-5 py-2.5 text-[13px] font-semibold text-white disabled:opacity-60" style={{ background: C.brand }} onClick={go} disabled={busy || !what.trim()}>{busy ? "Starting…" : "Start generating"}</button>
-          </div>
-        </div>
-      ) : (
-        <div className="p-4">
-          <div className="flex flex-col gap-4 rounded-xl p-3.5 sm:flex-row sm:items-center" style={{ background: C.bg, border: `1px solid ${C.line}` }}>
-            <div className="flex min-w-0 flex-1 items-center gap-3.5">
-              {ring}
-              <div className="min-w-0">
-                <div className="text-[13.5px] font-bold" style={{ color: C.ink }}>
-                  {mode === "live" ? "Collecting leads…" : failed ? "It hit a problem" : doneFound != null ? `Done — ${doneFound} new lead${doneFound === 1 ? "" : "s"}` : "Done"}
-                </div>
-                <div className="text-[12px]" style={{ color: C.sub }}>
-                  {mode === "live" ? "Finding potential customers from multiple sources. You can leave this page — they save by themselves." : failed ? (gen?.last_note ?? "Try again in a minute; the reason is logged in Reports.") : "Fresh leads are in the table below with a green Today badge."}
-                </div>
-              </div>
-            </div>
-            <div className="flex shrink-0 items-center gap-5 pl-[66px] sm:pl-0">
-              <div>
-                <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: C.sub }}>Found</div>
-                <div className="text-[20px] font-bold leading-tight" style={{ color: C.ink }}>{mode === "done" ? (doneFound ?? foundSoFar) : foundSoFar}</div>
-                <div className="text-[10.5px]" style={{ color: C.sub }}>so far</div>
-              </div>
-              {target != null && (
-                <div style={{ borderLeft: `1px solid ${C.line}`, paddingLeft: 20 }}>
-                  <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: C.sub }}>Target</div>
-                  <div className="text-[20px] font-bold leading-tight" style={{ color: C.ink }}>{target}</div>
-                  <div className="text-[10.5px]" style={{ color: C.sub }}>this run</div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="mt-3.5 flex items-center gap-2 overflow-x-auto pb-1">
-            {GEN_STEPS.map((label, i) => {
-              const doneStep = i < step || mode === "done";
-              const current = mode === "live" && i === step;
-              return (
-                <div key={label} className="flex min-w-0 shrink-0 items-center gap-2">
-                  {i > 0 && <span className="hidden h-px w-6 sm:block lg:w-10" style={{ background: C.line }} />}
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
-                    style={{ background: doneStep ? C.green : current ? C.blueSoft : C.graySoft, border: current ? `2px solid ${C.blue}` : "none" }}>
-                    {doneStep
-                      ? <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                      : current
-                        ? <span className="h-2 w-2 animate-pulse rounded-full" style={{ background: C.blue }} />
-                        : <span className="h-1.5 w-1.5 rounded-full" style={{ background: C.sub, opacity: 0.4 }} />}
-                  </span>
-                  <span className="whitespace-nowrap text-[11.5px] font-medium" style={{ color: doneStep ? C.ink : current ? C.blue : C.sub }}>{label}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}

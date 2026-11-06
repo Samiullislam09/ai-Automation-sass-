@@ -53,6 +53,25 @@ async function addNegativeDomain(supabase: any, tenantId: string, domain: string
   }
 }
 
+/** The heavy, drawer-only fields of ONE lead (the board list leaves them out to stay small).
+ *  Tenant-scoped. select("*") on purpose: an older database may not have every one of these
+ *  columns, and we only hand back the ones that exist. */
+const DETAIL_FIELDS = ["draft", "evidence", "score_breakdown", "observation", "notes", "reason", "source_segment", "source_query"] as const;
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const supabase = await createClient();
+  const tenantId = await getCurrentTenantId(supabase);
+  if (!tenantId) return NextResponse.json({ ok: false, error: "Not signed in." }, { status: 401 });
+
+  const { data, error } = await supabase.from("leads").select("*").eq("id", id).eq("tenant_id", tenantId).maybeSingle();
+  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  if (!data) return NextResponse.json({ ok: false, error: "Lead not found." }, { status: 404 });
+  const row = data as Record<string, unknown>;
+  const detail: Record<string, unknown> = {};
+  for (const k of DETAIL_FIELDS) if (k in row) detail[k] = row[k];
+  return NextResponse.json({ ok: true, id, detail }, { headers: { "Cache-Control": "private, max-age=30" } });
+}
+
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const supabase = await createClient();
