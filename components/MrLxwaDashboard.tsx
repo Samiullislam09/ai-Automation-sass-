@@ -2451,14 +2451,10 @@ const AgentNetwork = ({
 }) => {
   const hostRef = useRef<HTMLDivElement>(null);
   const workingAgents = [...top, ...left, ...right, ...bottom].filter((a) => a.status === "Working");
-  // The full grid gets the same "camera follows the work" treatment the compact tab strip
-  // already has (owner, 2026-09-10): the moment an agent starts, the page scrolls so its card
-  // sits centered in view instead of making the owner go hunting for it.
-  useEffect(() => {
-    if (!workingAgent) return;
-    const el = hostRef.current?.querySelector<HTMLElement>(`[data-agent-id="${workingAgent.id}"]`);
-    el?.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
-  }, [workingAgent?.id]);
+  // NO auto-scroll here. This used to call scrollIntoView() on the working agent's card, which
+  // scrolls EVERY ancestor, including the dashboard page itself, so the moment an article started
+  // the page jumped down and the agent tabs at the top slid out of view (owner, 2026-11-06). The
+  // live strip at the top already shows which agent is working and stays where it is.
   return (
     <div className="p-4 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -3059,8 +3055,8 @@ export default function MrLxwaDashboard({
       // key) then targets the textarea directly, so this handler never double-fires
       // for the same keystroke. Falls back to a rAF focus only for the one-off case
       // where the panel itself was still hidden/closed at the moment of this call.
-      el.focus();
-      if (document.activeElement !== el) requestAnimationFrame(() => msgInputRef.current?.focus());
+      el.focus({ preventScroll: true });
+      if (document.activeElement !== el) requestAnimationFrame(() => msgInputRef.current?.focus({ preventScroll: true }));
       setMsg((m) => m + e.key);
     };
     window.addEventListener("keydown", onKeyDown);
@@ -3164,7 +3160,7 @@ export default function MrLxwaDashboard({
         // — this catch only ever runs after that has already been requested.
         setThread((p) => p.slice(0, -2));
         setMsg(q);
-        requestAnimationFrame(() => msgInputRef.current?.focus());
+        requestAnimationFrame(() => msgInputRef.current?.focus({ preventScroll: true }));
         return; // `finally` below still clears the timer and chatBusy
       }
       // Whatever streamed in stays on screen; an empty bubble forever (with no way to retry)
@@ -4774,7 +4770,7 @@ export default function MrLxwaDashboard({
           setBotOpen(true);
           setDesktopAssistantOpen(true);
           setATab("assistant");
-          requestAnimationFrame(() => msgInputRef.current?.focus());
+          requestAnimationFrame(() => msgInputRef.current?.focus({ preventScroll: true }));
         }}
       >
         <Plus size={13} />
