@@ -974,12 +974,27 @@ function jobToCandidate(j: any): Candidate | null {
 
 export type DiscoverDeps = { fetchImpl?: typeof fetch };
 
+/** Round-robin merge: one from each group in turn, every group keeping its own order. Without this
+ *  the first source to answer (Google Maps) fills the whole target and the web-search companies are
+ *  never reached, because the pipeline stops as soon as it has `count` leads. */
+export function interleave<T>(groups: T[][]): T[] {
+  const out: T[] = [];
+  const longest = Math.max(0, ...groups.map((g) => g.length));
+  for (let i = 0; i < longest; i++) for (const g of groups) if (i < g.length) out.push(g[i]);
+  return out;
+}
+
 /** Ask every source that can answer, in order of what this ICP needs, and report on the ones
  *  that could not. Never throws: a source that fails is a report line, not a dead run. */
 export async function discover(icp: Icp, limit: number, deps: DiscoverDeps = {}): Promise<DiscoverResult> {
   const fetchImpl = deps.fetchImpl ?? fetch;
   const reports: SourceReport[] = [];
-  const candidates: Candidate[] = [];
+  // Kept per source so they can be merged fairly at the end (see interleave()).
+  const serperRows: Candidate[] = [];
+  const webRows: Candidate[] = [];
+  const placesRows: Candidate[] = [];
+  const jobsRows: Candidate[] = [];
+  const osmRows: Candidate[] = [];
 
   // Serper (Google Maps, free + no card) — FIRST, because it is the one source that gives real
   // Google Maps leads without a billing card, which is the constraint this install lives under.
@@ -988,7 +1003,7 @@ export async function discover(icp: Icp, limit: number, deps: DiscoverDeps = {})
   if (serperConfigured()) {
     try {
       const rows = await serperSearch(icp, limit, fetchImpl);
-      candidates.push(...rows);
+      serperRows.push(...rows);
       serperFound = rows.length;
       serperNote = rows.length ? "Google Maps via Serper (free, no card)" : "Serper returned nothing for this search";
     } catch (e: any) {
@@ -1007,7 +1022,7 @@ export async function discover(icp: Icp, limit: number, deps: DiscoverDeps = {})
   if (webSearchEnabled()) {
     try {
       const rows = await webSearch(icp, limit, fetchImpl);
-      candidates.push(...rows);
+      webRows.push(...rows);
       webFound = rows.length;
       webNote = rows.length ? "Company websites found by web search" : "Web search returned no company sites for this search";
     } catch (e: any) {
@@ -1025,7 +1040,7 @@ export async function discover(icp: Icp, limit: number, deps: DiscoverDeps = {})
   if (placesConfigured()) {
     try {
       const rows = await placesSearch(icp, limit, fetchImpl);
-      candidates.push(...rows);
+      placesRows.push(...rows);
       placesFound = rows.length;
       placesNote = rows.length ? "Google Places" : "Google Places returned nothing for this search";
     } catch (e: any) {
@@ -1044,7 +1059,7 @@ export async function discover(icp: Icp, limit: number, deps: DiscoverDeps = {})
   if (jobsConfigured()) {
     try {
       const r = await jobsSearch(icp, limit, fetchImpl);
-      candidates.push(...r.candidates);
+      jobsRows.push(...r.candidates);
       jobsFound = r.candidates.length;
       jobsNote = r.note;
     } catch (e: any) {
@@ -1075,7 +1090,7 @@ export async function discover(icp: Icp, limit: number, deps: DiscoverDeps = {})
     // Over-fetch: research drops the ones with no website, and the ceiling drops duplicates
     // per domain, so asking for exactly `limit` here reliably returns fewer than `limit`.
     const rows = await osmSearch(icp, Math.min(60, Math.max(limit * 3, 10)), fetchImpl);
-    candidates.push(...rows);
+    osmRows.push(...rows);
     osmFound = rows.length;
     if (!rows.length) {
       osmNote =
@@ -1098,6 +1113,9 @@ export async function discover(icp: Icp, limit: number, deps: DiscoverDeps = {})
     note: osmNote,
   });
 
+  // Maps, web search and Places take turns (Maps first, as before). Job boards and OpenStreetMap stay at
+  // the back as top-ups, exactly where they were, so a weaker source never jumps ahead of a better one.
+  const candidates = [...interleave([serperRows, webRows, placesRows]), ...jobsRows, ...osmRows];
   return { candidates, reports };
 }
 

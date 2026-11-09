@@ -18,6 +18,7 @@ const {
   apolloConfigured,
   describeSources,
   discover,
+  interleave,
   fetchPageForResearch,
   loadRobots,
   parseRobots,
@@ -459,6 +460,61 @@ test("webSearch: queries Serper's search endpoint, dedupes by domain, honours th
     assert.deepEqual(await webSearch(icp, 10, fetchImpl), []);
   } finally {
     for (const [name, v] of [["SERPER_API_KEY", prev.k], ["SERPER_API_KEYS", prev.ks], ["LEADS_WEB_SEARCH", prev.off]] as const) {
+      if (v === undefined) delete process.env[name]; else process.env[name] = v;
+    }
+    __resetSourceCaches();
+  }
+});
+
+// ── fair mixing of sources ──────────────────────────────────────────────────────────────────
+
+test("interleave: sources take turns and each keeps its own order", () => {
+  assert.deepEqual(interleave([["m1", "m2", "m3"], ["w1", "w2"], []]), ["m1", "w1", "m2", "w2", "m3"]);
+  assert.deepEqual(interleave([["a"], ["b"], ["c"]]), ["a", "b", "c"]);
+  assert.deepEqual(interleave([]), []);
+  assert.deepEqual(interleave([[], []]), []);
+});
+
+test("discover: Google Maps and web search take turns, so a long Maps list cannot crowd web out", async () => {
+  const prev = { k: process.env.SERPER_API_KEY, ks: process.env.SERPER_API_KEYS, off: process.env.LEADS_WEB_SEARCH, pl: process.env.GOOGLE_PLACES_API_KEY };
+  process.env.SERPER_API_KEY = "test-key-mix";
+  delete process.env.SERPER_API_KEYS;
+  delete process.env.LEADS_WEB_SEARCH;
+  delete process.env.GOOGLE_PLACES_API_KEY;
+  try {
+    __resetSourceCaches();
+    const icp = (buildIcp({ profile: null, query: "ISO consultants in Dubai", count: 4 }) as any).icp;
+    const json = (o: unknown) => new Response(JSON.stringify(o), { status: 200, headers: { "content-type": "application/json" } });
+    const places = [1, 2, 3, 4, 5].map((i) => ({ title: `Maps Company ${i}`, address: "Dubai, United Arab Emirates", phoneNumber: `+971 4 000 000${i}`, website: `https://mapsco${i}.ae`, cid: `m${i}` }));
+    const organic = [1, 2, 3, 4, 5].map((i) => ({ title: `Webco ${i} Consultants`, link: `https://webco${i}.ae/` }));
+    const osmRows = [1, 2].map((i) => ({
+      osm_type: "node", osm_id: 9000 + i, lat: "25.2", lon: "55.3", name: `Osm Cafe ${i}`, display_name: `Osm Cafe ${i}, Dubai`, category: "amenity", type: "cafe",
+      extratags: { website: `https://osmcafe${i}.example` }, namedetails: { name: `Osm Cafe ${i}` },
+    }));
+    const fetchImpl = (async (input: any) => {
+      const u = String(input);
+      if (u.includes("google.serper.dev/places")) return json({ places });
+      if (u.includes("google.serper.dev/search")) return json({ organic });
+      return json(osmRows); // OpenStreetMap
+    }) as unknown as typeof fetch;
+
+    const r = await discover(icp, 8, { fetchImpl });
+    const sources = r.candidates.map((c) => c.source);
+
+    // Maps first (as before), then web, then Maps again... — the first six alternate.
+    assert.deepEqual(sources.slice(0, 6), ["serper", "web", "serper", "web", "serper", "web"]);
+    // each source keeps its own order
+    assert.deepEqual(r.candidates.filter((c) => c.source === "serper").slice(0, 3).map((c) => c.name), ["Maps Company 1", "Maps Company 2", "Maps Company 3"]);
+    assert.deepEqual(r.candidates.filter((c) => c.source === "web").slice(0, 3).map((c) => c.domain), ["webco1.ae", "webco2.ae", "webco3.ae"]);
+    // OpenStreetMap stays a top-up at the very back, after every Maps and web candidate
+    const lastMapsOrWeb = Math.max(sources.lastIndexOf("serper"), sources.lastIndexOf("web"));
+    const firstOsm = sources.indexOf("osm");
+    assert.ok(firstOsm === -1 || firstOsm > lastMapsOrWeb, "OpenStreetMap candidates come after the better sources");
+    // the reports still say what each source found
+    const byId = Object.fromEntries(r.reports.map((x) => [x.id, x]));
+    assert.ok(byId.serper.found >= 3 && byId.web.found >= 3);
+  } finally {
+    for (const [name, v] of [["SERPER_API_KEY", prev.k], ["SERPER_API_KEYS", prev.ks], ["LEADS_WEB_SEARCH", prev.off], ["GOOGLE_PLACES_API_KEY", prev.pl]] as const) {
       if (v === undefined) delete process.env[name]; else process.env[name] = v;
     }
     __resetSourceCaches();
