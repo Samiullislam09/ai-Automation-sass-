@@ -620,7 +620,7 @@ function InboxSkeleton() {
 function Inbox({ search, setSearch, online }: { search: string; setSearch: (v: string) => void; online: boolean }) {
   const { toast } = useStore();
   const [leads, setLeads] = useState<Lead[] | null>(null);
-  const [inbox, setInbox] = useState<Record<string, { body: string; direction: string; created_at: string; status?: string; unanswered?: number }>>({});
+  const [inbox, setInbox] = useState<Record<string, { body: string; direction: string; created_at: string; status?: string; unanswered?: number; replied?: boolean }>>({});
   const [active, setActive] = useState<Lead | null>(null);
   const [newChat, setNewChat] = useState(false);
   const [onWa, setOnWa] = useState<Record<string, boolean | null>>({}); // leadId → on WhatsApp?
@@ -657,7 +657,7 @@ function Inbox({ search, setSearch, online }: { search: string; setSearch: (v: s
     setLeads(all);
     void checkOnWhatsApp(all);
     const map: Record<string, any> = {};
-    for (const m of ib ?? []) map[m.lead_id] = { body: m.body, direction: m.direction, created_at: m.created_at, status: m.status, unanswered: m.unanswered };
+    for (const m of ib ?? []) map[m.lead_id] = { body: m.body, direction: m.direction, created_at: m.created_at, status: m.status, unanswered: m.unanswered, replied: m.replied };
     setInbox(map);
     // ?lead=<id> deep link (the WhatsApp button on a lead row): open that conversation, even if the lead
     // is only approved and has no messages yet. Otherwise the first chat.
@@ -702,16 +702,17 @@ function Inbox({ search, setSearch, online }: { search: string; setSearch: (v: s
   // nothing was asked for (no ?lead= link) and the open one has no messages and is off WhatsApp.
   useEffect(() => {
     if (!leads || !active || new URLSearchParams(window.location.search).get("lead")) return;
-    if (onWa[active.id] !== false || inbox[active.id]) return;
-    const next = leads.find((l) => !(onWa[l.id] === false && !inbox[l.id]));
+    if (onWa[active.id] !== false || inbox[active.id]?.replied) return;
+    const next = leads.find((l) => !(onWa[l.id] === false && !inbox[l.id]?.replied));
     if (next && next.id !== active.id) setActive(next);
   }, [leads, active, onWa, inbox]);
 
   if (leads === null) return <InboxSkeleton />;
 
-  // A chat that has a message in it plainly works, so only a lead with NO conversation yet and a number
-  // that is not on WhatsApp goes to its own "No WhatsApp" list, away from the real chats.
-  const noWhatsApp = (l: Lead) => onWa[l.id] === false && !inbox[l.id];
+  // A number WhatsApp says is not registered goes to its own "No WhatsApp" list, away from the real chats,
+  // even if a message was once sent to it (that message never reached anyone). The one exception is a lead
+  // who has written to us: they are plainly reachable, whatever the check said.
+  const noWhatsApp = (l: Lead) => onWa[l.id] === false && !inbox[l.id]?.replied;
   const chatLeads = leads.filter((l) => !noWhatsApp(l));
   const noWaLeads = leads.filter(noWhatsApp);
   const unreadCount = chatLeads.filter((l) => (inbox[l.id]?.unanswered ?? 0) > 0).length;

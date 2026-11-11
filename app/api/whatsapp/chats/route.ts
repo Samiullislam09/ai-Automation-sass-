@@ -39,16 +39,17 @@ export async function GET(req: NextRequest) {
 
   // Per lead: the last message and `unanswered` (their messages newer than our last outgoing). Rows are
   // newest-first, so the first row per lead is the last message, and we count leading "in" rows until an "out".
-  const byLead = new Map<string, { last: any; unanswered: number; done: boolean }>();
+  const byLead = new Map<string, { last: any; unanswered: number; done: boolean; replied: boolean }>();
   for (const m of msgsRes.data ?? []) {
     if (!m.lead_id) continue;
     let e = byLead.get(m.lead_id);
-    if (!e) { e = { last: m, unanswered: 0, done: false }; byLead.set(m.lead_id, e); }
+    if (!e) { e = { last: m, unanswered: 0, done: false, replied: false }; byLead.set(m.lead_id, e); }
+    if (m.direction === "in") e.replied = true; // they have written to us at some point: that number is plainly reachable
     if (e.done) continue;
     if (m.direction === "in") e.unanswered += 1; else e.done = true;
   }
   const inbox = Array.from(byLead.entries()).map(([lead_id, e]) => ({
-    lead_id, body: String(e.last.body ?? "").slice(0, 160), direction: e.last.direction, status: e.last.status, created_at: e.last.created_at, unanswered: e.unanswered,
+    lead_id, body: String(e.last.body ?? "").slice(0, 160), direction: e.last.direction, status: e.last.status, created_at: e.last.created_at, unanswered: e.unanswered, replied: e.replied,
   }));
 
   const body = JSON.stringify({ ok: true, items: leads, inbox });
