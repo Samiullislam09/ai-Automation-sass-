@@ -63,6 +63,20 @@ export function reconnectDelayMs(attempt: number, replaced: boolean): number {
 /** Per tenant: how many reconnects in a row have failed, and the earliest moment another connect may start. */
 const retry = new Map<string, { attempt: number; notBefore: number }>();
 
+/** Can this process send for the tenant RIGHT NOW? The live socket answers that, not the database row: the row
+ *  is only a record of it and can be wrong (an old, late "close" event used to write "disconnected" after the
+ *  new socket had already opened). Trusting the row meant the Activity page said "Working" while no first message
+ *  ever left. When the live socket is up and the row disagrees, the row is corrected here. */
+export async function senderOnline(supabase: SupabaseClient, tenantId: string, dbStatus: string | null | undefined): Promise<boolean> {
+  const live = sessions.get(tenantId);
+  if (!live || live.status !== "connected" || !live.sock) return false;
+  if (dbStatus !== "connected") {
+    console.warn(`[whatsapp] ${tenantId}: database said "${dbStatus ?? "none"}" but the socket is connected; correcting the record`);
+    await setDbStatus(supabase, tenantId, { status: "connected", qr: null }).catch(() => {});
+  }
+  return true;
+}
+
 /** How the rest of the server sees a tenant's connection without touching Baileys. */
 export function sessionStatus(tenantId: string): { status: string; qr: string | null; phone: string | null } {
   const s = sessions.get(tenantId);

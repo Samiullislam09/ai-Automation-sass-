@@ -15,7 +15,7 @@ import { loadActiveProfile } from "../siteProfile.js";
 import { getWhatsappSettings } from "../outreach/settings.js";
 import { warmupCap, dailyAutoSendCount } from "./autoReply.js";
 import { isQuietHours } from "./outbound.js";
-import { sendText, simulateTyping } from "./session.js";
+import { sendText, simulateTyping, senderOnline } from "./session.js";
 import { leadDialDigits } from "./phone.js";
 import { recordOutgoing } from "./store.js";
 
@@ -87,7 +87,7 @@ async function followupTenant(tenantId: string, nowMs: number): Promise<number> 
   if (isQuietHours(nowMs, s.tz_offset, s.send_start, s.send_end)) return 0;
 
   const { data: session } = await supabase.from("whatsapp_sessions").select("first_connected_at, status").eq("tenant_id", tenantId).maybeSingle();
-  if ((session as any)?.status !== "connected") return 0;
+  if (!(await senderOnline(supabase, tenantId, (session as any)?.status))) return 0;
   const cap = warmupCap((session as any)?.first_connected_at ? Date.parse((session as any).first_connected_at) : null, nowMs);
   let dailyCount = await dailyAutoSendCount(tenantId);
   if (dailyCount >= cap) return 0;

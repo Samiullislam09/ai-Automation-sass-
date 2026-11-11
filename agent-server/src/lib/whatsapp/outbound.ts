@@ -18,7 +18,7 @@ import { getWhatsappSettings } from "../outreach/settings.js";
 import { warmupCap, dailyAutoSendCount } from "./autoReply.js";
 import { composeOpener } from "./opener.js";
 import { leadDialDigits } from "./phone.js";
-import { sendText, simulateTyping } from "./session.js";
+import { sendText, simulateTyping, senderOnline } from "./session.js";
 import { recordOutgoing } from "./store.js";
 
 /** How recently an inbound must have arrived for the tenant to count as "in a conversation" and
@@ -221,6 +221,15 @@ async function finishSlot(id: string, status: "sent" | "skipped" | "pending", re
   await supabase.from("wa_outbound_queue").update(patch).eq("id", id);
 }
 
+/** Say WHY nothing is going out, once each time the reason changes (a once-a-minute tick would otherwise flood the
+ *  log). This is the line to look for in the Railway logs when first messages are not leaving. */
+const lastHold = new Map<string, string>();
+function holdNote(tenantId: string, reason: string): void {
+  if (lastHold.get(tenantId) === reason) return;
+  lastHold.set(tenantId, reason);
+  console.log(`[outbound] ${tenantId}: first messages held: ${reason}`);
+}
+
 /** Send one tenant's next due cold message, if the gate allows. Returns true if a message went. */
 async function dispatchTenant(tenantId: string, nowMs: number): Promise<boolean> {
   const s = await getWhatsappSettings(tenantId);
@@ -229,7 +238,7 @@ async function dispatchTenant(tenantId: string, nowMs: number): Promise<boolean>
     dailyAutoSendCount(tenantId),
     supabase.from("whatsapp_sessions").select("first_connected_at, status").eq("tenant_id", tenantId).maybeSingle(),
   ]);
-  if ((session as any)?.status !== "connected") return false; // not linked → nothing to send through
+  if (!(await senderOnline(supabase, tenantId, (session as any)?.status))) { holdNote(tenantId, "WhatsApp is not connected in this process"); return false; }
   const cap = warmupCap((session as any)?.first_connected_at ? Date.parse((session as any).first_connected_at) : null, nowMs);
 
   const gate = canDispatchTenant({
@@ -240,7 +249,7 @@ async function dispatchTenant(tenantId: string, nowMs: number): Promise<boolean>
     dailyCount,
     cap,
   });
-  if (!gate.ok) return false;
+  if (!gate.ok) { holdNote(tenantId, gate.reason ?? "held"); return false; }
 
   // Belt and braces on top of the slots: never closer than the minimum gap to the previous first message.
   const { data: prev } = await supabase.from("wa_outbound_queue").select("updated_at").eq("tenant_id", tenantId).eq("status", "sent").order("updated_at", { ascending: false }).limit(1).maybeSingle();
@@ -282,6 +291,8 @@ async function dispatchTenant(tenantId: string, nowMs: number): Promise<boolean>
     // WhatsApp accepted the number: remember it, so the Leads page and later sweeps know.
     await supabase.from("leads").update({ wa_status: "yes", wa_checked_at: new Date().toISOString() }).eq("id", slot.lead_id).eq("tenant_id", tenantId).then(() => {}, () => {});
     await finishSlot(slot.id, "sent", null);
+    lastHold.delete(tenantId);
+    console.log(`[outbound] ${tenantId}: first message sent to lead ${slot.lead_id}`);
     return true;
   } catch (e: any) {
     const msg = String(e?.message ?? e);
