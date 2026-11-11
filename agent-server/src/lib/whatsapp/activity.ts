@@ -269,7 +269,7 @@ export async function loadOverview(tenantId: string, nowMs = Date.now()): Promis
   const [settings, dailyCount, { data: sess }, { data: msgs }, { data: queue }] = await Promise.all([
     getWhatsappSettings(tenantId),
     dailyAutoSendCount(tenantId),
-    supabase.from("whatsapp_sessions").select("first_connected_at, status").eq("tenant_id", tenantId).maybeSingle(),
+    supabase.from("whatsapp_sessions").select("first_connected_at, status, phone_number").eq("tenant_id", tenantId).maybeSingle(),
     supabase.from("outreach_messages").select("lead_id, direction, answered_by, created_at").eq("tenant_id", tenantId).gte("created_at", since).order("created_at", { ascending: false }).limit(2000),
     supabase.from("wa_outbound_queue").select("lead_id, scheduled_at, status, reason, updated_at").eq("tenant_id", tenantId).or(`status.in.(pending,sending),and(status.eq.skipped,updated_at.gte.${new Date(nowMs - 86_400_000).toISOString()})`).limit(300),
   ]);
@@ -294,7 +294,10 @@ export async function loadOverview(tenantId: string, nowMs = Date.now()): Promis
 
   const live = sessionStatus(tenantId).status;
   const dbStatus = (sess as any)?.status as string | undefined;
-  const connection = live === "disconnected" && dbStatus === "connected" ? "reconnecting" : live;
+  // Linked (a number is on file, not logged out or banned) but no live socket yet = reconnecting, the same word
+  // the chat page uses. Only an UNLINKED number is "not connected".
+  const linked = !!(sess as any)?.phone_number && dbStatus !== "logged_out" && dbStatus !== "banned";
+  const connection = live === "disconnected" && linked ? "reconnecting" : live;
   // The written first message of the leads at the front of the queue, so the page can show what will be sent.
   const front = queueRows.filter((q) => q.status === "pending" || q.status === "sending").sort((a, b) => Date.parse(a.scheduled_at) - Date.parse(b.scheduled_at)).slice(0, 12).map((q) => q.lead_id);
   const drafts: Record<string, string> = {};

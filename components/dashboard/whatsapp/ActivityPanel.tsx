@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 /** Mr. WhatsApp · Activity — what the AI is doing on WhatsApp, in plain words.
  *
@@ -56,7 +56,63 @@ const clock = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-d
 const KIND: Record<string, string> = { reply: "answering a reply", first_message: "sending a first message", followup: "sending a follow-up" };
 const hh = (h: number) => `${String(h).padStart(2, "0")}:00`;
 
-export default function ActivityPanel({ data, loading, onOpenChat }: { data: Overview | null; loading: boolean; onOpenChat: (leadId: string) => void }) {
+/** The web app and the agent server deploy separately, so for a while the page can get an overview from an
+ *  OLDER agent server (no `agenda`, no `plan`, ...). Fill every field the page reads, deriving the timeline from
+ *  the older lists when it is missing, so a version gap shows a plainer page instead of a crash. */
+export function normalizeOverview(raw: Partial<Overview> | null): Overview | null {
+  if (!raw || typeof raw !== "object") return null;
+  const now = raw.generated_at ?? new Date().toISOString();
+  const first = Array.isArray(raw.first_messages) ? raw.first_messages : [];
+  const follow = Array.isArray(raw.followups) ? raw.followups : [];
+  const agenda: AgendaItem[] = Array.isArray(raw.agenda)
+    ? raw.agenda
+    : [
+        ...first.slice(0, 12).map((f) => ({ kind: "first_message" as const, at: f.at, lead_id: f.lead_id, lead: f.name, title: "First message", detail: "" })),
+        ...follow.slice(0, 6).map((f) => ({ kind: "followup" as const, at: f.due_at, lead_id: f.lead_id, lead: f.name, title: `Follow-up ${f.which} of 3`, detail: "" })),
+      ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  return {
+    generated_at: now,
+    state: { code: "running", label: "Working", detail: "", sending: true, ...(raw.state ?? {}) },
+    plan: { window_start: 9, window_end: 21, tz_offset: 0, gap_min: 4, gap_max: 14, followups_enabled: true, first_messages_enabled: true, number_age_days: null, ...(raw.plan ?? {}) },
+    today: { sent: 0, cap: 20, remaining: 20, ...(raw.today ?? {}) },
+    counts: { replies_waiting: 0, held: 0, first_messages_queued: first.length, followups_due_24h: 0, skipped_24h: 0, ...(raw.counts ?? {}) },
+    next: raw.next ?? null,
+    replies: Array.isArray(raw.replies) ? raw.replies : [],
+    first_messages: first,
+    agenda,
+    agenda_more: typeof raw.agenda_more === "number" ? raw.agenda_more : 0,
+    followups: follow,
+    skipped: Array.isArray(raw.skipped) ? raw.skipped : [],
+    timeline: Array.isArray(raw.timeline) ? raw.timeline : [],
+    upcoming: Array.isArray(raw.upcoming) ? raw.upcoming : [],
+  };
+}
+
+/** If anything in the panel throws, say so inside the panel: the rest of the WhatsApp page stays usable. */
+class PanelBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(e: unknown) { console.error("[whatsapp activity]", e); }
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <div className="flex flex-1 items-center justify-center p-6 text-center">
+        <div className="max-w-sm">
+          <h3 className="text-[15px] font-semibold" style={{ color: C.ink }}>Activity could not be shown</h3>
+          <p className="mt-1 text-[13px]" style={{ color: C.sub }}>Your chats are not affected. Reload the page; if it happens again, the server may be mid-update.</p>
+          <button onClick={() => this.setState({ failed: false })} className="mt-3 h-9 rounded-lg px-4 text-[13px] font-medium text-white" style={{ background: C.green }}>Try again</button>
+        </div>
+      </div>
+    );
+  }
+}
+
+export default function ActivityPanel(props: { data: Overview | null; loading: boolean; onOpenChat: (leadId: string) => void }) {
+  const data = useMemo(() => normalizeOverview(props.data), [props.data]);
+  return <PanelBoundary><ActivityBody data={data} loading={props.loading} onOpenChat={props.onOpenChat} /></PanelBoundary>;
+}
+
+function ActivityBody({ data, loading, onOpenChat }: { data: Overview | null; loading: boolean; onOpenChat: (leadId: string) => void }) {
   const now = data ? Date.parse(data.generated_at) : Date.now();
   if (!data) {
     return (
@@ -123,7 +179,7 @@ export default function ActivityPanel({ data, loading, onOpenChat }: { data: Ove
               <Key color={C.green} label="Sent by the AI" /><Key color={C.slate} label="Sent by you" /><Key color={C.blue} label="Received" /><Key color={C.amber} label="Scheduled next" dashed />
             </div>
           </div>
-          <Chart timeline={data.timeline} upcoming={data.upcoming} paused={paused} />
+          {data.timeline.length >= 2 ? <Chart timeline={data.timeline} upcoming={data.upcoming} paused={paused} /> : <p className="rounded-xl px-4 py-5 text-[13px]" style={{ background: C.soft, color: C.sub }}>The hourly chart appears once the server has been updated.</p>}
         </section>
 
         {data.skipped.length > 0 && (

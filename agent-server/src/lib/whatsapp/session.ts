@@ -40,6 +40,29 @@ type Session = {
 
 const sessions = new Map<string, Session>();
 
+/** What to do when WhatsApp closes the socket. Pure, so the rules are a test, not a guess.
+ *   logged_out  the phone unlinked this device: the saved login is dead, wipe it, a scan is needed.
+ *   banned      WhatsApp refused the account: never retry.
+ *   replaced    ANOTHER process opened the same login (a second server, a local dev copy, an old deploy that has
+ *               not stopped yet). Reconnecting at once only knocks that one off and gets knocked off in turn,
+ *               forever. Wait a long while instead.
+ *   reconnect   anything else (network, restart): come back, a little slower each time. */
+export function closeAction(code: number | undefined): "logged_out" | "banned" | "replaced" | "reconnect" {
+  if (code === DisconnectReason.loggedOut) return "logged_out";
+  if (code === DisconnectReason.forbidden || code === 403) return "banned";
+  if (code === DisconnectReason.connectionReplaced || code === 440) return "replaced";
+  return "reconnect";
+}
+
+/** Delay before the next reconnect: 3s, 6s, 12s ... capped at 60s; a long wait after "replaced". */
+export function reconnectDelayMs(attempt: number, replaced: boolean): number {
+  if (replaced) return 10 * 60_000;
+  return Math.min(60_000, 3_000 * 2 ** Math.max(0, attempt));
+}
+
+/** Per tenant: how many reconnects in a row have failed, and the earliest moment another connect may start. */
+const retry = new Map<string, { attempt: number; notBefore: number }>();
+
 /** How the rest of the server sees a tenant's connection without touching Baileys. */
 export function sessionStatus(tenantId: string): { status: string; qr: string | null; phone: string | null } {
   const s = sessions.get(tenantId);
@@ -63,10 +86,15 @@ async function setDbStatus(
 export async function connect(
   supabase: SupabaseClient,
   tenantId: string,
-  onUpdate?: (s: { status: string; qr: string | null; phone: string | null }) => void
+  onUpdate?: (s: { status: string; qr: string | null; phone: string | null }) => void,
+  force = false
 ): Promise<void> {
   const existing = sessions.get(tenantId);
-  if (existing && (existing.status === "connected" || existing.starting)) return;
+  // A socket that is connected, still coming back, or waiting for a QR is ALIVE: a second one on the same login
+  // would knock it off (WhatsApp allows one). Likewise while a reconnect is backing off.
+  if (existing && (existing.starting || existing.status === "connected" || existing.status === "reconnecting" || existing.status === "pairing")) return;
+  const r0 = retry.get(tenantId);
+  if (!force && r0 && Date.now() < r0.notBefore) return;
 
   const placeholder: Session = { sock: undefined as any, status: "pairing", qr: null, phone: null, starting: true };
   sessions.set(tenantId, placeholder);
@@ -93,7 +121,9 @@ export async function connect(
 
   sock.ev.on("connection.update", async (u: any) => {
     const s = sessions.get(tenantId);
-    if (!s) return;
+    // Only the CURRENT socket speaks for this tenant. A late "close" from a socket that was already replaced
+    // must not delete or rewrite the live one.
+    if (!s || s !== placeholder) return;
 
     if (u.qr) {
       // A new QR to show. Stored in whatsapp_sessions.qr so the dashboard can render it, and
@@ -107,6 +137,7 @@ export async function connect(
     if (u.connection === "open") {
       s.status = "connected";
       s.qr = null;
+      retry.delete(tenantId); // a good connection: the next drop starts the backoff from 3s again
       s.phone = sock.user?.id ? String(sock.user.id).split(":")[0] : null;
       await setDbStatus(supabase, tenantId, {
         status: "connected",
@@ -127,9 +158,10 @@ export async function connect(
 
     if (u.connection === "close") {
       const code = (u.lastDisconnect?.error as any)?.output?.statusCode;
-      const loggedOut = code === DisconnectReason.loggedOut;
+      const action = closeAction(code);
+      console.warn(`[whatsapp] ${tenantId} socket closed (code ${code ?? "none"}) -> ${action}`);
 
-      if (loggedOut) {
+      if (action === "logged_out") {
         // The phone unlinked this device. The stored session is dead; wipe it so we do not
         // reconnect-loop, and the tenant must scan again to relink.
         s.status = "logged_out";
@@ -138,7 +170,7 @@ export async function connect(
         await clearAuthState(supabase, tenantId);
         await setDbStatus(supabase, tenantId, { status: "logged_out", qr: null });
         push();
-      } else if (code === DisconnectReason.forbidden || code === 403) {
+      } else if (action === "banned") {
         // WhatsApp refused the account — the ban case. Do not retry; surface it so the tenant
         // sees a real reason rather than a spinner.
         s.status = "banned";
@@ -146,12 +178,18 @@ export async function connect(
         await setDbStatus(supabase, tenantId, { status: "banned", qr: null });
         push();
       } else {
-        // A transient drop (network, restart). Reconnect once, reusing the stored creds.
-        s.status = "reconnecting"; // shown as "reconnecting", never as "connect your WhatsApp"
+        // A transient drop (network, restart) or another process holding the same login. Reconnect with the saved
+        // creds, a little slower each time, and never from two places at once (see connect()).
+        const replaced = action === "replaced";
+        const prev = retry.get(tenantId);
+        const attempt = (prev?.attempt ?? 0) + (replaced ? 0 : 1);
+        const delay = reconnectDelayMs(attempt - 1, replaced);
+        retry.set(tenantId, { attempt, notBefore: Date.now() + delay });
+        if (replaced) console.error(`[whatsapp] ${tenantId}: this login is in use by ANOTHER process (connection replaced). Check that only one agent-server is running. Retrying in ${Math.round(delay / 60_000)} min.`);
         await setDbStatus(supabase, tenantId, { status: "disconnected" }); // stays a "linked" row: phone_number is kept
+        sessions.delete(tenantId);
         push();
-        sessions.delete(tenantId); // the dead socket must not block the reconnect below ("starting"/"connected" early-return)
-        setTimeout(() => void connect(supabase, tenantId, onUpdate), 3000);
+        setTimeout(() => void connect(supabase, tenantId, onUpdate), delay);
       }
     }
   });

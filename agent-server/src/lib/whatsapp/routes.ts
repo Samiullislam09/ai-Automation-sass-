@@ -41,7 +41,7 @@ export function mountWhatsapp(app: Express): void {
     if (!authed(req, res)) return;
     const { tenantId } = req.params;
     try {
-      await connect(supabase, tenantId, (s) => emitWhatsapp(tenantId, s));
+      await connect(supabase, tenantId, (s) => emitWhatsapp(tenantId, s), true);
       res.json({ ok: true, ...sessionStatus(tenantId) });
     } catch (e: any) {
       res.status(500).json({ ok: false, error: e?.message ?? "connect failed" });
