@@ -40,6 +40,91 @@ type Session = {
 
 const sessions = new Map<string, Session>();
 
+/** One id per running process: the Railway deployment (so an old deploy and a new one differ) plus the pid and a
+ *  random part (so two copies on one machine differ). */
+export const INSTANCE_ID = `${process.env.RAILWAY_DEPLOYMENT_ID || process.env.RAILWAY_REPLICA_ID || "local"}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+const LEASE_STALE_MS = 2 * 60_000;
+const LEASE_RENEW_MS = 30_000;
+
+/** Who may hold the WhatsApp connection? Pure.
+ *   take   nobody holds it, or the holder stopped renewing (it is gone): this process may.
+ *   mine   this process already holds it.
+ *   busy   ANOTHER live process holds it: this one must wait, not fight. */
+export function leaseVerdict(row: { owner?: string | null; owner_seen_at?: string | null } | null, me: string, nowMs: number): "take" | "mine" | "busy" {
+  const owner = row?.owner ?? null;
+  if (!owner) return "take";
+  if (owner === me) return "mine";
+  const seen = row?.owner_seen_at ? Date.parse(row.owner_seen_at) : 0;
+  return nowMs - seen > LEASE_STALE_MS ? "take" : "busy";
+}
+
+/** Tenants whose connection is held by ANOTHER process right now (so the page can say so instead of "reconnecting"). */
+const heldElsewhere = new Map<string, { until: number }>();
+export function inUseElsewhere(tenantId: string): boolean {
+  const h = heldElsewhere.get(tenantId);
+  if (!h) return false;
+  if (Date.now() > h.until) { heldElsewhere.delete(tenantId); return false; }
+  return true;
+}
+let leaseColumnsMissing = false;
+
+async function claimLease(supabase: SupabaseClient, tenantId: string): Promise<boolean> {
+  if (leaseColumnsMissing) return true; // migration 039 not applied: no lease, fall back to backing off on 440
+  const { data, error } = await supabase.from("whatsapp_sessions").select("owner, owner_seen_at").eq("tenant_id", tenantId).maybeSingle();
+  if (error) {
+    if (/owner|column .* does not exist/i.test(error.message)) { leaseColumnsMissing = true; console.warn("[whatsapp] migration 039 (connection lease) is not applied: running without it"); return true; }
+    return true; // a read hiccup must not stop a connection
+  }
+  const verdict = leaseVerdict(data as any, INSTANCE_ID, Date.now());
+  if (verdict === "busy") { heldElsewhere.set(tenantId, { until: Date.now() + 60_000 }); return false; }
+  heldElsewhere.delete(tenantId);
+  const now = new Date().toISOString();
+  // Take it only if it is still free (or already ours): the update is the lock, a racing process loses cleanly.
+  const stale = new Date(Date.now() - LEASE_STALE_MS).toISOString();
+  const upd = await supabase.from("whatsapp_sessions").update({ owner: INSTANCE_ID, owner_seen_at: now })
+    .eq("tenant_id", tenantId).or(`owner.is.null,owner.eq.${INSTANCE_ID},owner_seen_at.lt.${stale}`).select("tenant_id");
+  if (upd.error) return true;
+  if ((upd.data ?? []).length === 0) {
+    // No row yet (first ever connect): create it with us as the owner.
+    const ins = await supabase.from("whatsapp_sessions").upsert({ tenant_id: tenantId, owner: INSTANCE_ID, owner_seen_at: now, updated_at: now }, { onConflict: "tenant_id", ignoreDuplicates: true }).select("tenant_id");
+    const again = await supabase.from("whatsapp_sessions").select("owner").eq("tenant_id", tenantId).maybeSingle();
+    if ((again.data as any)?.owner && (again.data as any).owner !== INSTANCE_ID) { heldElsewhere.set(tenantId, { until: Date.now() + 60_000 }); return false; }
+    void ins;
+  }
+  return true;
+}
+
+let leaseTimer: NodeJS.Timeout | null = null;
+function startLeaseHeartbeat(supabase: SupabaseClient): void {
+  if (leaseTimer || leaseColumnsMissing) return;
+  leaseTimer = setInterval(async () => {
+    for (const [tenantId, s] of Array.from(sessions.entries())) {
+      if (s.starting || (s.status !== "connected" && s.status !== "reconnecting")) continue;
+      const r = await supabase.from("whatsapp_sessions").update({ owner_seen_at: new Date().toISOString() }).eq("tenant_id", tenantId).eq("owner", INSTANCE_ID).select("tenant_id");
+      if (r.error) continue;
+      if ((r.data ?? []).length === 0) {
+        // Another process took the lease: stop using the socket so we do not fight for it.
+        console.error(`[whatsapp] ${tenantId}: another process now holds this login; this one steps aside`);
+        heldElsewhere.set(tenantId, { until: Date.now() + 60_000 });
+        sessions.delete(tenantId);
+        try { (s.sock as any)?.end?.(undefined); } catch { /* already closed */ }
+      }
+    }
+  }, LEASE_RENEW_MS);
+  leaseTimer.unref?.();
+}
+
+/** On shutdown: hand the connection over at once instead of making the next process wait for the lease to go stale. */
+export async function releaseAllLeases(supabase: SupabaseClient): Promise<void> {
+  if (leaseTimer) { clearInterval(leaseTimer); leaseTimer = null; }
+  const ids = Array.from(sessions.keys());
+  for (const tenantId of ids) {
+    try { (sessions.get(tenantId)?.sock as any)?.end?.(undefined); } catch { /* ignore */ }
+    sessions.delete(tenantId);
+    await supabase.from("whatsapp_sessions").update({ owner: null, owner_seen_at: null }).eq("tenant_id", tenantId).eq("owner", INSTANCE_ID).then(() => {}, () => {});
+  }
+}
+
 /** What to do when WhatsApp closes the socket. Pure, so the rules are a test, not a guess.
  *   logged_out  the phone unlinked this device: the saved login is dead, wipe it, a scan is needed.
  *   banned      WhatsApp refused the account: never retry.
@@ -72,7 +157,7 @@ export async function senderOnline(supabase: SupabaseClient, tenantId: string, d
   if (!live || live.status !== "connected" || !live.sock) return false;
   if (dbStatus !== "connected") {
     console.warn(`[whatsapp] ${tenantId}: database said "${dbStatus ?? "none"}" but the socket is connected; correcting the record`);
-    await setDbStatus(supabase, tenantId, { status: "connected", qr: null }).catch(() => {});
+    await setDbStatus(supabase, tenantId, { status: "connected", qr: null, ...(live.phone ? { phone_number: live.phone } : {}) }).catch(() => {});
   }
   return true;
 }
@@ -80,7 +165,7 @@ export async function senderOnline(supabase: SupabaseClient, tenantId: string, d
 /** How the rest of the server sees a tenant's connection without touching Baileys. */
 export function sessionStatus(tenantId: string): { status: string; qr: string | null; phone: string | null } {
   const s = sessions.get(tenantId);
-  if (!s) return { status: "disconnected", qr: null, phone: null };
+  if (!s) return { status: inUseElsewhere(tenantId) ? "in_use_elsewhere" : "disconnected", qr: null, phone: null };
   return { status: s.status, qr: s.qr, phone: s.phone };
 }
 
@@ -114,7 +199,31 @@ export async function connect(
   sessions.set(tenantId, placeholder);
   const push = () => onUpdate?.(sessionStatus(tenantId));
 
-  const { state, saveCreds } = await useSupabaseAuthState(supabase, tenantId);
+  // Everything up to the socket existing can fail (the lease check, reading the saved login, makeWASocket). If it
+  // does, the placeholder MUST go: left behind with starting=true it would make every later connect() return early
+  // and the tenant would sit on "reconnecting" until the server restarts.
+  let state: Awaited<ReturnType<typeof useSupabaseAuthState>>["state"], saveCreds: () => Promise<void>;
+  try {
+    // One process at a time. If another live process holds this login, wait quietly and look again soon.
+    if (!(await claimLease(supabase, tenantId))) {
+      sessions.delete(tenantId);
+      console.warn(`[whatsapp] ${tenantId}: another process holds this login (lease); ${INSTANCE_ID} waits`);
+      retry.set(tenantId, { attempt: retry.get(tenantId)?.attempt ?? 0, notBefore: Date.now() + 20_000 });
+      setTimeout(() => void connect(supabase, tenantId, onUpdate), 20_000);
+      push();
+      return;
+    }
+    startLeaseHeartbeat(supabase);
+    ({ state, saveCreds } = await useSupabaseAuthState(supabase, tenantId));
+  } catch (e: any) {
+    if (sessions.get(tenantId) === placeholder) sessions.delete(tenantId);
+    const attempt = (retry.get(tenantId)?.attempt ?? 0) + 1;
+    const delay = reconnectDelayMs(attempt - 1, false);
+    retry.set(tenantId, { attempt, notBefore: Date.now() + delay });
+    console.error(`[whatsapp] ${tenantId}: could not start the connection (${e?.message}); retrying in ${Math.round(delay / 1000)}s`);
+    setTimeout(() => void connect(supabase, tenantId, onUpdate), delay);
+    throw e;
+  }
   // A saved login means this number is ALREADY linked: we are coming back online, not pairing. The page
   // must not ask the user to scan again just because the server restarted or the socket blipped.
   placeholder.status = state.creds?.me ? "reconnecting" : "pairing";
@@ -199,7 +308,7 @@ export async function connect(
         const attempt = (prev?.attempt ?? 0) + (replaced ? 0 : 1);
         const delay = reconnectDelayMs(attempt - 1, replaced);
         retry.set(tenantId, { attempt, notBefore: Date.now() + delay });
-        if (replaced) console.error(`[whatsapp] ${tenantId}: this login is in use by ANOTHER process (connection replaced). Check that only one agent-server is running. Retrying in ${Math.round(delay / 60_000)} min.`);
+        if (replaced) { heldElsewhere.set(tenantId, { until: Date.now() + delay }); console.error(`[whatsapp] ${tenantId}: this login is in use by ANOTHER process (connection replaced). This process is ${INSTANCE_ID}. Check that only one agent-server is running (an old Railway deploy, a second replica, or a copy on your own computer). Retrying in ${Math.round(delay / 60_000)} min.`); }
         await setDbStatus(supabase, tenantId, { status: "disconnected" }); // stays a "linked" row: phone_number is kept
         sessions.delete(tenantId);
         push();
@@ -416,7 +525,7 @@ export async function disconnect(supabase: SupabaseClient, tenantId: string): Pr
   }
   sessions.delete(tenantId);
   await clearAuthState(supabase, tenantId);
-  await setDbStatus(supabase, tenantId, { status: "disconnected", qr: null, phone_number: null });
+  await setDbStatus(supabase, tenantId, { status: "disconnected", qr: null, phone_number: null, ...(leaseColumnsMissing ? {} : { owner: null, owner_seen_at: null }) });
 }
 
 /** Is this tenant's number linked (a login is saved)? Read from the database, because the in-memory map is

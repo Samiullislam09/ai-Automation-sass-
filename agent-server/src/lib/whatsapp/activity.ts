@@ -28,7 +28,7 @@ const SETTLE_S = 360;
 const ACTIVE_CONVO_MS = 60 * 60 * 1000;
 const HOUR = 3_600_000;
 
-export type StateCode = "running" | "auto_off" | "not_connected" | "reconnecting" | "cap_reached" | "quiet_hours" | "conversation_active";
+export type StateCode = "in_use_elsewhere" | "running" | "auto_off" | "not_connected" | "reconnecting" | "cap_reached" | "quiet_hours" | "conversation_active";
 
 export type ReplyRow = {
   lead_id: string; name: string; phone: string | null; since: string;
@@ -112,7 +112,8 @@ export function buildOverview(inp: OverviewInput): Overview {
 
   // ── overall state: the one sentence that answers "is the AI working, and if not, why" ──
   let state: Overview["state"];
-  if (inp.connection === "reconnecting") state = { code: "reconnecting", label: "Reconnecting", detail: "WhatsApp is coming back online. Nothing is lost and no scan is needed.", sending: false };
+  if (inp.connection === "in_use_elsewhere") state = { code: "in_use_elsewhere", label: "WhatsApp is open somewhere else", detail: "Another copy of the server is using this WhatsApp login, and WhatsApp allows only one. This one waits instead of fighting, and takes over as soon as the other stops.", sending: false };
+  else if (inp.connection === "reconnecting") state = { code: "reconnecting", label: "Reconnecting", detail: "WhatsApp is coming back online. Nothing is lost and no scan is needed.", sending: false };
   else if (!online) state = { code: "not_connected", label: "WhatsApp is not connected", detail: "The AI cannot send until WhatsApp is linked.", sending: false };
   else if (!s.auto_reply) state = { code: "auto_off", label: "Auto replies are OFF", detail: "The AI will not send anything on its own. Turn Auto replies on to start.", sending: false };
   else if (inp.dailyCount >= cap) state = { code: "cap_reached", label: "Daily limit reached", detail: `${inp.dailyCount} of ${cap} messages sent in the last 24 hours. This keeps a new number safe; sending resumes as older messages age out.`, sending: false };
@@ -297,7 +298,7 @@ export async function loadOverview(tenantId: string, nowMs = Date.now()): Promis
   // Linked (a number is on file, not logged out or banned) but no live socket yet = reconnecting, the same word
   // the chat page uses. Only an UNLINKED number is "not connected".
   const linked = !!(sess as any)?.phone_number && dbStatus !== "logged_out" && dbStatus !== "banned";
-  const connection = live === "disconnected" && linked ? "reconnecting" : live;
+  const connection = live === "in_use_elsewhere" ? live : live === "disconnected" && linked ? "reconnecting" : live;
   // The written first message of the leads at the front of the queue, so the page can show what will be sent.
   const front = queueRows.filter((q) => q.status === "pending" || q.status === "sending").sort((a, b) => Date.parse(a.scheduled_at) - Date.parse(b.scheduled_at)).slice(0, 12).map((q) => q.lead_id);
   const drafts: Record<string, string> = {};

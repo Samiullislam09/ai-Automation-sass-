@@ -1,3 +1,4 @@
+import "./lib/quietLogs.js";
 import "./lib/dns-fix.js";
 import express from "express";
 import cors from "cors";
@@ -14,7 +15,7 @@ import { nvidiaWindow } from "./lib/nvidia.js";
 import { mountBrain, startBrain, getRegistry } from "./brain/server.js";
 import { mountWhatsapp } from "./lib/whatsapp/routes.js";
 import { mountBuyerProfile } from "./lib/leads/buyerProfileRoutes.js";
-import { resumeConnected } from "./lib/whatsapp/session.js";
+import { resumeConnected, releaseAllLeases } from "./lib/whatsapp/session.js";
 import { supabase } from "./supabase.js";
 import { enabledActions } from "./brain/registry.js";
 import { stopEvents } from "./brain/events.js";
@@ -181,6 +182,8 @@ async function main() {
   });
 
   process.on("SIGTERM", async () => {
+    // First: give the WhatsApp connection back, so the new deploy can take it at once instead of waiting.
+    await releaseAllLeases(supabase).catch(() => {});
     stopScheduler();
     // Write the last half-second of the recording before the process goes: a redeploy in the
     // middle of a run should not lose the evidence of what was happening.

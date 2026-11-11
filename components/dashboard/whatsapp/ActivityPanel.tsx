@@ -37,6 +37,7 @@ const C = { green: "#008069", ink: "#111b21", sub: "#667781", line: "#e9edef", s
 const TONE: Record<string, { dot: string; bg: string; fg: string }> = {
   running: { dot: "#17c964", bg: C.greenSoft, fg: C.greenText },
   conversation_active: { dot: "#17c964", bg: C.greenSoft, fg: C.greenText },
+  in_use_elsewhere: { dot: "#f5a623", bg: C.amberSoft, fg: C.amberText },
   quiet_hours: { dot: "#f5a623", bg: C.amberSoft, fg: C.amberText },
   reconnecting: { dot: "#f5a623", bg: C.amberSoft, fg: C.amberText },
   cap_reached: { dot: "#f5a623", bg: C.amberSoft, fg: C.amberText },

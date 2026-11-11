@@ -105,7 +105,7 @@ export default function WhatsAppSection() {
   };
 
   // Quick while the link is coming back online, relaxed once it is up.
-  const reconnecting = status.status === "reconnecting";
+  const reconnecting = status.status === "reconnecting" || status.status === "in_use_elsewhere";
   useEffect(() => {
     poll();
     const id = setInterval(poll, reconnecting ? 2500 : 8000);
@@ -232,6 +232,12 @@ export default function WhatsAppSection() {
         <InboxSkeleton />
       ) : connected ? (
         <>
+          {status.loaded && status.status === "in_use_elsewhere" && (
+            <div className="flex shrink-0 items-center gap-2 px-4 py-1.5 text-[12.5px]" style={{ background: "#fff8e1", color: "#7a5b00", borderBottom: `1px solid ${WA.divider}` }} role="status">
+              <span className="h-2 w-2 rounded-full" style={{ background: "#f5a623" }} />
+              WhatsApp is open in another copy of the server (WhatsApp allows only one). It reconnects here as soon as the other one stops. No need to scan again.
+            </div>
+          )}
           {status.loaded && status.status === "reconnecting" && (
             <div className="flex shrink-0 items-center gap-2 px-4 py-1.5 text-[12.5px]" style={{ background: "#fff8e1", color: "#7a5b00", borderBottom: `1px solid ${WA.divider}` }} role="status">
               <span className="h-2 w-2 animate-pulse rounded-full" style={{ background: "#f5a623" }} />

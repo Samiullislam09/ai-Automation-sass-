@@ -22,3 +22,30 @@ test("reconnectDelayMs: slower each time, capped, and a long wait when another p
   assert.deepEqual([0, 1, 2, 3, 4, 5, 9].map((n) => reconnectDelayMs(n, false)), [3000, 6000, 12000, 24000, 48000, 60000, 60000]);
   assert.equal(reconnectDelayMs(0, true), 10 * 60_000);
 });
+
+// ── the connection lease: one process at a time ────────────────────────────────────────────
+const { leaseVerdict, INSTANCE_ID } = await import("./session.js");
+const { isSecretSessionLog } = await import("../quietLogs.js");
+
+test("leaseVerdict: free or stale -> take, mine -> mine, another LIVE process -> busy (wait, do not fight)", () => {
+  const NOW = Date.UTC(2026, 10, 11, 12, 0, 0);
+  const ago = (s: number) => new Date(NOW - s * 1000).toISOString();
+  assert.equal(leaseVerdict(null, "me", NOW), "take", "no row yet");
+  assert.equal(leaseVerdict({ owner: null, owner_seen_at: null }, "me", NOW), "take", "nobody holds it");
+  assert.equal(leaseVerdict({ owner: "me", owner_seen_at: ago(5) }, "me", NOW), "mine");
+  assert.equal(leaseVerdict({ owner: "old-deploy", owner_seen_at: ago(20) }, "me", NOW), "busy", "renewed 20s ago: it is alive");
+  assert.equal(leaseVerdict({ owner: "old-deploy", owner_seen_at: ago(119) }, "me", NOW), "busy");
+  assert.equal(leaseVerdict({ owner: "old-deploy", owner_seen_at: ago(121) }, "me", NOW), "take", "stopped renewing: it is gone");
+  assert.equal(leaseVerdict({ owner: "old-deploy", owner_seen_at: null }, "me", NOW), "take", "never renewed");
+  assert.ok(INSTANCE_ID.length > 8);
+});
+
+test("secret session dumps from libsignal are recognised so they never reach the logs", () => {
+  assert.equal(isSecretSessionLog("Closing session:"), true);
+  assert.equal(isSecretSessionLog("Closing open session in favor of incoming prekey bundle"), true);
+  assert.equal(isSecretSessionLog("Removing old closed session:"), true);
+  assert.equal(isSecretSessionLog("Opening session:"), true);
+  assert.equal(isSecretSessionLog("[whatsapp] socket closed (code 440) -> replaced"), false, "our own diagnostics stay");
+  assert.equal(isSecretSessionLog("opened connection to WA"), false);
+  assert.equal(isSecretSessionLog({ privKey: 1 }), false);
+});
