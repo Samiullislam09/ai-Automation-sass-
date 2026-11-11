@@ -10,7 +10,7 @@
 import type { Express, Request, Response } from "express";
 import { supabase } from "../../supabase.js";
 import { env } from "../../env.js";
-import { connect, disconnect, sendText, sessionStatus, getContactInfo, checkNumbers } from "./session.js";
+import { linkedState, connect, disconnect, sendText, sessionStatus, getContactInfo, checkNumbers } from "./session.js";
 import { getWhatsappAutoReply, setWhatsappAutoReply, getWhatsappSettings, patchWhatsappSettings } from "../outreach/settings.js";
 import { listAdmins, upsertAdmin, deleteAdmin, listNotifications, markNotificationsRead } from "./team.js";
 import { recordOutgoing } from "./store.js";
@@ -51,8 +51,19 @@ export function mountWhatsapp(app: Express): void {
    *  updates come over the socket. */
   app.get("/whatsapp/:tenantId/status", async (req, res) => {
     if (!authed(req, res)) return;
-    const autoReply = await getWhatsappAutoReply(req.params.tenantId).catch(() => false);
-    res.json({ ok: true, ...sessionStatus(req.params.tenantId), autoReply });
+    const { tenantId } = req.params;
+    const [autoReply, link] = await Promise.all([
+      getWhatsappAutoReply(tenantId).catch(() => false),
+      linkedState(supabase, tenantId).catch(() => ({ linked: false, phone: null as string | null })),
+    ]);
+    let mem = sessionStatus(tenantId);
+    // No live socket in this process (a restart wiped the map) but the number IS linked: bring it back in
+    // the background and say "reconnecting", so the page shows the inbox, not the Connect screen.
+    if (mem.status === "disconnected" && link.linked) {
+      connect(supabase, tenantId, (s) => emitWhatsapp(tenantId, s)).catch((e) => console.error("[whatsapp] reconnect on status failed:", e?.message));
+      mem = { status: "reconnecting", qr: null, phone: link.phone };
+    }
+    res.json({ ok: true, ...mem, phone: mem.phone ?? link.phone, linked: link.linked || mem.status === "connected" || mem.status === "reconnecting", autoReply });
   });
 
   /** Turn WhatsApp auto-reply on/off for this tenant. */

@@ -30,7 +30,8 @@ type Sock = ReturnType<typeof makeWASocket>;
 
 type Session = {
   sock: Sock;
-  status: "pairing" | "connected" | "logged_out" | "banned" | "disconnected";
+  /** "reconnecting" = already linked (saved login exists) and coming back online: NOT a reason to ask for a QR. */
+  status: "pairing" | "connected" | "logged_out" | "banned" | "disconnected" | "reconnecting";
   qr: string | null;
   phone: string | null;
   /** Set while a connect() is mid-flight so two callers cannot open two sockets for one tenant. */
@@ -72,6 +73,9 @@ export async function connect(
   const push = () => onUpdate?.(sessionStatus(tenantId));
 
   const { state, saveCreds } = await useSupabaseAuthState(supabase, tenantId);
+  // A saved login means this number is ALREADY linked: we are coming back online, not pairing. The page
+  // must not ask the user to scan again just because the server restarted or the socket blipped.
+  placeholder.status = state.creds?.me ? "reconnecting" : "pairing";
 
   const sock: Sock = makeWASocket({
     auth: state,
@@ -143,9 +147,10 @@ export async function connect(
         push();
       } else {
         // A transient drop (network, restart). Reconnect once, reusing the stored creds.
-        s.status = "disconnected";
-        await setDbStatus(supabase, tenantId, { status: "disconnected" });
+        s.status = "reconnecting"; // shown as "reconnecting", never as "connect your WhatsApp"
+        await setDbStatus(supabase, tenantId, { status: "disconnected" }); // stays a "linked" row: phone_number is kept
         push();
+        sessions.delete(tenantId); // the dead socket must not block the reconnect below ("starting"/"connected" early-return)
         setTimeout(() => void connect(supabase, tenantId, onUpdate), 3000);
       }
     }
@@ -362,10 +367,21 @@ export async function disconnect(supabase: SupabaseClient, tenantId: string): Pr
   await setDbStatus(supabase, tenantId, { status: "disconnected", qr: null, phone_number: null });
 }
 
-/** On server boot, reopen connections for tenants who were connected — so a redeploy does not
- *  silently drop everyone's WhatsApp until they each poke the dashboard. */
+/** Is this tenant's number linked (a login is saved)? Read from the database, because the in-memory map is
+ *  empty after every restart. Linked = a phone number is on file and the link was not logged out / banned /
+ *  unlinked by the user (unlinking clears phone_number). */
+export async function linkedState(supabase: SupabaseClient, tenantId: string): Promise<{ linked: boolean; phone: string | null }> {
+  const { data } = await supabase.from("whatsapp_sessions").select("status, phone_number").eq("tenant_id", tenantId).maybeSingle();
+  const row = data as { status?: string; phone_number?: string | null } | null;
+  const linked = !!row?.phone_number && row.status !== "logged_out" && row.status !== "banned";
+  return { linked, phone: linked ? row!.phone_number ?? null : null };
+}
+
+/** On server boot, reopen connections for every LINKED tenant — not only the ones whose last status was
+ *  "connected": a socket that was mid-reconnect when the server went down is stored as "disconnected" and
+ *  was never brought back, which is what sent people to the QR screen again and again. */
 export async function resumeConnected(supabase: SupabaseClient): Promise<void> {
-  const { data } = await supabase.from("whatsapp_sessions").select("tenant_id").eq("status", "connected");
+  const { data } = await supabase.from("whatsapp_sessions").select("tenant_id").not("phone_number", "is", null).in("status", ["connected", "disconnected", "pairing"]);
   for (const row of data ?? []) {
     connect(supabase, row.tenant_id as string).catch((e) =>
       console.error(`[whatsapp] resume failed for ${row.tenant_id}:`, e?.message)

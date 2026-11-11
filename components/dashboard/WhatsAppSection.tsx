@@ -38,7 +38,14 @@ const WA = {
  *  burned the free-tier LOG INGESTION quota. Backgrounded = skip the poll (it resumes on return). */
 const pageVisible = () => typeof document === "undefined" || document.visibilityState === "visible";
 
-type Status = { status: string; qr: string | null; phone: string | null };
+type Status = { status: string; qr: string | null; phone: string | null; linked?: boolean };
+
+/** Remembered in this browser: "this workspace has a linked WhatsApp". Lets the page draw the inbox on the
+ *  very first frame instead of waiting for the server to say so (and never flashes the Connect screen at a
+ *  user who is already linked). The server's answer replaces it a moment later. */
+const LINK_KEY = "lx-wa-linked";
+const readLinked = () => { try { return localStorage.getItem(LINK_KEY) === "1"; } catch { return false; } };
+const writeLinked = (v: boolean) => { try { if (v) localStorage.setItem(LINK_KEY, "1"); else localStorage.removeItem(LINK_KEY); } catch { /* private mode */ } };
 type Lead = {
   id: string; company: string | null; name: string | null; whatsapp: string | null; phone: string | null;
   stage: string; icp_score: number | null; draft?: string | null;
@@ -49,12 +56,14 @@ type Lead = {
   evidence?: any; reject_reason?: string | null;
   needs_attention?: boolean | null; needs_attention_reason?: string | null; last_intent?: string | null;
 };
+const CHATS_KEY = "lx-wa-chats-v1";
 type Msg = { id: string; direction: "in" | "out"; status: string; body: string; answered_by?: string | null; created_at: string };
 
 export default function WhatsAppSection() {
   const { toast } = useStore();
   const [status, setStatus] = useState<Status & { loaded: boolean }>({ status: "checking", qr: null, phone: null, loaded: false });
-  const [everConnected, setEverConnected] = useState(false);
+  const [hint, setHint] = useState(false); // this browser has seen a linked WhatsApp
+  useEffect(() => { setHint(readLinked()); }, []);
   const [modal, setModal] = useState(false);
   const [autoReply, setAutoReply] = useState(false);
   const [togglingAuto, setTogglingAuto] = useState(false);
@@ -67,9 +76,11 @@ export default function WhatsAppSection() {
     try {
       const r = await fetch("/api/whatsapp/status").then((x) => x.json());
       if (r.ok) {
-        setStatus({ status: r.status, qr: r.qr ?? null, phone: r.phone ?? null, loaded: true });
+        const linked = r.linked === true || r.status === "connected" || r.status === "reconnecting";
+        setStatus({ status: r.status, qr: r.qr ?? null, phone: r.phone ?? null, linked, loaded: true });
         if (typeof r.autoReply === "boolean") setAutoReply(r.autoReply);
-        if (r.status === "connected") setEverConnected(true);
+        setHint(linked);
+        writeLinked(linked);
       } else setStatus((s) => ({ ...s, loaded: true }));
     } catch {
       setStatus((s) => ({ ...s, loaded: true }));
@@ -88,22 +99,26 @@ export default function WhatsAppSection() {
     finally { setTogglingAuto(false); }
   };
 
+  // Quick while the link is coming back online, relaxed once it is up.
+  const reconnecting = status.status === "reconnecting";
   useEffect(() => {
     poll();
-    const id = setInterval(poll, 8000);
+    const id = setInterval(poll, reconnecting ? 2500 : 8000);
     return () => clearInterval(id);
-  }, [poll]);
+  }, [poll, reconnecting]);
 
   const doDisconnect = async () => {
     try {
       const r = await fetch("/api/whatsapp/disconnect", { method: "POST" }).then((x) => x.json());
-      if (r.ok) { setStatus({ status: "disconnected", qr: null, phone: null, loaded: true }); setEverConnected(false); toast("WhatsApp unlinked."); }
+      if (r.ok) { setStatus({ status: "disconnected", qr: null, phone: null, linked: false, loaded: true }); setHint(false); writeLinked(false); toast("WhatsApp unlinked."); }
       else toast(r.error ?? "Could not unlink.", "error");
     } catch (e: any) { toast(e?.message ?? "Network error.", "error"); }
   };
 
-  const connected = status.status === "connected" || (everConnected && status.status === "checking");
-  const checking = !status.loaded && !everConnected;
+  // Show the inbox when the number is linked (online or reconnecting), or, before the server has answered,
+  // when this browser already knows it is. The Connect screen is ONLY for a number that is not linked.
+  const connected = status.loaded ? status.linked === true || status.status === "connected" : hint;
+  const checking = !status.loaded && !hint;
 
   return (
     // Full-bleed like the Leads page: cancel the dashboard's padding so the WhatsApp app runs
@@ -183,16 +198,24 @@ export default function WhatsAppSection() {
       )}
 
       {checking ? (
-        <div className="flex flex-1 items-center justify-center"><p className="text-[13px]" style={{ color: WA.sub }}>Checking connection…</p></div>
+        <InboxSkeleton />
       ) : connected ? (
-        <Inbox search={search} setSearch={setSearch} />
+        <>
+          {status.loaded && status.status === "reconnecting" && (
+            <div className="flex shrink-0 items-center gap-2 px-4 py-1.5 text-[12.5px]" style={{ background: "#fff8e1", color: "#7a5b00", borderBottom: `1px solid ${WA.divider}` }} role="status">
+              <span className="h-2 w-2 animate-pulse rounded-full" style={{ background: "#f5a623" }} />
+              Reconnecting to WhatsApp… your chats are safe, sending resumes in a moment. No need to scan again.
+            </div>
+          )}
+          <Inbox search={search} setSearch={setSearch} online={status.status === "connected" || !status.loaded} />
+        </>
       ) : (
         <div className="flex-1 p-3 sm:p-4">
           <ConnectCta status={status.status} onConnect={() => setModal(true)} />
         </div>
       )}
 
-      <WhatsAppConnectModal open={modal} onClose={() => { setModal(false); poll(); }} onConnected={() => { setEverConnected(true); poll(); }} />
+      <WhatsAppConnectModal open={modal} onClose={() => { setModal(false); poll(); }} onConnected={() => { setHint(true); writeLinked(true); poll(); }} />
       <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} toast={toast} />
     </div>
   );
@@ -575,8 +598,26 @@ function ConnectCta({ status, onConnect }: { status: string; onConnect: () => vo
   );
 }
 
+/** Grey placeholder rows in the shape of the inbox, so the page has structure on the first frame. */
+function InboxSkeleton() {
+  return (
+    <div className="flex min-h-0 flex-1 overflow-hidden" style={{ background: WA.panel }} aria-hidden>
+      <div className="w-full md:w-[300px] xl:w-[330px]" style={{ borderRight: `1px solid ${WA.divider}` }}>
+        <div className="px-4 pt-4 text-[16px] font-bold" style={{ color: WA.text }}>Chats</div>
+        {Array.from({ length: 9 }).map((_, i) => (
+          <div key={i} className="flex items-center gap-3 px-3.5 py-3" style={{ borderBottom: `1px solid ${WA.divider}` }}>
+            <span className="h-11 w-11 shrink-0 rounded-full" style={{ background: WA.divider }} />
+            <span className="flex-1 space-y-2"><span className="block h-3 w-2/5 rounded" style={{ background: WA.divider }} /><span className="block h-2.5 w-4/5 rounded" style={{ background: WA.listHover }} /></span>
+          </div>
+        ))}
+      </div>
+      <div className="hidden flex-1 md:block" style={{ background: WA.chatBg }} />
+    </div>
+  );
+}
+
 /* ── the inbox ───────────────────────────────────────────────────────────────────────────── */
-function Inbox({ search, setSearch }: { search: string; setSearch: (v: string) => void }) {
+function Inbox({ search, setSearch, online }: { search: string; setSearch: (v: string) => void; online: boolean }) {
   const { toast } = useStore();
   const [leads, setLeads] = useState<Lead[] | null>(null);
   const [inbox, setInbox] = useState<Record<string, { body: string; direction: string; created_at: string; status?: string; unanswered?: number }>>({});
@@ -584,73 +625,101 @@ function Inbox({ search, setSearch }: { search: string; setSearch: (v: string) =
   const [newChat, setNewChat] = useState(false);
   const [onWa, setOnWa] = useState<Record<string, boolean | null>>({}); // leadId → on WhatsApp?
   const q = search;
-  const [tab, setTab] = useState<"all" | "unread">("all");
+  const [tab, setTab] = useState<"all" | "unread" | "nowa">("all");
 
-  // One batch call checks every chat's number at once, so each row shows a green "On WhatsApp" /
-  // red "Not on WhatsApp" badge. Keyed back by lead id.
+  // Which chats are on WhatsApp. Asked by lead id, so the server can use the lead's country to turn a local
+  // number into a dialable one and reuse an answer it already stored. Each lead is asked about once, and an
+  // unknown one again only after two minutes (WhatsApp may not have been connected yet).
+  const asked = useRef<Record<string, number>>({});
   const checkOnWhatsApp = useCallback(async (list: Lead[]) => {
-    const phones = Array.from(new Set(list.map((l) => (l.whatsapp || l.phone || "").replace(/[^0-9]/g, "")).filter(Boolean)));
-    if (!phones.length) return;
-    try {
-      const r = await fetch("/api/whatsapp/check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phones }) }).then((x) => x.json());
-      if (!r.ok) return;
-      const byLead: Record<string, boolean | null> = {};
-      for (const l of list) {
-        const d = (l.whatsapp || l.phone || "").replace(/[^0-9]/g, "");
-        if (d && d in (r.results ?? {})) byLead[l.id] = r.results[d];
-      }
-      setOnWa((prev) => ({ ...prev, ...byLead }));
-    } catch { /* badges just won't show */ }
+    const now = Date.now();
+    const ids = list.filter((l) => l.phone || l.whatsapp).map((l) => l.id).filter((id) => now - (asked.current[id] ?? 0) > 120_000);
+    for (let i = 0; i < ids.length; i += 60) {
+      const chunk = ids.slice(i, i + 60);
+      chunk.forEach((id) => { asked.current[id] = now; });
+      try {
+        const r = await fetch("/api/leads/wa-check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: chunk }) }).then((x) => x.json());
+        if (!r.ok) continue;
+        const byLead: Record<string, boolean | null> = {};
+        for (const id of chunk) {
+          const v = r.statuses?.[id];
+          if (v === "yes") byLead[id] = true; else if (v === "no") byLead[id] = false;
+          else if (v === null) continue;
+          if (v === "yes" || v === "no") asked.current[id] = now + 86_400_000; // settled: do not ask again this visit
+        }
+        setOnWa((prev) => ({ ...prev, ...byLead }));
+      } catch { /* the split just won't happen yet */ }
+    }
   }, []);
 
-  const loadList = useCallback(async () => {
-    // Two INDEPENDENT fetches, not Promise.all: the chat list is the leads call, so render it the
-    // moment it returns instead of waiting on the heavier last-message query too. The message
-    // previews fold in a beat later. This is what made the page sit on "Loading…" for seconds.
-    fetch("/api/leads?stage=all")
-      .then((r) => r.json())
-      .then((ls) => {
-        if (!ls.ok) return;
-        const all = ls.items as Lead[];
-        const inConvo = all.filter((l) =>
-          ["approved", "contacted", "delivered", "read", "replied", "in_conversation", "interested", "won", "lost"].includes(l.stage)
-        );
-        setLeads(inConvo);
-        void checkOnWhatsApp(inConvo);
-        // ?lead=<id> deep link (the WhatsApp button on a lead row): open that conversation, even
-        // if the lead is only approved and has no messages yet.
-        const wanted = new URLSearchParams(window.location.search).get("lead");
-        setActive((a) => {
-          if (a) return inConvo.find((x) => x.id === a.id) ?? a;
-          if (wanted) return inConvo.find((x) => x.id === wanted) ?? all.find((x) => x.id === wanted) ?? inConvo[0] ?? null;
-          return inConvo[0] ?? null;
-        });
-      })
-      .catch(() => {});
-
-    fetch("/api/whatsapp/messages")
-      .then((r) => r.json())
-      .then((ib) => {
-        if (!ib.ok) return;
-        const map: Record<string, any> = {};
-        for (const m of ib.inbox ?? []) map[m.lead_id] = { body: m.body, direction: m.direction, created_at: m.created_at, status: m.status, unanswered: m.unanswered };
-        setInbox(map);
-      })
-      .catch(() => {});
+  const deepLink = useRef<string | null>(null);
+  const applyChats = useCallback((all: Lead[], ib: any[]) => {
+    setLeads(all);
+    void checkOnWhatsApp(all);
+    const map: Record<string, any> = {};
+    for (const m of ib ?? []) map[m.lead_id] = { body: m.body, direction: m.direction, created_at: m.created_at, status: m.status, unanswered: m.unanswered };
+    setInbox(map);
+    // ?lead=<id> deep link (the WhatsApp button on a lead row): open that conversation, even if the lead
+    // is only approved and has no messages yet. Otherwise the first chat.
+    const wanted = deepLink.current;
+    setActive((a) => {
+      if (a) return all.find((x) => x.id === a.id) ?? a;
+      if (wanted) return all.find((x) => x.id === wanted) ?? all[0] ?? null;
+      return all[0] ?? null;
+    });
   }, [checkOnWhatsApp]);
 
+  // ONE request for the leads, the last message of each and the unread counts (the old page made two,
+  // one after the other, and the first returned every column of every lead). The last answer is kept in
+  // this browser, so the next visit paints the chats on the first frame and refreshes behind them.
+  const loadList = useCallback(async () => {
+    try {
+      const wanted = deepLink.current;
+      const r = await fetch(`/api/whatsapp/chats${wanted ? `?lead=${encodeURIComponent(wanted)}` : ""}`).then((x) => x.json());
+      if (!r.ok) return;
+      applyChats(r.items as Lead[], r.inbox ?? []);
+      try { sessionStorage.setItem(CHATS_KEY, JSON.stringify({ items: r.items, inbox: r.inbox ?? [] })); } catch { /* quota / private mode */ }
+    } catch { /* keep what is on screen */ }
+  }, [applyChats]);
+
+  // First paint from the last visit, before the network answers.
   useEffect(() => {
+    deepLink.current = new URLSearchParams(window.location.search).get("lead");
+    try {
+      const raw = sessionStorage.getItem(CHATS_KEY);
+      if (raw) { const c = JSON.parse(raw); if (Array.isArray(c?.items)) applyChats(c.items, c.inbox ?? []); }
+    } catch { /* ignore a bad cache */ }
+  }, [applyChats]);
+
+  useEffect(() => {
+    deepLink.current = new URLSearchParams(window.location.search).get("lead");
     loadList();
     const id = setInterval(() => { if (pageVisible()) void loadList(); }, 10000);
     return () => clearInterval(id);
   }, [loadList]);
 
-  if (leads === null) return <div className="flex flex-1 items-center justify-center rounded-3xl" style={{ background: WA.panel }}><p className="text-[13px]" style={{ color: WA.sub }}>Loading…</p></div>;
+  // The chat that opens by itself should be a real chat, not a number WhatsApp cannot reach. Only when
+  // nothing was asked for (no ?lead= link) and the open one has no messages and is off WhatsApp.
+  useEffect(() => {
+    if (!leads || !active || new URLSearchParams(window.location.search).get("lead")) return;
+    if (onWa[active.id] !== false || inbox[active.id]) return;
+    const next = leads.find((l) => !(onWa[l.id] === false && !inbox[l.id]));
+    if (next && next.id !== active.id) setActive(next);
+  }, [leads, active, onWa, inbox]);
 
-  // Filtered + sorted (recent-first) list, with the All/Unread tab and the search box applied.
-  const unreadCount = leads.filter((l) => (inbox[l.id]?.unanswered ?? 0) > 0).length;
+  if (leads === null) return <InboxSkeleton />;
+
+  // A chat that has a message in it plainly works, so only a lead with NO conversation yet and a number
+  // that is not on WhatsApp goes to its own "No WhatsApp" list, away from the real chats.
+  const noWhatsApp = (l: Lead) => onWa[l.id] === false && !inbox[l.id];
+  const chatLeads = leads.filter((l) => !noWhatsApp(l));
+  const noWaLeads = leads.filter(noWhatsApp);
+  const unreadCount = chatLeads.filter((l) => (inbox[l.id]?.unanswered ?? 0) > 0).length;
+  const tabs: [typeof tab, string, number][] = [["all", "All", chatLeads.length], ["unread", "Unread", unreadCount]];
+  if (noWaLeads.length) tabs.push(["nowa", "No WhatsApp", noWaLeads.length]);
   const needle = q.trim().toLowerCase();
-  const visible = leads
+  const pool = tab === "nowa" ? noWaLeads : chatLeads;
+  const visible = pool
     .filter((l) => (tab === "unread" ? (inbox[l.id]?.unanswered ?? 0) > 0 : true))
     .filter((l) => !needle || [l.company, l.name, l.whatsapp, l.phone, inbox[l.id]?.body].some((v) => String(v ?? "").toLowerCase().includes(needle)))
     .sort((a, b) => {
@@ -678,7 +747,7 @@ function Inbox({ search, setSearch }: { search: string; setSearch: (v: string) =
           </div>
           {/* All / Unread tabs */}
           <div className="flex items-center gap-4 px-4 pt-2 text-[13px] font-semibold">
-            {([["all", "All", leads.length], ["unread", "Unread", unreadCount]] as const).map(([k, label, n]) => (
+            {tabs.map(([k, label, n]) => (
               <button key={k} onClick={() => setTab(k)} className="flex items-center gap-1.5 pb-2" style={{ color: tab === k ? WA.green : WA.sub, borderBottom: `2px solid ${tab === k ? WA.green : "transparent"}` }}>
                 {label}
                 <span className="rounded-full px-1.5 text-[11px] font-bold" style={{ background: tab === k ? WA.green : WA.divider, color: tab === k ? "#fff" : WA.sub }}>{n}</span>
@@ -693,8 +762,13 @@ function Inbox({ search, setSearch }: { search: string; setSearch: (v: string) =
             </div>
           </div>
           <div className="wa-scroll flex-1 overflow-y-auto" style={{ borderTop: `1px solid ${WA.divider}` }}>
+            {tab === "nowa" && (
+              <p className="px-4 py-3 text-[12px] leading-snug" style={{ color: WA.sub, background: WA.listHover, borderBottom: `1px solid ${WA.divider}` }}>
+                These numbers are not on WhatsApp (landlines, toll-free lines), so no message can reach them. Contact them by phone or email instead.
+              </p>
+            )}
             {visible.length === 0 ? (
-              <div className="p-5"><p className="text-[13px]" style={{ color: WA.sub }}>{tab === "unread" ? "No unread chats." : q ? "No chats match your search." : "No chats yet. Approve a lead and send the first message, or start a New chat."}</p></div>
+              <div className="p-5"><p className="text-[13px]" style={{ color: WA.sub }}>{tab === "unread" ? "No unread chats." : tab === "nowa" ? "Every lead here is reachable on WhatsApp." : q ? "No chats match your search." : "No chats yet. Approve a lead and send the first message, or start a New chat."}</p></div>
             ) : visible.map((l) => {
               const last = inbox[l.id];
               const on = active?.id === l.id;
@@ -713,11 +787,11 @@ function Inbox({ search, setSearch }: { search: string; setSearch: (v: string) =
                       <span className="truncate text-[14px]" style={{ color: WA.text, fontWeight: unread ? 700 : 600 }}>{l.company || l.name || "Lead"}</span>
                       {l.needs_attention && <span title={l.needs_attention_reason ?? "Needs your attention"} className="flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9.5px] font-bold" style={{ background: "#fef3c7", color: "#92400e" }}>⚠ Needs you</span>}
                       {wa === true && <span className="flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9.5px] font-bold" style={{ background: "#e7f6ec", color: "#067647" }}>✓ On WhatsApp</span>}
-                      {wa === false && <span className="flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9.5px] font-bold" style={{ background: "#fdeaea", color: "#b42318" }}>Not on WA</span>}
+                      {wa === false && tab !== "nowa" && <span className="flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9.5px] font-bold" style={{ background: "#fdeaea", color: "#b42318" }}>Not on WA</span>}
                     </span>
                     <span className="flex items-center gap-1 truncate text-[12.5px]" style={{ color: unread ? WA.text : WA.sub }}>
                       {last?.direction === "out" && last.status && <Ticks status={last.status} />}
-                      <span className="truncate" style={{ fontWeight: unread ? 600 : 400 }}>{last ? last.body : "Tap to open"}</span>
+                      <span className="truncate" style={{ fontWeight: unread ? 600 : 400 }}>{last ? last.body : tab === "nowa" ? (l.phone || "No WhatsApp") : "Tap to open"}</span>
                     </span>
                   </span>
                   {unread > 0 && (
@@ -732,7 +806,7 @@ function Inbox({ search, setSearch }: { search: string; setSearch: (v: string) =
         {/* chat pane — full width on mobile when a chat is open */}
         <div className={`${active ? "flex" : "hidden md:flex"} h-full min-h-0 flex-col`} style={{ background: WA.chatBg }}>
           {active ? (
-            <Chat lead={active} onSent={loadList} onBack={() => setActive(null)} onDeleted={() => { setActive(null); loadList(); }} toast={toast} />
+            <Chat lead={active} online={online} onSent={loadList} onBack={() => setActive(null)} onDeleted={() => { setActive(null); loadList(); }} toast={toast} />
           ) : (
             <div className="flex h-full items-center justify-center"><p className="text-[13px]" style={{ color: WA.sub }}>Select a chat</p></div>
           )}
@@ -756,7 +830,7 @@ function Inbox({ search, setSearch }: { search: string; setSearch: (v: string) =
   );
 }
 
-function Chat({ lead, onSent, onBack, onDeleted, toast }: { lead: Lead; onSent: () => void; onBack: () => void; onDeleted: () => void; toast: (m: string, t?: "error") => void }) {
+function Chat({ lead, online, onSent, onBack, onDeleted, toast }: { lead: Lead; online: boolean; onSent: () => void; onBack: () => void; onDeleted: () => void; toast: (m: string, t?: "error") => void }) {
   const [thread, setThread] = useState<Msg[] | null>(null);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -888,6 +962,7 @@ function Chat({ lead, onSent, onBack, onDeleted, toast }: { lead: Lead; onSent: 
     const body = text.trim();
     if (!body) return;
     if (!phone) { toast("This lead has no phone number.", "error"); return; }
+    if (!online) { toast("WhatsApp is reconnecting. Try again in a few seconds; no need to scan.", "error"); return; }
     // Optimistic: show the message the instant Send is pressed (like WhatsApp), clock-ticking,
     // and send in the background. The server round-trip no longer blocks the bubble from showing.
     const tmpId = `tmp-${Date.now()}`;
@@ -1099,8 +1174,16 @@ function srcLabel(s: string | null | undefined): string | null {
   return ({ serper: "Google Maps", osm: "OpenStreetMap", places: "Google Places", jobs: "Job board", manual: "Manual", apollo: "Apollo" } as Record<string, string>)[s] ?? s;
 }
 
-function LeadDetailsDrawer({ lead, onWa, dp, onClose, onDeleted, toast }: { lead: Lead; onWa: boolean | null; dp: string | null; onClose: () => void; onDeleted: () => void; toast: (m: string, t?: "error") => void }) {
+function LeadDetailsDrawer({ lead: leadRow, onWa, dp, onClose, onDeleted, toast }: { lead: Lead; onWa: boolean | null; dp: string | null; onClose: () => void; onDeleted: () => void; toast: (m: string, t?: "error") => void }) {
   const [deleting, setDeleting] = useState(false);
+  // The chat list carries only the columns a list needs; the evidence, score breakdown and notes load now.
+  const [more, setMore] = useState<Partial<Lead>>({});
+  useEffect(() => {
+    let live = true;
+    fetch(`/api/leads/${leadRow.id}`).then((r) => r.json()).then((r) => { if (live && r?.ok && r.detail) setMore(r.detail); }).catch(() => {});
+    return () => { live = false; };
+  }, [leadRow.id]);
+  const lead: Lead = { ...leadRow, ...more };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);

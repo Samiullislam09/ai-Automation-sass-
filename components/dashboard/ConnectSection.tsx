@@ -327,7 +327,7 @@ export default function ConnectSection() {
 
   const liveModalItem = modalCard ? found(modalCard.type) : null;
 
-  const waState: "connected" | "pairing" | "off" = waStatus === "connected" ? "connected" : waStatus === "pairing" ? "pairing" : "off";
+  const waState: "connected" | "pairing" | "off" = waStatus === "connected" || waStatus === "reconnecting" ? "connected" : waStatus === "pairing" ? "pairing" : "off";
   const showWa = tab === "all" || tab === "messaging";
 
   return (
