@@ -24,20 +24,39 @@ test("reconnectDelayMs: slower each time, capped, and a long wait when another p
 });
 
 // ── the connection lease: one process at a time ────────────────────────────────────────────
-const { leaseVerdict, INSTANCE_ID } = await import("./session.js");
+const { leaseDecision, shouldYield, whatsappHostEnabled, INSTANCE_ID } = await import("./session.js");
 const { isSecretSessionLog } = await import("../quietLogs.js");
 
-test("leaseVerdict: free or stale -> take, mine -> mine, another LIVE process -> busy (wait, do not fight)", () => {
+test("leaseDecision: free or gone -> take, mine -> mine, a live OLDER holder -> request a handover, a live NEWER one -> wait", () => {
   const NOW = Date.UTC(2026, 10, 11, 12, 0, 0);
   const ago = (s: number) => new Date(NOW - s * 1000).toISOString();
-  assert.equal(leaseVerdict(null, "me", NOW), "take", "no row yet");
-  assert.equal(leaseVerdict({ owner: null, owner_seen_at: null }, "me", NOW), "take", "nobody holds it");
-  assert.equal(leaseVerdict({ owner: "me", owner_seen_at: ago(5) }, "me", NOW), "mine");
-  assert.equal(leaseVerdict({ owner: "old-deploy", owner_seen_at: ago(20) }, "me", NOW), "busy", "renewed 20s ago: it is alive");
-  assert.equal(leaseVerdict({ owner: "old-deploy", owner_seen_at: ago(119) }, "me", NOW), "busy");
-  assert.equal(leaseVerdict({ owner: "old-deploy", owner_seen_at: ago(121) }, "me", NOW), "take", "stopped renewing: it is gone");
-  assert.equal(leaseVerdict({ owner: "old-deploy", owner_seen_at: null }, "me", NOW), "take", "never renewed");
+  const T0 = NOW - 3600_000; // this process started an hour ago
+  const older = ago(7200), newer = ago(60);
+  assert.equal(leaseDecision(null, "me", T0, NOW), "take", "no row yet");
+  assert.equal(leaseDecision({ owner: null, owner_seen_at: null }, "me", T0, NOW), "take", "nobody holds it");
+  assert.equal(leaseDecision({ owner: "me", owner_seen_at: ago(5) }, "me", T0, NOW), "mine");
+  assert.equal(leaseDecision({ owner: "old", owner_seen_at: ago(20), owner_started_at: older }, "me", T0, NOW), "request", "the holder is older: ask it to step aside");
+  assert.equal(leaseDecision({ owner: "newer", owner_seen_at: ago(20), owner_started_at: newer }, "me", T0, NOW), "wait", "an older process never takes a login from a newer one");
+  assert.equal(leaseDecision({ owner: "old", owner_seen_at: ago(59), owner_started_at: older }, "me", T0, NOW), "request");
+  assert.equal(leaseDecision({ owner: "old", owner_seen_at: ago(61), owner_started_at: older }, "me", T0, NOW), "take", "stopped renewing: it is gone");
+  assert.equal(leaseDecision({ owner: "old", owner_seen_at: null }, "me", T0, NOW), "take", "never renewed");
+  assert.equal(leaseDecision({ owner: "unknown-age", owner_seen_at: ago(5) }, "me", T0, NOW), "request", "an old build that wrote no start time counts as oldest");
   assert.ok(INSTANCE_ID.length > 8);
+});
+
+test("shouldYield: the holder hands over only when ANOTHER process asked", () => {
+  assert.equal(shouldYield({ takeover_by: "newer" }, "me"), true);
+  assert.equal(shouldYield({ takeover_by: "me" }, "me"), false);
+  assert.equal(shouldYield({ takeover_by: null }, "me"), false);
+  assert.equal(shouldYield(null, "me"), false);
+});
+
+test("whatsappHostEnabled: a developer's Windows/macOS machine never takes the production login", () => {
+  assert.equal(whatsappHostEnabled({}, "linux"), true, "a Linux container (Railway) takes part by default");
+  assert.equal(whatsappHostEnabled({}, "win32"), false, "a Windows PC does not");
+  assert.equal(whatsappHostEnabled({}, "darwin"), false, "nor a Mac");
+  assert.equal(whatsappHostEnabled({ WHATSAPP_ENABLED: "1" }, "win32"), true, "unless asked to");
+  assert.equal(whatsappHostEnabled({ WHATSAPP_ENABLED: "0" }, "linux"), false, "or switched off");
 });
 
 test("secret session dumps from libsignal are recognised so they never reach the logs", () => {

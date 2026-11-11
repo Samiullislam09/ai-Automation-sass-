@@ -83,6 +83,8 @@ export type OverviewInput = {
   settings: WhatsappSettings;
   /** Live connection state: connected | reconnecting | pairing | disconnected | logged_out | banned. */
   connection: string;
+  /** Who holds the WhatsApp login when it is not this server, for the page to name. */
+  holder?: { info: string; seenSecondsAgo: number } | null;
   firstConnectedAtMs: number | null;
   dailyCount: number;
   messages: MsgRow[];          // newest first, at least the last 24h
@@ -112,7 +114,7 @@ export function buildOverview(inp: OverviewInput): Overview {
 
   // ── overall state: the one sentence that answers "is the AI working, and if not, why" ──
   let state: Overview["state"];
-  if (inp.connection === "in_use_elsewhere") state = { code: "in_use_elsewhere", label: "WhatsApp is open somewhere else", detail: "Another copy of the server is using this WhatsApp login, and WhatsApp allows only one. This one waits instead of fighting, and takes over as soon as the other stops.", sending: false };
+  if (inp.connection === "in_use_elsewhere") state = { code: "in_use_elsewhere", label: "WhatsApp is open somewhere else", detail: `Another copy of the server is using this WhatsApp login, and WhatsApp allows only one. ${inp.holder ? `It is held by ${inp.holder.info}, last seen ${inp.holder.seenSecondsAgo}s ago. ` : ""}This one waits instead of fighting, and takes over as soon as the other stops.`, sending: false };
   else if (inp.connection === "reconnecting") state = { code: "reconnecting", label: "Reconnecting", detail: "WhatsApp is coming back online. Nothing is lost and no scan is needed.", sending: false };
   else if (!online) state = { code: "not_connected", label: "WhatsApp is not connected", detail: "The AI cannot send until WhatsApp is linked.", sending: false };
   else if (!s.auto_reply) state = { code: "auto_off", label: "Auto replies are OFF", detail: "The AI will not send anything on its own. Turn Auto replies on to start.", sending: false };
@@ -306,8 +308,12 @@ export async function loadOverview(tenantId: string, nowMs = Date.now()): Promis
     const { data: dr } = await supabase.from("leads").select("id, draft").eq("tenant_id", tenantId).in("id", front);
     for (const d of (dr ?? []) as { id: string; draft: string | null }[]) if (d.draft) drafts[d.id] = d.draft;
   }
+  const sr = (sess ?? {}) as { owner?: string | null; owner_seen_at?: string | null; owner_info?: string | null };
+  const holder = connection === "in_use_elsewhere" && sr.owner
+    ? { info: sr.owner_info || sr.owner, seenSecondsAgo: sr.owner_seen_at ? Math.max(0, Math.round((nowMs - Date.parse(sr.owner_seen_at)) / 1000)) : 0 }
+    : null;
   return buildOverview({
-    nowMs, settings, connection, dailyCount, drafts,
+    nowMs, settings, connection, holder, dailyCount, drafts,
     firstConnectedAtMs: (sess as any)?.first_connected_at ? Date.parse((sess as any).first_connected_at) : null,
     messages, leads, queue: queueRows,
   });

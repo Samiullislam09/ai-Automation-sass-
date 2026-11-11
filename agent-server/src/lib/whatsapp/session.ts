@@ -20,6 +20,7 @@
  *  process, the same way socket.ts holds its io server). Auth persists in Supabase
  *  (authStore.ts), so a redeploy reconnects without a re-scan. */
 import { makeWASocket, DisconnectReason, Browsers } from "@whiskeysockets/baileys";
+import os from "node:os";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { useSupabaseAuthState, clearAuthState } from "./authStore.js";
 import { linkIncoming, recordSentStatus } from "./store.js";
@@ -43,19 +44,45 @@ const sessions = new Map<string, Session>();
 /** One id per running process: the Railway deployment (so an old deploy and a new one differ) plus the pid and a
  *  random part (so two copies on one machine differ). */
 export const INSTANCE_ID = `${process.env.RAILWAY_DEPLOYMENT_ID || process.env.RAILWAY_REPLICA_ID || "local"}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
-const LEASE_STALE_MS = 2 * 60_000;
-const LEASE_RENEW_MS = 30_000;
+/** When this process started. The newest process wins a handover. */
+export const PROCESS_STARTED_AT = Date.now();
+/** Who this process is, in words. "linux" with a short random host is a container (Railway); "win32" is a Windows PC. */
+export const INSTANCE_INFO = `${process.platform} / ${os.hostname()} / pid ${process.pid}${process.env.RAILWAY_DEPLOYMENT_ID ? ` / deploy ${process.env.RAILWAY_DEPLOYMENT_ID.slice(0, 8)}` : ""}`;
+
+const LEASE_STALE_MS = 60_000;   // a holder that has not renewed for this long is gone
+const LEASE_RENEW_MS = 15_000;   // how often the holder renews, and so how fast it notices a handover request
+const WAIT_RETRY_MS = 10_000;    // how often a waiting process looks again
+
+/** May THIS process hold WhatsApp at all? A copy running on a developer's computer (Windows or macOS) must never
+ *  touch the production login: it would take the connection from the real server every time it starts. Only a
+ *  Linux host (a container) takes part by default; set WHATSAPP_ENABLED=1 to force it on anywhere, 0 to force it off. */
+export function whatsappHostEnabled(env: Record<string, string | undefined> = process.env, platform: string = process.platform): boolean {
+  if (env.WHATSAPP_ENABLED === "1") return true;
+  if (env.WHATSAPP_ENABLED === "0") return false;
+  return platform === "linux";
+}
+
+export type LeaseRow = { owner?: string | null; owner_seen_at?: string | null; owner_started_at?: string | null; takeover_by?: string | null };
 
 /** Who may hold the WhatsApp connection? Pure.
- *   take   nobody holds it, or the holder stopped renewing (it is gone): this process may.
- *   mine   this process already holds it.
- *   busy   ANOTHER live process holds it: this one must wait, not fight. */
-export function leaseVerdict(row: { owner?: string | null; owner_seen_at?: string | null } | null, me: string, nowMs: number): "take" | "mine" | "busy" {
+ *   take     nobody holds it, or the holder stopped renewing (it is gone): this process may.
+ *   mine     this process already holds it.
+ *   request  ANOTHER live process holds it, but this one is NEWER: ask it to step aside, and wait.
+ *   wait     ANOTHER live process holds it and is newer (or the same age): wait, never fight. */
+export function leaseDecision(row: LeaseRow | null, me: string, myStartedAt: number, nowMs: number): "take" | "mine" | "request" | "wait" {
   const owner = row?.owner ?? null;
   if (!owner) return "take";
   if (owner === me) return "mine";
   const seen = row?.owner_seen_at ? Date.parse(row.owner_seen_at) : 0;
-  return nowMs - seen > LEASE_STALE_MS ? "take" : "busy";
+  if (nowMs - seen > LEASE_STALE_MS) return "take";
+  const ownerStart = row?.owner_started_at ? Date.parse(row.owner_started_at) : 0;
+  return myStartedAt > ownerStart ? "request" : "wait";
+}
+
+/** The holder, on a renewal: should it yield to someone who asked? Pure. Only a request from a NEWER process counts. */
+export function shouldYield(row: { takeover_by?: string | null } | null, me: string): boolean {
+  const by = row?.takeover_by ?? null;
+  return !!by && by !== me;
 }
 
 /** Tenants whose connection is held by ANOTHER process right now (so the page can say so instead of "reconnecting"). */
@@ -66,31 +93,46 @@ export function inUseElsewhere(tenantId: string): boolean {
   if (Date.now() > h.until) { heldElsewhere.delete(tenantId); return false; }
   return true;
 }
-let leaseColumnsMissing = false;
+let leaseColumnsMissing = false;   // migration 039 not applied
+let handoverColumnsMissing = false; // migration 041 not applied
+
+const baseLease = () => ({ owner: INSTANCE_ID, owner_seen_at: new Date().toISOString() });
+const fullLease = () => ({ ...baseLease(), ...(handoverColumnsMissing ? {} : { owner_started_at: new Date(PROCESS_STARTED_AT).toISOString(), takeover_by: null, owner_info: INSTANCE_INFO }) });
 
 async function claimLease(supabase: SupabaseClient, tenantId: string): Promise<boolean> {
   if (leaseColumnsMissing) return true; // migration 039 not applied: no lease, fall back to backing off on 440
-  const { data, error } = await supabase.from("whatsapp_sessions").select("owner, owner_seen_at").eq("tenant_id", tenantId).maybeSingle();
-  if (error) {
-    if (/owner|column .* does not exist/i.test(error.message)) { leaseColumnsMissing = true; console.warn("[whatsapp] migration 039 (connection lease) is not applied: running without it"); return true; }
-    return true; // a read hiccup must not stop a connection
+  let sel = await supabase.from("whatsapp_sessions").select("*").eq("tenant_id", tenantId).maybeSingle();
+  if (sel.error) return true; // a read hiccup must not stop a connection
+  const row = sel.data as (LeaseRow & Record<string, unknown>) | null;
+  if (row && !("owner" in row)) { leaseColumnsMissing = true; console.warn("[whatsapp] migration 039 (connection lease) is not applied: running without it"); return true; }
+  if (row && !("takeover_by" in row)) handoverColumnsMissing = true;
+
+  const decision = leaseDecision(row, INSTANCE_ID, PROCESS_STARTED_AT, Date.now());
+  if (decision === "wait" || decision === "request") {
+    heldElsewhere.set(tenantId, { until: Date.now() + 30_000 });
+    if (decision === "request" && !handoverColumnsMissing && row?.takeover_by !== INSTANCE_ID) {
+      // This process is newer: ask the holder to hand over. It sees the request on its next renewal (within 15 s).
+      await supabase.from("whatsapp_sessions").update({ takeover_by: INSTANCE_ID }).eq("tenant_id", tenantId).eq("owner", row!.owner as string);
+      console.warn(`[whatsapp] ${tenantId}: asked the current holder (${row?.owner_info ?? row?.owner}) to hand over the login to this newer process`);
+    }
+    return false;
   }
-  const verdict = leaseVerdict(data as any, INSTANCE_ID, Date.now());
-  if (verdict === "busy") { heldElsewhere.set(tenantId, { until: Date.now() + 60_000 }); return false; }
   heldElsewhere.delete(tenantId);
-  const now = new Date().toISOString();
-  // Take it only if it is still free (or already ours): the update is the lock, a racing process loses cleanly.
+
+  // Take it only if it is still free, stale or already ours: the update is the lock, a racing process loses cleanly.
   const stale = new Date(Date.now() - LEASE_STALE_MS).toISOString();
-  const upd = await supabase.from("whatsapp_sessions").update({ owner: INSTANCE_ID, owner_seen_at: now })
+  const upd = await supabase.from("whatsapp_sessions").update(fullLease())
     .eq("tenant_id", tenantId).or(`owner.is.null,owner.eq.${INSTANCE_ID},owner_seen_at.lt.${stale}`).select("tenant_id");
   if (upd.error) return true;
   if ((upd.data ?? []).length === 0) {
-    // No row yet (first ever connect): create it with us as the owner.
-    const ins = await supabase.from("whatsapp_sessions").upsert({ tenant_id: tenantId, owner: INSTANCE_ID, owner_seen_at: now, updated_at: now }, { onConflict: "tenant_id", ignoreDuplicates: true }).select("tenant_id");
+    if (!row) {
+      // No row yet (first ever connect): create it with us as the owner.
+      await supabase.from("whatsapp_sessions").upsert({ tenant_id: tenantId, ...fullLease(), updated_at: new Date().toISOString() }, { onConflict: "tenant_id", ignoreDuplicates: true });
+    }
     const again = await supabase.from("whatsapp_sessions").select("owner").eq("tenant_id", tenantId).maybeSingle();
-    if ((again.data as any)?.owner && (again.data as any).owner !== INSTANCE_ID) { heldElsewhere.set(tenantId, { until: Date.now() + 60_000 }); return false; }
-    void ins;
+    if ((again.data as any)?.owner && (again.data as any).owner !== INSTANCE_ID) { heldElsewhere.set(tenantId, { until: Date.now() + 30_000 }); return false; }
   }
+  console.log(`[whatsapp] ${tenantId}: this process holds the login (${INSTANCE_INFO})`);
   return true;
 }
 
@@ -100,14 +142,23 @@ function startLeaseHeartbeat(supabase: SupabaseClient): void {
   leaseTimer = setInterval(async () => {
     for (const [tenantId, s] of Array.from(sessions.entries())) {
       if (s.starting || (s.status !== "connected" && s.status !== "reconnecting")) continue;
-      const r = await supabase.from("whatsapp_sessions").update({ owner_seen_at: new Date().toISOString() }).eq("tenant_id", tenantId).eq("owner", INSTANCE_ID).select("tenant_id");
+      const cols = handoverColumnsMissing ? "tenant_id" : "tenant_id, takeover_by";
+      const r = await supabase.from("whatsapp_sessions").update({ owner_seen_at: new Date().toISOString() }).eq("tenant_id", tenantId).eq("owner", INSTANCE_ID).select(cols);
       if (r.error) continue;
-      if ((r.data ?? []).length === 0) {
-        // Another process took the lease: stop using the socket so we do not fight for it.
+      const got = (r.data ?? []) as unknown as { takeover_by?: string | null }[];
+      if (got.length === 0) {
+        // The lease is no longer ours (someone took it): stop using the socket so we do not fight for it.
         console.error(`[whatsapp] ${tenantId}: another process now holds this login; this one steps aside`);
-        heldElsewhere.set(tenantId, { until: Date.now() + 60_000 });
+        heldElsewhere.set(tenantId, { until: Date.now() + 30_000 });
         sessions.delete(tenantId);
         try { (s.sock as any)?.end?.(undefined); } catch { /* already closed */ }
+      } else if (shouldYield(got[0], INSTANCE_ID)) {
+        // A NEWER process asked for the login (a new deploy): hand it over now, so it does not have to wait for us to die.
+        console.warn(`[whatsapp] ${tenantId}: a newer process (${got[0].takeover_by}) asked for this login; handing it over`);
+        heldElsewhere.set(tenantId, { until: Date.now() + 30_000 });
+        sessions.delete(tenantId);
+        try { (s.sock as any)?.end?.(undefined); } catch { /* already closed */ }
+        await supabase.from("whatsapp_sessions").update({ owner: null, owner_seen_at: null, owner_started_at: null, owner_info: null }).eq("tenant_id", tenantId).eq("owner", INSTANCE_ID);
       }
     }
   }, LEASE_RENEW_MS);
@@ -121,7 +172,7 @@ export async function releaseAllLeases(supabase: SupabaseClient): Promise<void> 
   for (const tenantId of ids) {
     try { (sessions.get(tenantId)?.sock as any)?.end?.(undefined); } catch { /* ignore */ }
     sessions.delete(tenantId);
-    await supabase.from("whatsapp_sessions").update({ owner: null, owner_seen_at: null }).eq("tenant_id", tenantId).eq("owner", INSTANCE_ID).then(() => {}, () => {});
+    await supabase.from("whatsapp_sessions").update({ owner: null, owner_seen_at: null, ...(handoverColumnsMissing ? {} : { owner_started_at: null, owner_info: null }) }).eq("tenant_id", tenantId).eq("owner", INSTANCE_ID).then(() => {}, () => {});
   }
 }
 
@@ -149,6 +200,7 @@ export function reconnectDelayMs(attempt: number, replaced: boolean): number {
 const retry = new Map<string, { attempt: number; notBefore: number }>();
 
 const healReported = new Set<string>();
+let hostOffNoted = false;
 
 /** Can this process send for the tenant RIGHT NOW? The live socket answers that, not the database row: the row
  *  is only a record of it and can be wrong (an old, late "close" event used to write "disconnected" after the
@@ -204,6 +256,10 @@ export async function connect(
   onUpdate?: (s: { status: string; qr: string | null; phone: string | null }) => void,
   force = false
 ): Promise<void> {
+  if (!whatsappHostEnabled()) {
+    if (!hostOffNoted) { hostOffNoted = true; console.warn(`[whatsapp] this process (${INSTANCE_INFO}) does not hold WhatsApp logins: only a Linux server does by default, so a copy on a developer machine cannot take the production connection. Set WHATSAPP_ENABLED=1 to turn it on here.`); }
+    return;
+  }
   const existing = sessions.get(tenantId);
   // A socket that is connected, still coming back, or waiting for a QR is ALIVE: a second one on the same login
   // would knock it off (WhatsApp allows one). Likewise while a reconnect is backing off.
@@ -224,8 +280,8 @@ export async function connect(
     if (!(await claimLease(supabase, tenantId))) {
       sessions.delete(tenantId);
       console.warn(`[whatsapp] ${tenantId}: another process holds this login (lease); ${INSTANCE_ID} waits`);
-      retry.set(tenantId, { attempt: retry.get(tenantId)?.attempt ?? 0, notBefore: Date.now() + 20_000 });
-      setTimeout(() => void connect(supabase, tenantId, onUpdate), 20_000);
+      retry.set(tenantId, { attempt: retry.get(tenantId)?.attempt ?? 0, notBefore: Date.now() + WAIT_RETRY_MS });
+      setTimeout(() => void connect(supabase, tenantId, onUpdate), WAIT_RETRY_MS);
       push();
       return;
     }
