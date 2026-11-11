@@ -9,6 +9,12 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
  *  scheduled next, then the lists: replies (answering soon / held back and why), first messages queued,
  *  follow-ups, skipped. */
 
+export type AgendaItem = {
+  kind: "reply" | "first_message" | "followup" | "resume";
+  at: string; lead_id?: string; lead?: string; title: string; detail: string;
+  message?: { state: "ready" | "ai"; text: string };
+};
+
 export type Overview = {
   generated_at: string;
   state: { code: string; label: string; detail: string; resumes_at?: string; sending: boolean };
@@ -18,6 +24,8 @@ export type Overview = {
   next: { kind: "reply" | "first_message" | "followup"; lead: string; at: string } | null;
   replies: { lead_id: string; name: string; phone: string | null; since: string; state: "queued" | "held" | "reviewed"; due_by?: string; reason: string }[];
   first_messages: { lead_id: string; name: string; at: string }[];
+  agenda: AgendaItem[];
+  agenda_more: number;
   followups: { lead_id: string; name: string; which: number; due_at: string }[];
   skipped: { lead_id: string; name: string; reason: string; at: string }[];
   timeline: { hour: string; ai: number; you: number; received: number }[];
@@ -54,7 +62,7 @@ export default function ActivityPanel({ data, loading, onOpenChat }: { data: Ove
     return (
       <div className="flex-1 overflow-y-auto p-4 sm:p-6" aria-busy={loading}>
         <div className="mx-auto max-w-5xl space-y-4">
-          {[88, 40, 96, 260, 220].map((h, i) => <div key={i} className="rounded-xl" style={{ height: h, background: C.soft }} />)}
+          {[88, 96, 340, 260].map((h, i) => <div key={i} className="rounded-xl" style={{ height: h, background: C.soft }} />)}
         </div>
       </div>
     );
@@ -64,10 +72,11 @@ export default function ActivityPanel({ data, loading, onOpenChat }: { data: Ove
   const p = data.plan;
   const warm = p.number_age_days != null && p.number_age_days < 7 ? ` New number, day ${p.number_age_days + 1}: the limit rises each day.` : "";
   const paused = !data.state.sending;
+  const needYou = data.replies.filter((r) => r.state !== "queued");
 
   return (
     <div className="wa-scroll min-h-0 flex-1 overflow-y-auto p-3 sm:p-6" style={{ background: "#fff", color: C.ink }}>
-      <div className="mx-auto max-w-5xl space-y-4 sm:space-y-5">
+      <div className="mx-auto max-w-5xl space-y-4 sm:space-y-6">
         {/* 1 · is it working */}
         <section className="rounded-xl p-4" style={{ background: tone.bg }} role="status">
           <div className="flex items-center gap-2.5">
@@ -75,36 +84,41 @@ export default function ActivityPanel({ data, loading, onOpenChat }: { data: Ove
             <h2 className="text-[15px] font-semibold" style={{ color: tone.fg }}>{data.state.label}</h2>
           </div>
           <p className="mt-1 text-[13px] leading-relaxed" style={{ color: tone.fg }}>{data.state.detail}</p>
-          {data.next && !paused && (
-            <p className="mt-2 border-t pt-2 text-[13px]" style={{ color: tone.fg, borderColor: "rgba(0,0,0,.08)" }}>
-              <span className="opacity-80">Next:</span> {KIND[data.next.kind]} to <b>{data.next.lead}</b>{" "}
-              <span className="tabular-nums">{clock(data.next.at)} · {rel(data.next.at, now)}</span>
-            </p>
-          )}
         </section>
 
-        {/* 2 · the rules in force */}
-        <p className="text-[12.5px] leading-relaxed" style={{ color: C.sub }}>
-          Sends between <b style={{ color: C.ink }}>{hh(p.window_start)}</b> and <b style={{ color: C.ink }}>{hh(p.window_end)}</b> (UTC{p.tz_offset >= 0 ? "+" : ""}{p.tz_offset})
-          {p.first_messages_enabled ? <>, one first message every <b style={{ color: C.ink }}>{p.gap_min} to {p.gap_max} min</b></> : ", first messages off"}
-          , at most <b style={{ color: C.ink }}>{data.today.cap}</b> messages per 24 h.{p.followups_enabled ? " Follow-ups at 24 h, 90 h and 160 h." : ""}{warm}
-        </p>
-
-        {/* 3 · the numbers */}
-        <section className="grid grid-cols-2 gap-px overflow-hidden rounded-xl sm:grid-cols-5" style={{ background: C.line, border: `1px solid ${C.line}` }}>
+        {/* 2 · the numbers */}
+        <section className="grid grid-cols-2 gap-px overflow-hidden rounded-xl sm:grid-cols-4" style={{ background: C.line, border: `1px solid ${C.line}` }}>
           <Stat label="Sent, last 24 h" value={`${data.today.sent}`} sub={`of ${data.today.cap} allowed`}>
             <div className="mt-2 h-1.5 overflow-hidden rounded-full" style={{ background: C.line }}><div className="h-full rounded-full" style={{ width: `${used}%`, background: used >= 90 ? "#f5a623" : C.green }} /></div>
           </Stat>
-          <Stat label="Replies waiting" value={`${data.counts.replies_waiting}`} sub="AI will answer" />
-          <Stat label="Held back" value={`${data.counts.held}`} sub="AI will not answer" warn={data.counts.held > 0} />
-          <Stat label="First messages queued" value={`${data.counts.first_messages_queued}`} sub={paused ? "paused" : "waiting their turn"} />
-          <Stat className="col-span-2 sm:col-span-1" label="Follow-ups, next 24 h" value={`${data.counts.followups_due_24h}`} sub="gentle nudges" />
+          <Stat label="Replies to answer" value={`${data.counts.replies_waiting}`} sub="the AI is on it" />
+          <Stat label="First messages waiting" value={`${data.counts.first_messages_queued}`} sub={paused ? "paused" : "in line"} />
+          <Stat label="Needs you" value={`${data.counts.held}`} sub="the AI will not answer" warn={data.counts.held > 0} />
         </section>
 
-        {/* 4 · past and next, one chart */}
+        {/* 3 · what happens next */}
+        <section>
+          <div className="mb-3">
+            <h3 className="text-[15px] font-semibold">What happens next</h3>
+            <p className="mt-0.5 text-[12.5px]" style={{ color: C.sub }}>In the order it will happen. Each message goes out one at a time, with a gap, inside sending hours.</p>
+          </div>
+          <Agenda items={data.agenda} more={data.agenda_more} now={now} paused={paused} waiting={data.counts.first_messages_queued} onOpenChat={onOpenChat} />
+        </section>
+
+        {/* 4 · people the AI will not answer on its own */}
+        {needYou.length > 0 && (
+          <List title="Needs your attention" hint="The AI will not answer these on its own" empty="" rows={needYou.length}>
+            {needYou.map((r) => {
+              const chip = r.state === "held" ? { t: "Held back", bg: C.amberSoft, fg: C.amberText } : { t: "No reply sent", bg: C.soft, fg: C.sub };
+              return <Row key={r.lead_id} onClick={() => onOpenChat(r.lead_id)} name={r.name} sub={r.reason} chip={chip} right={`wrote ${rel(r.since, now)}`} />;
+            })}
+          </List>
+        )}
+
+        {/* 5 · past and next, one chart */}
         <section>
           <div className="mb-2 flex flex-wrap items-end justify-between gap-x-4 gap-y-1">
-            <h3 className="text-[14px] font-semibold">Messages per hour</h3>
+            <h3 className="text-[15px] font-semibold">Messages per hour</h3>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px]" style={{ color: C.sub }}>
               <Key color={C.green} label="Sent by the AI" /><Key color={C.slate} label="Sent by you" /><Key color={C.blue} label="Received" /><Key color={C.amber} label="Scheduled next" dashed />
             </div>
@@ -112,38 +126,99 @@ export default function ActivityPanel({ data, loading, onOpenChat }: { data: Ove
           <Chart timeline={data.timeline} upcoming={data.upcoming} paused={paused} />
         </section>
 
-        {/* 5 · replies */}
-        <List title="Replies" hint="People who wrote to you" empty="Nobody is waiting for an answer." rows={data.replies.length}>
-          {data.replies.map((r) => {
-            const chip = r.state === "queued" ? { t: "AI answering", bg: C.greenSoft, fg: C.greenText } : r.state === "held" ? { t: "Held back", bg: C.amberSoft, fg: C.amberText } : { t: "No reply sent", bg: C.soft, fg: C.sub };
-            return (
-              <Row key={r.lead_id} onClick={() => onOpenChat(r.lead_id)} name={r.name} sub={r.reason} chip={chip}
-                right={r.state === "queued" && r.due_by ? `answers ${rel(r.due_by, now)}` : `wrote ${rel(r.since, now)}`} />
-            );
-          })}
-        </List>
-
-        <div className="grid gap-4 sm:gap-5 lg:grid-cols-2">
-          <List title="First messages queue" hint="One at a time, spread out, inside sending hours" empty="No first messages are waiting." rows={data.first_messages.length} more={Math.max(0, data.counts.first_messages_queued - data.first_messages.length)}>
-            {data.first_messages.map((f, i) => (
-              <Row key={f.lead_id} onClick={() => onOpenChat(f.lead_id)} name={f.name} sub={`#${i + 1} in line`} right={paused ? "paused" : `${clock(f.at)} · ${rel(f.at, now)}`} />
-            ))}
-          </List>
-          <List title="Follow-ups coming" hint="A gentle nudge to someone who went quiet" empty="No follow-ups are due." rows={data.followups.length}>
-            {data.followups.map((f) => <Row key={f.lead_id} onClick={() => onOpenChat(f.lead_id)} name={f.name} sub={`Nudge ${f.which} of 3`} right={paused ? "paused" : rel(f.due_at, now)} />)}
-          </List>
-        </div>
-
         {data.skipped.length > 0 && (
           <List title="Skipped" hint="First messages not sent, last 24 hours" empty="" rows={data.skipped.length}>
             {data.skipped.map((s) => <Row key={s.lead_id + s.at} onClick={() => onOpenChat(s.lead_id)} name={s.name} sub={s.reason} right={rel(s.at, now)} />)}
           </List>
         )}
-        <p className="pb-2 text-[12px]" style={{ color: C.sub }}>Updated {clock(data.generated_at)}. This page refreshes by itself.</p>
+
+        {/* 6 · the rules in force */}
+        <p className="text-[12.5px] leading-relaxed" style={{ color: C.sub }}>
+          <b style={{ color: C.ink }}>The rules:</b> sends between {hh(p.window_start)} and {hh(p.window_end)} (UTC{p.tz_offset >= 0 ? "+" : ""}{p.tz_offset})
+          {p.first_messages_enabled ? `, one first message every ${p.gap_min} to ${p.gap_max} min` : ", first messages off"}
+          , at most {data.today.cap} messages per 24 h.{p.followups_enabled ? " Follow-ups at 24 h, 90 h and 160 h if there is no answer." : ""}{warm} Updated {clock(data.generated_at)}; this page refreshes by itself.
+        </p>
       </div>
     </div>
   );
 }
+
+const KIND_STYLE: Record<string, { label: string; dot: string; bg: string; fg: string }> = {
+  first_message: { label: "First message", dot: C.green, bg: C.greenSoft, fg: C.greenText },
+  reply: { label: "Reply", dot: C.blue, bg: "#e6f3fb", fg: "#1b6fa3" },
+  followup: { label: "Follow-up", dot: C.slate, bg: C.soft, fg: C.sub },
+  resume: { label: "", dot: C.amber, bg: C.amberSoft, fg: C.amberText },
+};
+
+/** The timeline: a rail with a dot per event, the time on the left, and for each message what it will say. */
+function Agenda({ items, more, now, paused, waiting, onOpenChat }: { items: AgendaItem[]; more: number; now: number; paused: boolean; waiting: number; onOpenChat: (id: string) => void }) {
+  const [open, setOpen] = useState<Record<number, boolean>>({});
+  if (paused) {
+    return <p className="rounded-xl px-4 py-5 text-[13px]" style={{ background: C.soft, color: C.sub }}>Nothing is scheduled while the AI is paused. {waiting > 0 ? `${waiting} first message${waiting === 1 ? " is" : "s are"} waiting and will be spread out once it starts again.` : ""}</p>;
+  }
+  if (!items.length) return <p className="rounded-xl px-4 py-5 text-[13px]" style={{ background: C.soft, color: C.sub }}>Nothing is waiting to go out right now.</p>;
+  return (
+    <ol className="relative">
+      <li className="relative flex gap-3 pb-4 sm:gap-4">
+        <TimeCol top="Now" sub={clock(new Date(now).toISOString())} strong />
+        <Rail dot={C.ink} first />
+        <span className="pt-0.5 text-[13px]" style={{ color: C.sub }}>Here and now</span>
+      </li>
+      {items.map((it, i) => {
+        const st = KIND_STYLE[it.kind];
+        const isOpen = !!open[i];
+        const last = i === items.length - 1 && more === 0;
+        return (
+          <li key={i} className="relative flex gap-3 pb-4 sm:gap-4">
+            <TimeCol top={clock(it.at)} sub={rel(it.at, now)} />
+            <Rail dot={st.dot} last={last} />
+            {it.kind === "resume" ? (
+              <div className="min-w-0 flex-1 rounded-lg px-3 py-2" style={{ background: st.bg }}>
+                <div className="text-[13px] font-semibold" style={{ color: st.fg }}>{it.title}</div>
+                <div className="text-[12.5px]" style={{ color: st.fg }}>{it.detail}</div>
+              </div>
+            ) : (
+              <div className="min-w-0 flex-1 rounded-xl p-3" style={{ border: `1px solid ${C.line}` }}>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ background: st.bg, color: st.fg }}>{it.kind === "followup" ? it.title : st.label}</span>
+                  <button onClick={() => it.lead_id && onOpenChat(it.lead_id)} className="min-w-0 truncate text-left text-[13.5px] font-semibold hover:underline">{it.lead}</button>
+                </div>
+                {it.message && (
+                  it.message.state === "ready" ? (
+                    <div className="mt-2">
+                      <div className="mb-1 text-[11.5px] font-medium" style={{ color: C.sub }}>This message will be sent</div>
+                      <blockquote className="rounded-lg px-3 py-2 text-[13px] leading-relaxed" style={{ background: "#d9fdd3", color: C.ink }}>
+                        <div className="whitespace-pre-line">{isOpen || it.message.text.length <= 170 ? it.message.text : `${it.message.text.replace(/\s+/g, " ").slice(0, 160).trimEnd()}…`}</div>
+                      </blockquote>
+                      {it.message.text.length > 170 && <button onClick={() => setOpen((o) => ({ ...o, [i]: !o[i] }))} className="mt-1 text-[12px] font-medium" style={{ color: C.green }}>{isOpen ? "Show less" : "Show the full message"}</button>}
+                    </div>
+                  ) : (
+                    <p className="mt-2 rounded-lg px-3 py-2 text-[12.5px] leading-relaxed" style={{ background: C.soft, color: C.sub }}>{it.message.text}</p>
+                  )
+                )}
+              </div>
+            )}
+          </li>
+        );
+      })}
+      {more > 0 && (
+        <li className="relative flex gap-3 sm:gap-4"><TimeCol top="" sub="" /><Rail dot={C.line} last /><span className="pt-0.5 text-[13px]" style={{ color: C.sub }}>and {more} more after these, one at a time</span></li>
+      )}
+    </ol>
+  );
+}
+const TimeCol = ({ top, sub, strong }: { top: string; sub: string; strong?: boolean }) => (
+  <div className="w-[72px] shrink-0 pt-0.5 text-right sm:w-[88px]">
+    <div className={`text-[13px] tabular-nums ${strong ? "font-semibold" : "font-medium"}`}>{top}</div>
+    <div className="text-[11.5px] tabular-nums" style={{ color: C.sub }}>{sub}</div>
+  </div>
+);
+const Rail = ({ dot, first, last }: { dot: string; first?: boolean; last?: boolean }) => (
+  <div className="relative w-3 shrink-0">
+    {!last && <span className="absolute left-1/2 top-3 -bottom-4 w-px -translate-x-1/2" style={{ background: C.line }} />}
+    <span className="absolute left-1/2 top-1.5 h-3 w-3 -translate-x-1/2 rounded-full" style={{ background: first ? "#fff" : dot, border: first ? `3px solid ${dot}` : "2px solid #fff", boxShadow: `0 0 0 1px ${first ? dot : C.line}` }} />
+  </div>
+);
 
 function Stat({ label, value, sub, children, warn, className = "" }: { label: string; value: string; sub: string; children?: ReactNode; warn?: boolean; className?: string }) {
   return (

@@ -156,3 +156,56 @@ test("plan: the rules in force are reported so the page can say them in words", 
   assert.deepEqual([o.plan.window_start, o.plan.window_end, o.plan.gap_min, o.plan.gap_max], [9, 21, 4, 14]);
   assert.equal(o.plan.number_age_days, 30);
 });
+
+test("agenda: stale slots held by a conversation come out one after another, not all at the same minute", () => {
+  const stale = (id: string, days: number) => ({ lead_id: id, scheduled_at: iso(NOW - days * 86_400_000), status: "pending", reason: null });
+  const o = buildOverview(base({
+    messages: [inbound("9", 20 * MIN)],
+    leads: { "9": lead("9"), a: lead("a"), b: lead("b"), c: lead("c") },
+    queue: [stale("a", 26), stale("b", 25), stale("c", 24)],
+  }));
+  const times = o.first_messages.map((f) => Date.parse(f.at));
+  assert.equal(times[0], NOW + 40 * MIN, "the first goes when the hold ends");
+  assert.equal(times[1] - times[0], 4 * MIN, "the next one a minimum gap later");
+  assert.equal(times[2] - times[1], 4 * MIN);
+  const kinds = o.agenda.map((a) => a.kind);
+  assert.equal(kinds[0], "resume", "the hold ending is on the timeline");
+  assert.deepEqual(kinds.slice(1), ["first_message", "first_message", "first_message"]);
+});
+
+test("agenda: says what each message will be, the exact text when it is already written", () => {
+  const good = "Hi, this is Acme.\n\n— Acme\nhttps://acme.ae\nIf you would rather not hear from me, reply with the word STOP and I will not write again.";
+  const o = buildOverview(base({
+    leads: { a: lead("a"), b: lead("b"), f: lead("f", { contacted_at: iso(NOW - 30 * H), auto_followups_done: 0 }) },
+    messages: [outbound("f", 30 * H)],
+    queue: [
+      { lead_id: "a", scheduled_at: iso(NOW + 5 * MIN), status: "pending", reason: null },
+      { lead_id: "b", scheduled_at: iso(NOW + 15 * MIN), status: "pending", reason: null },
+    ],
+    drafts: { a: good },
+  }));
+  const a = o.agenda.find((x) => x.lead_id === "a")!;
+  const b = o.agenda.find((x) => x.lead_id === "b")!;
+  const f = o.agenda.find((x) => x.kind === "followup")!;
+  assert.deepEqual(a.message, { state: "ready", text: good });
+  assert.equal(b.message?.state, "ai", "no written draft: the AI writes it, and the page says so");
+  assert.match(b.message!.text, /Site Brain/);
+  assert.equal(f.title, "Follow-up 1 of 3");
+  assert.match(f.message!.text, /light check-in/);
+});
+
+test("agenda: a paused AI promises nothing; quiet hours put the window opening on the timeline", () => {
+  const q = [{ lead_id: "a", scheduled_at: iso(NOW + 5 * MIN), status: "pending", reason: null }];
+  const off = buildOverview(base({ leads: { a: lead("a") }, queue: q, settings: { ...DEFAULT_WHATSAPP_SETTINGS, auto_reply: false } }));
+  assert.deepEqual(off.agenda, []);
+  const night = buildOverview(base({ nowMs: Date.UTC(2026, 10, 11, 20, 0, 0), leads: { a: lead("a") }, queue: [{ lead_id: "a", scheduled_at: iso(Date.UTC(2026, 10, 11, 20, 5)), status: "pending", reason: null }] }));
+  assert.equal(night.agenda[0].kind, "resume");
+  assert.match(night.agenda[0].detail, /09:00/);
+  assert.equal(night.agenda[1].kind, "first_message");
+  assert.ok(Date.parse(night.agenda[1].at) >= Date.parse(night.agenda[0].at));
+});
+
+test("a message the AI read and chose not to answer says what it understood", () => {
+  const o = buildOverview(base({ messages: [inbound("1", 2 * H)], leads: { "1": lead("1", { last_intent: "greeting" }) } }));
+  assert.match(o.replies[0].reason, /looks like a greeting\) and chose not to reply/);
+});

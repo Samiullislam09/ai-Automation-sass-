@@ -693,13 +693,13 @@ function Inbox({ search, setSearch, online, focusLead }: { search: string; setSe
     const map: Record<string, any> = {};
     for (const m of ib ?? []) map[m.lead_id] = { body: m.body, direction: m.direction, created_at: m.created_at, status: m.status, unanswered: m.unanswered, replied: m.replied };
     setInbox(map);
-    // ?lead=<id> deep link (the WhatsApp button on a lead row): open that conversation, even if the lead
-    // is only approved and has no messages yet. Otherwise the first chat.
+    // No chat opens by itself, like WhatsApp: you pick one. The only exception is a ?lead=<id> deep link (the
+    // WhatsApp button on a lead row), which opens that conversation, even if the lead has no messages yet.
     const wanted = deepLink.current;
     setActive((a) => {
       if (a) return all.find((x) => x.id === a.id) ?? a;
-      if (wanted) return all.find((x) => x.id === wanted) ?? all[0] ?? null;
-      return all[0] ?? null;
+      if (wanted) return all.find((x) => x.id === wanted) ?? null;
+      return null;
     });
   }, [checkOnWhatsApp]);
 
@@ -738,15 +738,6 @@ function Inbox({ search, setSearch, online, focusLead }: { search: string; setSe
     const id = setInterval(() => { if (pageVisible()) void loadList(); }, 10000);
     return () => clearInterval(id);
   }, [loadList]);
-
-  // The chat that opens by itself should be a real chat, not a number WhatsApp cannot reach. Only when
-  // nothing was asked for (no ?lead= link) and the open one has no messages and is off WhatsApp.
-  useEffect(() => {
-    if (!leads || !active || new URLSearchParams(window.location.search).get("lead")) return;
-    if (onWa[active.id] !== false || inbox[active.id]?.replied) return;
-    const next = leads.find((l) => !(onWa[l.id] === false && !inbox[l.id]?.replied));
-    if (next && next.id !== active.id) setActive(next);
-  }, [leads, active, onWa, inbox]);
 
   if (leads === null) return <InboxSkeleton />;
 
@@ -850,7 +841,13 @@ function Inbox({ search, setSearch, online, focusLead }: { search: string; setSe
           {active ? (
             <Chat lead={active} online={online} onSent={loadList} onBack={() => setActive(null)} onDeleted={() => { setActive(null); loadList(); }} toast={toast} />
           ) : (
-            <div className="flex h-full items-center justify-center"><p className="text-[13px]" style={{ color: WA.sub }}>Select a chat</p></div>
+            <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center" style={{ background: "#f0f2f5" }}>
+              <span className="grid h-16 w-16 place-items-center rounded-full" style={{ background: "#e7f6ec" }}>
+                <svg width="30" height="30" viewBox="0 0 24 24" fill="none" aria-hidden><path d="M12 21a9 9 0 10-8-4.9L3 21l4.9-1A9 9 0 0012 21z" stroke={WA.green} strokeWidth="1.7" strokeLinejoin="round" /></svg>
+              </span>
+              <h2 className="text-[20px] font-light" style={{ color: WA.text }}>Mr. WhatsApp</h2>
+              <p className="max-w-xs text-[13.5px] leading-relaxed" style={{ color: WA.sub }}>Select a chat from the list to read the conversation and reply. Nothing is sent until you, or the AI within its limits, send it.</p>
+            </div>
           )}
         </div>
       </div>

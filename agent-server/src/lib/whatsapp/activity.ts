@@ -20,6 +20,7 @@ import { dailyAutoSendCount, warmupCap } from "./autoReply.js";
 import { isQuietHours, nextAllowedTime } from "./outbound.js";
 import { FOLLOWUP_HOURS } from "./followup.js";
 import { sessionStatus } from "./session.js";
+import { usableDraft } from "./opener.js";
 
 /** A reply is sent 30–180s after a message arrives; past this the AI either chose not to answer or it is stuck. */
 const REPLY_WINDOW_S = 180;
@@ -36,6 +37,18 @@ export type ReplyRow = {
   due_by?: string; reason: string;
 };
 
+/** One thing on the "what happens next" timeline. */
+export type AgendaItem = {
+  kind: "reply" | "first_message" | "followup" | "resume";
+  at: string;
+  lead_id?: string;
+  lead?: string;
+  title: string;
+  detail: string;
+  /** What will be sent. `ready` = the exact text is already written; `ai` = the AI writes it when the time comes (`text` says how). */
+  message?: { state: "ready" | "ai"; text: string };
+};
+
 export type Overview = {
   generated_at: string;
   /** `sending` = the AI is allowed to send (possibly after a wait). False when it is paused: off, offline, reconnecting, limit. */
@@ -47,6 +60,9 @@ export type Overview = {
   next: { kind: "reply" | "first_message" | "followup"; lead: string; at: string } | null;
   replies: ReplyRow[];
   first_messages: { lead_id: string; name: string; at: string }[];
+  /** Everything that is about to happen, in time order, with what each message will say. */
+  agenda: AgendaItem[];
+  agenda_more: number;
   followups: { lead_id: string; name: string; which: number; due_at: string }[];
   skipped: { lead_id: string; name: string; reason: string; at: string }[];
   timeline: { hour: string; ai: number; you: number; received: number }[];
@@ -57,7 +73,7 @@ export type Overview = {
 export type MsgRow = { lead_id: string | null; direction: "in" | "out"; answered_by: string | null; created_at: string };
 export type LeadRow = {
   id: string; company?: string | null; name?: string | null; phone?: string | null; whatsapp?: string | null; stage?: string | null;
-  opt_out?: boolean | null; auto_reply_paused_until?: string | null; needs_attention?: boolean | null; needs_attention_reason?: string | null;
+  last_intent?: string | null; opt_out?: boolean | null; auto_reply_paused_until?: string | null; needs_attention?: boolean | null; needs_attention_reason?: string | null;
   replied_at?: string | null; contacted_at?: string | null; auto_followups_done?: number | null;
 };
 export type QueueRow = { lead_id: string; scheduled_at: string; status: string; reason: string | null; updated_at?: string | null };
@@ -72,6 +88,8 @@ export type OverviewInput = {
   messages: MsgRow[];          // newest first, at least the last 24h
   leads: Record<string, LeadRow>;
   queue: QueueRow[];           // pending slots + skipped in the last 24h
+  /** The written first message of the leads nearest the front of the queue (lead id -> draft), for the preview. */
+  drafts?: Record<string, string>;
 };
 
 const nameOf = (l?: LeadRow) => l?.company || l?.name || l?.phone || l?.whatsapp || "Lead";
@@ -129,15 +147,22 @@ export function buildOverview(inp: OverviewInput): Overview {
     else if (inp.dailyCount >= cap) replies.push({ ...base, state: "held", reason: "Daily limit reached, so the AI cannot answer right now." });
     else if (ageS <= REPLY_WINDOW_S + 15) replies.push({ ...base, state: "queued", due_by: new Date(sinceMs + REPLY_WINDOW_S * 1000).toISOString(), reason: "The AI is reading the thread and will answer within about 3 minutes." });
     else if (ageS <= SETTLE_S) replies.push({ ...base, state: "queued", due_by: new Date(nowMs + 60_000).toISOString(), reason: "The AI is finishing this reply." });
-    else if (ageS < 7 * 86_400) replies.push({ ...base, state: "reviewed", reason: l.needs_attention ? (l.needs_attention_reason || "Needs you.") : "The AI looked at it and sent nothing. Most likely a short acknowledgement such as \"ok\". Open the chat if it needs an answer." });
+    else if (ageS < 7 * 86_400) replies.push({ ...base, state: "reviewed", reason: l.needs_attention ? (l.needs_attention_reason || "Needs you.") : l.last_intent ? `The AI read it (it looks like a ${l.last_intent}) and chose not to reply. Open the chat if it needs an answer.` : "The AI looked at it and sent nothing. Most likely a short acknowledgement such as \"ok\". Open the chat if it needs an answer." });
   });
   replies.sort((a, b) => (a.state === b.state ? Date.parse(a.since) - Date.parse(b.since) : a.state === "queued" ? -1 : b.state === "queued" ? 1 : a.state === "held" ? -1 : 1));
 
   // ── first messages still queued, and the ones that were skipped ──
+  // Slots that fell due while the AI was held all clamp to the moment the hold ends. They will not all go at once:
+  // one first message at a time, at least the minimum gap apart, so show them that way.
+  const gapMs = s.gap_min_min * 60_000;
+  let prevAt = holdUntil - gapMs;
   const first_messages = inp.queue
     .filter((q) => q.status === "pending" || q.status === "sending")
     .sort((a, b) => Date.parse(a.scheduled_at) - Date.parse(b.scheduled_at))
-    .map((q) => ({ lead_id: q.lead_id, name: nameOf(leads[q.lead_id]), at: new Date(goesAt(Date.parse(q.scheduled_at))).toISOString() }));
+    .map((q) => {
+      prevAt = Math.max(goesAt(Date.parse(q.scheduled_at)), prevAt + gapMs);
+      return { lead_id: q.lead_id, name: nameOf(leads[q.lead_id]), at: new Date(prevAt).toISOString() };
+    });
   const skipped = inp.queue
     .filter((q) => q.status === "skipped")
     .sort((a, b) => Date.parse(b.updated_at ?? b.scheduled_at) - Date.parse(a.updated_at ?? a.scheduled_at))
@@ -187,6 +212,28 @@ export function buildOverview(inp: OverviewInput): Overview {
     for (const f of followups) { const b = bucket(f.due_at); if (b >= 0 && b < 6) upcoming[b].followups++; else if (b < 0) upcoming[0].followups++; }
   }
 
+  // ── the agenda: everything about to happen, in time order, with what each message will say ──
+  const NUDGE = ["a light check-in", "an offer to clarify anything", "a last, no-pressure note"];
+  const agenda: AgendaItem[] = [];
+  if (state.sending) {
+    if (state.code === "quiet_hours" && state.resumes_at) agenda.push({ kind: "resume", at: state.resumes_at, title: "Sending window opens", detail: `First messages and follow-ups start again at ${clock(Date.parse(state.resumes_at), s.tz_offset)}.` });
+    if (state.code === "conversation_active" && state.resumes_at) agenda.push({ kind: "resume", at: state.resumes_at, title: "First messages continue", detail: "They were paused while someone was chatting. If it stays quiet, they carry on from here." });
+    for (const r of replies) {
+      if (r.state !== "queued") continue;
+      agenda.push({ kind: "reply", at: r.due_by ?? new Date(nowMs).toISOString(), lead_id: r.lead_id, lead: r.name, title: "Answer their message", detail: "They wrote to you, and the AI is answering.", message: { state: "ai", text: "The AI reads what they wrote and writes the answer just before sending." } });
+    }
+    for (const f of first_messages.slice(0, 12)) {
+      const text = usableDraft(inp.drafts?.[f.lead_id]);
+      agenda.push({ kind: "first_message", at: f.at, lead_id: f.lead_id, lead: f.name, title: "First message", detail: "Introduces your business and how to opt out.", message: text ? { state: "ready", text } : { state: "ai", text: "The AI writes a short introduction from your business details (Site Brain) just before sending." } });
+    }
+    for (const f of followups.slice(0, 6)) {
+      agenda.push({ kind: "followup", at: f.due_at, lead_id: f.lead_id, lead: f.name, title: `Follow-up ${f.which} of 3`, detail: "They have not answered.", message: { state: "ai", text: `The AI writes ${NUDGE[f.which - 1] ?? "a short check-in"} that fits the conversation.` } });
+    }
+    agenda.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  }
+  const agendaCap = 14;
+  const agendaTotal = agenda.length + Math.max(0, first_messages.length - 12) + Math.max(0, followups.length - 6);
+
   const skipped24 = skipped.filter((x) => nowMs - Date.parse(x.at) < 86_400_000);
   return {
     generated_at: new Date(nowMs).toISOString(),
@@ -207,6 +254,8 @@ export function buildOverview(inp: OverviewInput): Overview {
     next: cands[0] ?? null,
     replies: replies.slice(0, 25),
     first_messages: first_messages.slice(0, 15),
+    agenda: agenda.slice(0, agendaCap),
+    agenda_more: Math.max(0, agendaTotal - Math.min(agenda.length, agendaCap)),
     followups: followups.slice(0, 10),
     skipped: skipped24.slice(0, 10),
     timeline,
@@ -237,7 +286,7 @@ export async function loadOverview(tenantId: string, nowMs = Date.now()): Promis
   if (idList.length) {
     const { data } = await supabase
       .from("leads")
-      .select("id, company, name, phone, whatsapp, stage, opt_out, auto_reply_paused_until, needs_attention, needs_attention_reason, replied_at, contacted_at, auto_followups_done")
+      .select("id, company, name, phone, whatsapp, stage, opt_out, auto_reply_paused_until, needs_attention, needs_attention_reason, last_intent, replied_at, contacted_at, auto_followups_done")
       .eq("tenant_id", tenantId)
       .in("id", idList);
     for (const l of (data ?? []) as LeadRow[]) leads[l.id] = l;
@@ -246,8 +295,15 @@ export async function loadOverview(tenantId: string, nowMs = Date.now()): Promis
   const live = sessionStatus(tenantId).status;
   const dbStatus = (sess as any)?.status as string | undefined;
   const connection = live === "disconnected" && dbStatus === "connected" ? "reconnecting" : live;
+  // The written first message of the leads at the front of the queue, so the page can show what will be sent.
+  const front = queueRows.filter((q) => q.status === "pending" || q.status === "sending").sort((a, b) => Date.parse(a.scheduled_at) - Date.parse(b.scheduled_at)).slice(0, 12).map((q) => q.lead_id);
+  const drafts: Record<string, string> = {};
+  if (front.length) {
+    const { data: dr } = await supabase.from("leads").select("id, draft").eq("tenant_id", tenantId).in("id", front);
+    for (const d of (dr ?? []) as { id: string; draft: string | null }[]) if (d.draft) drafts[d.id] = d.draft;
+  }
   return buildOverview({
-    nowMs, settings, connection, dailyCount,
+    nowMs, settings, connection, dailyCount, drafts,
     firstConnectedAtMs: (sess as any)?.first_connected_at ? Date.parse((sess as any).first_connected_at) : null,
     messages, leads, queue: queueRows,
   });
