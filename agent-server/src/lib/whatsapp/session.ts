@@ -148,6 +148,8 @@ export function reconnectDelayMs(attempt: number, replaced: boolean): number {
 /** Per tenant: how many reconnects in a row have failed, and the earliest moment another connect may start. */
 const retry = new Map<string, { attempt: number; notBefore: number }>();
 
+const healReported = new Set<string>();
+
 /** Can this process send for the tenant RIGHT NOW? The live socket answers that, not the database row: the row
  *  is only a record of it and can be wrong (an old, late "close" event used to write "disconnected" after the
  *  new socket had already opened). Trusting the row meant the Activity page said "Working" while no first message
@@ -156,8 +158,19 @@ export async function senderOnline(supabase: SupabaseClient, tenantId: string, d
   const live = sessions.get(tenantId);
   if (!live || live.status !== "connected" || !live.sock) return false;
   if (dbStatus !== "connected") {
-    console.warn(`[whatsapp] ${tenantId}: database said "${dbStatus ?? "none"}" but the socket is connected; correcting the record`);
+    // The socket flips to "connected" a moment BEFORE its own record is written, so a sender that wakes inside that
+    // moment sees the old row. That is harmless and is corrected here. It is reported once per connection, and
+    // then CHECKED: if the record is still wrong after we wrote it, that is a real problem and is logged as an error.
+    const key = `${tenantId}:${live.phone ?? ""}`;
+    if (!healReported.has(key)) console.warn(`[whatsapp] ${tenantId}: record said "${dbStatus ?? "no row"}" while the socket is connected; correcting it`);
     await setDbStatus(supabase, tenantId, { status: "connected", qr: null, ...(live.phone ? { phone_number: live.phone } : {}) }).catch(() => {});
+    const { data: check, error: checkErr } = await supabase.from("whatsapp_sessions").select("status").eq("tenant_id", tenantId).maybeSingle();
+    if (checkErr || (check as any)?.status !== "connected") {
+      console.error(`[whatsapp] ${tenantId}: the connection record is STILL wrong after correcting it (${checkErr ? checkErr.message : `status ${(check as any)?.status ?? "no row"}`}). Check the whatsapp_sessions table and its permissions.`);
+    } else if (!healReported.has(key)) {
+      console.log(`[whatsapp] ${tenantId}: connection record corrected`);
+    }
+    healReported.add(key);
   }
   return true;
 }
