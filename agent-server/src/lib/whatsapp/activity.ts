@@ -38,7 +38,10 @@ export type ReplyRow = {
 
 export type Overview = {
   generated_at: string;
-  state: { code: StateCode; label: string; detail: string; resumes_at?: string };
+  /** `sending` = the AI is allowed to send (possibly after a wait). False when it is paused: off, offline, reconnecting, limit. */
+  state: { code: StateCode; label: string; detail: string; resumes_at?: string; sending: boolean };
+  /** The rules in force, so the page can say them in words. */
+  plan: { window_start: number; window_end: number; tz_offset: number; gap_min: number; gap_max: number; followups_enabled: boolean; first_messages_enabled: boolean; number_age_days: number | null };
   today: { sent: number; cap: number; remaining: number };
   counts: { replies_waiting: number; held: number; first_messages_queued: number; followups_due_24h: number; skipped_24h: number };
   next: { kind: "reply" | "first_message" | "followup"; lead: string; at: string } | null;
@@ -47,6 +50,8 @@ export type Overview = {
   followups: { lead_id: string; name: string; which: number; due_at: string }[];
   skipped: { lead_id: string; name: string; reason: string; at: string }[];
   timeline: { hour: string; ai: number; you: number; received: number }[];
+  /** The current hour and the next five, one bucket each: what is scheduled to go out. */
+  upcoming: { hour: string; first: number; followups: number }[];
 };
 
 export type MsgRow = { lead_id: string | null; direction: "in" | "out"; answered_by: string | null; created_at: string };
@@ -89,15 +94,22 @@ export function buildOverview(inp: OverviewInput): Overview {
 
   // ── overall state: the one sentence that answers "is the AI working, and if not, why" ──
   let state: Overview["state"];
-  if (inp.connection === "reconnecting") state = { code: "reconnecting", label: "Reconnecting", detail: "WhatsApp is coming back online. Nothing is lost and no scan is needed." };
-  else if (!online) state = { code: "not_connected", label: "WhatsApp is not connected", detail: "The AI cannot send until WhatsApp is linked." };
-  else if (!s.auto_reply) state = { code: "auto_off", label: "Auto replies are OFF", detail: "The AI will not send anything on its own. Turn Auto replies on to start." };
-  else if (inp.dailyCount >= cap) state = { code: "cap_reached", label: "Daily limit reached", detail: `${inp.dailyCount} of ${cap} messages sent in the last 24 hours. This keeps a new number safe; sending resumes as older messages age out.` };
+  if (inp.connection === "reconnecting") state = { code: "reconnecting", label: "Reconnecting", detail: "WhatsApp is coming back online. Nothing is lost and no scan is needed.", sending: false };
+  else if (!online) state = { code: "not_connected", label: "WhatsApp is not connected", detail: "The AI cannot send until WhatsApp is linked.", sending: false };
+  else if (!s.auto_reply) state = { code: "auto_off", label: "Auto replies are OFF", detail: "The AI will not send anything on its own. Turn Auto replies on to start.", sending: false };
+  else if (inp.dailyCount >= cap) state = { code: "cap_reached", label: "Daily limit reached", detail: `${inp.dailyCount} of ${cap} messages sent in the last 24 hours. This keeps a new number safe; sending resumes as older messages age out.`, sending: false };
   else if (quiet) {
     const at = nextAllowedTime(nowMs, s.tz_offset, s.send_start, s.send_end);
-    state = { code: "quiet_hours", label: "Quiet hours", detail: `First messages and follow-ups wait until ${clock(at, s.tz_offset)}. Replies to people who write to you still go out.`, resumes_at: new Date(at).toISOString() };
-  } else if (activeConversation) state = { code: "conversation_active", label: "In a conversation", detail: "First messages are paused while someone is chatting, and resume after an hour of quiet. Replies keep going." };
-  else state = { code: "running", label: "Working", detail: "The AI is sending within its limits." };
+    state = { code: "quiet_hours", label: "Quiet hours", detail: `First messages and follow-ups wait until ${clock(at, s.tz_offset)}. Replies to people who write to you still go out.`, resumes_at: new Date(at).toISOString(), sending: true };
+  } else if (activeConversation) {
+    const resume = Date.parse(lastInboundMs!.created_at) + ACTIVE_CONVO_MS;
+    state = { code: "conversation_active", label: "In a conversation", detail: `First messages wait while someone is chatting, and resume ${clock(resume, s.tz_offset)} if it stays quiet. Replies keep going.`, resumes_at: new Date(resume).toISOString(), sending: true };
+  } else state = { code: "running", label: "Working", detail: "The AI is sending within its limits.", sending: true };
+
+  // The earliest a FIRST MESSAGE / follow-up can go out. A slot that fell due while the AI was held back is not
+  // "26 days ago": it goes out when the hold ends, so that is the time shown.
+  const holdUntil = state.resumes_at ? Date.parse(state.resumes_at) : nowMs;
+  const goesAt = (ms: number) => Math.max(ms, holdUntil, nowMs);
 
   // ── replies: every lead whose LAST message is theirs ──
   const replies: ReplyRow[] = [];
@@ -125,7 +137,7 @@ export function buildOverview(inp: OverviewInput): Overview {
   const first_messages = inp.queue
     .filter((q) => q.status === "pending" || q.status === "sending")
     .sort((a, b) => Date.parse(a.scheduled_at) - Date.parse(b.scheduled_at))
-    .map((q) => ({ lead_id: q.lead_id, name: nameOf(leads[q.lead_id]), at: q.scheduled_at }));
+    .map((q) => ({ lead_id: q.lead_id, name: nameOf(leads[q.lead_id]), at: new Date(goesAt(Date.parse(q.scheduled_at))).toISOString() }));
   const skipped = inp.queue
     .filter((q) => q.status === "skipped")
     .sort((a, b) => Date.parse(b.updated_at ?? b.scheduled_at) - Date.parse(a.updated_at ?? a.scheduled_at))
@@ -142,7 +154,7 @@ export function buildOverview(inp: OverviewInput): Overview {
       if (lastByLead.get(l.id)?.direction !== "out") continue; // their turn is not ours to nudge
       const anchor = Date.parse(l.replied_at ?? l.contacted_at ?? "");
       if (!Number.isFinite(anchor)) continue;
-      const dueMs = Math.max(nowMs, anchor + FOLLOWUP_HOURS[done] * HOUR);
+      const dueMs = goesAt(anchor + FOLLOWUP_HOURS[done] * HOUR);
       followups.push({ lead_id: l.id, name: nameOf(l), which: done + 1, due_at: new Date(dueMs).toISOString() });
     }
     followups.sort((a, b) => Date.parse(a.due_at) - Date.parse(b.due_at));
@@ -167,10 +179,23 @@ export function buildOverview(inp: OverviewInput): Overview {
     else timeline[idx].you++;
   }
 
+  // Bucket 0 is the CURRENT hour (what is still to go out in it), then the next five: it lines up with the last bar of the timeline.
+  const upcoming = Array.from({ length: 6 }, (_, i) => ({ hour: new Date(endHour + i * HOUR).toISOString(), first: 0, followups: 0 }));
+  const bucket = (iso: string) => Math.floor((Math.floor(Date.parse(iso) / HOUR) * HOUR - endHour) / HOUR);
+  if (state.sending) {
+    for (const f of first_messages) { const b = bucket(f.at); if (b >= 0 && b < 6) upcoming[b].first++; else if (b < 0) upcoming[0].first++; }
+    for (const f of followups) { const b = bucket(f.due_at); if (b >= 0 && b < 6) upcoming[b].followups++; else if (b < 0) upcoming[0].followups++; }
+  }
+
   const skipped24 = skipped.filter((x) => nowMs - Date.parse(x.at) < 86_400_000);
   return {
     generated_at: new Date(nowMs).toISOString(),
     state,
+    plan: {
+      window_start: s.send_start, window_end: s.send_end, tz_offset: s.tz_offset, gap_min: s.gap_min_min, gap_max: s.gap_max_min,
+      followups_enabled: s.followups_enabled, first_messages_enabled: s.outbound_enabled,
+      number_age_days: inp.firstConnectedAtMs ? Math.floor((nowMs - inp.firstConnectedAtMs) / 86_400_000) : null,
+    },
     today: { sent: inp.dailyCount, cap, remaining: Math.max(0, cap - inp.dailyCount) },
     counts: {
       replies_waiting: replies.filter((r) => r.state === "queued").length,
@@ -185,6 +210,7 @@ export function buildOverview(inp: OverviewInput): Overview {
     followups: followups.slice(0, 10),
     skipped: skipped24.slice(0, 10),
     timeline,
+    upcoming,
   };
 }
 

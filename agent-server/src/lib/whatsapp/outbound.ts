@@ -80,6 +80,29 @@ export function computeSlots(
   return out;
 }
 
+/** Slots that fell due long ago (the AI was off, offline, in a conversation, at its limit) must NOT all fire
+ *  one per minute the moment it is allowed again: that is a burst, the exact thing the random gaps exist to
+ *  prevent. A slot is stale once it is overdue by more than the biggest gap; stale slots are laid out again
+ *  from `nowMs`, in their original order, each a random gap after the previous. Returns id -> new time. */
+export function respaceStale(
+  pending: { id: string; scheduled_at: string }[],
+  nowMs: number,
+  gapMinMs: number,
+  gapMaxMs: number,
+  tzOffset: number,
+  sendStart: number,
+  sendEnd: number,
+  rng: () => number = Math.random,
+): Map<string, number> {
+  const out = new Map<string, number>();
+  const sorted = pending.slice().sort((a, b) => Date.parse(a.scheduled_at) - Date.parse(b.scheduled_at));
+  const stale = sorted.filter((p) => nowMs - Date.parse(p.scheduled_at) > Math.max(gapMaxMs, 15 * 60_000));
+  if (!stale.length) return out;
+  const slots = computeSlots(stale.length, nowMs, gapMinMs, gapMaxMs, tzOffset, sendStart, sendEnd, rng);
+  stale.forEach((p, i) => out.set(p.id, slots[i]));
+  return out;
+}
+
 /** The pure dispatch decision for a tenant this tick — everything passed in, so it is unit-tested. */
 export function canDispatchTenant(input: {
   autoReply: boolean;
@@ -120,11 +143,20 @@ async function backfillTenant(tenantId: string, nowMs: number): Promise<number> 
   const s = await getWhatsappSettings(tenantId);
   if (!s.auto_reply || !s.outbound_enabled) return 0;
 
-  const { data: queued } = await supabase
+  const { data: queuedRaw } = await supabase
     .from("wa_outbound_queue")
-    .select("lead_id, scheduled_at, status")
+    .select("id, lead_id, scheduled_at, status")
     .eq("tenant_id", tenantId)
     .in("status", ["pending", "sending"]);
+  let queued = (queuedRaw ?? []) as any[];
+  // Slots left over from a stretch when nothing could send: lay them out again instead of letting them burst.
+  const re = respaceStale(queued.filter((r) => r.status === "pending"), nowMs, s.gap_min_min * 60_000, s.gap_max_min * 60_000, s.tz_offset, s.send_start, s.send_end);
+  if (re.size) {
+    await Promise.all(Array.from(re.entries()).map(([id, ms]) =>
+      supabase.from("wa_outbound_queue").update({ scheduled_at: new Date(ms).toISOString(), updated_at: new Date().toISOString() }).eq("id", id).eq("status", "pending")
+    ));
+    queued = queued.map((r) => (re.has(r.id) ? { ...r, scheduled_at: new Date(re.get(r.id)!).toISOString() } : r));
+  }
   const queuedIds = new Set((queued ?? []).map((r: any) => r.lead_id));
   const lastSlot = (queued ?? []).reduce((mx: number, r: any) => Math.max(mx, Date.parse(r.scheduled_at) || 0), 0);
 
@@ -209,6 +241,10 @@ async function dispatchTenant(tenantId: string, nowMs: number): Promise<boolean>
     cap,
   });
   if (!gate.ok) return false;
+
+  // Belt and braces on top of the slots: never closer than the minimum gap to the previous first message.
+  const { data: prev } = await supabase.from("wa_outbound_queue").select("updated_at").eq("tenant_id", tenantId).eq("status", "sent").order("updated_at", { ascending: false }).limit(1).maybeSingle();
+  if (prev && nowMs - Date.parse((prev as any).updated_at) < s.gap_min_min * 60_000) return false;
 
   const slot = await claimNextDue(tenantId, new Date(nowMs).toISOString());
   if (!slot) return false;

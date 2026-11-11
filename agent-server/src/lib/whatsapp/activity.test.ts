@@ -125,3 +125,34 @@ test("an empty workspace still answers, with no next step", () => {
   assert.equal(o.replies.length, 0);
   assert.equal(o.timeline.length, 24);
 });
+
+test("a slot that fell due while the AI was held shows when the hold ends, never '26 days ago'", () => {
+  const o = buildOverview(base({
+    messages: [inbound("9", 20 * MIN)], // someone chatted 20 min ago: first messages wait until 60 min after that
+    leads: { "9": lead("9"), a: lead("a") },
+    queue: [{ lead_id: "a", scheduled_at: iso(NOW - 26 * 86_400_000), status: "pending", reason: null }],
+  }));
+  assert.equal(o.state.code, "conversation_active");
+  assert.equal(o.state.sending, true);
+  assert.equal(Date.parse(o.first_messages[0].at), NOW - 20 * MIN + 60 * MIN, "resumes an hour after their message");
+  assert.equal(o.next?.kind, "first_message");
+});
+
+test("upcoming: the next 6 hours, and nothing promised while the AI is paused", () => {
+  const q = [
+    { lead_id: "a", scheduled_at: iso(NOW + 10 * MIN), status: "pending", reason: null },
+    { lead_id: "b", scheduled_at: iso(NOW + 70 * MIN), status: "pending", reason: null },
+  ];
+  const running = buildOverview(base({ leads: { a: lead("a"), b: lead("b") }, queue: q }));
+  assert.equal(running.upcoming.length, 6);
+  assert.deepEqual(running.upcoming.map((u) => u.first), [1, 1, 0, 0, 0, 0]);
+  const paused = buildOverview(base({ leads: { a: lead("a"), b: lead("b") }, queue: q, settings: { ...DEFAULT_WHATSAPP_SETTINGS, auto_reply: false } }));
+  assert.equal(paused.state.sending, false);
+  assert.deepEqual(paused.upcoming.map((u) => u.first), [0, 0, 0, 0, 0, 0]);
+});
+
+test("plan: the rules in force are reported so the page can say them in words", () => {
+  const o = buildOverview(base());
+  assert.deepEqual([o.plan.window_start, o.plan.window_end, o.plan.gap_min, o.plan.gap_max], [9, 21, 4, 14]);
+  assert.equal(o.plan.number_age_days, 30);
+});

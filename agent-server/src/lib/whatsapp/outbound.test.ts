@@ -10,7 +10,7 @@ process.env.DATABASE_URL ||= "postgres://unit-test/none";
 process.env.SUPABASE_URL ||= "http://unit-test.invalid";
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= "unit-test";
 
-const { isQuietHours, nextAllowedTime, computeSlots, canDispatchTenant, localHour } = await import("./outbound.js");
+const { isQuietHours, nextAllowedTime, computeSlots, canDispatchTenant, localHour, respaceStale } = await import("./outbound.js");
 
 // A UTC midnight; with tz_offset +4 that is 04:00 local.
 const MIDNIGHT_UTC = Date.UTC(2026, 9, 7, 0, 0, 0);
@@ -65,4 +65,24 @@ test("canDispatchTenant: opens only when everything is clear", () => {
   assert.equal(canDispatchTenant({ ...base, inQuietHours: true }).ok, false);
   assert.equal(canDispatchTenant({ ...base, hasActiveConversation: true }).reason, "a conversation is active — timeline paused");
   assert.equal(canDispatchTenant({ ...base, dailyCount: 50 }).ok, false, "at cap → stop");
+});
+
+
+test("respaceStale: slots overdue for a long time are laid out again, not fired one per minute", () => {
+  const NOW = Date.UTC(2026, 10, 11, 12, 0, 0); // 16:00 Dubai, inside 9-21
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const pending = [
+    { id: "old2", scheduled_at: iso(NOW - 25 * 86_400_000 + 60_000) },
+    { id: "old1", scheduled_at: iso(NOW - 26 * 86_400_000) },
+    { id: "fresh", scheduled_at: iso(NOW + 5 * 60_000) },
+    { id: "justdue", scheduled_at: iso(NOW - 2 * 60_000) },
+  ];
+  const moved = respaceStale(pending, NOW, 4 * 60_000, 14 * 60_000, 4, 9, 21, () => 0.5);
+  assert.deepEqual(Array.from(moved.keys()), ["old1", "old2"], "oldest first, original order kept");
+  assert.equal(moved.has("fresh"), false);
+  assert.equal(moved.has("justdue"), false, "a slot that is only minutes late is left alone");
+  const [a, b] = [moved.get("old1")!, moved.get("old2")!];
+  assert.ok(a >= NOW + 4 * 60_000 && a <= NOW + 14 * 60_000, "first re-spaced slot is one random gap from now");
+  assert.ok(b - a >= 4 * 60_000 && b - a <= 14 * 60_000, "and each next one a gap after it");
+  assert.equal(respaceStale([], NOW, 1, 2, 4, 9, 21).size, 0);
 });
