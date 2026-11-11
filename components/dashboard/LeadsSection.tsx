@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronLeft, ChevronRight, Download, Ellipsis, Mail, Plus, Search, SlidersHorizontal, Sparkles, PenLine, TriangleAlert, UserRound, Users, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useStore } from "@/lib/store";
-import { C, D, STAGE, SOURCE_LABEL, SORT_LABEL, REJECT_REASONS, ago, scoreColor, isToday, fmtDay, siteLabel, initials, cityOf, countryOf, phoneDisplay, StageChip, Tag, WaGlyph, RejectMenu, DATE_LABEL, SCORE_LABEL, MSG_LABEL, msgValue, msgFlags, waDigits, type Lead, type Gen } from "./leads/shared";
+import { C, D, STAGE, SOURCE_LABEL, SORT_LABEL, REJECT_REASONS, ago, scoreColor, isToday, fmtDay, siteLabel, initials, cityOf, countryOf, phoneDisplay, StageChip, Tag, WaGlyph, RejectMenu, DATE_LABEL, SCORE_LABEL, MSG_LABEL, msgValue, msgFlags, type Lead, type Gen } from "./leads/shared";
 import type { Flt } from "./leads/FilterPanel";
 
 // Opened on demand, so they are not part of the page's first download.
@@ -61,13 +61,13 @@ function readCache(): Board | null {
   try { const raw = sessionStorage.getItem(CACHE_KEY); if (raw) { const b = JSON.parse(raw) as Board; if (Array.isArray(b.leads)) { boardCache = b; return b; } } } catch {}
   return null;
 }
-// WhatsApp "is this number on WhatsApp" answers (definite ones only), kept for the session.
-const WA_KEY = "lx-wa-check-v1";
-function readWa(): Record<string, boolean> {
+// WhatsApp "is this lead on WhatsApp" answers received this session, by lead id (the server also stores them on the lead).
+const WA_KEY = "lx-wa-status-v2";
+function readWa(): Record<string, "yes" | "no"> {
   try { const raw = sessionStorage.getItem(WA_KEY); if (raw) return JSON.parse(raw); } catch {}
   return {};
 }
-function writeWa(m: Record<string, boolean>) { try { sessionStorage.setItem(WA_KEY, JSON.stringify(m)); } catch {} }
+function writeWa(m: Record<string, "yes" | "no">) { try { sessionStorage.setItem(WA_KEY, JSON.stringify(m)); } catch {} }
 const PIPE: [string, string][] = [
   ["needs", "Needs you"], ["all", "All"], ["new", "New"], ["contacted", "Contacted"],
   ["engaged", "Engaged"], ["hot", "Hot"], ["won", "Won"], ["rejected", "Rejected"],
@@ -427,41 +427,43 @@ export default function LeadsSection() {
   const hasView = !!q || activeFilterCount > 0 || dateRange !== "all" || tab !== "all";
 
   // ── WhatsApp: only leads that are actually on WhatsApp get the WhatsApp button ───────────────
-  // A lead whose website publishes a wa.me link is on WhatsApp. For the rest we ask WhatsApp itself
-  // (the same batch check the WhatsApp page uses), only for the rows on screen, and remember the
-  // definite answers. A number we cannot check (no country code, or WhatsApp not connected) keeps
-  // its button: "unknown" is not "no". A lead with no number at all never shows the button.
-  const [waMap, setWaMap] = useState<Record<string, boolean>>(() => readWa());
+  // The server (POST /api/leads/wa-check) decides and REMEMBERS the answer on the lead, so this works on
+  // later visits even when WhatsApp is disconnected:
+  //   · a lead whose own site published a wa.me number is on WhatsApp
+  //   · a toll-free / premium-rate line never is (decided without asking anyone)
+  //   · every other number is made international from the lead's country and asked of WhatsApp itself
+  // "Cannot tell" (WhatsApp not connected, or no country to read the number with) keeps the button.
+  const [waLocal, setWaLocal] = useState<Record<string, "yes" | "no">>({});
+  useEffect(() => { setWaLocal(readWa()); }, []);
   const waTried = useRef<Map<string, number>>(new Map());
   useEffect(() => {
-    const need = new Set<string>();
-    for (const l of paged) {
-      if (l.whatsapp) continue;
-      const dg = waDigits(l);
-      if (!dg || dg in waMap) continue;
-      if (Date.now() - (waTried.current.get(dg) ?? 0) < 120_000) continue; // asked a moment ago, WhatsApp could not tell
-      need.add(dg);
-    }
-    if (!need.size) return;
-    const phones = Array.from(need).slice(0, 200);
-    phones.forEach((p) => waTried.current.set(p, Date.now()));
+    const now = Date.now();
+    const need = paged.filter((l) => {
+      if (l.whatsapp || !l.phone) return false;
+      if (l.wa_status || waLocal[l.id]) {
+        const staleNo = l.wa_status === "no" && !!l.wa_checked_at && now - new Date(l.wa_checked_at).getTime() > 30 * 86_400_000; // a "no" is looked at again after 30 days
+        if (!staleNo) return false;
+      }
+      return now - (waTried.current.get(l.id) ?? 0) > 120_000; // not asked a moment ago
+    }).map((l) => l.id);
+    if (!need.length) return;
+    need.forEach((id) => waTried.current.set(id, now));
     let alive = true;
-    fetch("/api/whatsapp/check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phones }) })
+    fetch("/api/leads/wa-check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: need }) })
       .then((r) => r.json())
       .then((r) => {
         if (!alive || !r?.ok) return;
-        const got: Record<string, boolean> = {};
-        for (const p of phones) if (typeof r.results?.[p] === "boolean") got[p] = r.results[p];
-        if (Object.keys(got).length) setWaMap((m) => { const n = { ...m, ...got }; writeWa(n); return n; });
+        const got: Record<string, "yes" | "no"> = {};
+        for (const [id, st] of Object.entries(r.statuses ?? {})) if (st === "yes" || st === "no") got[id] = st;
+        if (Object.keys(got).length) setWaLocal((m) => { const n = { ...m, ...got }; writeWa(n); return n; });
       })
       .catch(() => {});
     return () => { alive = false; };
-  }, [paged, waMap]);
+  }, [paged, waLocal]);
   const waShow = (l: Lead) => {
-    if (!(l.whatsapp || l.phone)) return false;      // no number at all
-    if (l.whatsapp) return true;                      // its own site says it is on WhatsApp
-    const dg = waDigits(l);
-    return !(dg && waMap[dg] === false);              // hidden only when WhatsApp said "not on WhatsApp"
+    if (!(l.whatsapp || l.phone)) return false; // no number at all
+    if (l.whatsapp) return true;                 // its own site says it is on WhatsApp
+    return (l.wa_status ?? waLocal[l.id]) !== "no"; // hidden only when we KNOW it is not on WhatsApp
   };
 
   const card = { background: C.panel, border: `1px solid ${C.line}` };

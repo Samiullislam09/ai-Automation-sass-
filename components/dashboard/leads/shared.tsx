@@ -29,6 +29,7 @@ export type Lead = {
   ai_messaged: boolean; human_messaged: boolean; messaged: boolean; converted: boolean; is_client: boolean;
   last_out_at: string | null; last_out_body: string | null; last_in_at: string | null; last_in_body: string | null;
   needs_attention?: boolean | null; needs_attention_reason?: string | null; last_intent?: string | null;
+  wa_status?: "yes" | "no" | null; wa_checked_at?: string | null;
   meeting?: { id: string; status: string; start_at: string | null; meet_link: string | null } | null;
 };
 export type Gen = { running: boolean; running_since?: string | null; running_found?: number | null; running_label?: string | null; running_done?: number | null; running_total?: number | null; last_run_at: string | null; last_status: string | null; last_found: number | null; last_saved?: number | null; last_note: string | null; last_needs?: string[]; last_question?: string | null };
@@ -123,15 +124,6 @@ export function msgValue(f: { ai: string; you: string }): "any" | "none" | "ai" 
 }
 export function msgFlags(v: string): { ai: string; you: string } {
   return { ai: v === "ai" ? "yes" : v === "none" ? "no" : "any", you: v === "you" ? "yes" : v === "none" ? "no" : "any" };
-}
-
-/** The number to ask WhatsApp about: full international digits, or null when we do not know the country
- *  code (then we cannot tell, and the WhatsApp button stays). Never guesses a country code. */
-export function waDigits(l: { whatsapp?: string | null; phone: string | null; country?: string | null }): string | null {
-  const shown = phoneDisplay(l as Lead);
-  if (!/^(\+|00)/.test(shown)) return null;
-  const d = shown.replace(/[^0-9]/g, "").replace(/^00/, "");
-  return d.length >= 8 ? d : null;
 }
 
 export const REJECT_REASONS: { key: string; label: string }[] = [

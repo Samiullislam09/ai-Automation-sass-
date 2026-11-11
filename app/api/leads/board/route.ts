@@ -32,6 +32,8 @@ const LIST_COLUMNS = [
   "icp_score", "stage", "created_at", "approved_at", "contacted_at", "replied_at", "reject_reason",
   "needs_attention", "needs_attention_reason", "last_intent", "classification",
 ].join(", ");
+/** Migration 038 (whether the number is on WhatsApp). Asked for first; dropped if the column is not there yet. */
+const WA_COLUMNS = ", wa_status, wa_checked_at";
 
 /** Fields only the drawer shows; stripped from list rows (GET /api/leads/[id] serves them). */
 const LEAD_HEAVY_FIELDS = ["draft", "evidence", "score_breakdown", "observation", "notes", "reason", "source_segment", "source_query"] as const;
@@ -100,7 +102,7 @@ export async function GET(req: NextRequest) {
     supabase.from("leads").select(cols).eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(1000);
 
   const [first, { data: msgs, error: me }, gen, { data: meetingRows }] = await Promise.all([
-    listQuery(LIST_COLUMNS),
+    listQuery(LIST_COLUMNS + WA_COLUMNS),
     supabase
       .from("outreach_messages")
       .select("lead_id, direction, answered_by, body, created_at")
@@ -121,6 +123,12 @@ export async function GET(req: NextRequest) {
 
   let leads: any[] | null = first.data as any[] | null;
   let le = first.error;
+  // Migration 038 not applied: the same list without the two WhatsApp columns (still a slim read).
+  if (le && /wa_status|wa_checked_at/i.test(le.message)) {
+    const slim = await listQuery(LIST_COLUMNS);
+    leads = slim.data as any[] | null;
+    le = slim.error;
+  }
   // An older database may lack one of the newer columns: fall back to select("*") and strip the heavy
   // fields in code, so the page still works (just with a bigger read) until the migration is applied.
   if (le && /column .* does not exist/i.test(le.message)) {
