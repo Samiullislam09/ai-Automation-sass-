@@ -9,6 +9,7 @@ import { getWhatsappSettings } from "../outreach/settings.js";
 import { isQuietHours } from "./outbound.js";
 import { calendarFreeBusy, calendarBook, calendarCancel } from "./calendar.js";
 import { sendText, simulateTyping } from "./session.js";
+import { leadDialDigits } from "./phone.js";
 import { recordOutgoing } from "./store.js";
 import { notifyAdmins } from "./team.js";
 
@@ -158,8 +159,9 @@ export async function tickMeetingNoShows(now: Date = new Date()): Promise<number
         continue;
       }
       if (hoursSince < NOSHOW_NUDGE_HOURS[done]) continue;
-      const { data: lead } = await supabase.from("leads").select("whatsapp, phone, opt_out").eq("id", m.lead_id).eq("tenant_id", m.tenant_id).maybeSingle();
-      const phone = (lead as any)?.whatsapp || (lead as any)?.phone || "";
+      const { data: lead } = await supabase.from("leads").select("whatsapp, phone, country, opt_out").eq("id", m.lead_id).eq("tenant_id", m.tenant_id).maybeSingle();
+      const dial = lead ? leadDialDigits(lead as any) : null;
+      const phone = dial && dial.ok ? dial.digits : "";
       if (!lead || (lead as any).opt_out || !phone) { await supabase.from("lead_meetings").update({ nudges_done: done + 1 }).eq("id", m.id); continue; }
       const body = done === 0 ? "Looks like we missed each other — would you like to pick another time?" : "Still happy to set up that call whenever suits you — just say the word.";
       await simulateTyping(m.tenant_id, phone, 2000);

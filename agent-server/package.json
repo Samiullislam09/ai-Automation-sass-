@@ -22,6 +22,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "libphonenumber-js": "^1.13.16",
     "lighthouse": "^13.4.0",
     "pg-boss": "^12.27.0",
     "sharp": "^0.35.4",

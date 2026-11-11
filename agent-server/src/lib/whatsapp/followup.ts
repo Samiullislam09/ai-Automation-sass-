@@ -16,6 +16,7 @@ import { getWhatsappSettings } from "../outreach/settings.js";
 import { warmupCap, dailyAutoSendCount } from "./autoReply.js";
 import { isQuietHours } from "./outbound.js";
 import { sendText, simulateTyping } from "./session.js";
+import { leadDialDigits } from "./phone.js";
 import { recordOutgoing } from "./store.js";
 
 /** Hours after the anchor at which nudge 1, 2, 3 fire. */
@@ -94,7 +95,7 @@ async function followupTenant(tenantId: string, nowMs: number): Promise<number> 
   // Candidates: engaged-or-contacted, not opted out, not under human handoff, nudges remaining.
   const { data: leads } = await supabase
     .from("leads")
-    .select("id, stage, replied_at, contacted_at, auto_followups_done, auto_reply_paused_until, whatsapp, phone, opt_out")
+    .select("id, stage, replied_at, contacted_at, auto_followups_done, auto_reply_paused_until, whatsapp, phone, country, opt_out")
     .eq("tenant_id", tenantId)
     .in("stage", ["contacted", "delivered", "read", "replied", "in_conversation", "interested"])
     .eq("opt_out", false)
@@ -121,8 +122,9 @@ async function followupTenant(tenantId: string, nowMs: number): Promise<number> 
     // reactive lane owns it — a follow-up would talk over an unanswered question.
     if ((await lastMessageDirection(tenantId, l.id)) !== "out") continue;
 
-    const phone = l.whatsapp || l.phone || "";
-    if (!phone) continue;
+    const dial = leadDialDigits(l);
+    if (!dial.ok) continue;
+    const phone = dial.digits;
     try {
       const body = await draftFollowup(tenantId, l.id, pick.which!);
       if (!body) continue;

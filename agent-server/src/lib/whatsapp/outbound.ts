@@ -16,7 +16,8 @@
 import { supabase } from "../../supabase.js";
 import { getWhatsappSettings } from "../outreach/settings.js";
 import { warmupCap, dailyAutoSendCount } from "./autoReply.js";
-import { decideReply } from "./decide.js";
+import { composeOpener } from "./opener.js";
+import { leadDialDigits } from "./phone.js";
 import { sendText, simulateTyping } from "./session.js";
 import { recordOutgoing } from "./store.js";
 
@@ -129,14 +130,16 @@ async function backfillTenant(tenantId: string, nowMs: number): Promise<number> 
 
   const { data: leads } = await supabase
     .from("leads")
-    .select("id, whatsapp, phone")
+    .select("id, whatsapp, phone, country, wa_status")
     .eq("tenant_id", tenantId)
     .eq("stage", "approved")
     .eq("opt_out", false)
     .is("contacted_at", null)
     .limit(200);
 
-  const eligible = (leads ?? []).filter((l: any) => !queuedIds.has(l.id) && (l.whatsapp || l.phone));
+  // Only leads we can really dial: a number that resolves to international digits (the lead's country
+  // is what makes a local number dialable), not a toll-free line, and not already known to be off WhatsApp.
+  const eligible = (leads ?? []).filter((l: any) => !queuedIds.has(l.id) && l.wa_status !== "no" && leadDialDigits(l).ok);
   if (!eligible.length) return 0;
 
   const from = Math.max(nowMs, lastSlot); // append AFTER the existing timeline
@@ -213,20 +216,25 @@ async function dispatchTenant(tenantId: string, nowMs: number): Promise<boolean>
   try {
     const { data: lead } = await supabase
       .from("leads")
-      .select("whatsapp, phone, opt_out, contacted_at")
+      .select("whatsapp, phone, country, company, name, city, reason, draft, channel, opt_out, contacted_at, wa_status")
       .eq("id", slot.lead_id)
       .eq("tenant_id", tenantId)
       .maybeSingle();
-    const phone = (lead as any)?.whatsapp || (lead as any)?.phone || "";
-    if (!lead || (lead as any).opt_out || (lead as any).contacted_at || !phone) {
+    if (!lead || (lead as any).opt_out || (lead as any).contacted_at) {
       await finishSlot(slot.id, "skipped", "lead no longer eligible");
       return false;
     }
+    const dial = leadDialDigits(lead as any);
+    if (!dial.ok) {
+      await finishSlot(slot.id, "skipped", dial.reason);
+      return false;
+    }
+    const phone = dial.digits;
 
-    // The opener: the decision engine drafts it from the thread (the first "message" is the lead's
-    // own record/notes) + Site Brain. If there is genuinely nothing to say, skip rather than invent.
-    const decision = await decideReply(supabase, tenantId, slot.lead_id).catch(() => null);
-    const body = decision?.reply?.trim();
+    // The opener: the lead's own screened first message, or a short one written from Site Brain and
+    // finished in code with who is writing and a working opt-out. If there is genuinely nothing real to
+    // say, skip rather than invent.
+    const body = await composeOpener(tenantId, lead as any).catch(() => null);
     if (!body) {
       await finishSlot(slot.id, "skipped", "no opener drafted");
       return false;
@@ -235,13 +243,16 @@ async function dispatchTenant(tenantId: string, nowMs: number): Promise<boolean>
     await simulateTyping(tenantId, phone, Math.min(5000, Math.max(1500, body.length * 35)));
     const { waMessageId } = await sendText(tenantId, phone, body); // throws for a non-WhatsApp number
     await recordOutgoing(supabase, tenantId, slot.lead_id, body, waMessageId, "brain");
+    // WhatsApp accepted the number: remember it, so the Leads page and later sweeps know.
+    await supabase.from("leads").update({ wa_status: "yes", wa_checked_at: new Date().toISOString() }).eq("id", slot.lead_id).eq("tenant_id", tenantId).then(() => {}, () => {});
     await finishSlot(slot.id, "sent", null);
     return true;
   } catch (e: any) {
     const msg = String(e?.message ?? e);
     if (/isn't on WhatsApp|not on WhatsApp/i.test(msg)) {
       await finishSlot(slot.id, "skipped", "not on WhatsApp");
-      await supabase.from("leads").update({ stage: "invalid", updated_at: new Date().toISOString() }).eq("id", slot.lead_id).eq("tenant_id", tenantId).eq("stage", "approved");
+      await supabase.from("leads").update({ stage: "invalid", wa_status: "no", wa_checked_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", slot.lead_id).eq("tenant_id", tenantId).eq("stage", "approved")
+        .then(async (r: any) => { if (r?.error && /wa_status|wa_checked_at/i.test(r.error.message)) await supabase.from("leads").update({ stage: "invalid", updated_at: new Date().toISOString() }).eq("id", slot.lead_id).eq("tenant_id", tenantId).eq("stage", "approved"); });
       return false;
     }
     // Transient: back to pending for a later tick, up to MAX_ATTEMPTS.
