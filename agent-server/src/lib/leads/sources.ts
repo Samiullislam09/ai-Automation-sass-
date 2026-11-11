@@ -984,6 +984,40 @@ export function interleave<T>(groups: T[][]): T[] {
   return out;
 }
 
+/** How likely a candidate is to be a lead worth contacting, from what the source already told us.
+ *  A website is what research needs to find an email and to judge the company; a phone number is the way
+ *  to reach them; a toll-free / 1800 line is a call centre, never a WhatsApp number. Higher is better. */
+export function candidateQuality(c: Candidate): number {
+  let q = 0;
+  if (c.website || c.domain) q += 3;
+  if (c.phone) {
+    q += 1;
+    const digits = c.phone.replace(/[^\d+]/g, "");
+    if (/^(\+?1)?8(00|88|77|66|55|44|33)\d{7}$/.test(digits) || /^(\+?\d{1,3})?0?(800|1800)\d{5,}$/.test(digits)) q -= 2;
+  }
+  return q;
+}
+
+/** Best first inside a source (stable, so ties keep the source's own order). */
+export function rankByQuality(rows: Candidate[]): Candidate[] {
+  return rows.map((c, i) => ({ c, i, q: candidateQuality(c) })).sort((a, b) => b.q - a.q || a.i - b.i).map((x) => x.c);
+}
+
+/** Weighted round-robin: each round takes `weight` rows from each group in turn. Web search weighs more
+ *  than Maps because a company found on the open web has a real site to research, while a Maps pin often
+ *  has only a phone, and a landline that is rarely on WhatsApp. */
+export function blend<T>(groups: { rows: T[]; weight: number }[]): T[] {
+  const out: T[] = [];
+  const pos = groups.map(() => 0);
+  for (;;) {
+    let took = false;
+    groups.forEach((g, gi) => {
+      for (let k = 0; k < g.weight && pos[gi] < g.rows.length; k++) { out.push(g.rows[pos[gi]++]); took = true; }
+    });
+    if (!took) return out;
+  }
+}
+
 /** Ask every source that can answer, in order of what this ICP needs, and report on the ones
  *  that could not. Never throws: a source that fails is a report line, not a dead run. */
 export async function discover(icp: Icp, limit: number, deps: DiscoverDeps = {}): Promise<DiscoverResult> {
@@ -1113,9 +1147,13 @@ export async function discover(icp: Icp, limit: number, deps: DiscoverDeps = {})
     note: osmNote,
   });
 
-  // Maps, web search and Places take turns (Maps first, as before). Job boards and OpenStreetMap stay at
+  // Web search, Maps and Places take turns (web weighs double; see blend()). Job boards and OpenStreetMap stay at
   // the back as top-ups, exactly where they were, so a weaker source never jumps ahead of a better one.
-  const candidates = [...interleave([serperRows, webRows, placesRows]), ...jobsRows, ...osmRows];
+  // Web search leads, two for every Maps / Places one, each source best-first (website + usable phone first).
+  const candidates = [
+    ...blend([{ rows: rankByQuality(webRows), weight: 2 }, { rows: rankByQuality(serperRows), weight: 1 }, { rows: rankByQuality(placesRows), weight: 1 }]),
+    ...jobsRows, ...osmRows,
+  ];
   return { candidates, reports };
 }
 

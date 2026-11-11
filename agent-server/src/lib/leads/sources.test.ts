@@ -4,6 +4,7 @@
  *  every test injects its own `fetch`. */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import type { Candidate } from "./sources.js";
 
 process.env.DATABASE_URL ||= "postgres://unit-test/none";
 process.env.SUPABASE_URL ||= "http://unit-test.invalid";
@@ -19,6 +20,9 @@ const {
   describeSources,
   discover,
   interleave,
+  blend,
+  candidateQuality,
+  rankByQuality,
   fetchPageForResearch,
   loadRobots,
   parseRobots,
@@ -501,8 +505,8 @@ test("discover: Google Maps and web search take turns, so a long Maps list canno
     const r = await discover(icp, 8, { fetchImpl });
     const sources = r.candidates.map((c) => c.source);
 
-    // Maps first (as before), then web, then Maps again... — the first six alternate.
-    assert.deepEqual(sources.slice(0, 6), ["serper", "web", "serper", "web", "serper", "web"]);
+    // Web search weighs double: two web, one Maps, two web, one Maps...
+    assert.deepEqual(sources.slice(0, 6), ["web", "web", "serper", "web", "web", "serper"]);
     // each source keeps its own order
     assert.deepEqual(r.candidates.filter((c) => c.source === "serper").slice(0, 3).map((c) => c.name), ["Maps Company 1", "Maps Company 2", "Maps Company 3"]);
     assert.deepEqual(r.candidates.filter((c) => c.source === "web").slice(0, 3).map((c) => c.domain), ["webco1.ae", "webco2.ae", "webco3.ae"]);
@@ -519,4 +523,22 @@ test("discover: Google Maps and web search take turns, so a long Maps list canno
     }
     __resetSourceCaches();
   }
+});
+
+test("candidateQuality / rankByQuality: a site and a usable phone first, a toll-free line last", () => {
+  const c = (o: Partial<Candidate>): Candidate => ({ name: "x", website: null, domain: null, phone: null, address: null, categories: [], source: "serper", sourceRef: null, attribution: null, ...o });
+  const site = c({ name: "site", website: "https://a.com", domain: "a.com", phone: "+971 4 000 0001" });
+  const phoneOnly = c({ name: "phone", phone: "+971 4 000 0002" });
+  const tollFree = c({ name: "toll", phone: "(800) 259-1264" });
+  const nothing = c({ name: "none" });
+  assert.ok(candidateQuality(site) > candidateQuality(phoneOnly));
+  assert.ok(candidateQuality(phoneOnly) > candidateQuality(nothing));
+  assert.ok(candidateQuality(tollFree) < candidateQuality(nothing) + 1);
+  assert.deepEqual(rankByQuality([nothing, tollFree, phoneOnly, site]).map((x) => x.name), ["site", "phone", "none", "toll"]);
+});
+
+test("blend: weighted turns, nothing lost, each group keeps its order", () => {
+  assert.deepEqual(blend([{ rows: ["w1", "w2", "w3", "w4"], weight: 2 }, { rows: ["m1", "m2", "m3"], weight: 1 }]), ["w1", "w2", "m1", "w3", "w4", "m2", "m3"]);
+  assert.deepEqual(blend([{ rows: [], weight: 2 }, { rows: ["m1"], weight: 1 }]), ["m1"]);
+  assert.deepEqual(blend([]), []);
 });
