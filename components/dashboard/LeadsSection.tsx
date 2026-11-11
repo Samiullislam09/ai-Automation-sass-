@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronLeft, ChevronRight, Download, Ellipsis, Mail, Plus, Search, SlidersHorizontal, Sparkles, PenLine, TriangleAlert, UserRound, Users, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useStore } from "@/lib/store";
-import { C, D, STAGE, SOURCE_LABEL, SORT_LABEL, REJECT_REASONS, ago, scoreColor, isToday, fmtDay, siteLabel, initials, cityOf, countryOf, phoneDisplay, StageChip, Tag, WaGlyph, RejectMenu, type Lead, type Gen } from "./leads/shared";
+import { C, D, STAGE, SOURCE_LABEL, SORT_LABEL, REJECT_REASONS, ago, scoreColor, isToday, fmtDay, siteLabel, initials, cityOf, countryOf, phoneDisplay, StageChip, Tag, WaGlyph, RejectMenu, DATE_LABEL, SCORE_LABEL, MSG_LABEL, msgValue, msgFlags, waDigits, type Lead, type Gen } from "./leads/shared";
 import type { Flt } from "./leads/FilterPanel";
 
 // Opened on demand, so they are not part of the page's first download.
@@ -61,6 +61,13 @@ function readCache(): Board | null {
   try { const raw = sessionStorage.getItem(CACHE_KEY); if (raw) { const b = JSON.parse(raw) as Board; if (Array.isArray(b.leads)) { boardCache = b; return b; } } } catch {}
   return null;
 }
+// WhatsApp "is this number on WhatsApp" answers (definite ones only), kept for the session.
+const WA_KEY = "lx-wa-check-v1";
+function readWa(): Record<string, boolean> {
+  try { const raw = sessionStorage.getItem(WA_KEY); if (raw) return JSON.parse(raw); } catch {}
+  return {};
+}
+function writeWa(m: Record<string, boolean>) { try { sessionStorage.setItem(WA_KEY, JSON.stringify(m)); } catch {} }
 const PIPE: [string, string][] = [
   ["needs", "Needs you"], ["all", "All"], ["new", "New"], ["contacted", "Contacted"],
   ["engaged", "Engaged"], ["hot", "Hot"], ["won", "Won"], ["rejected", "Rejected"],
@@ -83,8 +90,17 @@ function Summary({ items }: { items: { label: string; value?: number; note: stri
   );
 }
 
-function Score({ s }: { s: number | null }) {
-  return <span className="text-[13px] tabular-nums" style={{ color: s == null ? C.sub : C.ink }} title={s == null ? "Not scored yet" : `Lead score ${s} out of 100`}>{s ?? "—"}</span>;
+/** The score as a number and a thin bar (green 70+, amber 40-69, red below). */
+function Score({ s, compact }: { s: number | null; compact?: boolean }) {
+  if (s == null) return <span className="text-[13px]" style={{ color: C.sub }} title="Not scored yet">—</span>;
+  return (
+    <div className="flex items-center gap-2" title={`Lead score ${s} out of 100`}>
+      <span className="w-6 text-[13px] tabular-nums" style={{ color: C.ink }}>{s}</span>
+      <span className="overflow-hidden rounded-full" style={{ width: compact ? 40 : 56, height: 6, background: C.graySoft }}>
+        <i className="block h-full rounded-full" style={{ width: `${Math.min(100, Math.max(4, s))}%`, background: scoreColor(s) }} />
+      </span>
+    </div>
+  );
 }
 
 /** What happened last, in words. No badges. */
@@ -105,8 +121,7 @@ function ActivityCell({ l }: { l: Lead }) {
 }
 
 /** Row actions: three quiet line icons. `lg` is the phone version: labelled, 44px tall. */
-function LeadActions({ l, setStage, busy, waLink, size }: { l: Lead; setStage: (l: Lead, s: string, reason?: string) => void; busy: string | null; waLink: (l: Lead) => string; size: "sm" | "lg" }) {
-  const num = l.whatsapp || l.phone;
+function LeadActions({ l, setStage, busy, waLink, size, showWa }: { l: Lead; setStage: (l: Lead, s: string, reason?: string) => void; busy: string | null; waLink: (l: Lead) => string; size: "sm" | "lg"; showWa: boolean }) {
   const lg = size === "lg";
   if (l.stage === "rejected") {
     return <button className={`rounded-lg border px-3 text-[13px] font-medium transition-colors duration-150 ease-out hover:bg-[#f9fafb] disabled:opacity-40 ${lg ? "h-11 w-full" : "h-8"}`} style={{ color: C.ink, background: C.panel, borderColor: C.line }} disabled={busy === l.id} onClick={() => setStage(l, "approved")}>Restore lead</button>;
@@ -118,9 +133,7 @@ function LeadActions({ l, setStage, busy, waLink, size }: { l: Lead; setStage: (
   const st = { color: C.sub, background: C.panel, borderColor: C.line, textDecoration: "none" } as const;
   return (
     <div className={`flex items-center gap-2 ${lg ? "w-full" : ""}`}>
-      {num
-        ? <a href={waLink(l)} aria-label={`Open WhatsApp chat with ${l.company || l.name || "lead"}`} title="WhatsApp chat" className={live} style={st}><WaGlyph size={16} />{lg && <span>WhatsApp</span>}</a>
-        : <span aria-label="No WhatsApp number" title="No WhatsApp number" className={dead} style={st}><WaGlyph size={16} />{lg && <span>WhatsApp</span>}</span>}
+      {showWa && <a href={waLink(l)} aria-label={`Open WhatsApp chat with ${l.company || l.name || "lead"}`} title="WhatsApp chat" className={live} style={st}><WaGlyph size={16} />{lg && <span>WhatsApp</span>}</a>}
       {l.email
         ? <a href={`mailto:${l.email}`} aria-label={`Email ${l.email}`} title={`Email ${l.email}`} onClick={(e) => e.stopPropagation()} className={live} style={st}><Mail size={16} />{lg && <span>Email</span>}</a>
         : <span aria-label="No email" title="No email" className={dead} style={st}><Mail size={16} />{lg && <span>Email</span>}</span>}
@@ -368,6 +381,14 @@ export default function LeadsSection() {
     return c;
   }, [leads]);
 
+  // What is filtered right now, as chips you can remove one by one (shown under the search bar).
+  const activeChips: [string, () => void][] = [
+    ...(dateRange !== "all" ? [[`Added: ${DATE_LABEL[dateRange]}`, () => setDateRange("all")] as [string, () => void]] : []),
+    ...flt.source.map((v) => [SOURCE_LABEL[v] ?? v, () => setFlt({ ...flt, source: flt.source.filter((x) => x !== v) })] as [string, () => void]),
+    ...flt.city.map((v) => [v, () => setFlt({ ...flt, city: flt.city.filter((x) => x !== v) })] as [string, () => void]),
+    ...(flt.score !== "any" ? [[`Score ${SCORE_LABEL[flt.score]}`, () => setFlt({ ...flt, score: "any" })] as [string, () => void]] : []),
+    ...(msgValue(flt) !== "any" ? [[MSG_LABEL[msgValue(flt)], () => setFlt({ ...flt, ...msgFlags("any") })] as [string, () => void]] : []),
+  ];
   const activeFilterCount =
     flt.status.length + flt.source.length + flt.city.length +
     ["ai", "you", "converted", "client", "score"].filter((k) => (flt as any)[k] !== "any").length;
@@ -404,6 +425,44 @@ export default function LeadsSection() {
   const toggleAll = () => setSel((s) => { const n = new Set(s); if (allOnPage) paged.forEach((l) => n.delete(l.id)); else paged.forEach((l) => n.add(l.id)); return n; });
   const selectedLeads = useMemo(() => (leads ?? []).filter((l) => sel.has(l.id)), [leads, sel]);
   const hasView = !!q || activeFilterCount > 0 || dateRange !== "all" || tab !== "all";
+
+  // ── WhatsApp: only leads that are actually on WhatsApp get the WhatsApp button ───────────────
+  // A lead whose website publishes a wa.me link is on WhatsApp. For the rest we ask WhatsApp itself
+  // (the same batch check the WhatsApp page uses), only for the rows on screen, and remember the
+  // definite answers. A number we cannot check (no country code, or WhatsApp not connected) keeps
+  // its button: "unknown" is not "no". A lead with no number at all never shows the button.
+  const [waMap, setWaMap] = useState<Record<string, boolean>>(() => readWa());
+  const waTried = useRef<Map<string, number>>(new Map());
+  useEffect(() => {
+    const need = new Set<string>();
+    for (const l of paged) {
+      if (l.whatsapp) continue;
+      const dg = waDigits(l);
+      if (!dg || dg in waMap) continue;
+      if (Date.now() - (waTried.current.get(dg) ?? 0) < 120_000) continue; // asked a moment ago, WhatsApp could not tell
+      need.add(dg);
+    }
+    if (!need.size) return;
+    const phones = Array.from(need).slice(0, 200);
+    phones.forEach((p) => waTried.current.set(p, Date.now()));
+    let alive = true;
+    fetch("/api/whatsapp/check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phones }) })
+      .then((r) => r.json())
+      .then((r) => {
+        if (!alive || !r?.ok) return;
+        const got: Record<string, boolean> = {};
+        for (const p of phones) if (typeof r.results?.[p] === "boolean") got[p] = r.results[p];
+        if (Object.keys(got).length) setWaMap((m) => { const n = { ...m, ...got }; writeWa(n); return n; });
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [paged, waMap]);
+  const waShow = (l: Lead) => {
+    if (!(l.whatsapp || l.phone)) return false;      // no number at all
+    if (l.whatsapp) return true;                      // its own site says it is on WhatsApp
+    const dg = waDigits(l);
+    return !(dg && waMap[dg] === false);              // hidden only when WhatsApp said "not on WhatsApp"
+  };
 
   const card = { background: C.panel, border: `1px solid ${C.line}` };
   const btn = "flex h-9 items-center gap-2 rounded-lg px-3.5 text-[13px] font-medium transition-colors duration-150 ease-out";
@@ -519,7 +578,7 @@ export default function LeadsSection() {
       )}
 
       {/* ONE surface: tabs, toolbar, bulk bar, then the leads, separated by 1px lines */}
-      <div className="overflow-hidden rounded-2xl" style={card}>
+      <div className="rounded-2xl" style={card}>
         <div role="tablist" aria-label="Lead pipeline" className="lx-lscroll flex overflow-x-auto px-2 max-sm:[mask-image:linear-gradient(to_right,transparent,#000_14px,#000_calc(100%-14px),transparent)]">
           {PIPE.map(([k, label]) => {
             const on = tab === k; const n = counts[k] ?? 0;
@@ -549,12 +608,23 @@ export default function LeadsSection() {
               <SlidersHorizontal size={16} /><span>Filters</span>
               {activeFilterCount ? <span className="tabular-nums" style={{ color: C.brand }}>{activeFilterCount}</span> : null}
             </button>
-            {filtersOpen && <FilterPanel flt={flt} setFlt={setFlt} cities={cities} dateRange={dateRange} setDateRange={setDateRange} onClose={() => setFiltersOpen(false)} onClear={() => { setFlt({ status: [], source: [], city: [], ai: "any", you: "any", converted: "any", client: "any", score: "any" }); setDateRange("all"); }} />}
+            {filtersOpen && <FilterPanel flt={flt} setFlt={setFlt} leads={leads ?? []} dateRange={dateRange} setDateRange={setDateRange} resultCount={filtered.length} activeCount={activeChips.length} onClose={() => setFiltersOpen(false)} onClear={() => { setFlt({ status: [], source: [], city: [], ai: "any", you: "any", converted: "any", client: "any", score: "any" }); setDateRange("all"); }} />}
           </div>
           <select aria-label="Sort leads" value={sort} onChange={(e) => setSort(e.target.value)} className="shrink-0 font-medium max-sm:min-w-0 max-sm:flex-1">
             {Object.entries(SORT_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
         </div>
+
+        {activeChips.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 px-3 pb-3">
+            {activeChips.map(([label, remove]) => (
+              <button key={label} onClick={remove} aria-label={`Remove filter: ${label}`} className="inline-flex h-7 items-center gap-1.5 rounded-md border pl-2.5 pr-1.5 text-[12px] transition-colors duration-150 ease-out hover:bg-[#f9fafb]" style={{ borderColor: C.line, color: C.ink, background: C.panel }}>
+                {label}<X size={12} style={{ color: C.sub }} />
+              </button>
+            ))}
+            <button onClick={() => { setFlt({ status: [], source: [], city: [], ai: "any", you: "any", converted: "any", client: "any", score: "any" }); setDateRange("all"); }} className="h-7 rounded-md px-2 text-[12px] font-medium transition-colors duration-150 ease-out hover:bg-[#f3f4f6]" style={{ color: C.brand }}>Clear all</button>
+          </div>
+        )}
 
         {sel.size > 0 && (
           <div className="flex flex-wrap items-center gap-2 px-4 py-2" style={{ background: C.hover, borderTop: `1px solid ${C.line}` }}>
@@ -566,6 +636,7 @@ export default function LeadsSection() {
           </div>
         )}
 
+        <div className="overflow-hidden rounded-b-2xl">
         {leads === null ? (
           <SkeletonRows />
         ) : filtered.length === 0 ? (
@@ -612,7 +683,7 @@ export default function LeadsSection() {
                           <td className="px-3 py-3"><Score s={l.icp_score} /></td>
                           <td className="px-3 py-3"><ActivityCell l={l} /></td>
                           <td className="whitespace-nowrap px-3 py-3 text-[13px]" style={{ color: C.sub }}>{SOURCE_LABEL[l.source ?? ""] ?? l.source ?? "—"}</td>
-                          <td className="px-3 py-3 pr-4" onClick={(e) => e.stopPropagation()}><LeadActions l={l} setStage={setStage} busy={busy} waLink={waLink} size="sm" /></td>
+                          <td className="px-3 py-3 pr-4" onClick={(e) => e.stopPropagation()}><LeadActions l={l} setStage={setStage} busy={busy} waLink={waLink} size="sm" showWa={waShow(l)} /></td>
                         </tr>
                       );
                     })}
@@ -628,13 +699,13 @@ export default function LeadsSection() {
                   <button className="block w-full text-left" onClick={() => setSelected(l)} aria-label={`Open ${l.company || l.name || "lead"}`}>
                     <span className="flex items-start justify-between gap-3">
                       <span className="truncate text-[15px] font-medium">{l.company || l.name || "Untitled"}</span>
-                      <Score s={l.icp_score} />
+                      <Score s={l.icp_score} compact />
                     </span>
                     <span className="mt-0.5 block truncate text-[13px]" style={{ color: C.sub }}>{phoneDisplay(l)}{countryOf(l) ? ` · ${countryOf(l)}` : ""}</span>
                     {l.needs_attention && <span className="mt-2 inline-flex items-center gap-1 text-[12px] font-medium" style={{ color: C.amber }}><TriangleAlert size={12} />Needs you</span>}
                     <span className="mt-2 block"><ActivityCell l={l} /></span>
                   </button>
-                  <div className="mt-3"><LeadActions l={l} setStage={setStage} busy={busy} waLink={waLink} size="lg" /></div>
+                  <div className="mt-3"><LeadActions l={l} setStage={setStage} busy={busy} waLink={waLink} size="lg" showWa={waShow(l)} /></div>
                 </div>
               ))}
             </div>
@@ -642,9 +713,10 @@ export default function LeadsSection() {
             <Pagination page={pageSafe} totalPages={totalPages} perPage={perPage} total={filtered.length} setPage={setPage} setPerPage={setPerPage} />
           </>
         )}
+        </div>
       </div>
 
-      {selected && <LeadDrawer lead={{ ...selected, ...(details[selected.id] ?? {}) }} loadingDetail={!details[selected.id]} onClose={() => setSelected(null)} setStage={setStage} busy={busy} waLink={waLink} />}
+      {selected && <LeadDrawer lead={{ ...selected, ...(details[selected.id] ?? {}) }} loadingDetail={!details[selected.id]} onClose={() => setSelected(null)} setStage={setStage} busy={busy} waLink={waLink} showWa={waShow(selected)} />}
       {addOpen && <AddLeadModal open={addOpen} onClose={() => setAddOpen(false)} onAdded={() => { setAddOpen(false); load(); }} toast={toast} />}
       {buyerOpen && <BuyerProfilePanel open={buyerOpen} onClose={() => setBuyerOpen(false)} toast={toast} />}
     </div>

@@ -54,7 +54,7 @@ function MeetingBlock({ meeting, onClose }: { meeting: NonNullable<Lead["meeting
   );
 }
 
-export default function LeadDrawer({ lead, onClose, setStage, busy, waLink, loadingDetail }: { lead: Lead; loadingDetail?: boolean; onClose: () => void; setStage: (l: Lead, s: string, reason?: string) => void; busy: string | null; waLink: (l: Lead) => string }) {
+export default function LeadDrawer({ lead, onClose, setStage, busy, waLink, loadingDetail, showWa = true }: { lead: Lead; loadingDetail?: boolean; showWa?: boolean; onClose: () => void; setStage: (l: Lead, s: string, reason?: string) => void; busy: string | null; waLink: (l: Lead) => string }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", onKey);
@@ -173,14 +173,16 @@ export default function LeadDrawer({ lead, onClose, setStage, busy, waLink, load
         </div>
 
         <div className="shrink-0 border-t p-3 pb-[calc(12px+env(safe-area-inset-bottom))]" style={{ borderColor: C.line, background: C.panel }}>
-          <div className="grid grid-cols-2 gap-2">
+          <div className={`grid gap-2 ${showWa ? "grid-cols-2" : "grid-cols-1"}`}>
             {lead.stage === "rejected" ? (
-              <button className="col-span-2 h-11 rounded-lg border text-[13px] font-medium transition-colors duration-150 ease-out hover:bg-[#f9fafb] disabled:opacity-40" style={{ color: C.ink, background: C.panel, borderColor: C.line }} disabled={busy === lead.id} onClick={() => setStage(lead, "approved")}>Restore this lead</button>
+              <button className="h-11 rounded-lg border text-[13px] font-medium transition-colors duration-150 ease-out hover:bg-[#f9fafb] disabled:opacity-40 col-span-full" style={{ color: C.ink, background: C.panel, borderColor: C.line }} disabled={busy === lead.id} onClick={() => setStage(lead, "approved")}>Restore this lead</button>
             ) : (
               <>
-                <a href={waLink(lead)} className="flex h-11 items-center justify-center gap-2 rounded-lg border text-[13px] font-medium transition-colors duration-150 ease-out hover:bg-[#f9fafb]" style={{ background: C.panel, borderColor: C.line, color: C.ink, textDecoration: "none" }}>
-                  <MessageCircle size={16} />WhatsApp chat
-                </a>
+                {showWa && (
+                  <a href={waLink(lead)} className="flex h-11 items-center justify-center gap-2 rounded-lg border text-[13px] font-medium transition-colors duration-150 ease-out hover:bg-[#f9fafb]" style={{ background: C.panel, borderColor: C.line, color: C.ink, textDecoration: "none" }}>
+                    <MessageCircle size={16} />WhatsApp chat
+                  </a>
+                )}
                 <div><RejectMenu variant="button" full disabled={busy === lead.id} onPick={(reason) => setStage(lead, "rejected", reason)} /></div>
               </>
             )}

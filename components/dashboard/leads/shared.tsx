@@ -110,6 +110,30 @@ export function StageChip({ stage }: { stage: string }) {
   );
 }
 
+/** Filter labels shared by the filter panel and the "active filters" chips under the toolbar. */
+export const DATE_LABEL: Record<string, string> = { all: "All time", today: "Today", "7d": "Last 7 days", "30d": "Last 30 days" };
+export const SCORE_LABEL: Record<string, string> = { any: "Any score", "76-100": "76–100", "51-75": "51–75", "26-50": "26–50", "0-25": "0–25" };
+export const MSG_LABEL: Record<string, string> = { any: "Anyone", none: "Not messaged yet", ai: "Messaged by AI", you: "Messaged by you" };
+/** "Messaged by" is one choice in the UI; underneath it is the two yes/no flags the filter logic reads. */
+export function msgValue(f: { ai: string; you: string }): "any" | "none" | "ai" | "you" {
+  if (f.ai === "no" && f.you === "no") return "none";
+  if (f.ai === "yes" && f.you === "any") return "ai";
+  if (f.you === "yes" && f.ai === "any") return "you";
+  return "any";
+}
+export function msgFlags(v: string): { ai: string; you: string } {
+  return { ai: v === "ai" ? "yes" : v === "none" ? "no" : "any", you: v === "you" ? "yes" : v === "none" ? "no" : "any" };
+}
+
+/** The number to ask WhatsApp about: full international digits, or null when we do not know the country
+ *  code (then we cannot tell, and the WhatsApp button stays). Never guesses a country code. */
+export function waDigits(l: { whatsapp?: string | null; phone: string | null; country?: string | null }): string | null {
+  const shown = phoneDisplay(l as Lead);
+  if (!/^(\+|00)/.test(shown)) return null;
+  const d = shown.replace(/[^0-9]/g, "").replace(/^00/, "");
+  return d.length >= 8 ? d : null;
+}
+
 export const REJECT_REASONS: { key: string; label: string }[] = [
   { key: "competitor", label: "Competitor" },
   { key: "wrong_industry", label: "Wrong industry" },
