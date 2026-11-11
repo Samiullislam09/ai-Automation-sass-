@@ -86,7 +86,7 @@ async function followupTenant(tenantId: string, nowMs: number): Promise<number> 
   if (!s.auto_reply || !s.followups_enabled) return 0;
   if (isQuietHours(nowMs, s.tz_offset, s.send_start, s.send_end)) return 0;
 
-  const { data: session } = await supabase.from("whatsapp_sessions").select("first_connected_at, status").eq("tenant_id", tenantId).maybeSingle();
+  const { data: session } = await supabase.from("whatsapp_sessions").select("*").eq("tenant_id", tenantId).maybeSingle();
   if (!(await senderOnline(supabase, tenantId, (session as any)?.status))) return 0;
   const cap = warmupCap((session as any)?.first_connected_at ? Date.parse((session as any).first_connected_at) : null, nowMs);
   let dailyCount = await dailyAutoSendCount(tenantId);

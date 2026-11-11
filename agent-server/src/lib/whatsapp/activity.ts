@@ -270,7 +270,7 @@ export async function loadOverview(tenantId: string, nowMs = Date.now()): Promis
   const [settings, dailyCount, { data: sess }, { data: msgs }, { data: queue }] = await Promise.all([
     getWhatsappSettings(tenantId),
     dailyAutoSendCount(tenantId),
-    supabase.from("whatsapp_sessions").select("first_connected_at, status, phone_number").eq("tenant_id", tenantId).maybeSingle(),
+    supabase.from("whatsapp_sessions").select("*").eq("tenant_id", tenantId).maybeSingle(),
     supabase.from("outreach_messages").select("lead_id, direction, answered_by, created_at").eq("tenant_id", tenantId).gte("created_at", since).order("created_at", { ascending: false }).limit(2000),
     supabase.from("wa_outbound_queue").select("lead_id, scheduled_at, status, reason, updated_at").eq("tenant_id", tenantId).or(`status.in.(pending,sending),and(status.eq.skipped,updated_at.gte.${new Date(nowMs - 86_400_000).toISOString()})`).limit(300),
   ]);

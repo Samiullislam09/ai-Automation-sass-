@@ -128,7 +128,7 @@ export async function handleAutoReply(job: AutoReplyJob): Promise<void> {
   try {
     const [{ data: lead }, { data: session }, last, count] = await Promise.all([
       supabase.from("leads").select("opt_out, auto_reply_paused_until, stage, company, name").eq("id", leadId).eq("tenant_id", tenantId).maybeSingle(),
-      supabase.from("whatsapp_sessions").select("first_connected_at").eq("tenant_id", tenantId).maybeSingle(),
+      supabase.from("whatsapp_sessions").select("*").eq("tenant_id", tenantId).maybeSingle(),
       lastMessage(tenantId, leadId),
       dailyAutoSendCount(tenantId),
     ]);

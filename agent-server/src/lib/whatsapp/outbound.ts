@@ -236,7 +236,7 @@ async function dispatchTenant(tenantId: string, nowMs: number): Promise<boolean>
   const [active, dailyCount, { data: session }] = await Promise.all([
     tenantHasActiveConversation(tenantId, nowMs),
     dailyAutoSendCount(tenantId),
-    supabase.from("whatsapp_sessions").select("first_connected_at, status").eq("tenant_id", tenantId).maybeSingle(),
+    supabase.from("whatsapp_sessions").select("*").eq("tenant_id", tenantId).maybeSingle(),
   ]);
   if (!(await senderOnline(supabase, tenantId, (session as any)?.status))) { holdNote(tenantId, "WhatsApp is not connected in this process"); return false; }
   const cap = warmupCap((session as any)?.first_connected_at ? Date.parse((session as any).first_connected_at) : null, nowMs);
