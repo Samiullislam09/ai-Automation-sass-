@@ -1,16 +1,20 @@
 "use client";
 import { useState } from "react";
+import { MessageCircle, X } from "lucide-react";
 
 /** Shared pieces of the Leads page: the palette, types, small helpers and the few components used by
  *  more than one module. Split out of LeadsSection.tsx so the drawer, filters, add-lead form and the
  *  generate panel can each be loaded on demand. */
 
 export const C = {
-  bg: "#f6f7f9", panel: "#ffffff", ink: "#0f172a", sub: "#64748b", line: "#e9edf2",
-  brand: "#6a5af0", brandSoft: "#f1eeff", brandInk: "#5242d8",
-  green: "#16a34a", greenSoft: "#e7f6ec", amber: "#b45309", amberSoft: "#fdf2e3", red: "#dc2626", redSoft: "#fdeaea",
-  // the old rainbow (blue / violet) now resolves to the brand, so every sub-panel matches
-  blue: "#5242d8", blueSoft: "#f1eeff", violet: "#6a5af0", violetSoft: "#f1eeff", graySoft: "#f1f5f9",
+  // surfaces and text: neutral
+  bg: "#f4f5f8", panel: "#ffffff", ink: "#111827", sub: "#6b7280", line: "#e5e7eb", graySoft: "#f3f4f6", hover: "#f9fafb",
+  // the one accent (the brand purple, dark). Its "soft" is a neutral grey on purpose: no tinted fills.
+  brand: "#5242d8", brandInk: "#5242d8", brandSoft: "#f3f4f6",
+  // meaning only: amber = needs you, red = something negative, green = good news
+  green: "#15803d", greenSoft: "#f3f4f6", amber: "#b45309", amberSoft: "#f3f4f6", red: "#b91c1c", redSoft: "#f3f4f6",
+  // legacy names still used by a few sub-panels: they resolve to the accent / neutral
+  blue: "#5242d8", blueSoft: "#f3f4f6", violet: "#5242d8", violetSoft: "#f3f4f6",
 };
 
 export type Lead = {
@@ -125,20 +129,19 @@ export function RejectMenu({ onPick, disabled, variant, large, full }: { onPick:
   return (
     <div className={full ? "relative w-full" : "relative"}>
       {variant === "icon" ? (
-        <button className={`inline-flex items-center justify-center rounded-lg disabled:opacity-60 ${large ? "h-11 w-11" : "h-8 w-8"}`} style={{ color: open ? C.red : C.sub, background: open ? C.redSoft : "transparent", border: `1px solid ${open ? C.red : C.line}` }} title="Reject this lead" aria-label="Reject this lead" aria-haspopup="menu" aria-expanded={open} disabled={disabled} onClick={() => setOpen((o) => !o)}>
-          <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+        <button className={`inline-flex items-center justify-center rounded-lg border transition-colors duration-150 ease-out hover:bg-[#f9fafb] hover:text-[#b91c1c] disabled:opacity-40 ${large ? "h-11 w-11" : "h-8 w-8"}`} style={{ color: open ? C.red : C.sub, background: open ? C.hover : C.panel, borderColor: C.line }} title="Reject this lead" aria-label="Reject this lead" aria-haspopup="menu" aria-expanded={open} disabled={disabled} onClick={() => setOpen((o) => !o)}>
+          <X size={16} aria-hidden />
         </button>
       ) : (
-        <button className={`rounded-xl px-3.5 text-[13px] font-semibold disabled:opacity-60 ${full ? "h-11 w-full" : "h-9"}`} style={{ color: C.red, background: C.redSoft }} disabled={disabled} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>Reject…</button>
+        <button className={`rounded-lg border px-3.5 text-[13px] font-medium transition-colors duration-150 ease-out hover:bg-[#f9fafb] disabled:opacity-40 ${full ? "h-11 w-full" : "h-9"}`} style={{ color: C.red, background: C.panel, borderColor: C.line }} disabled={disabled} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>Reject…</button>
       )}
       {open && (
         <>
           <div className="fixed inset-0 z-[105]" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-[106] mt-1 w-44 overflow-hidden rounded-xl py-1 shadow-lg" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
-            <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide" style={{ color: C.sub }}>Why reject?</div>
+          <div className="absolute right-0 z-[106] mt-1 w-48 rounded-xl p-1 shadow-md" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+            <div className="px-3 pb-1 pt-1.5 text-[12px]" style={{ color: C.sub }}>Why reject?</div>
             {REJECT_REASONS.map((r) => (
-              <button key={r.key} className="block w-full px-3 py-1.5 text-left text-[12.5px]" style={{ color: C.ink }} onClick={() => { setOpen(false); onPick(r.key); }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = C.graySoft)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>{r.label}</button>
+              <button key={r.key} className="block w-full rounded-lg px-3 py-2 text-left text-[13px] transition-colors duration-150 ease-out hover:bg-[#f3f4f6]" style={{ color: C.ink }} onClick={() => { setOpen(false); onPick(r.key); }}>{r.label}</button>
             ))}
           </div>
         </>
@@ -152,12 +155,7 @@ export function RejectMenu({ onPick, disabled, variant, large, full }: { onPick:
 export function Tag({ children, tone, soft }: { children: React.ReactNode; tone: string; soft: string }) {
   return <span className="rounded-md px-2 py-0.5 text-[11px] font-semibold" style={{ color: tone, background: soft }}>{children}</span>;
 }
-export function WaGlyph({ size = 14 }: { size?: number }) {
-  // The real WhatsApp mark: a speech bubble with a handset. Filled white on the green pill.
-  return (
-    <svg width={size} height={size} viewBox="0 0 32 32" fill="currentColor" aria-hidden>
-      <path d="M16 3C9.2 3 3.7 8.5 3.7 15.3c0 2.4.7 4.7 1.9 6.7L3.5 29l7.2-1.9c1.9 1 4 1.6 6.2 1.6h.1c6.8 0 12.3-5.5 12.3-12.3S22.8 3 16 3zm0 22.4c-1.9 0-3.8-.5-5.4-1.5l-.4-.2-4.3 1.1 1.1-4.2-.3-.4a10 10 0 01-1.6-5.4c0-5.6 4.6-10.1 10.2-10.1 2.7 0 5.2 1 7.1 2.9a10 10 0 013 7.2c0 5.6-4.6 10.1-10.2 10.1zm5.6-7.6c-.3-.2-1.8-.9-2.1-1-.3-.1-.5-.2-.7.2s-.8 1-1 1.2c-.2.2-.4.2-.7.1-.3-.2-1.3-.5-2.5-1.5-.9-.8-1.5-1.8-1.7-2.1-.2-.3 0-.5.1-.7l.5-.6c.2-.2.2-.3.3-.5.1-.2.1-.4 0-.5l-1-2.3c-.2-.6-.5-.5-.7-.5h-.6c-.2 0-.5.1-.8.4-.3.3-1 1-1 2.5s1.1 2.9 1.2 3.1c.2.2 2.2 3.4 5.4 4.8.7.3 1.3.5 1.7.6.7.2 1.4.2 1.9.1.6-.1 1.8-.7 2-1.4.3-.7.3-1.3.2-1.4-.1-.2-.3-.3-.6-.4z" />
-    </svg>
-  );
+export function WaGlyph({ size = 16 }: { size?: number }) {
+  return <MessageCircle size={size} aria-hidden />;
 }
 
