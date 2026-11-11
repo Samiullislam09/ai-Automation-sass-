@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { useStore } from "@/lib/store";
 import { C, D, STAGE, SOURCE_LABEL, SORT_LABEL, REJECT_REASONS, ago, scoreColor, isToday, fmtDay, siteLabel, initials, cityOf, countryOf, phoneDisplay, StageChip, Tag, WaGlyph, RejectMenu, DATE_LABEL, SCORE_LABEL, MSG_LABEL, msgValue, msgFlags, type Lead, type Gen } from "./leads/shared";
 import type { Flt } from "./leads/FilterPanel";
+import Select from "./leads/Select";
 
 // Opened on demand, so they are not part of the page's first download.
 const LeadDrawer = dynamic(() => import("./leads/LeadDrawer"), { ssr: false });
@@ -78,7 +79,7 @@ const PIPE: [string, string][] = [
 /** One surface, four numbers, 1px dividers: not four cards. */
 function Summary({ items }: { items: { label: string; value?: number; note: string; warn?: boolean }[] }) {
   return (
-    <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl lg:grid-cols-4" style={{ background: C.line, border: `1px solid ${C.line}` }}>
+    <div className="grid grid-cols-2 gap-px overflow-hidden lg:grid-cols-4" style={{ background: C.line, border: `1px solid ${C.line}` }}>
       {items.map((it) => (
         <div key={it.label} className="px-5 py-4" style={{ background: C.panel }}>
           <div className="text-[12px]" style={{ color: C.sub }}>{it.label}</div>
@@ -612,9 +613,7 @@ export default function LeadsSection() {
             </button>
             {filtersOpen && <FilterPanel flt={flt} setFlt={setFlt} leads={leads ?? []} dateRange={dateRange} setDateRange={setDateRange} resultCount={filtered.length} activeCount={activeChips.length} onClose={() => setFiltersOpen(false)} onClear={() => { setFlt({ status: [], source: [], city: [], ai: "any", you: "any", converted: "any", client: "any", score: "any" }); setDateRange("all"); }} />}
           </div>
-          <select aria-label="Sort leads" value={sort} onChange={(e) => setSort(e.target.value)} className="shrink-0 font-medium max-sm:min-w-0 max-sm:flex-1">
-            {Object.entries(SORT_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-          </select>
+          <Select label="Sort leads" prefix="Sort:" align="right" className="max-sm:flex-1" value={sort} onChange={setSort} options={Object.entries(SORT_LABEL).map(([value, label]) => ({ value, label }))} />
         </div>
 
         {activeChips.length > 0 && (
