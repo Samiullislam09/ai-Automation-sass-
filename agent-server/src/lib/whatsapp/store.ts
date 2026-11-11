@@ -138,7 +138,7 @@ export async function recordSentStatus(
   supabase: SupabaseClient,
   tenantId: string,
   waMessageId: string,
-  status: "delivered" | "read"
+  status: "delivered" | "read" | "failed"
 ): Promise<void> {
   const { data: row } = await supabase
     .from("outreach_messages")
@@ -147,6 +147,14 @@ export async function recordSentStatus(
     .eq("wa_message_id", waMessageId)
     .maybeSingle();
   if (!row) return;
+
+  // A refusal only applies to a message that was never confirmed; a delivered/read one is already proof it arrived.
+  if (status === "failed") {
+    if (row.status === "delivered" || row.status === "read" || row.status === "failed") return;
+    console.warn(`[whatsapp] ${tenantId}: WhatsApp refused message ${waMessageId} (lead ${row.lead_id}); marking it failed`);
+    await supabase.from("outreach_messages").update({ status: "failed" }).eq("id", row.id);
+    return;
+  }
 
   const rank: Record<string, number> = { sent: 1, delivered: 2, read: 3 };
   if ((rank[status] ?? 0) <= (rank[row.status] ?? 0)) return; // never go backward

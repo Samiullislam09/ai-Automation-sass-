@@ -1370,6 +1370,13 @@ function Ticks({ status }: { status?: string }) {
       </svg>
     );
   }
+  if (status === "failed") {
+    return (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-label="Not delivered" style={{ display: "inline-block", verticalAlign: "-2px" }}>
+        <circle cx="12" cy="12" r="9" stroke="#e11d48" strokeWidth="1.8" /><path d="M12 7.5v5.5M12 16.4h.01" stroke="#e11d48" strokeWidth="2" strokeLinecap="round" />
+      </svg>
+    );
+  }
   const read = status === "read";
   const color = read ? WA.tickBlue : "#8696a0";
   const twin = status === "read" || status === "delivered";

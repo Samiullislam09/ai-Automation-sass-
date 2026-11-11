@@ -174,9 +174,12 @@ async function setDbStatus(
   tenantId: string,
   patch: Record<string, unknown>
 ): Promise<void> {
-  await supabase
+  const { error } = await supabase
     .from("whatsapp_sessions")
     .upsert({ tenant_id: tenantId, ...patch, updated_at: new Date().toISOString() }, { onConflict: "tenant_id" });
+  // This used to swallow the error, so a write that never landed (a constraint, a paused or over-quota database)
+  // looked like success and the record stayed wrong ("database said none") with nothing in the logs to say why.
+  if (error) console.error(`[whatsapp] ${tenantId}: could not save the connection record (${JSON.stringify(patch.status ?? Object.keys(patch))}): ${error.message}`);
 }
 
 /** Open (or reopen) a tenant's WhatsApp connection. Returns immediately; the QR and connection
@@ -373,7 +376,9 @@ export async function connect(
       const id = up.key?.id;
       if (!id || status == null) continue;
       // Baileys status: 2=server ack (sent), 3=delivered, 4=read.
-      const mapped = status >= 4 ? "read" : status >= 3 ? "delivered" : null;
+      // 0 = ERROR: WhatsApp's server refused the message ("received error in ack"). It is NOT sent, whatever the
+      // single tick suggested, so say so instead of leaving it looking delivered-later.
+      const mapped = status >= 4 ? "read" : status >= 3 ? "delivered" : status === 0 ? "failed" : null;
       if (mapped) await recordSentStatus(supabase, tenantId, id, mapped);
     }
   });
