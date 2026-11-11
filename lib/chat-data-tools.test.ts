@@ -237,3 +237,44 @@ test("focus narrows to one part of the pipeline, most-promising first", () => {
   assert.ok(d.focused_list);
   assert.equal(d.focused_list.length, 2, "only the two pending, not the contacted one");
 });
+
+// ── lookup_whatsapp_activity: the overview trimmed for the model ───────────────────────────
+import { shapeWhatsappActivity, LOOKUP_WHATSAPP_ACTIVITY } from "./chat-data-tools";
+
+const overview = {
+  generated_at: "2026-11-11T12:00:00.000Z",
+  state: { code: "running", label: "Working", detail: "The AI is sending within its limits." },
+  today: { sent: 3, cap: 20, remaining: 17 },
+  counts: { replies_waiting: 1, held: 1, first_messages_queued: 2, followups_due_24h: 0, skipped_24h: 1 },
+  next: { kind: "reply", lead: "Acme", at: "2026-11-11T12:02:00.000Z" },
+  replies: [
+    { lead_id: "1", name: "Acme", phone: "+971500000001", since: "2026-11-11T11:59:00.000Z", state: "queued", due_by: "2026-11-11T12:02:00.000Z", reason: "The AI is reading the thread." },
+    { lead_id: "2", name: "Beta", phone: "+971500000002", since: "2026-11-11T11:00:00.000Z", state: "held", reason: "You replied yourself, so the AI stays out until 18:00." },
+  ],
+  first_messages: [{ lead_id: "3", name: "Gamma", at: "2026-11-11T12:10:00.000Z" }],
+  followups: [{ lead_id: "4", name: "Delta", which: 1, due_at: "2026-11-12T09:00:00.000Z" }],
+  skipped: [{ lead_id: "5", name: "Eps", reason: "not on WhatsApp", at: "2026-11-11T10:00:00.000Z" }],
+  timeline: [],
+};
+
+test("the WhatsApp activity tool is registered, read-only and carries the order guard", () => {
+  const t = READ_TOOLS.find((x) => x.function.name === LOOKUP_WHATSAPP_ACTIVITY)!;
+  assert.ok(t, "registered");
+  assert.ok(t.function.name.startsWith("lookup_"));
+  assert.match(t.function.description, /THIS TOOL ONLY READS/);
+  assert.match(t.function.description, /queue pe/);
+});
+
+test("shapeWhatsappActivity: the model gets names, reasons and limits it can read out", () => {
+  const all: any = shapeWhatsappActivity(overview, "all");
+  assert.equal(all.state.status, "Working");
+  assert.deepEqual(all.sent_last_24h, { sent: 3, limit: 20, remaining: 17 });
+  assert.equal(all.replies.length, 2);
+  assert.equal(all.replies[1].why, "You replied yourself, so the AI stays out until 18:00.");
+  assert.deepEqual(all.first_message_queue, [{ lead: "Gamma", due_at: "2026-11-11T12:10:00.000Z" }]);
+  assert.equal(all.next_up.lead, "Acme");
+  const held: any = shapeWhatsappActivity(overview, "held");
+  assert.deepEqual(held.held.map((r: any) => r.lead), ["Beta"]);
+  assert.equal(held.replies, undefined, "a narrow question gets a narrow answer");
+  assert.deepEqual(shapeWhatsappActivity(null, "all").counts, null, "no overview: no invented numbers");
+});

@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useStore } from "@/lib/store";
 import WhatsAppConnectModal from "./WhatsAppConnectModal";
+import ActivityPanel, { type Overview } from "./whatsapp/ActivityPanel";
 
 /** /dashboard/whatsapp — Mr. WhatsApp, made to look and feel like WhatsApp itself.
  *
@@ -70,6 +71,10 @@ export default function WhatsAppSection() {
   const [search, setSearch] = useState("");
   const [adminOpen, setAdminOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [view, setView] = useState<"chats" | "activity">("chats");
+  const [focusLead, setFocusLead] = useState<string | null>(null);
+  const [activity, setActivity] = useState<Overview | null>(null);
+  const [activityLoading, setActivityLoading] = useState(false);
 
   const poll = useCallback(async () => {
     if (!pageVisible()) return;
@@ -106,6 +111,23 @@ export default function WhatsAppSection() {
     const id = setInterval(poll, reconnecting ? 2500 : 8000);
     return () => clearInterval(id);
   }, [poll, reconnecting]);
+
+  const loadActivity = useCallback(async () => {
+    if (!pageVisible()) return;
+    setActivityLoading(true);
+    try {
+      const r = await fetch("/api/whatsapp/activity").then((x) => x.json());
+      if (r.ok && r.overview) setActivity(r.overview as Overview);
+    } catch { /* keep the last overview */ } finally { setActivityLoading(false); }
+  }, []);
+  const linkedNow = status.loaded ? status.linked === true || status.status === "connected" : hint;
+  useEffect(() => {
+    if (!linkedNow) return;
+    void loadActivity();
+    const id = setInterval(loadActivity, view === "activity" ? 10_000 : 45_000);
+    return () => clearInterval(id);
+  }, [linkedNow, view, loadActivity]);
+  const attention = activity ? activity.counts.replies_waiting + activity.counts.held : 0;
 
   const doDisconnect = async () => {
     try {
@@ -146,7 +168,16 @@ export default function WhatsAppSection() {
       {/* TOP BAR — Auto replies, alerts, settings, help and the admin, all on the right (matches the
           reference; chat search lives in the list, not here). Only shown once connected. */}
       {connected && (
-        <div className="flex shrink-0 items-center justify-end gap-3 px-4 py-2.5" style={{ borderBottom: `1px solid ${WA.divider}` }}>
+        <div className="flex shrink-0 items-center justify-between gap-3 px-4 py-2.5" style={{ borderBottom: `1px solid ${WA.divider}` }}>
+          <div role="tablist" aria-label="WhatsApp view" className="inline-flex rounded-lg p-0.5" style={{ background: WA.listHover }}>
+            {([["chats", "Chats"], ["activity", "Activity"]] as const).map(([k, label]) => (
+              <button key={k} role="tab" aria-selected={view === k} onClick={() => setView(k)} className="inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium transition-colors duration-150 ease-out"
+                style={{ background: view === k ? "#fff" : "transparent", color: view === k ? WA.text : WA.sub, boxShadow: view === k ? "0 1px 2px rgba(0,0,0,.08)" : "none" }}>
+                {label}
+                {k === "activity" && attention > 0 && <span className="rounded-full px-1.5 text-[11px] font-semibold tabular-nums" style={{ background: activity && activity.counts.held > 0 ? "#fff8e1" : "#e7f6ec", color: activity && activity.counts.held > 0 ? "#7a5b00" : "#067647" }}>{attention}</span>}
+              </button>
+            ))}
+          </div>
           <div className="flex shrink-0 items-center gap-3">
             {/* Auto replies toggle */}
             <button onClick={toggleAuto} disabled={togglingAuto} className="inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[12.5px] font-semibold disabled:opacity-60"
@@ -207,7 +238,10 @@ export default function WhatsAppSection() {
               Reconnecting to WhatsApp… your chats are safe, sending resumes in a moment. No need to scan again.
             </div>
           )}
-          <Inbox search={search} setSearch={setSearch} online={status.status === "connected" || !status.loaded} />
+          <div className={view === "chats" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+            <Inbox search={search} setSearch={setSearch} online={status.status === "connected" || !status.loaded} focusLead={focusLead} />
+          </div>
+          {view === "activity" && <ActivityPanel data={activity} loading={activityLoading} onOpenChat={(id) => { setFocusLead(id); setView("chats"); }} />}
         </>
       ) : (
         <div className="flex-1 p-3 sm:p-4">
@@ -617,7 +651,7 @@ function InboxSkeleton() {
 }
 
 /* ── the inbox ───────────────────────────────────────────────────────────────────────────── */
-function Inbox({ search, setSearch, online }: { search: string; setSearch: (v: string) => void; online: boolean }) {
+function Inbox({ search, setSearch, online, focusLead }: { search: string; setSearch: (v: string) => void; online: boolean; focusLead: string | null }) {
   const { toast } = useStore();
   const [leads, setLeads] = useState<Lead[] | null>(null);
   const [inbox, setInbox] = useState<Record<string, { body: string; direction: string; created_at: string; status?: string; unanswered?: number; replied?: boolean }>>({});
@@ -681,6 +715,13 @@ function Inbox({ search, setSearch, online }: { search: string; setSearch: (v: s
       try { sessionStorage.setItem(CHATS_KEY, JSON.stringify({ items: r.items, inbox: r.inbox ?? [] })); } catch { /* quota / private mode */ }
     } catch { /* keep what is on screen */ }
   }, [applyChats]);
+
+  // "Open chat" from the Activity page: switch to that lead's conversation (tab first, so it is in the list).
+  useEffect(() => {
+    if (!focusLead || !leads) return;
+    const l = leads.find((x) => x.id === focusLead);
+    if (l) { setTab("all"); setActive(l); }
+  }, [focusLead, leads]);
 
   // First paint from the last visit, before the network answers.
   useEffect(() => {

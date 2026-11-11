@@ -34,6 +34,7 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ChatTool } from "@/lib/chat-tools";
+import { callWhatsapp } from "@/lib/whatsapp-proxy";
 
 /* ── The tools, as the model sees them ───────────────────────────────────────────────────── */
 
@@ -49,6 +50,7 @@ export const LOOKUP_ANALYTICS = "lookup_analytics";
 export const LOOKUP_SCHEDULE = "lookup_schedule";
 export const LOOKUP_BUSINESS = "lookup_business_profile";
 export const LOOKUP_OUTREACH = "lookup_outreach";
+export const LOOKUP_WHATSAPP_ACTIVITY = "lookup_whatsapp_activity";
 
 export function isReadTool(name: string | null | undefined): boolean {
   return typeof name === "string" && name.startsWith(READ_PREFIX);
@@ -209,6 +211,36 @@ const RAW_READ_TOOLS: ChatTool[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: LOOKUP_WHATSAPP_ACTIVITY,
+      description:
+        "Look up what Mr. WhatsApp (the AI that messages leads on WhatsApp) is doing RIGHT NOW: whether it is working or why it " +
+        "is stopped (auto replies off, not connected, quiet hours, daily limit), how many messages it sent today against its " +
+        "limit, who it will answer next, who has written and is waiting for an answer, who is held back and WHY (the owner " +
+        "replied personally, the lead said STOP, limit reached), the queue of first messages with their times, follow-ups coming " +
+        "due, and messages skipped (not on WhatsApp). " +
+        'Call this for "abhi kitne whatsapp message queue pe hain", "AI kiske liye likh raha hai", "next kisko jawab dega", ' +
+        '"kisne reply diya aur jawab nahi gaya", "AI ne is lead ko jawab kyun nahi diya", "whatsapp agent kya kar raha hai", ' +
+        '"kitne message bheje aaj", "kitna limit bacha", "what is the WhatsApp queue", "why has nobody been answered". ' +
+        "Always call it instead of guessing. For the plain lead and reply counts by stage, use the outreach lookup instead.",
+      parameters: {
+        type: "object",
+        properties: {
+          focus: {
+            type: "string",
+            enum: ["all", "queue", "replies", "held", "followups", "today"],
+            description:
+              "'queue' = first messages waiting to go out; 'replies' = people who wrote and the AI's answer status; " +
+              "'held' = only the ones the AI will NOT answer and why; 'followups' = nudges coming due; 'today' = how many sent versus the limit. Default 'all'.",
+          },
+        },
+        required: [],
+        additionalProperties: false,
+      },
+    },
+  },
 ];
 
 /** What every caller gets: the lookups, each carrying NEVER_FOR_ORDERS. */
@@ -243,6 +275,7 @@ export async function runReadTool(
       case LOOKUP_SCHEDULE: return await lookupSchedule(supabase, tenantId);
       case LOOKUP_BUSINESS: return await lookupBusiness(supabase, tenantId);
       case LOOKUP_OUTREACH: return await lookupOutreach(supabase, tenantId, typeof args?.focus === "string" ? args.focus : "all");
+      case LOOKUP_WHATSAPP_ACTIVITY: return await lookupWhatsappActivity(tenantId, typeof args?.focus === "string" ? args.focus : "all");
       default: return { ok: false, tool: name, note: "No such lookup." };
     }
   } catch (e: any) {
@@ -507,6 +540,36 @@ async function lookupBusiness(supabase: SupabaseClient, tenantId: string): Promi
 }
 
 /* ── Handing the result to the model ─────────────────────────────────────────────────────── */
+
+/** What Mr. WhatsApp is doing now. agent-server builds the overview (lib/whatsapp/activity.ts); this only trims it
+ *  to what the model needs so it reads names and reasons out instead of inventing them. */
+async function lookupWhatsappActivity(tenantId: string, focus: string): Promise<ReadResult> {
+  const r = await callWhatsapp(tenantId, "activity");
+  if (!r.ok) return { ok: false, tool: LOOKUP_WHATSAPP_ACTIVITY, note: `WhatsApp activity is not available right now (${r.error ?? "agent server unreachable"}).` };
+  return { ok: true, tool: LOOKUP_WHATSAPP_ACTIVITY, data: shapeWhatsappActivity(r.overview as any, focus) };
+}
+
+/** Pure: the overview in, a compact answer out. Exported for tests. */
+export function shapeWhatsappActivity(o: any, focus: string): Record<string, unknown> {
+  const L = <T,>(a: T[] | undefined, n: number) => (Array.isArray(a) ? a.slice(0, n) : []);
+  const replies = L<any>(o?.replies, 12).map((r) => ({ lead: r.name, phone: r.phone, status: r.state, since: r.since, answer_due_by: r.due_by ?? null, why: r.reason }));
+  const out: Record<string, unknown> = {
+    as_of: o?.generated_at,
+    state: o?.state ? { status: o.state.label, detail: o.state.detail, resumes_at: o.state.resumes_at ?? null } : null,
+    sent_last_24h: o?.today ? { sent: o.today.sent, limit: o.today.cap, remaining: o.today.remaining } : null,
+    counts: o?.counts ?? null,
+    next_up: o?.next ?? null,
+  };
+  const all = focus === "all" || !focus;
+  if (all || focus === "replies") out.replies = replies;
+  if (focus === "held") out.held = replies.filter((r) => r.status === "held");
+  if (all || focus === "queue") {
+    out.first_message_queue = L<any>(o?.first_messages, 10).map((f) => ({ lead: f.name, due_at: f.at }));
+    out.skipped_last_24h = L<any>(o?.skipped, 6).map((x) => ({ lead: x.name, reason: x.reason }));
+  }
+  if (all || focus === "followups") out.followups_due = L<any>(o?.followups, 8).map((f) => ({ lead: f.name, nudge_number: f.which, due_at: f.due_at }));
+  return out;
+}
 
 /** The CRM/outreach read. Two queries — the leads and the recent messages — shaped by a pure
  *  function so the exact counts can be tested without a database, the way lookup_content is.

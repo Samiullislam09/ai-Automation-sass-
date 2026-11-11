@@ -11,6 +11,7 @@ import type { Express, Request, Response } from "express";
 import { supabase } from "../../supabase.js";
 import { env } from "../../env.js";
 import { linkedState, connect, disconnect, sendText, sessionStatus, getContactInfo, checkNumbers } from "./session.js";
+import { loadOverview } from "./activity.js";
 import { getWhatsappAutoReply, setWhatsappAutoReply, getWhatsappSettings, patchWhatsappSettings } from "../outreach/settings.js";
 import { listAdmins, upsertAdmin, deleteAdmin, listNotifications, markNotificationsRead } from "./team.js";
 import { recordOutgoing } from "./store.js";
@@ -64,6 +65,17 @@ export function mountWhatsapp(app: Express): void {
       mem = { status: "reconnecting", qr: null, phone: link.phone };
     }
     res.json({ ok: true, ...mem, phone: mem.phone ?? link.phone, linked: link.linked || mem.status === "connected" || mem.status === "reconnecting", autoReply });
+  });
+
+  /** What the AI is doing on WhatsApp right now: who it answers next, who is held and why, the queue,
+   *  follow-ups, skips and the hourly timeline. One object for the Activity panel and for Mr Lxwa. */
+  app.get("/whatsapp/:tenantId/activity", async (req, res) => {
+    if (!authed(req, res)) return;
+    try {
+      res.json({ ok: true, overview: await loadOverview(req.params.tenantId) });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message ?? "could not build the overview" });
+    }
   });
 
   /** Turn WhatsApp auto-reply on/off for this tenant. */
