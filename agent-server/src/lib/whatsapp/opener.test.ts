@@ -38,3 +38,52 @@ test("closing: sender, site and the opt-out line are built in code", () => {
   assert.ok(c.includes(OPT_OUT_PHRASE));
   assert.ok(!closing("Acme", null).includes("http"));
 });
+
+// ── brand: the website, not the account username ───────────────────────────────────────────
+import { hostOf, brandName, applyBrand } from "./brand.js";
+import { shortenDraft, prepareDraft } from "./opener.js";
+
+test("hostOf / brandName: a business is its website; the workspace name is only the fallback", () => {
+  assert.equal(hostOf("https://www.wca-global.com/about?x=1"), "wca-global.com");
+  assert.equal(hostOf("wca-global.com"), "wca-global.com");
+  assert.equal(hostOf("not a url"), null);
+  assert.equal(hostOf(""), null);
+  assert.equal(brandName({ name: "heysamiul09", website_url: "https://wca-global.com" }), "wca-global.com");
+  assert.equal(brandName({ name: "Acme Safety", website_url: null }), "Acme Safety");
+  assert.equal(brandName(null), "our team");
+});
+
+test("applyBrand: an old draft that says 'from heysamiul09' now says the website, without repeating the address", () => {
+  const tenant = { name: "heysamiul09", website_url: "https://wca-global.com" };
+  const old = "Hi, This is Sami from heysamiul09. We provide ISO certification.\n\n— heysamiul09\nhttps://wca-global.com\nIf you would rather not hear from me, reply with the word STOP and I will not write again.";
+  const out = applyBrand(old, tenant);
+  assert.match(out, /This is Sami from wca-global\.com\./);
+  assert.ok(!/heysamiul09/.test(out));
+  assert.equal(out.split("wca-global.com").length - 1, 2, "once in the greeting, once in the signature: the address line is gone");
+  assert.match(out, /— wca-global\.com\nIf you would rather not hear from me/);
+  // a name that merely CONTAINS the old one is left alone
+  assert.equal(applyBrand("heysamiul09x is another company", tenant), "heysamiul09x is another company");
+});
+
+test("shortenDraft: a draft a few lines too long is cut to its opening and closing question, signature untouched", () => {
+  const sig = "— wca-global.com\nIf you would rather not hear from me, reply with the word STOP and I will not write again.";
+  const longBody = "Hi, this is Sami from wca-global.com. We provide ISO 13485 certification for medical device makers across the UAE. " + "Our services also include ISO 9001, ISO 14001, ISO 45001 and ISO 22000 certification for manufacturers of every size. ".repeat(4) + "Are you supporting clients who need ISO 13485?";
+  const draft = `${longBody}\n\n${sig}`;
+  assert.ok(draft.length > 700, "test setup: it is over the limit");
+  assert.equal(usableDraft(draft), null);
+  const short = shortenDraft(draft)!;
+  assert.ok(short.length <= 700);
+  assert.ok(short.startsWith("Hi, this is Sami from wca-global.com."));
+  assert.ok(short.includes("Are you supporting clients who need ISO 13485?"), "the closing question is kept");
+  assert.ok(short.endsWith(sig), "signature and opt-out are exactly as written");
+  assert.equal(shortenDraft("Hi there, long text but no signature and no opt-out ".repeat(30)), null, "never sends one without a working opt-out");
+  assert.equal(shortenDraft(`Subject: Hi\n\n${longBody}\n\n${sig}`), null, "an email is not a WhatsApp message");
+});
+
+test("prepareDraft: brand + shorten in one step", () => {
+  const tenant = { name: "heysamiul09", website_url: "https://wca-global.com" };
+  const d = "Hi, this is Sami from heysamiul09. Would a one-page outline help?\n\n— heysamiul09\nhttps://wca-global.com\nIf you would rather not hear from me, reply with the word STOP and I will not write again.";
+  const out = prepareDraft(d, tenant)!;
+  assert.ok(out.includes("from wca-global.com.") && !out.includes("heysamiul09"));
+  assert.equal(prepareDraft(null, tenant), null);
+});

@@ -28,10 +28,10 @@ export async function POST(req: NextRequest) {
   if (!ids.length) return NextResponse.json({ ok: true, statuses: {}, stored: true });
 
   let stored = true;
-  let { data, error } = await supabase.from("leads").select("id, phone, whatsapp, country, wa_status, wa_checked_at").eq("tenant_id", tenantId).in("id", ids);
+  let { data, error } = await supabase.from("leads").select("id, phone, whatsapp, country, stage, replied_at, wa_status, wa_checked_at").eq("tenant_id", tenantId).in("id", ids);
   if (error && /wa_status|wa_checked_at|column .* does not exist/i.test(error.message)) {
     stored = false; // migration 038 not applied yet: answer anyway, just cannot remember it
-    ({ data, error } = (await supabase.from("leads").select("id, phone, whatsapp, country").eq("tenant_id", tenantId).in("id", ids)) as any);
+    ({ data, error } = (await supabase.from("leads").select("id, phone, whatsapp, country, stage, replied_at").eq("tenant_id", tenantId).in("id", ids)) as any);
   }
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
 

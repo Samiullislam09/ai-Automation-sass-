@@ -20,7 +20,7 @@ import { dailyAutoSendCount, warmupCap } from "./autoReply.js";
 import { isQuietHours, nextAllowedTime } from "./outbound.js";
 import { FOLLOWUP_HOURS } from "./followup.js";
 import { sessionStatus } from "./session.js";
-import { usableDraft } from "./opener.js";
+import { prepareDraft } from "./opener.js";
 
 /** A reply is sent 30–180s after a message arrives; past this the AI either chose not to answer or it is stuck. */
 const REPLY_WINDOW_S = 180;
@@ -92,6 +92,8 @@ export type OverviewInput = {
   queue: QueueRow[];           // pending slots + skipped in the last 24h
   /** The written first message of the leads nearest the front of the queue (lead id -> draft), for the preview. */
   drafts?: Record<string, string>;
+  /** Show every upcoming item, not just the first few (the "Show all" button). */
+  full?: boolean;
 };
 
 const nameOf = (l?: LeadRow) => l?.company || l?.name || l?.phone || l?.whatsapp || "Lead";
@@ -216,6 +218,8 @@ export function buildOverview(inp: OverviewInput): Overview {
   }
 
   // ── the agenda: everything about to happen, in time order, with what each message will say ──
+  const FIRST_SHOWN = inp.full ? 150 : 12;
+  const FOLLOW_SHOWN = inp.full ? 60 : 6;
   const NUDGE = ["a light check-in", "an offer to clarify anything", "a last, no-pressure note"];
   const agenda: AgendaItem[] = [];
   if (state.sending) {
@@ -225,17 +229,17 @@ export function buildOverview(inp: OverviewInput): Overview {
       if (r.state !== "queued") continue;
       agenda.push({ kind: "reply", at: r.due_by ?? new Date(nowMs).toISOString(), lead_id: r.lead_id, lead: r.name, title: "Answer their message", detail: "They wrote to you, and the AI is answering.", message: { state: "ai", text: "The AI reads what they wrote and writes the answer just before sending." } });
     }
-    for (const f of first_messages.slice(0, 12)) {
-      const text = usableDraft(inp.drafts?.[f.lead_id]);
+    for (const f of first_messages.slice(0, FIRST_SHOWN)) {
+      const text = inp.drafts?.[f.lead_id] ?? null; // already prepared (branded, shortened) by the loader
       agenda.push({ kind: "first_message", at: f.at, lead_id: f.lead_id, lead: f.name, title: "First message", detail: "Introduces your business and how to opt out.", message: text ? { state: "ready", text } : { state: "ai", text: "The AI writes a short introduction from your business details (Site Brain) just before sending." } });
     }
-    for (const f of followups.slice(0, 6)) {
+    for (const f of followups.slice(0, FOLLOW_SHOWN)) {
       agenda.push({ kind: "followup", at: f.due_at, lead_id: f.lead_id, lead: f.name, title: `Follow-up ${f.which} of 3`, detail: "They have not answered.", message: { state: "ai", text: `The AI writes ${NUDGE[f.which - 1] ?? "a short check-in"} that fits the conversation.` } });
     }
     agenda.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
   }
-  const agendaCap = 14;
-  const agendaTotal = agenda.length + Math.max(0, first_messages.length - 12) + Math.max(0, followups.length - 6);
+  const agendaCap = inp.full ? 400 : 14;
+  const agendaTotal = agenda.length + Math.max(0, first_messages.length - FIRST_SHOWN) + Math.max(0, followups.length - FOLLOW_SHOWN);
 
   const skipped24 = skipped.filter((x) => nowMs - Date.parse(x.at) < 86_400_000);
   return {
@@ -267,7 +271,7 @@ export function buildOverview(inp: OverviewInput): Overview {
 }
 
 /** Gather the rows and build the overview. Never throws: a missing table just means an emptier answer. */
-export async function loadOverview(tenantId: string, nowMs = Date.now()): Promise<Overview> {
+export async function loadOverview(tenantId: string, nowMs = Date.now(), opts: { full?: boolean } = {}): Promise<Overview> {
   const since = new Date(nowMs - 7 * 86_400_000).toISOString();
   const [settings, dailyCount, { data: sess }, { data: msgs }, { data: queue }] = await Promise.all([
     getWhatsappSettings(tenantId),
@@ -302,18 +306,22 @@ export async function loadOverview(tenantId: string, nowMs = Date.now()): Promis
   const linked = !!(sess as any)?.phone_number && dbStatus !== "logged_out" && dbStatus !== "banned";
   const connection = live === "in_use_elsewhere" ? live : live === "disconnected" && linked ? "reconnecting" : live;
   // The written first message of the leads at the front of the queue, so the page can show what will be sent.
-  const front = queueRows.filter((q) => q.status === "pending" || q.status === "sending").sort((a, b) => Date.parse(a.scheduled_at) - Date.parse(b.scheduled_at)).slice(0, 12).map((q) => q.lead_id);
+  const front = queueRows.filter((q) => q.status === "pending" || q.status === "sending").sort((a, b) => Date.parse(a.scheduled_at) - Date.parse(b.scheduled_at)).slice(0, opts.full ? 150 : 12).map((q) => q.lead_id);
   const drafts: Record<string, string> = {};
   if (front.length) {
     const { data: dr } = await supabase.from("leads").select("id, draft").eq("tenant_id", tenantId).in("id", front);
-    for (const d of (dr ?? []) as { id: string; draft: string | null }[]) if (d.draft) drafts[d.id] = d.draft;
+    const { data: tenantRow } = await supabase.from("tenants").select("name, website_url").eq("id", tenantId).maybeSingle();
+    for (const d of (dr ?? []) as { id: string; draft: string | null }[]) {
+      const ready = d.draft ? prepareDraft(d.draft, tenantRow as any) : null;
+      if (ready) drafts[d.id] = ready;
+    }
   }
   const sr = (sess ?? {}) as { owner?: string | null; owner_seen_at?: string | null; owner_info?: string | null };
   const holder = connection === "in_use_elsewhere" && sr.owner
     ? { info: sr.owner_info || sr.owner, seenSecondsAgo: sr.owner_seen_at ? Math.max(0, Math.round((nowMs - Date.parse(sr.owner_seen_at)) / 1000)) : 0 }
     : null;
   return buildOverview({
-    nowMs, settings, connection, holder, dailyCount, drafts,
+    nowMs, settings, connection, holder, dailyCount, drafts, full: opts.full,
     firstConnectedAtMs: (sess as any)?.first_connected_at ? Date.parse((sess as any).first_connected_at) : null,
     messages, leads, queue: queueRows,
   });

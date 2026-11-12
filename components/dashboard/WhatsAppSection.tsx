@@ -56,8 +56,30 @@ type Lead = {
   score_breakdown?: { score?: number; band?: string; components?: { id: string; group: string; points: number; max: number; why: string }[] } | null;
   evidence?: any; reject_reason?: string | null;
   needs_attention?: boolean | null; needs_attention_reason?: string | null; last_intent?: string | null;
+  /** International digits to show and dial, made from the lead's country (null when it cannot be told). */
+  dial?: string | null;
 };
 const CHATS_KEY = "lx-wa-chats-v1";
+
+/** Like WhatsApp's chat list: the time today, "Yesterday", the weekday this week, else the date. */
+function listTime(iso: string): string {
+  const d = new Date(iso), now = new Date();
+  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day(now) - day(d)) / 86_400_000);
+  if (diff <= 0) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (diff === 1) return "Yesterday";
+  if (diff < 7) return d.toLocaleDateString([], { weekday: "long" });
+  return d.toLocaleDateString([], { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+/** The day heading inside a chat: Today, Yesterday, or the full date. */
+function dayLabel(iso: string): string {
+  const d = new Date(iso), now = new Date();
+  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day(now) - day(d)) / 86_400_000);
+  if (diff <= 0) return "Today";
+  if (diff === 1) return "Yesterday";
+  return d.toLocaleDateString([], { day: "numeric", month: "long", year: "numeric" });
+}
 type Msg = { id: string; direction: "in" | "out"; status: string; body: string; answered_by?: string | null; created_at: string };
 
 export default function WhatsAppSection() {
@@ -75,6 +97,7 @@ export default function WhatsAppSection() {
   const [focusLead, setFocusLead] = useState<string | null>(null);
   const [activity, setActivity] = useState<Overview | null>(null);
   const [activityLoading, setActivityLoading] = useState(false);
+  const [activityFull, setActivityFull] = useState(false); // the "Show all" button on the timeline
 
   const poll = useCallback(async () => {
     if (!pageVisible()) return;
@@ -116,10 +139,10 @@ export default function WhatsAppSection() {
     if (!pageVisible()) return;
     setActivityLoading(true);
     try {
-      const r = await fetch("/api/whatsapp/activity").then((x) => x.json());
+      const r = await fetch(`/api/whatsapp/activity${activityFull ? "?full=1" : ""}`).then((x) => x.json());
       if (r.ok && r.overview) setActivity(r.overview as Overview);
     } catch { /* keep the last overview */ } finally { setActivityLoading(false); }
-  }, []);
+  }, [activityFull]);
   const linkedNow = status.loaded ? status.linked === true || status.status === "connected" : hint;
   useEffect(() => {
     if (!linkedNow) return;
@@ -247,7 +270,7 @@ export default function WhatsAppSection() {
           <div className={view === "chats" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
             <Inbox search={search} setSearch={setSearch} online={status.status === "connected" || !status.loaded} focusLead={focusLead} />
           </div>
-          {view === "activity" && <ActivityPanel data={activity} loading={activityLoading} onOpenChat={(id) => { setFocusLead(id); setView("chats"); }} />}
+          {view === "activity" && <ActivityPanel data={activity} loading={activityLoading} showAll={activityFull} onShowAll={setActivityFull} onOpenChat={(id) => { setFocusLead(id); setView("chats"); }} />}
         </>
       ) : (
         <div className="flex-1 p-3 sm:p-4">
@@ -750,7 +773,9 @@ function Inbox({ search, setSearch, online, focusLead }: { search: string; setSe
   // A number WhatsApp says is not registered goes to its own "No WhatsApp" list, away from the real chats,
   // even if a message was once sent to it (that message never reached anyone). The one exception is a lead
   // who has written to us: they are plainly reachable, whatever the check said.
-  const noWhatsApp = (l: Lead) => onWa[l.id] === false && !inbox[l.id]?.replied;
+  // The server sends dial: null for a number it cannot make dialable (no country, malformed): that lead cannot be
+  // messaged either. (An old cached list has no dial field at all, which is "not known yet", not "none".)
+  const noWhatsApp = (l: Lead) => (onWa[l.id] === false || l.dial === null) && !inbox[l.id]?.replied;
   const chatLeads = leads.filter((l) => !noWhatsApp(l));
   const noWaLeads = leads.filter(noWhatsApp);
   const unreadCount = chatLeads.filter((l) => (inbox[l.id]?.unanswered ?? 0) > 0).length;
@@ -768,8 +793,8 @@ function Inbox({ search, setSearch, online, focusLead }: { search: string; setSe
     });
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden" style={{ background: WA.panel }}>
-      <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[280px_1fr] lg:grid-cols-[300px_1fr] xl:grid-cols-[330px_1fr]">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" style={{ background: WA.panel }}>
+      <div className="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)] overflow-hidden md:grid-cols-[280px_minmax(0,1fr)] lg:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[330px_minmax(0,1fr)]">
         {/* conversation list — hidden on mobile once a chat is open */}
         <div className={`${active ? "hidden md:flex" : "flex"} h-full min-h-0 flex-col overflow-hidden`} style={{ borderRight: `1px solid ${WA.divider}` }}>
           <div className="flex items-center justify-between px-4 pt-3.5" style={{ color: WA.text }}>
@@ -803,7 +828,7 @@ function Inbox({ search, setSearch, online, focusLead }: { search: string; setSe
           <div className="wa-scroll flex-1 overflow-y-auto" style={{ borderTop: `1px solid ${WA.divider}` }}>
             {tab === "nowa" && (
               <p className="px-4 py-3 text-[12px] leading-snug" style={{ color: WA.sub, background: WA.listHover, borderBottom: `1px solid ${WA.divider}` }}>
-                These numbers are not on WhatsApp (landlines, toll-free lines), so no message can reach them. Contact them by phone or email instead.
+                These leads cannot be messaged on WhatsApp: the number is a landline or toll-free line, is not on WhatsApp, or is not a usable number. Contact them by phone or email instead.
               </p>
             )}
             {visible.length === 0 ? (
@@ -812,7 +837,6 @@ function Inbox({ search, setSearch, online, focusLead }: { search: string; setSe
               const last = inbox[l.id];
               const on = active?.id === l.id;
               const unread = !on && (last?.unanswered ?? 0) > 0 ? last!.unanswered! : 0;
-              const wa = onWa[l.id]; // true / false / undefined
               return (
                 <button
                   key={l.id}
@@ -822,20 +846,21 @@ function Inbox({ search, setSearch, online, focusLead }: { search: string; setSe
                 >
                   <WaAvatar size={44} />
                   <span className="min-w-0 flex-1">
-                    <span className="flex items-center gap-1.5">
-                      <span className="truncate text-[14px]" style={{ color: WA.text, fontWeight: unread ? 700 : 600 }}>{l.company || l.name || "Lead"}</span>
-                      {l.needs_attention && <span title={l.needs_attention_reason ?? "Needs your attention"} className="flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9.5px] font-bold" style={{ background: "#fef3c7", color: "#92400e" }}>⚠ Needs you</span>}
-                      {wa === true && <span className="flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9.5px] font-bold" style={{ background: "#e7f6ec", color: "#067647" }}>✓ On WhatsApp</span>}
-                      {wa === false && tab !== "nowa" && <span className="flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9.5px] font-bold" style={{ background: "#fdeaea", color: "#b42318" }}>Not on WA</span>}
+                    <span className="flex items-baseline justify-between gap-2">
+                      <span className="truncate text-[15px]" style={{ color: WA.text, fontWeight: 500 }}>{l.company || l.name || "Lead"}</span>
+                      {last?.created_at && <span className="shrink-0 text-[11.5px] tabular-nums" style={{ color: unread ? WA.green : WA.sub }}>{listTime(last.created_at)}</span>}
                     </span>
-                    <span className="flex items-center gap-1 truncate text-[12.5px]" style={{ color: unread ? WA.text : WA.sub }}>
-                      {last?.direction === "out" && last.status && <Ticks status={last.status} />}
-                      <span className="truncate" style={{ fontWeight: unread ? 600 : 400 }}>{last ? last.body : tab === "nowa" ? (l.phone || "No WhatsApp") : "Tap to open"}</span>
+                    <span className="mt-0.5 flex items-center justify-between gap-2">
+                      <span className="flex min-w-0 items-center gap-1 text-[13px]" style={{ color: WA.sub }}>
+                        {last?.direction === "out" && last.status && <Ticks status={last.status} />}
+                        <span className="truncate">{last ? last.body : tab === "nowa" ? (l.dial ? `+${l.dial}` : l.phone || "No WhatsApp") : "Tap to open"}</span>
+                      </span>
+                      <span className="flex shrink-0 items-center gap-1.5">
+                        {l.needs_attention && <span title={l.needs_attention_reason ?? "Needs your attention"} className="h-2 w-2 rounded-full" style={{ background: "#f5a623" }} aria-label="Needs you" />}
+                        {unread > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold text-white" style={{ background: WA.green }}>{unread}</span>}
+                      </span>
                     </span>
                   </span>
-                  {unread > 0 && (
-                    <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-bold text-white" style={{ background: WA.green }}>{unread}</span>
-                  )}
                 </button>
               );
             })}
@@ -843,9 +868,9 @@ function Inbox({ search, setSearch, online, focusLead }: { search: string; setSe
         </div>
 
         {/* chat pane — full width on mobile when a chat is open */}
-        <div className={`${active ? "flex" : "hidden md:flex"} h-full min-h-0 flex-col`} style={{ background: WA.chatBg }}>
+        <div className={`${active ? "flex" : "hidden md:flex"} h-full min-h-0 min-w-0 flex-col overflow-hidden`} style={{ background: WA.chatBg }}>
           {active ? (
-            <Chat lead={active} online={online} onSent={loadList} onBack={() => setActive(null)} onDeleted={() => { setActive(null); loadList(); }} toast={toast} />
+            <Chat lead={active} online={online} knownWa={onWa[active.id]} onSent={loadList} onBack={() => setActive(null)} onDeleted={() => { setActive(null); loadList(); }} toast={toast} />
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center" style={{ background: "#f0f2f5" }}>
               <span className="grid h-16 w-16 place-items-center rounded-full" style={{ background: "#e7f6ec" }}>
@@ -875,7 +900,7 @@ function Inbox({ search, setSearch, online, focusLead }: { search: string; setSe
   );
 }
 
-function Chat({ lead, online, onSent, onBack, onDeleted, toast }: { lead: Lead; online: boolean; onSent: () => void; onBack: () => void; onDeleted: () => void; toast: (m: string, t?: "error") => void }) {
+function Chat({ lead, online, knownWa, onSent, onBack, onDeleted, toast }: { lead: Lead; online: boolean; knownWa?: boolean | null; onSent: () => void; onBack: () => void; onDeleted: () => void; toast: (m: string, t?: "error") => void }) {
   const [thread, setThread] = useState<Msg[] | null>(null);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -958,12 +983,17 @@ function Chat({ lead, online, onSent, onBack, onDeleted, toast }: { lead: Lead; 
     setOnWa(null);
     if (!phone) return;
     let on = true;
-    fetch(`/api/whatsapp/avatar?phone=${encodeURIComponent(phone)}`)
+    fetch(`/api/whatsapp/avatar?leadId=${encodeURIComponent(lead.id)}`)
       .then((r) => r.json())
       .then((d) => { if (!on) return; if (d?.url) setDp(d.url); if (typeof d?.onWhatsapp === "boolean") setOnWa(d.onWhatsapp); })
       .catch(() => {});
     return () => { on = false; };
-  }, [phone]);
+  }, [phone, lead.id]);
+
+  // ONE answer to "is this number on WhatsApp": a message that was delivered or a reply from them is proof, then the
+  // country-aware check the chat list already made, and only then the photo lookup.
+  const reached = (thread ?? []).some((m) => m.direction === "in" || m.status === "delivered" || m.status === "read");
+  const waEff: boolean | null = reached ? true : knownWa ?? onWa;
 
   const suggest = async () => {
     if (!thread || thread.length === 0) {
@@ -1051,19 +1081,19 @@ function Chat({ lead, online, onSent, onBack, onDeleted, toast }: { lead: Lead; 
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <b className="truncate text-[15px] text-white">{lead.company || lead.name || "Lead"}</b>
-              {onWa === false && (
+              {waEff === false && (
                 <span className="flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-bold" style={{ background: "#fff", color: "#b42318" }}>
                   <span style={{ fontSize: 10 }}>⛔</span> Not on WhatsApp
                 </span>
               )}
-              {onWa === true && (
+              {waEff === true && (
                 <span className="flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-bold" style={{ background: "rgba(255,255,255,.22)", color: "#fff" }}>
                   <span className="h-1.5 w-1.5 rounded-full" style={{ background: "#9ef0b0" }} /> On WhatsApp
                 </span>
               )}
             </div>
             <span className="text-[12px]" style={{ color: "rgba(255,255,255,.8)" }}>
-              {phone ? `+${phone.replace(/[^0-9]/g, "")}` : "no number"}
+              {lead.dial ? `+${lead.dial}` : phone ? phone : "no number"}
             </span>
           </div>
         </button>
@@ -1115,7 +1145,7 @@ function Chat({ lead, online, onSent, onBack, onDeleted, toast }: { lead: Lead; 
       )}
 
       {/* a plain "not on WhatsApp" strip when the number has no WhatsApp account (e.g. a landline) */}
-      {onWa === false && (
+      {waEff === false && (
         <div className="px-4 py-2 text-center text-[12.5px]" style={{ background: "#fdeaea", color: "#b42318" }}>
           This number isn’t on WhatsApp — it looks like a landline. Message their mobile/WhatsApp number instead.
         </div>
@@ -1129,14 +1159,20 @@ function Chat({ lead, online, onSent, onBack, onDeleted, toast }: { lead: Lead; 
           <div className="mx-auto mt-6 max-w-xs rounded-lg px-4 py-3 text-center" style={{ background: "#fff5c4", color: "#54656f" }}>
             <p className="text-[12.5px]">No messages yet. Send the first one below — the conversation starts here.</p>
           </div>
-        ) : thread.map((m) => (
-          <Bubble
-            key={m.id}
-            m={m}
-            highlight={term}
-            active={m.id === activeMatchId}
-            innerRef={(el) => { bubbleRefs.current[m.id] = el; }}
-          />
+        ) : thread.map((m, i) => (
+          <div key={m.id}>
+            {(i === 0 || dayLabel(thread[i - 1].created_at) !== dayLabel(m.created_at)) && (
+              <div className="my-2 flex justify-center">
+                <span className="rounded-lg px-3 py-1 text-[12px] shadow-sm" style={{ background: "#fff", color: WA.sub }}>{dayLabel(m.created_at)}</span>
+              </div>
+            )}
+            <Bubble
+              m={m}
+              highlight={term}
+              active={m.id === activeMatchId}
+              innerRef={(el) => { bubbleRefs.current[m.id] = el; }}
+            />
+          </div>
         ))}
         <div ref={endRef} />
       </div>
@@ -1199,14 +1235,14 @@ function Chat({ lead, online, onSent, onBack, onDeleted, toast }: { lead: Lead; 
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full disabled:opacity-50"
           style={{ background: WA.green }}
           onClick={send}
-          disabled={sending || !text.trim() || onWa === false}
-          title={onWa === false ? "This number isn't on WhatsApp" : "Send"}
+          disabled={sending || !text.trim() || waEff === false}
+          title={waEff === false ? "This number isn't on WhatsApp" : "Send"}
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 21l18-9L3 3v7l12 2-12 2v7z" fill="#fff" /></svg>
         </button>
       </div>
 
-      {details && <LeadDetailsDrawer lead={lead} onWa={onWa} dp={dp} onClose={() => setDetails(false)} onDeleted={() => { setDetails(false); onDeleted(); }} toast={toast} />}
+      {details && <LeadDetailsDrawer lead={lead} onWa={waEff} dp={dp} onClose={() => setDetails(false)} onDeleted={() => { setDetails(false); onDeleted(); }} toast={toast} />}
     </>
   );
 }

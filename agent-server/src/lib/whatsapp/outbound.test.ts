@@ -10,7 +10,7 @@ process.env.DATABASE_URL ||= "postgres://unit-test/none";
 process.env.SUPABASE_URL ||= "http://unit-test.invalid";
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= "unit-test";
 
-const { isQuietHours, nextAllowedTime, computeSlots, canDispatchTenant, localHour, respaceStale } = await import("./outbound.js");
+const { isQuietHours, nextAllowedTime, computeSlots, canDispatchTenant, localHour, respaceStale, planReachability } = await import("./outbound.js");
 
 // A UTC midnight; with tz_offset +4 that is 04:00 local.
 const MIDNIGHT_UTC = Date.UTC(2026, 9, 7, 0, 0, 0);
@@ -85,4 +85,27 @@ test("respaceStale: slots overdue for a long time are laid out again, not fired 
   assert.ok(a >= NOW + 4 * 60_000 && a <= NOW + 14 * 60_000, "first re-spaced slot is one random gap from now");
   assert.ok(b - a >= 4 * 60_000 && b - a <= 14 * 60_000, "and each next one a gap after it");
   assert.equal(respaceStale([], NOW, 1, 2, 4, 9, 21).size, 0);
+});
+
+
+test("planReachability: unreachable leads are decided BEFORE anyone is queued", () => {
+  const r = planReachability([
+    { id: "mobile", phone: "0501234567", country: "United Arab Emirates" },                    // dialable, unconfirmed -> ask WhatsApp
+    { id: "known-yes", phone: "0502222222", country: "United Arab Emirates", wa_status: "yes" }, // confirmed before
+    { id: "site-wa", phone: "04 000 0000", country: "United Arab Emirates", whatsapp: "971501112222" }, // its own site published wa.me
+    { id: "known-no", phone: "0503333333", country: "United Arab Emirates", wa_status: "no" },  // WhatsApp already said no
+    { id: "tollfree", phone: "(800) 259-1264", country: "United States" },                      // never on WhatsApp
+    { id: "no-country", phone: "0501234567" },                                                  // cannot be dialled safely
+    { id: "junk", phone: "12345", country: "Pakistan" },
+    { id: "no-number" },
+    { id: "replied", phone: "0504444444", country: "United Arab Emirates", wa_status: "no", replied_at: "2026-11-10T10:00:00Z" }, // they wrote to us: reachable whatever a lookup said
+  ]);
+  assert.deepEqual(r.queueNow.sort(), ["known-yes", "replied", "site-wa"]);
+  assert.deepEqual(Array.from(r.needCheck.entries()), [["971501234567", ["mobile"]]]);
+  assert.deepEqual(r.unreachable.sort(), ["junk", "known-no", "no-country", "no-number", "tollfree"]);
+});
+
+test("planReachability: two leads sharing a number are checked once", () => {
+  const r = planReachability([{ id: "a", phone: "0501234567", country: "United Arab Emirates" }, { id: "b", phone: "050 123 4567", country: "UAE" }]);
+  assert.deepEqual(Array.from(r.needCheck.entries()), [["971501234567", ["a", "b"]]]);
 });

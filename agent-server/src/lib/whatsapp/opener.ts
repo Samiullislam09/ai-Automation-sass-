@@ -11,6 +11,7 @@ import { supabase } from "../../supabase.js";
 import { completeJson } from "../llm.js";
 import { loadActiveProfile } from "../siteProfile.js";
 import { OPT_OUT_PHRASE } from "../leads/compliance.js";
+import { applyBrand, brandName } from "./brand.js";
 
 export const OPENER_MAX_CHARS = 700;
 
@@ -26,21 +27,53 @@ export function usableDraft(draft: string | null | undefined): string | null {
   return d;
 }
 
+/** A draft that is too long for a phone but is otherwise a good message (identification and opt-out intact): keep
+ *  its opening and its closing question, cut the middle, and keep the signature block exactly as written. Before this
+ *  a lead whose draft ran a few lines over was skipped as "no opener drafted" and never contacted. */
+export function shortenDraft(draft: string | null | undefined): string | null {
+  const d = String(draft ?? "").trim();
+  if (!d || /^subject\s*:/i.test(d) || /^dear\b/i.test(d)) return null;
+  const at = d.search(/\n\s*—\s/);
+  if (at < 0) return null;
+  const sig = d.slice(at).trim();
+  if (!sig.toLowerCase().includes(OPT_OUT_PHRASE.toLowerCase())) return null;
+  const sentences = d.slice(0, at).trim().replace(/\s+/g, " ").split(/(?<=[.?!])\s+/).filter(Boolean);
+  if (!sentences.length) return null;
+  const budget = OPENER_MAX_CHARS - sig.length - 4;
+  const question = sentences.length > 1 && /\?$/.test(sentences[sentences.length - 1]) ? sentences[sentences.length - 1] : null;
+  const picked: string[] = [];
+  for (const s of sentences.slice(0, question ? -1 : undefined)) {
+    const next = [...picked, s, ...(question ? [question] : [])].join(" ");
+    if (next.length > budget) break;
+    picked.push(s);
+  }
+  if (!picked.length) return null;
+  const body = [...picked, ...(question ? [question] : [])].join(" ");
+  return body.length <= budget ? `${body}\n\n${sig}` : null;
+}
+
+/** A stored draft made ready to send or to preview: signed with the website, shortened if needed. null = not usable. */
+export function prepareDraft(draft: string | null | undefined, tenant: { name?: string | null; website_url?: string | null } | null): string | null {
+  const ready = usableDraft(draft) ?? shortenDraft(draft);
+  return ready ? applyBrand(ready, tenant) : null;
+}
+
 /** The closing every cold message ends with, built in code. */
 export function closing(business: string, website: string | null): string {
   const lines = [`— ${business}`];
-  if (website) lines.push(website);
+  const host = (v: string) => v.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/[/?#].*$/, "");
+  if (website && host(website) !== host(business)) lines.push(website);
   lines.push(`If you would rather not hear from me, ${OPT_OUT_PHRASE} and I will not write again.`);
   return lines.join("\n");
 }
 
 export async function composeOpener(tenantId: string, lead: LeadForOpener): Promise<string | null> {
-  const ready = usableDraft(lead.draft);
+  const { data: tenant } = await supabase.from("tenants").select("name, website_url").eq("id", tenantId).maybeSingle();
+  const ready = prepareDraft(lead.draft, tenant as any);
   if (ready) return ready;
 
   const profile = (await loadActiveProfile(tenantId).catch(() => null))?.profile as any;
-  const { data: tenant } = await supabase.from("tenants").select("name, website_url").eq("id", tenantId).maybeSingle();
-  const business = String((tenant as any)?.name ?? "").trim();
+  const business = brandName(tenant as any);
   const what = String(profile?.what_they_do ?? "").trim();
   if (!business || !what) return null; // nothing real to say, and we do not invent a business
   const who = lead.company || lead.name || "";
@@ -61,7 +94,10 @@ export async function composeOpener(tenantId: string, lead: LeadForOpener): Prom
 
   const out = await completeJson<{ message?: string }>(prompt).catch(() => null);
   const text = String(out?.message ?? "").replace(/\s+\n/g, "\n").trim();
-  if (!text || text.length < 20 || text.length > 450) return null;
+  if (!text || text.length < 20) return null;
+  // A model answer that runs long is cut to its sentences rather than thrown away.
+  const trimmed = text.length <= 450 ? text : text.replace(/\s+/g, " ").split(/(?<=[.?!])\s+/).reduce((acc, s) => (`${acc} ${s}`.trim().length <= 450 ? `${acc} ${s}`.trim() : acc), "");
+  if (trimmed.length < 20) return null;
   const site = String((tenant as any)?.website_url ?? "").trim() || null;
-  return `${text}\n\n${closing(business, site)}`;
+  return `${trimmed}\n\n${closing(business, site)}`;
 }

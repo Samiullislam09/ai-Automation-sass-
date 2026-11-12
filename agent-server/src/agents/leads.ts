@@ -1,3 +1,4 @@
+import { brandName } from "../lib/whatsapp/brand.js";
 import type { Job } from "pg-boss";
 import { Agent, type AgentContext, type AgentJobData } from "./base.js";
 import { supabase } from "../supabase.js";
@@ -301,7 +302,8 @@ function senderIdentity(tenant: { name?: string | null; website_url?: string | n
   };
   return {
     personName: str(profile.contact_name ?? profile.owner_name ?? profile.sender_name),
-    businessName: str(tenant?.name) ?? "our team",
+    // The business is its website ("wca-global.com"), not the account username the workspace happens to be named.
+    businessName: brandName(tenant),
     website: str(tenant?.website_url),
     replyTo: str(profile.reply_to ?? profile.contact_email ?? profile.email),
   };

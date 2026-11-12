@@ -18,7 +18,7 @@ import { getWhatsappSettings } from "../outreach/settings.js";
 import { warmupCap, dailyAutoSendCount } from "./autoReply.js";
 import { composeOpener } from "./opener.js";
 import { leadDialDigits } from "./phone.js";
-import { sendText, simulateTyping, senderOnline } from "./session.js";
+import { sendText, simulateTyping, senderOnline, checkNumbers, sessionStatus } from "./session.js";
 import { recordOutgoing } from "./store.js";
 
 /** How recently an inbound must have arrived for the tenant to count as "in a conversation" and
@@ -103,6 +103,26 @@ export function respaceStale(
   return out;
 }
 
+/** Which approved leads can be WhatsApp'd at all, decided BEFORE anyone is queued. A lead we cannot message must never
+ *  take a slot: it only ends up as a "skipped" line, wastes a place in line and, when the number is wrong, risks a
+ *  message to a stranger. Pure, so it is a test.
+ *   queueNow   known to be on WhatsApp (its own site published a wa.me number, a stored "yes", or it has written to us)
+ *   needCheck  a dialable number we have not confirmed: asked of WhatsApp itself, in a batch (digits -> lead ids)
+ *   unreachable can never be messaged: no usable number (no country, malformed, a landline code), a toll-free / premium
+ *              line, or WhatsApp already said no */
+export type ReachLead = { id: string; whatsapp?: string | null; phone?: string | null; country?: string | null; wa_status?: string | null; stage?: string | null; replied_at?: string | null };
+export function planReachability(leads: ReachLead[]): { queueNow: string[]; needCheck: Map<string, string[]>; unreachable: string[] } {
+  const out = { queueNow: [] as string[], needCheck: new Map<string, string[]>(), unreachable: [] as string[] };
+  for (const l of leads) {
+    const dial = leadDialDigits(l);
+    if (l.wa_status === "no" && !l.replied_at) { out.unreachable.push(l.id); continue; }
+    if (l.replied_at || l.wa_status === "yes" || String(l.whatsapp ?? "").replace(/\D/g, "").length >= 8) { if (dial.ok) out.queueNow.push(l.id); else out.unreachable.push(l.id); continue; }
+    if (!dial.ok) { out.unreachable.push(l.id); continue; }
+    out.needCheck.set(dial.digits, [...(out.needCheck.get(dial.digits) ?? []), l.id]);
+  }
+  return out;
+}
+
 /** The pure dispatch decision for a tenant this tick — everything passed in, so it is unit-tested. */
 export function canDispatchTenant(input: {
   autoReply: boolean;
@@ -157,21 +177,58 @@ async function backfillTenant(tenantId: string, nowMs: number): Promise<number> 
     ));
     queued = queued.map((r) => (re.has(r.id) ? { ...r, scheduled_at: new Date(re.get(r.id)!).toISOString() } : r));
   }
+  // Take unreachable leads OUT of the line (a landline, a malformed number, a toll-free line, "not on WhatsApp"):
+  // they were queued before this check existed, or their number turned out to be wrong.
+  const pendingRows = queued.filter((r: any) => r.status === "pending");
+  if (pendingRows.length) {
+    const { data: inLine } = await supabase.from("leads").select("id, whatsapp, phone, country, wa_status, stage, replied_at").eq("tenant_id", tenantId).in("id", pendingRows.map((r: any) => r.lead_id));
+    const dead = new Set(planReachability((inLine ?? []) as ReachLead[]).unreachable);
+    const gone = pendingRows.filter((r: any) => dead.has(r.lead_id)).map((r: any) => r.id);
+    if (gone.length) {
+      await supabase.from("wa_outbound_queue").delete().in("id", gone).eq("status", "pending");
+      queued = queued.filter((r: any) => !gone.includes(r.id));
+      console.log(`[outbound] ${tenantId}: took ${gone.length} lead(s) out of the line: their number cannot receive WhatsApp`);
+    }
+  }
   const queuedIds = new Set((queued ?? []).map((r: any) => r.lead_id));
   const lastSlot = (queued ?? []).reduce((mx: number, r: any) => Math.max(mx, Date.parse(r.scheduled_at) || 0), 0);
 
   const { data: leads } = await supabase
     .from("leads")
-    .select("id, whatsapp, phone, country, wa_status")
+    .select("id, whatsapp, phone, country, wa_status, stage, replied_at")
     .eq("tenant_id", tenantId)
     .eq("stage", "approved")
     .eq("opt_out", false)
     .is("contacted_at", null)
     .limit(200);
 
-  // Only leads we can really dial: a number that resolves to international digits (the lead's country
-  // is what makes a local number dialable), not a toll-free line, and not already known to be off WhatsApp.
-  const eligible = (leads ?? []).filter((l: any) => !queuedIds.has(l.id) && l.wa_status !== "no" && leadDialDigits(l).ok);
+  // Only leads that can really be messaged on WhatsApp, decided BEFORE they are queued: a usable number, and WhatsApp
+  // itself confirming that number has an account. Anyone who fails never takes a slot and never shows up as "skipped".
+  // A lead whose slot was skipped in the last 24 hours (no opener could be written, the send failed) is left alone for
+  // a day. Without this the very next tick queued it again, it was skipped again, and the same name filled the
+  // "Skipped" list over and over while taking a place in line each time.
+  const { data: recentSkips } = await supabase.from("wa_outbound_queue").select("lead_id").eq("tenant_id", tenantId).eq("status", "skipped").gte("updated_at", new Date(nowMs - 86_400_000).toISOString());
+  const cooling = new Set(((recentSkips ?? []) as { lead_id: string }[]).map((r) => r.lead_id));
+  const fresh = ((leads ?? []) as ReachLead[]).filter((l) => !queuedIds.has(l.id) && !cooling.has(l.id));
+  const plan = planReachability(fresh);
+  const confirmed = new Set<string>(plan.queueNow);
+  const verdicts: { id: string; wa_status: "yes" | "no" }[] = [];
+  if (plan.needCheck.size && sessionStatus(tenantId).status === "connected") {
+    const digits = Array.from(plan.needCheck.keys()).slice(0, 25); // a batch a minute is plenty and kind to WhatsApp
+    const answers = await checkNumbers(tenantId, digits);
+    for (const d of digits) {
+      const a = answers[d];
+      if (a === null || a === undefined) continue; // could not tell: look again next time, do not queue blind
+      for (const id of plan.needCheck.get(d) ?? []) { verdicts.push({ id, wa_status: a ? "yes" : "no" }); if (a) confirmed.add(id); }
+    }
+  }
+  if (verdicts.length) {
+    const at = new Date().toISOString();
+    await Promise.all(verdicts.map((v) => supabase.from("leads").update({ wa_status: v.wa_status, wa_checked_at: at }).eq("id", v.id).eq("tenant_id", tenantId).then(() => {}, () => {})));
+    const no = verdicts.filter((v) => v.wa_status === "no").length;
+    if (no) console.log(`[outbound] ${tenantId}: ${no} lead(s) are not on WhatsApp and will not be messaged`);
+  }
+  const eligible = fresh.filter((l) => confirmed.has(l.id));
   if (!eligible.length) return 0;
 
   const from = Math.max(nowMs, lastSlot); // append AFTER the existing timeline

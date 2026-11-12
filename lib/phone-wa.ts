@@ -76,7 +76,10 @@ export function analyseNumber(raw: string | null | undefined, countryName?: stri
 // ── deciding which leads are on WhatsApp ──────────────────────────────────────────────────────
 
 export type WaStatus = "yes" | "no" | null;
-export type LeadWaRow = { id: string; phone: string | null; whatsapp?: string | null; country?: string | null; wa_status?: WaStatus; wa_checked_at?: string | null };
+export type LeadWaRow = { id: string; phone: string | null; whatsapp?: string | null; country?: string | null; wa_status?: WaStatus; wa_checked_at?: string | null; stage?: string | null; replied_at?: string | null };
+
+/** Stages a lead only reaches after WhatsApp actually delivered something to it, or it wrote back. */
+const PROVEN_ON_WHATSAPP = new Set(["delivered", "read", "replied", "in_conversation", "interested", "meeting_requested", "won"]);
 export const RECHECK_NO_AFTER_MS = 30 * 86_400_000;
 
 export type WaPlan = {
@@ -97,6 +100,9 @@ export function planWaCheck(rows: LeadWaRow[], opts: { stored: boolean; now?: nu
   const plan: WaPlan = { statuses: {}, toStore: {}, ask: new Map() };
   for (const l of rows) {
     if (l.whatsapp) { plan.statuses[l.id] = "yes"; continue; }
+    // Proof beats any lookup: a message was delivered or read, or they wrote to us. (Looking the raw number up
+    // again would only risk a false "no" for a number written without its country code.)
+    if (l.replied_at || (l.stage && PROVEN_ON_WHATSAPP.has(l.stage))) { plan.statuses[l.id] = "yes"; if (opts.stored && l.wa_status !== "yes") plan.toStore[l.id] = "yes"; continue; }
     if (opts.stored && l.wa_status === "yes") { plan.statuses[l.id] = "yes"; continue; }
     if (opts.stored && l.wa_status === "no" && l.wa_checked_at && now - new Date(l.wa_checked_at).getTime() < RECHECK_NO_AFTER_MS) { plan.statuses[l.id] = "no"; continue; }
     if (!l.phone) { plan.statuses[l.id] = null; continue; }

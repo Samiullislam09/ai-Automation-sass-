@@ -260,7 +260,9 @@ export const OPT_OUT_PHRASE = "reply with the word STOP";
 export function buildSignature(identity: SenderIdentity): string {
   const who = identity.personName ? `${identity.personName}, ${identity.businessName}` : identity.businessName;
   const lines = [`— ${who}`];
-  if (identity.website) lines.push(identity.website);
+  // When the business IS the website's name ("wca-global.com"), a second line with the same address adds nothing.
+  const hostOnly = (v: string) => v.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/[/?#].*$/, "");
+  if (identity.website && hostOnly(identity.website) !== hostOnly(identity.businessName)) lines.push(identity.website);
   const optOut = identity.replyTo
     ? `If you would rather not hear from me, ${OPT_OUT_PHRASE} to ${identity.replyTo} and I will not write again.`
     : `If you would rather not hear from me, ${OPT_OUT_PHRASE} and I will not write again.`;

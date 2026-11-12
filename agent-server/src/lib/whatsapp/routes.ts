@@ -72,7 +72,7 @@ export function mountWhatsapp(app: Express): void {
   app.get("/whatsapp/:tenantId/activity", async (req, res) => {
     if (!authed(req, res)) return;
     try {
-      res.json({ ok: true, overview: await loadOverview(req.params.tenantId) });
+      res.json({ ok: true, overview: await loadOverview(req.params.tenantId, Date.now(), { full: req.query.full === "1" }) });
     } catch (e: any) {
       res.status(500).json({ ok: false, error: e?.message ?? "could not build the overview" });
     }

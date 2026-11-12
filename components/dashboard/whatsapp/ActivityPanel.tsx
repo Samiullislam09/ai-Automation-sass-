@@ -108,12 +108,12 @@ class PanelBoundary extends Component<{ children: ReactNode }, { failed: boolean
   }
 }
 
-export default function ActivityPanel(props: { data: Overview | null; loading: boolean; onOpenChat: (leadId: string) => void }) {
+export default function ActivityPanel(props: { data: Overview | null; loading: boolean; showAll?: boolean; onShowAll?: (v: boolean) => void; onOpenChat: (leadId: string) => void }) {
   const data = useMemo(() => normalizeOverview(props.data), [props.data]);
-  return <PanelBoundary><ActivityBody data={data} loading={props.loading} onOpenChat={props.onOpenChat} /></PanelBoundary>;
+  return <PanelBoundary><ActivityBody data={data} loading={props.loading} showAll={!!props.showAll} onShowAll={props.onShowAll} onOpenChat={props.onOpenChat} /></PanelBoundary>;
 }
 
-function ActivityBody({ data, loading, onOpenChat }: { data: Overview | null; loading: boolean; onOpenChat: (leadId: string) => void }) {
+function ActivityBody({ data, loading, showAll, onShowAll, onOpenChat }: { data: Overview | null; loading: boolean; showAll: boolean; onShowAll?: (v: boolean) => void; onOpenChat: (leadId: string) => void }) {
   const now = data ? Date.parse(data.generated_at) : Date.now();
   if (!data) {
     return (
@@ -159,7 +159,7 @@ function ActivityBody({ data, loading, onOpenChat }: { data: Overview | null; lo
             <h3 className="text-[15px] font-semibold">What happens next</h3>
             <p className="mt-0.5 text-[12.5px]" style={{ color: C.sub }}>In the order it will happen. Each message goes out one at a time, with a gap, inside sending hours.</p>
           </div>
-          <Agenda items={data.agenda} more={data.agenda_more} now={now} paused={paused} waiting={data.counts.first_messages_queued} onOpenChat={onOpenChat} />
+          <Agenda items={data.agenda} more={data.agenda_more} showAll={showAll} onShowAll={onShowAll} loading={loading} now={now} paused={paused} waiting={data.counts.first_messages_queued} onOpenChat={onOpenChat} />
         </section>
 
         {/* 4 · people the AI will not answer on its own */}
@@ -208,7 +208,7 @@ const KIND_STYLE: Record<string, { label: string; dot: string; bg: string; fg: s
 };
 
 /** The timeline: a rail with a dot per event, the time on the left, and for each message what it will say. */
-function Agenda({ items, more, now, paused, waiting, onOpenChat }: { items: AgendaItem[]; more: number; now: number; paused: boolean; waiting: number; onOpenChat: (id: string) => void }) {
+function Agenda({ items, more, showAll, onShowAll, loading, now, paused, waiting, onOpenChat }: { items: AgendaItem[]; more: number; showAll: boolean; onShowAll?: (v: boolean) => void; loading: boolean; now: number; paused: boolean; waiting: number; onOpenChat: (id: string) => void }) {
   const [open, setOpen] = useState<Record<number, boolean>>({});
   if (paused) {
     return <p className="rounded-xl px-4 py-5 text-[13px]" style={{ background: C.soft, color: C.sub }}>Nothing is scheduled while the AI is paused. {waiting > 0 ? `${waiting} first message${waiting === 1 ? " is" : "s are"} waiting and will be spread out once it starts again.` : ""}</p>;
@@ -258,8 +258,17 @@ function Agenda({ items, more, now, paused, waiting, onOpenChat }: { items: Agen
           </li>
         );
       })}
-      {more > 0 && (
-        <li className="relative flex gap-3 sm:gap-4"><TimeCol top="" sub="" /><Rail dot={C.line} last /><span className="pt-0.5 text-[13px]" style={{ color: C.sub }}>and {more} more after these, one at a time</span></li>
+      {(more > 0 || showAll) && (
+        <li className="relative flex gap-3 sm:gap-4">
+          <TimeCol top="" sub="" /><Rail dot={C.line} last />
+          {showAll ? (
+            <button onClick={() => onShowAll?.(false)} className="pt-0.5 text-left text-[13px] font-medium" style={{ color: C.green }}>Show fewer</button>
+          ) : (
+            <button onClick={() => onShowAll?.(true)} disabled={loading} className="rounded-lg px-3 py-1.5 text-left text-[13px] font-medium transition-colors duration-150 ease-out hover:bg-[#f0faf7] disabled:opacity-60" style={{ color: C.green, border: `1px solid ${C.line}` }}>
+              Show all {more} more{loading ? "…" : ""}
+            </button>
+          )}
+        </li>
       )}
     </ol>
   );

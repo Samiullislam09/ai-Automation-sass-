@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
+import { analyseNumber } from "@/lib/phone-wa";
 
 /** GET /api/whatsapp/chats — everything the WhatsApp page's chat list needs, in ONE round trip.
  *
@@ -52,7 +53,14 @@ export async function GET(req: NextRequest) {
     lead_id, body: String(e.last.body ?? "").slice(0, 160), direction: e.last.direction, status: e.last.status, created_at: e.last.created_at, unanswered: e.unanswered, replied: e.replied,
   }));
 
-  const body = JSON.stringify({ ok: true, items: leads, inbox });
+  // The number to SHOW and dial: international digits made from the lead's country ("0504608157" + United Arab
+  // Emirates -> 971504608157). Computed here so the browser does not need the phone-number library.
+  const withDial = (leads as unknown as { id: string; phone?: string | null; whatsapp?: string | null; country?: string | null }[]).map((l) => {
+    const wa = String(l.whatsapp ?? "").replace(/[^\d]/g, "");
+    return { ...l, dial: wa.length >= 8 ? wa : analyseNumber(l.phone, l.country).digits };
+  });
+
+  const body = JSON.stringify({ ok: true, items: withDial, inbox });
   const etag = `"${createHash("sha1").update(body).digest("base64url").slice(0, 27)}"`;
   const headers = { ETag: etag, "Cache-Control": "private, no-cache" };
   if (req.headers.get("if-none-match") === etag) return new NextResponse(null, { status: 304, headers });
