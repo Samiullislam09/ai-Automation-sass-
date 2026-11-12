@@ -36,6 +36,28 @@ export async function POST(request: NextRequest) {
         .maybeSingle();
       if (!data) conversationId = null;
     }
+    // A scheduled run gets a conversation of its own, found again by title so following the same
+    // run twice (or its finish line) lands in the same thread instead of spawning duplicates.
+    const wantedTitle = typeof body?.conversationTitle === "string" ? body.conversationTitle.trim().slice(0, 120) : "";
+    if (!conversationId && wantedTitle) {
+      const { data: byTitle } = await supabase
+        .from("chat_conversations")
+        .select("id")
+        .eq("tenant_id", tenantId)
+        .eq("title", wantedTitle)
+        .limit(1)
+        .maybeSingle();
+      conversationId = byTitle?.id ?? null;
+      if (!conversationId) {
+        const { data: created, error } = await supabase
+          .from("chat_conversations")
+          .insert({ tenant_id: tenantId, user_id: user?.id ?? null, title: wantedTitle })
+          .select("id")
+          .single();
+        if (error || !created) throw new Error(error?.message ?? "could not open a conversation");
+        conversationId = created.id;
+      }
+    }
     if (!conversationId) {
       const { data: latest } = await supabase
         .from("chat_conversations")

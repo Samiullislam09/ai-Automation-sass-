@@ -44,9 +44,14 @@ export async function GET() {
   const tenantId = await getCurrentTenantId(supabase);
   if (!tenantId) return NextResponse.json({ ok: false, error: "Not signed in." }, { status: 401 });
 
-  const runs = await loadScheduledBossRuns(supabase, tenantId);
+  // Leads and site-audit runs are receipts too — they never go through the boss, so the article
+  // query below cannot see them. They are read separately and merged by time at the end.
+  const [runs, otherRuns] = await Promise.all([
+    loadScheduledBossRuns(supabase, tenantId),
+    loadScheduledOtherRuns(supabase, tenantId),
+  ]);
   if (runs.error) return NextResponse.json({ ok: false, error: runs.error }, { status: 500 });
-  if (!runs.rows.length) return NextResponse.json({ ok: true, runs: [] });
+  if (!runs.rows.length) return NextResponse.json({ ok: true, runs: otherRuns });
 
   // One read each for the two things a run produces, bounded by the oldest run on screen so
   // this never turns into a full-table scan as the account gets older.
@@ -120,6 +125,7 @@ export async function GET() {
       : [];
 
     return {
+      kind: "article" as const,
       id: String(run.id),
       firedAt: run.created_at,
       status: runStatus(run.status, stillWorking, articles.length, failures.length),
@@ -138,7 +144,60 @@ export async function GET() {
     };
   });
 
-  return NextResponse.json({ ok: true, runs: out });
+  const merged = [...out, ...otherRuns]
+    .sort((a: any, b: any) => new Date(b.firedAt).getTime() - new Date(a.firedAt).getTime())
+    .slice(0, RUNS * 2);
+  return NextResponse.json({ ok: true, runs: merged });
+}
+
+/** Scheduled lead-discovery and site-audit runs. The scheduler labels them
+ *  "Scheduled lead discovery" / "Scheduled site audit" (agent-server/src/scheduler.ts), and the
+ *  agent's own receipt carries the numbers (`saved`, `found`, `message`). Nothing is estimated. */
+async function loadScheduledOtherRuns(supabase: any, tenantId: string) {
+  const { data, error } = await supabase
+    .from("jobs_log")
+    .select("id, agent, action, status, detail, created_at")
+    .eq("tenant_id", tenantId)
+    .in("agent", ["leads", "audit"])
+    .ilike("action", "Scheduled%")
+    .order("created_at", { ascending: false })
+    .limit(RUNS);
+  if (error) {
+    console.error("[schedule/history] leads/audit runs unreadable:", error.message);
+    return [];
+  }
+  return (data ?? []).map((r: any) => {
+    const failed = r.status === "error" || r.status === "skipped";
+    const kind = r.agent === "audit" ? ("audit" as const) : ("leads" as const);
+    const saved = typeof r.detail?.saved === "number" ? r.detail.saved : null;
+    const found = typeof r.detail?.found === "number" ? r.detail.found : null;
+    const summary = failed
+      ? String(r.detail?.message ?? "The run failed")
+      : r.status === "running"
+        ? "Working…"
+        : kind === "leads"
+          ? saved != null
+            ? `${saved} lead${saved === 1 ? "" : "s"} sent to Approvals`
+            : found != null ? `${found} found` : "Finished"
+          : "Report ready";
+    return {
+      kind,
+      id: String(r.id),
+      firedAt: r.created_at,
+      status: failed ? ("failed" as const) : r.status === "running" ? ("running" as const) : ("finished" as const),
+      planned: null,
+      reason: null,
+      autoPublish: null,
+      bossError: failed ? String(r.detail?.message ?? "Failed.") : null,
+      topics: [],
+      linkedBy: "time" as const,
+      articles: [],
+      failures: [],
+      summary,
+      found,
+      saved,
+    };
+  });
 }
 
 function runStatus(bossStatus: string, stillWorking: boolean, articles: number, failures: number):

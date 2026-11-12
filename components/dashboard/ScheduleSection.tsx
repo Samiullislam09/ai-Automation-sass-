@@ -68,6 +68,9 @@ type Sched = {
 };
 
 type Run = {
+  kind: Kind;
+  /** One-line outcome for leads/audit runs (articles build theirs from `articles`). */
+  summary?: string;
   id: string;
   firedAt: string;
   status: "running" | "finished" | "partial" | "failed";
@@ -672,8 +675,11 @@ function HistoryTab({ runs, error, now, tz, hf, setHf, q, setQ }: any) {
 
   const rows = (runs as Run[]).map((r) => {
     const failed = r.status === "failed";
-    const result = r.bossError || (failed ? (r.failures[0]?.message ?? "The run failed") : r.reason || `${r.articles.length} article${r.articles.length === 1 ? "" : "s"}${r.articles.some((a) => a.status === "awaiting_approval") ? " sent to Approvals" : ""}`);
-    return { r, failed, result, label: "Article run" };
+    const kind: Kind = r.kind ?? "article";
+    const result = kind !== "article"
+      ? (r.summary ?? (failed ? "The run failed" : "Finished"))
+      : r.bossError || (failed ? (r.failures[0]?.message ?? "The run failed") : r.reason || `${r.articles.length} article${r.articles.length === 1 ? "" : "s"}${r.articles.some((a) => a.status === "awaiting_approval") ? " sent to Approvals" : ""}`);
+    return { r, failed, result, label: kind === "leads" ? "Leads run" : kind === "audit" ? "Site audit run" : "Article run" };
   }).filter((x) => (hf === "all" || (hf === "Completed" ? !x.failed : x.failed)) && (x.label + x.result).toLowerCase().includes(q.toLowerCase()))
     .sort((a, b) => new Date(b.r.firedAt).getTime() - new Date(a.r.firedAt).getTime());
 
@@ -693,17 +699,22 @@ function HistoryTab({ runs, error, now, tz, hf, setHf, q, setQ }: any) {
         {rows.length ? rows.map((x) => {
           const art = x.r.articles[0];
           const live = x.r.articles.find((a: any) => a.publishedUrl);
-          const go = art ? () => router.push(`/dashboard/content/${art.id}`) : undefined;
+          const k: Kind = x.r.kind ?? "article";
+          // Where a row leads: an article opens itself; a leads run opens the Leads page; an
+          // audit opens the Audit page.
+          const target = art ? `/dashboard/content/${art.id}` : k === "leads" ? "/dashboard/leads" : k === "audit" ? "/dashboard/audit" : null;
+          const hint = art ? "Tap to open the article" : k === "leads" ? "Tap to open Leads" : k === "audit" ? "Tap to open the report" : null;
+          const go = target ? () => router.push(target) : undefined;
           return (
-            <div key={x.r.id} className={"tr hs" + (art ? " clickable" : "")} onClick={go} role={art ? "button" : undefined} tabIndex={art ? 0 : undefined}
-              onKeyDown={art ? (e) => { if (e.key === "Enter") go!(); } : undefined}>
+            <div key={x.r.id} className={"tr hs" + (target ? " clickable" : "")} onClick={go} role={target ? "button" : undefined} tabIndex={target ? 0 : undefined}
+              onKeyDown={target ? (e) => { if (e.key === "Enter") go!(); } : undefined}>
               <div className="c main"><span className={"ico sm " + (x.failed ? "bad" : "good")}><Ic n={x.failed ? "error" : "check"} z={20} /></span>
-                <div className="info"><div className="name">{x.label}</div>{art ? <small>Tap to open the article</small> : null}</div>
+                <div className="info"><div className="name">{x.label}</div>{hint ? <small>{hint}</small> : null}</div>
               </div>
               <div className={"c" + (x.failed ? " bad" : "")}>{x.result}</div>
               <div className="c" suppressHydrationWarning>{dayLabel(new Date(x.r.firedAt), tz, now)}, {time12(new Date(x.r.firedAt), tz)}</div>
               <div className="c"><span className={"sp " + (x.failed ? "bad" : "ok")}>{x.failed ? "Failed" : x.r.status === "running" ? "Running" : "Completed"}</span></div>
-              <div className="c end">{live ? <a className="lnk" href={live.publishedUrl!} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>Open live</a> : art ? <span className="chev">›</span> : null}</div>
+              <div className="c end">{live ? <a className="lnk" href={live.publishedUrl!} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>Open live</a> : target ? <span className="chev">›</span> : null}</div>
             </div>
           );
         }) : <Empty icon="history" title="No runs found" desc="Try another filter or search." />}

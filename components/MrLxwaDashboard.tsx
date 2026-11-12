@@ -46,6 +46,9 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { useLiveEvents, isTerminalTask, isTerminalStep, isFlowing, useNow, elapsedMs, clock, type TaskState } from "@/lib/live";
 import { useStore, PLANS } from "@/lib/store";
 import { startPolling } from "@/lib/poll";
+import { FOCUS_EVENT, takeFocusRun, runConversationTitle, type FocusRun } from "@/lib/schedule-current";
+import ScheduledRunCard from "@/components/dashboard/ScheduledRunCard";
+import ScheduledRunView from "@/components/dashboard/ScheduledRunView";
 import {
   LayoutDashboard,
   Users,
@@ -3235,6 +3238,45 @@ export default function MrLxwaDashboard({
     if (id === convId.current) newChat();
   }
 
+  /** A scheduled run opened from the Current task card (components/dashboard/ScheduledRunCard).
+   *  The run gets its own conversation in the chat history — found by title, so reopening the same
+   *  run lands in the same thread — and its live view takes the place of the agent grid. */
+  const [focusedRun, setFocusedRun] = useState<FocusRun | null>(null);
+  async function postRunEvent(run: FocusRun, text: string, tone: "done" | "error" = "done") {
+    try {
+      const r = await fetch("/api/chat/events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, tone, conversationTitle: runConversationTitle(run) }),
+      }).then((res) => res.json());
+      return r?.ok ? (r.conversationId as string) : null;
+    } catch {
+      return null;
+    }
+  }
+  async function followRun(run: FocusRun) {
+    setFocusedRun(run);
+    setShowPanel(false);
+    setSelectedAgentId(null);
+    const id = await postRunEvent(run, `Following the scheduled run: ${run.title}. Its live view is open on the dashboard.`);
+    if (id) {
+      await openConversation(id);
+      void refreshConvs();
+    }
+  }
+  useEffect(() => {
+    const pending = takeFocusRun();
+    if (pending) void followRun(pending);
+    const onFocus = (e: Event) => {
+      takeFocusRun(); // consume the stored copy of this same request
+      const run = (e as CustomEvent<FocusRun>).detail;
+      if (run?.id) void followRun(run);
+    };
+    window.addEventListener(FOCUS_EVENT, onFocus);
+    return () => window.removeEventListener(FOCUS_EVENT, onFocus);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (helloSent.current) return;
     helloSent.current = true;
@@ -3690,6 +3732,7 @@ export default function MrLxwaDashboard({
   // 2026-09-05/06) — this guard is kept for the day a genuinely unbuilt agent joins the roster.
   const openAgentPanel = (a: Agent) => {
     if (a.status === "Planned") return;
+    setFocusedRun(null);
     setSelectedAgentId(a.id);
     setShowPanel(true);
   };
@@ -4915,7 +4958,15 @@ export default function MrLxwaDashboard({
             <>
               {Workflow}
               <Collapse open={panelOpen}>{AgentPanel}</Collapse>
-              {Network}
+              {focusedRun && (
+                <ScheduledRunView
+                  run={focusedRun}
+                  onClose={() => setFocusedRun(null)}
+                  onFinished={(text, tone) => { void postRunEvent(focusedRun, text, tone); }}
+                />
+              )}
+              {!focusedRun && Network}
+              <ScheduledRunCard className="mt-3" />
               {BottomBar}
             </>
           ) : children}

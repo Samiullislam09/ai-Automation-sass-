@@ -6,6 +6,7 @@ import { useStore } from "@/lib/store";
 import { C, D, STAGE, SOURCE_LABEL, SORT_LABEL, REJECT_REASONS, ago, scoreColor, isToday, fmtDay, siteLabel, initials, cityOf, countryOf, phoneDisplay, StageChip, Tag, WaGlyph, RejectMenu, DATE_LABEL, SCORE_LABEL, MSG_LABEL, msgValue, msgFlags, type Lead, type Gen } from "./leads/shared";
 import type { Flt } from "./leads/FilterPanel";
 import Select from "./leads/Select";
+import ScheduledRunCard from "./ScheduledRunCard";
 
 // Opened on demand, so they are not part of the page's first download.
 const LeadDrawer = dynamic(() => import("./leads/LeadDrawer"), { ssr: false });
@@ -492,6 +493,9 @@ export default function LeadsSection() {
         /* the dashboard global input/select rule (full width, dark fill, padding) must not reach this page's controls */
         .lx-leads select{width:auto;min-width:0;max-width:100%;height:36px;padding:0 10px;background:#fff !important;color:#111827 !important;border:1px solid #e5e7eb;border-radius:8px;color-scheme:light;font-size:13px}
       ` }} />
+
+      {/* What the leads schedule is doing right now (and next). Click a running task to follow it live in the chat. */}
+      <ScheduledRunCard kinds={["leads"]} className="mb-4" />
 
       {/* header: title + count, one primary action. Sections below are 24px apart. */}
       <div className="mb-6 flex items-start justify-between gap-3">
