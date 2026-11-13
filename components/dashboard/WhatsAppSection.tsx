@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useStore } from "@/lib/store";
 import WhatsAppConnectModal from "./WhatsAppConnectModal";
 import ActivityPanel, { type Overview } from "./whatsapp/ActivityPanel";
+import TeamAlerts from "./whatsapp/TeamAlerts";
 
 /** /dashboard/whatsapp — Mr. WhatsApp, made to look and feel like WhatsApp itself.
  *
@@ -369,14 +370,22 @@ function SettingsPanel({ open, onClose, toast }: { open: boolean; onClose: () =>
     if (b?.ok) setOutbox(b.items ?? []);
   }, []);
 
+  // WHY A REF. This effect used to list `onClose` as a dependency, and the parent passes a fresh arrow function
+  // on every render. The parent re-renders every few seconds (connection poll, activity poll, chat list), so every
+  // few seconds the effect re-ran, set the settings back to null and refetched: the whole panel blanked to
+  // "Loading…" and came back, over and over (owner's screenshot, 2026-11-14: "settings bar bar load ho raha hai
+  // phir gayab"). The panel must reset only when it is OPENED; Escape just calls whichever onClose is current.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; });
+
   useEffect(() => {
     if (!open) return;
     setS(null); setOutbox(null);
     void load();
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onCloseRef.current(); };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [open, load, onClose]);
+  }, [open, load]);
 
   if (!open) return null;
 
@@ -454,7 +463,12 @@ function SettingsPanel({ open, onClose, toast }: { open: boolean; onClose: () =>
                 <BookingLinkRow initial={s.booking_link} onSave={(v) => save({ booking_link: v })} />
               </div>
 
-              <TeamAndAlerts toast={toast} />
+              <div className="mt-5">
+                <TeamAlerts
+                  toast={toast}
+                  palette={{ rowBg: WA.listHover, text: WA.text, sub: WA.sub, line: WA.divider, accent: WA.green, inputBg: WA.listHover, inputText: WA.text, onBg: "#e7f6ec", onText: "#067647", danger: "#b42318" }}
+                />
+              </div>
 
               <div className="mt-5">
                 <div className="mb-2 flex items-center justify-between">
@@ -496,68 +510,6 @@ function SettingsPanel({ open, onClose, toast }: { open: boolean; onClose: () =>
             </>
           )}
         </div>
-      </div>
-    </div>
-  );
-}
-
-/* ── Team & Alerts (§29.5): the numbers that get meeting / hot-lead pings. ──────────────────── */
-type AdminRow = { id: string; name: string | null; phone: string; role: string; notify: boolean };
-
-function TeamAndAlerts({ toast }: { toast: (m: string, t?: "error") => void }) {
-  const [admins, setAdmins] = useState<AdminRow[] | null>(null);
-  const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const load = useCallback(async () => {
-    try { const r = await fetch("/api/whatsapp/admins").then((x) => x.json()); if (r.ok) setAdmins(r.admins ?? []); } catch { /* ignore */ }
-  }, []);
-  useEffect(() => { void load(); }, [load]);
-
-  const add = async () => {
-    if (phone.replace(/[^0-9]/g, "").length < 8) { toast("Enter a full number with country code.", "error"); return; }
-    setBusy(true);
-    try {
-      const r = await fetch("/api/whatsapp/admins", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: name.trim() || null, phone }) }).then((x) => x.json());
-      if (!r.ok) toast(r.error ?? "Could not add.", "error");
-      else { setName(""); setPhone(""); await load(); }
-    } catch (e: any) { toast(e?.message ?? "Network error.", "error"); } finally { setBusy(false); }
-  };
-
-  const toggleNotify = async (a: AdminRow) => {
-    setAdmins((xs) => (xs ?? []).map((x) => (x.id === a.id ? { ...x, notify: !x.notify } : x)));
-    try { await fetch("/api/whatsapp/admins", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: a.id, name: a.name, phone: a.phone, role: a.role, notify: !a.notify }) }); } catch { void load(); }
-  };
-
-  const remove = async (id: string) => {
-    setAdmins((xs) => (xs ?? []).filter((x) => x.id !== id));
-    try { await fetch(`/api/whatsapp/admins?id=${encodeURIComponent(id)}`, { method: "DELETE" }); } catch { void load(); }
-  };
-
-  return (
-    <div className="mt-5">
-      <b className="text-[13.5px]">Team & alerts</b>
-      <div className="mb-2 text-[11.5px]" style={{ color: WA.sub }}>These WhatsApp numbers get a ping on a meeting request or a hot lead. Add yourself and your managers.</div>
-      <div className="mb-2 space-y-1.5">
-        {(admins ?? []).map((a) => (
-          <div key={a.id} className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: WA.listHover }}>
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-[13px] font-medium">{a.name || a.phone}{a.role === "owner" && <span className="ml-1.5 rounded px-1 text-[9.5px] font-bold" style={{ color: "#067647", background: "#e7f6ec" }}>Owner</span>}</div>
-              {a.name && <div className="text-[11.5px]" style={{ color: WA.sub }}>{a.phone}</div>}
-            </div>
-            <button onClick={() => toggleNotify(a)} title={a.notify ? "Alerts on" : "Alerts off"} className="shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-semibold" style={{ color: a.notify ? "#067647" : WA.sub, background: a.notify ? "#e7f6ec" : WA.divider }}>{a.notify ? "Alerts on" : "Muted"}</button>
-            <button onClick={() => remove(a.id)} className="shrink-0 rounded-full p-1" style={{ color: "#b42318" }} aria-label="Remove">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
-            </button>
-          </div>
-        ))}
-        {admins && admins.length === 0 && <div className="text-[12px]" style={{ color: WA.sub }}>No team numbers yet.</div>}
-      </div>
-      <div className="flex gap-2">
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (optional)" autoComplete="off" className="wa-input wa-search w-28 rounded-lg px-2.5 py-1.5 text-[12.5px]" style={{ background: WA.listHover, color: WA.text }} />
-        <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+971 50…" autoComplete="off" className="wa-input wa-search flex-1 rounded-lg px-2.5 py-1.5 text-[12.5px]" style={{ background: WA.listHover, color: WA.text }} />
-        <button onClick={add} disabled={busy} className="shrink-0 rounded-lg px-3 py-1.5 text-[12.5px] font-semibold text-white disabled:opacity-60" style={{ background: WA.green }}>Add</button>
       </div>
     </div>
   );

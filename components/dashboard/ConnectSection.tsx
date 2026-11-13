@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { useStore } from "@/lib/store";
 import WhatsAppConnectModal from "./WhatsAppConnectModal";
 import { LxInput, LxSelect } from "./ui";
-import { Globe, LayoutGrid, Link2, Megaphone, MessageCircle, MoreHorizontal, Monitor } from "lucide-react";
+import { Bell, Globe, LayoutGrid, Link2, Megaphone, MessageCircle, MoreHorizontal, Monitor } from "lucide-react";
+import TeamAlerts, { TEAM_ALERTS_CAPTION, useAdmins } from "./whatsapp/TeamAlerts";
 import type { IconType } from "react-icons";
 import { FaFacebookF, FaInstagram, FaLinkedinIn, FaYoutube } from "react-icons/fa";
 import { FaXTwitter } from "react-icons/fa6";
@@ -183,9 +184,11 @@ function Icon({ card }: { card: Card }) {
  *  look and behave the same: mark, name, status, one line of what it does, one clear action.
  *  Connected cards are outlined in green and offer "Manage"; the rest offer "Connect". On a phone
  *  the card becomes a compact row so the whole list is scannable without scrolling forever. */
-function ConnTile({ mark, name, state, blurb, detail, onAction, label }: {
+function ConnTile({ mark, name, state, blurb, detail, onAction, label, pill }: {
   mark: React.ReactNode; name: string; state: "connected" | "pairing" | "off"; blurb: string; detail?: string | null;
   onAction: () => void; label: string;
+  /** Wording for the status pill when "Connected / Not connected" is not the right words (Team alerts: Active / Not set up). */
+  pill?: { on: string; off: string };
 }) {
   const on = state === "connected";
   return (
@@ -195,7 +198,7 @@ function ConnTile({ mark, name, state, blurb, detail, onAction, label }: {
         <div className="cn-top">
           <b className="cn-name">{name}</b>
           <span className={`cn-pill ${state}`}>
-            <i />{state === "connected" ? "Connected" : state === "pairing" ? "Scanning" : "Not connected"}
+            <i />{state === "connected" ? (pill?.on ?? "Connected") : state === "pairing" ? "Scanning" : (pill?.off ?? "Not connected")}
           </span>
         </div>
         <p className="cn-blurb">{blurb}</p>
@@ -242,6 +245,8 @@ export default function ConnectSection() {
   const [err, setErr] = useState<Record<string, string>>({});
   const [secret, setSecret] = useState<{ type: string; value: string } | null>(null);
   const [waModal, setWaModal] = useState(false);
+  const [teamModal, setTeamModal] = useState(false);
+  const { admins, reload: reloadAdmins } = useAdmins();
   const [waStatus, setWaStatus] = useState<string>("loading");
   const [tab, setTab] = useState<(typeof TABS)[number]["key"]>("all");
   const [googleConnected, setGoogleConnected] = useState(false);
@@ -327,6 +332,9 @@ export default function ConnectSection() {
 
   const liveModalItem = modalCard ? found(modalCard.type) : null;
 
+  const teamActive = (admins ?? []).filter((a) => a.notify);
+  const teamOn = teamActive.length > 0;
+
   const waState: "connected" | "pairing" | "off" = waStatus === "connected" || waStatus === "reconnecting" || waStatus === "in_use_elsewhere" ? "connected" : waStatus === "pairing" ? "pairing" : "off";
   const showWa = tab === "all" || tab === "messaging";
 
@@ -346,6 +354,25 @@ export default function ConnectSection() {
       </header>
 
       <WhatsAppConnectModal open={waModal} onClose={() => setWaModal(false)} onConnected={() => setWaStatus("connected")} />
+
+      {teamModal && (
+        <Modal onClose={() => { setTeamModal(false); void reloadAdmins(); }}>
+          <div className="mb-3 flex items-start gap-2.5">
+            <span className="cn-glyph" style={{ background: "#f59e0b" }}><Bell size={18} color="#1f1300" /></span>
+            <div className="min-w-0">
+              <div className="lx-13 font-bold">Team alerts</div>
+              <p className="lx-11 lx-mut mt-0.5 leading-relaxed">{TEAM_ALERTS_CAPTION}</p>
+            </div>
+          </div>
+          <TeamAlerts
+            compact
+            toast={toast}
+            onChange={() => void reloadAdmins()}
+            palette={{ rowBg: "rgba(255,255,255,.04)", text: "var(--lx-text)", sub: "var(--lx-mut)", line: "var(--lx-border)", accent: "#128c7e", inputBg: "var(--lx-in)", inputText: "var(--lx-text)", onBg: "rgba(34,197,94,.14)", onText: "#4ade80", danger: "#f87171" }}
+          />
+          <button className="lx-ghost mt-3" onClick={() => { setTeamModal(false); void reloadAdmins(); }}>Done</button>
+        </Modal>
+      )}
 
       <div className="cn-tabs" role="tablist" aria-label="Connection categories">
         {TABS.map((t) => (
@@ -384,6 +411,18 @@ export default function ConnectSection() {
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 21a9 9 0 10-8-4.9L3 21l4.9-1A9 9 0 0012 21z" stroke="#04120a" strokeWidth="1.8" strokeLinejoin="round" /></svg>
               </span>
             }
+          />
+        )}
+        {showWa && (
+          <ConnTile
+            name="Team alerts"
+            state={teamOn ? "connected" : "off"}
+            pill={{ on: "Active", off: "Not set up" }}
+            blurb="Instant WhatsApp updates on your phone when a lead wants a meeting, is ready to buy, or needs you."
+            detail={teamOn ? `${teamActive.length} number${teamActive.length === 1 ? "" : "s"} receiving alerts${teamActive[0] ? ` · ${teamActive[0].name || teamActive[0].phone}${teamActive.length > 1 ? ` +${teamActive.length - 1}` : ""}` : ""}` : null}
+            label={teamOn ? "Manage" : "Set up"}
+            onAction={() => setTeamModal(true)}
+            mark={<span className="cn-glyph" style={{ background: "#f59e0b" }}><Bell size={18} color="#1f1300" /></span>}
           />
         )}
         {filteredCards.map((card) => {
