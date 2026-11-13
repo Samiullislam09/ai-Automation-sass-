@@ -25,6 +25,7 @@ import { sendText, simulateTyping, senderOnline } from "./session.js";
 import { leadDialDigits } from "./phone.js";
 import { recordOutgoing } from "./store.js";
 import { buildBusinessBrief, loadRecentThread, isNearDuplicate } from "./decide.js";
+import { detectLanguage, LANG_INSTRUCTION } from "./conversation.js";
 
 /** Hours of silence — counted from our last message — before follow-up 1, 2, 3 are due:
  *  48 h, then 5 days, then 7 days. */
@@ -61,6 +62,9 @@ async function draftFollowup(tenantId: string, leadId: string, which: 1 | 2 | 3)
   ]);
   const business = buildBusinessBrief(profile?.profile, (tenant as any) ?? null);
   const transcript = thread.map((m) => `${m.direction === "in" ? "THEM" : "US"}: ${String(m.body).replace(/\s+/g, " ").slice(0, 300)}`).join("\n");
+  // The customer's own language, from whatever they last wrote; if they never replied, from our
+  // opener's language (a Hinglish opener gets a Hinglish nudge).
+  const followupLang = detectLanguage(thread.some((m) => m.direction === "in") ? thread : thread.map((m) => ({ ...m, direction: "in" as const })));
   const weSaid = thread.filter((m) => m.direction === "out").slice(-4).map((m) => m.body);
   const brief =
     which === 1
@@ -78,7 +82,8 @@ async function draftFollowup(tenantId: string, leadId: string, which: 1 | 2 | 3)
     transcript || "(our first message was sent; no reply yet)",
     "",
     brief,
-    "Rules: 1-2 short lines, no 'Dear', no signature, no emoji spam (at most one), match their language and script (Hinglish in Roman letters if they write that). You can ONLY send text — never say you will send a file/PDF/brochure. Never invent a price, date or guarantee. Do not apologise. Do NOT repeat or paraphrase anything we already said:",
+    `LANGUAGE: ${LANG_INSTRUCTION[followupLang]}`,
+    "Rules: 1-2 short lines, no 'Dear', no signature, no emoji spam (at most one). You can ONLY send text — never say you will send a file/PDF/brochure. Never invent a price, date or guarantee. Do not apologise. Do NOT repeat or paraphrase anything we already said:",
     weSaid.map((w) => `- ${String(w).replace(/\s+/g, " ").slice(0, 200)}`).join("\n"),
     'Reply with ONLY JSON: {"reply":"...your message..."}',
   ].filter(Boolean).join("\n");

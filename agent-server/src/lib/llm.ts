@@ -44,7 +44,11 @@ export function resolvedAgentModel(): string {
 /** Statuses that mean "this MODEL won't work (try another)", vs a real transient to surface. */
 const MODEL_UNAVAILABLE = new Set([400, 404, 410, 422, 503]);
 
-export async function completeJson<T = any>(prompt: string): Promise<T> {
+/** `opts.system` is optional and changes nothing for existing callers: when given, the instructions
+ *  that never change (role, rules) travel as a real `system` message and `prompt` carries only the
+ *  facts of THIS call — the structure instruction-tuned models were trained on, which holds long rule
+ *  lists far better than one big user turn (the WhatsApp reply engine, 2026-11-13). */
+export async function completeJson<T = any>(prompt: string, opts: { system?: string } = {}): Promise<T> {
   const tryOrder = resolvedModel ? [resolvedModel, ...MODEL_CANDIDATES.filter((m) => m !== resolvedModel)] : MODEL_CANDIDATES;
   let lastErr = "";
   let res: Awaited<ReturnType<typeof nvidiaFetch>> | null = null;
@@ -54,7 +58,7 @@ export async function completeJson<T = any>(prompt: string): Promise<T> {
       label: "llm",
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model, chat_template_kwargs: { thinking: false }, max_tokens: 3000, messages: [{ role: "user", content: prompt }] }),
+      body: JSON.stringify({ model, chat_template_kwargs: { thinking: false }, max_tokens: 3000, messages: opts.system ? [{ role: "system", content: opts.system }, { role: "user", content: prompt }] : [{ role: "user", content: prompt }] }),
     });
     if (r.ok) { res = r; used = model; break; }
     const body = (await r.text().catch(() => "")).slice(0, 200);

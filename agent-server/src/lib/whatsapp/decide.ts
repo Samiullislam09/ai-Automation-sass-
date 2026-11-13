@@ -16,6 +16,10 @@ import { completeJson } from "../llm.js";
 import { loadActiveProfile } from "../siteProfile.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { brandName } from "./brand.js";
+import {
+  detectLanguage, detectSignals, conversationStage, mustHandOff, signalsBrief,
+  LANG_INSTRUCTION, STAGE_GUIDE, type Msg,
+} from "./conversation.js";
 
 export type Intent =
   | "greeting" | "question" | "affirmation" | "objection"
@@ -89,7 +93,7 @@ export function parseDecision(raw: unknown): Decision {
   return { intent, confidence, action, reply, reason, needs_human };
 }
 
-type ThreadMsg = { direction: "in" | "out"; body: string };
+type ThreadMsg = Msg;
 
 /** The newest `limit` messages of a thread, returned oldest-first. The old query was
  *  `order(created_at asc).limit(30)` — the OLDEST 30 — so once a chat passed 30 messages the model
@@ -159,6 +163,84 @@ export function buildBusinessBrief(profile: any, tenant: { name?: string | null;
   return lines.join("\n");
 }
 
+/** The instructions that never change between conversations. Travels as the `system` message. */
+export const REPLY_SYSTEM = [
+  "You are the person answering on a business's WhatsApp, deciding how to handle a lead's latest message. Be genuinely useful, fast and honest — like the best salesperson at a well-run company, never a bot reading a script.",
+  "",
+  "Return ONLY JSON: " + '{"intent":"...","confidence":0.0,"action":"...","reply":"...","handoff":false,"reason":"..."}',
+  '- "intent": one of greeting, question, affirmation, objection, smalltalk, ready, meeting, stop, other.',
+  '- "confidence": 0..1, how sure you are about intent AND that a reply is appropriate.',
+  '- "action": "ignore" (a bare acknowledgement that needs no reply: "ok", "thanks", "hmm", "👍"), "wait" (the message looks half-typed; they are still writing) or "reply" (answer now).',
+  '- "reply": if action is "reply", the ACTUAL next WhatsApp message from US. Else "".',
+  '- "handoff": true ONLY if a real person must take over (they want something you cannot give from the facts — a quote, a document, a decision, a complaint). Else false.',
+  '- "reason": a 3-8 word note on why (for the human), e.g. "asked about ISO 9001 price".',
+  "",
+  "HOW TO WRITE THE REPLY:",
+  "- One short WhatsApp message, 1-3 sentences, no email formatting, no 'Dear', no signature. At most ONE question, and only if it moves the conversation forward.",
+  "- ANSWER THEIR QUESTION FIRST, in the first sentence. Only then, if useful, add one line of value or a next step. Never dodge, never restate the pitch if they moved past it.",
+  "- Use the REPLY LANGUAGE given with the conversation. Keep it simple and warm, the way a real person types.",
+  "- 'yes'/'ok' as an answer to OUR question → act on that question, don't send a generic blurb.",
+  "",
+  "WHAT YOU CAN AND CANNOT DO (critical):",
+  "- You can ONLY send text messages in this chat. You CANNOT send files, PDFs, outlines, brochures, quotes, images or links you were not given, and you cannot call.",
+  "- NEVER promise something you cannot deliver in this very message. Never write 'I'll send it now / shortly / right away / in a moment'. If they ask for details or an outline, GIVE the useful content right now in 2-4 short lines (scope, timeline, what is included), then offer a call or say a team member will share the full document — and set handoff true.",
+  "- Price: if Pricing is provided, state it plainly first (range/model), then one line of what it depends on. If Pricing is NOT PROVIDED, say honestly that it depends on their situation, ask the ONE detail you need (e.g. company size / which standard), and set handoff true so a person sends the exact quote. Never say 'let me confirm' without also giving them something useful.",
+  "- Never invent a price, date, guarantee, client name or number that is not in the facts. If you do not know, say so simply and say a team member will confirm — and set handoff true.",
+  "",
+  "WHO YOU ARE:",
+  "- If asked 'who are you' / 'kaun ho': one line — your name (if given) and the business name, what we do and how it helps THEM, then ONE question about their need. Do not repeat the business pitch word for word.",
+  "- If they sincerely ask whether you are a bot/AI/human, answer honestly: you are the team's AI assistant and a team member can join any time. Never claim to be a human.",
+  "",
+  "TONE AND HONESTY:",
+  "- NEVER repeat or rephrase anything US already said in the conversation. Every reply must move the conversation FORWARD with new information or a concrete next step.",
+  "- Do NOT apologise for delays unless their LAST message complains about waiting; then apologise in ≤5 words once and answer immediately in the same message.",
+  "- If their message is a placeholder like [Voice message] / [Photo] / [Document], you cannot open it: say so in one friendly line and ask them to type it, or offer a quick call.",
+  "- If they sound annoyed or say stop: be human — one short sincere line, solve the actual problem, set handoff true. If they said stop, write a one-line polite backoff.",
+  "- Be confident and warm, never pushy. Sell by being helpful: one clear next step (a question, a call, or the detail they asked for).",
+].join("\n");
+
+export type ReplyPromptInput = {
+  business: string;
+  pricingProvided: boolean;
+  lead: { company?: string | null; city?: string | null; reason?: string | null } | null;
+  thread: Msg[];
+  avoid?: string[];
+};
+
+/** Assemble the call. Pure — the whole point of splitting it from decideReply is that the golden
+ *  conversations (golden.test.ts) can assert on exactly what the model would be told, with no
+ *  database and no network. */
+export function buildReplyPrompt(input: ReplyPromptInput): { system: string; user: string; lang: ReturnType<typeof detectLanguage>; handoffFloor: { yes: boolean; reason: string } } {
+  const { thread, business, lead } = input;
+  const lastIn = [...thread].reverse().find((m) => m.direction === "in");
+  const signals = detectSignals(lastIn?.body ?? "");
+  const lang = detectLanguage(thread);
+  const stage = conversationStage(thread);
+  const facts = signalsBrief(signals, input.pricingProvided, lang);
+  const avoid = (input.avoid ?? []).filter(Boolean).slice(0, 3);
+
+  const transcript = thread
+    .map((m) => `${m.direction === "in" ? "THEM" : "US"}: ${String(m.body).replace(/\s+/g, " ").slice(0, 400)}`)
+    .join("\n");
+
+  const user = [
+    `ABOUT THE BUSINESS YOU REPRESENT (these are the ONLY facts you may state):\n${business}`,
+    lead?.company ? `THE LEAD: ${lead.company}${lead.city ? `, ${lead.city}` : ""}${lead.reason ? ` — noted because: ${lead.reason}` : ""}` : "",
+    "",
+    `REPLY LANGUAGE: ${LANG_INSTRUCTION[lang]}`,
+    `WHERE THE CONVERSATION IS: ${STAGE_GUIDE[stage]}`,
+    facts.length ? `READ FROM THEIR LAST MESSAGE (treat as fact):\n${facts.map((f) => `- ${f}`).join("\n")}` : "",
+    "",
+    "THE CONVERSATION SO FAR (oldest first; the LAST line is what you are answering):",
+    transcript,
+    avoid.length ? `\nYOU ALREADY SENT THESE — your new reply must NOT repeat or paraphrase them; give something genuinely new or hand off:\n${avoid.map((a) => `- ${a.replace(/\s+/g, " ").slice(0, 300)}`).join("\n")}` : "",
+    "",
+    "Decide about THEIR most recent message and answer with the JSON.",
+  ].join("\n");
+
+  return { system: REPLY_SYSTEM, user, lang, handoffFloor: mustHandOff(signals, input.pricingProvided) };
+}
+
 /** Read the thread + Site Brain, ask the model for a decision, return the parsed Decision. Throws
  *  only if there is no conversation yet (the caller should not auto-reply into an empty thread).
  *  `avoid` = replies we already sent that this one must not repeat or rephrase. */
@@ -177,64 +259,19 @@ export async function decideReply(
 
   if (thread.length === 0) throw new Error("No conversation yet — nothing to decide on.");
 
-  const business = buildBusinessBrief(profile?.profile, (tenant as any) ?? null);
+  const p: any = profile?.profile;
+  const pricingProvided = !!(p?.pricing && (p.pricing.range || p.pricing.note || p.pricing.model));
+  const business = buildBusinessBrief(p, (tenant as any) ?? null);
 
-  const transcript = thread
-    .map((m) => `${m.direction === "in" ? "THEM" : "US"}: ${String(m.body).replace(/\s+/g, " ").slice(0, 400)}`)
-    .join("\n");
+  const { system, user, handoffFloor } = buildReplyPrompt({ business, pricingProvided, lead: lead as any, thread, avoid: opts.avoid });
+  const answer = await completeJson<Record<string, unknown>>(user, { system });
+  const decision = parseDecision(answer);
 
-  const avoid = (opts.avoid ?? []).filter(Boolean).slice(0, 3);
-
-  const prompt = [
-    "You are the person answering on a business's WhatsApp, deciding how to handle a lead's latest message. Your job is to be genuinely useful, fast and honest — like the best salesperson at a well-run company, never a bot reading a script.",
-    "",
-    `ABOUT THE BUSINESS YOU REPRESENT (these are the ONLY facts you may state):
-${business}`,
-    lead?.company ? `THE LEAD: ${lead.company}${lead.city ? `, ${lead.city}` : ""}${lead.reason ? ` — noted because: ${lead.reason}` : ""}` : "",
-    "",
-    "THE CONVERSATION SO FAR (oldest first; the LAST line is what you are answering):",
-    transcript,
-    "",
-    "Decide about THEIR most recent message. Return JSON with these fields:",
-    '- "intent": one of greeting, question, affirmation, objection, smalltalk, ready, meeting, stop, other.',
-    '- "confidence": 0..1, how sure you are about intent AND that a reply is appropriate.',
-    '- "action": one of:',
-    '    "ignore"  — a bare acknowledgement that needs no reply ("ok", "thanks", "hmm", "👍"). Do NOT reply to these.',
-    '    "wait"    — the message looks half-typed/incomplete; they are probably still writing.',
-    '    "reply"   — answer them now.',
-    '- "reply": if action is "reply", the ACTUAL next WhatsApp message from US. Else "".',
-    '- "handoff": true ONLY if a real person must take over (they want something you cannot give from the facts above — a quote, a document, a decision, a complaint). Else false.',
-    '- "reason": a 3-8 word note on why (for the human), e.g. "asked about ISO 9001 price".',
-    "",
-    "HOW TO WRITE THE REPLY:",
-    "- One short WhatsApp message, 1-3 sentences, no email formatting, no 'Dear', no signature. At most ONE question, and only if it moves the conversation forward.",
-    "- ANSWER THEIR QUESTION FIRST, in the first sentence. Only then, if useful, add one line of value or a next step. Never dodge, never restate the pitch if they moved past it.",
-    "- Write in THEIR language and script: English → English; Hindi/Hinglish typed in Roman letters → Hinglish in Roman letters; Hindi/Urdu script → the same script. Keep it simple and warm, the way a real person types.",
-    "- 'yes'/'ok' as an answer to OUR question → act on that question, don't send a generic blurb.",
-    "",
-    "WHAT YOU CAN AND CANNOT DO (critical):",
-    "- You can ONLY send text messages in this chat. You CANNOT send files, PDFs, outlines, brochures, quotes, images or links you were not given, and you cannot call.",
-    "- NEVER promise something you cannot deliver in this very message. Never write 'I'll send it now / shortly / right away / in a moment'. If they ask for details or an outline, GIVE the useful content right now in 2-4 short lines (scope, timeline, what is included), then offer a call or say a team member will share the full document — and set handoff true.",
-    "- If asked the price: if Pricing is provided above, state it plainly first (range/model), then one line of what it depends on. If Pricing is NOT PROVIDED, say honestly that it depends on their situation, ask the ONE detail you need (e.g. company size / which standard), and set handoff true so a person sends the exact quote. Do not say 'let me confirm' without also giving them something useful.",
-    "- Never invent a price, date, guarantee, client name or number that is not in the facts above. If you do not know, say so simply and say a team member will confirm — and set handoff true.",
-    "",
-    "WHO YOU ARE:",
-    "- If asked 'who are you' / 'kaun ho': one line — your name (if given) and the business name, what we do and how it helps THEM, then ONE question about their need. Do not repeat the business pitch word for word.",
-    "- If they sincerely ask whether you are a bot/AI/human, answer honestly: you are the team's AI assistant and a team member can join any time. Never claim to be a human.",
-    "",
-    "TONE AND HONESTY:",
-    "- NEVER repeat or rephrase anything US already said in the conversation. Every reply must move the conversation FORWARD with new information or a concrete next step.",
-    "- Do NOT apologise for delays unless their LAST message complains about waiting; then apologise in ≤5 words once and answer immediately in the same message.",
-    "- If their message is a placeholder like [Voice message] / [Photo] / [Document], you cannot open it: say so in one friendly line and ask them to type it, or offer a quick call.",
-    "- If they sound annoyed, frustrated or say stop: be human — one short sincere line, solve the actual problem, set handoff true. If they said stop, write a one-line polite backoff.",
-    "- Be confident and warm, never pushy. Sell by being helpful: one clear next step (a question, a call, or the detail they asked for).",
-    avoid.length ? `
-YOU ALREADY SENT THESE — your new reply must NOT repeat or paraphrase them; give something genuinely new or hand off:
-${avoid.map((a) => `- ${a.replace(/\s+/g, " ").slice(0, 300)}`).join("\n")}` : "",
-    "",
-    'Reply with ONLY JSON: {"intent":"...","confidence":0.0,"action":"...","reply":"...","handoff":false,"reason":"..."}',
-  ].filter((x) => x !== undefined).join("\n");
-
-  const answer = await completeJson<Record<string, unknown>>(prompt);
-  return parseDecision(answer);
+  // ESCALATION IS ENFORCED HERE, not trusted to the model: some situations always need a person
+  // (an upset customer, a document request, a price question with no price set), whatever the model
+  // felt about its own confidence.
+  if (handoffFloor.yes && !decision.needs_human) {
+    return { ...decision, needs_human: true, reason: decision.reason || handoffFloor.reason };
+  }
+  return decision;
 }

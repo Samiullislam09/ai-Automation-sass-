@@ -261,8 +261,12 @@ async function handleAutoReplyLocked(job: AutoReplyJob): Promise<void> {
       .from("leads")
       .update({
         last_intent: decision.intent,
-        needs_attention: decision.needs_human,
-        needs_attention_reason: decision.needs_human ? decision.reason || decision.intent : null,
+        // STICKY: a flag raised for a person stays up until a person answers (store.ts clears it when
+        // a human sends). It used to be overwritten with `false` by the very next decision — an
+        // owner-alert for "asked about price" vanished the moment the customer said "ok".
+        ...(decision.needs_human
+          ? { needs_attention: true, needs_attention_reason: decision.reason || decision.intent }
+          : {}),
         updated_at: new Date().toISOString(),
       })
       .eq("id", leadId)
