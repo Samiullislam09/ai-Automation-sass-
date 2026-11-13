@@ -21,6 +21,8 @@ import { isQuietHours, nextAllowedTime } from "./outbound.js";
 import { FOLLOWUP_GAP_HOURS } from "./followup.js";
 import { sessionStatus } from "./session.js";
 import { prepareDraft } from "./opener.js";
+import { isNearDuplicate } from "./decide.js";
+import { HOLDING } from "./conversation.js";
 
 /** A reply is sent within ~30 s of a message arriving (4–12 s delay, a few seconds of quiet, the model, typing); past this the AI either chose not to answer or it is stuck. */
 const REPLY_WINDOW_S = 45;
@@ -68,9 +70,36 @@ export type Overview = {
   timeline: { hour: string; ai: number; you: number; received: number }[];
   /** The current hour and the next five, one bucket each: what is scheduled to go out. */
   upcoming: { hour: string; first: number; followups: number }[];
+  /** How fast the AI answers people who write to it — measured from their first unanswered message to our reply. */
+  reply_speed: { day: SpeedStats; week: SpeedStats };
+  /** Things that mean the AI is not doing its job well, found in what it actually sent. */
+  quality: Quality;
+};
+
+export type SpeedStats = {
+  /** Replies measured. */
+  samples: number;
+  p50_s: number | null;
+  p95_s: number | null;
+  avg_s: number | null;
+  /** Share (0-100) answered within FAST_S. */
+  fast_pct: number | null;
+  slowest_s: number | null;
+  health: "good" | "slow" | "bad" | "no_data";
+};
+
+export type Quality = {
+  /** Chats where the AI sent (nearly) the same message twice in a row, last 24 h. Should always be empty. */
+  loops: { lead_id: string; name: string; repeats: number }[];
+  /** Customers who got the "a team member will get back to you" line, last 24 h — the AI could not answer in time. */
+  holding: number;
+  /** Leads flagged for a person who have not been answered by one yet. */
+  needs_you: { lead_id: string; name: string; reason: string }[];
 };
 
 export type MsgRow = { lead_id: string | null; direction: "in" | "out"; answered_by: string | null; created_at: string };
+/** What the AI itself sent, with the words — only needed to spot repeats and holding lines. */
+export type SentRow = { lead_id: string | null; body: string; created_at: string };
 export type LeadRow = {
   id: string; company?: string | null; name?: string | null; phone?: string | null; whatsapp?: string | null; stage?: string | null;
   last_intent?: string | null; opt_out?: boolean | null; auto_reply_paused_until?: string | null; needs_attention?: boolean | null; needs_attention_reason?: string | null;
@@ -94,7 +123,97 @@ export type OverviewInput = {
   drafts?: Record<string, string>;
   /** Show every upcoming item, not just the first few (the "Show all" button). */
   full?: boolean;
+  /** The AI's own messages of the last 24 h, newest first. Optional: without it `quality` just reports nothing. */
+  sent?: SentRow[];
 };
+
+/* ── reply speed ─────────────────────────────────────────────────────────────────────────────
+ *  Measured from what is already in the database — no new write path, nothing to forget to call.
+ *  A customer's wait starts at their FIRST message they have not yet had an answer to (a burst of
+ *  three short messages is one wait, not three) and ends at the next message WE sent. */
+
+/** A reply this fast (seconds) counts as "instant" to a person on WhatsApp. */
+export const FAST_S = 30;
+/** Past this the customer has stopped waiting and is doing something else. */
+const SLOW_P95_S = 45;
+const BAD_P95_S = 120;
+/** An outbound this long after an unanswered inbound is not a reply: it is the AI choosing not to
+ *  answer an "ok" and a follow-up arriving days later. Counting it would make a healthy system look
+ *  like it takes two days. */
+const MAX_REPLY_GAP_S = 6 * 3600;
+
+export type ReplySample = { lead_id: string; at: number; seconds: number; by: "brain" | "human" };
+
+/** Pair each unanswered inbound burst with the outbound that closed it. `messages` is newest first. */
+export function replySamples(messages: MsgRow[]): ReplySample[] {
+  const byLead = new Map<string, MsgRow[]>();
+  for (const m of messages) {
+    if (!m.lead_id) continue;
+    let a = byLead.get(m.lead_id);
+    if (!a) byLead.set(m.lead_id, (a = []));
+    a.push(m);
+  }
+  const out: ReplySample[] = [];
+  byLead.forEach((rows, lead_id) => {
+    rows.sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+    let waitingSince: number | null = null;
+    for (const m of rows) {
+      const t = Date.parse(m.created_at);
+      if (m.direction === "in") {
+        if (waitingSince == null) waitingSince = t;
+      } else if (waitingSince != null) {
+        const seconds = (t - waitingSince) / 1000;
+        if (seconds >= 0 && seconds <= MAX_REPLY_GAP_S) out.push({ lead_id, at: t, seconds, by: m.answered_by === "brain" ? "brain" : "human" });
+        waitingSince = null;
+      }
+    }
+  });
+  return out;
+}
+
+const pct = (sorted: number[], p: number) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1))];
+
+/** Numbers and a verdict from a list of reply times (seconds). Needs three samples to judge — one slow
+ *  reply on a quiet day is an anecdote, not a trend. */
+export function speedStats(seconds: number[]): SpeedStats {
+  const n = seconds.length;
+  if (n === 0) return { samples: 0, p50_s: null, p95_s: null, avg_s: null, fast_pct: null, slowest_s: null, health: "no_data" };
+  const s = [...seconds].sort((a, b) => a - b);
+  const p95 = pct(s, 95);
+  const health = n < 3 ? "no_data" : p95 <= SLOW_P95_S ? "good" : p95 <= BAD_P95_S ? "slow" : "bad";
+  return {
+    samples: n,
+    p50_s: Math.round(pct(s, 50)),
+    p95_s: Math.round(p95),
+    avg_s: Math.round(s.reduce((a, c) => a + c, 0) / n),
+    fast_pct: Math.round((s.filter((x) => x <= FAST_S).length / n) * 100),
+    slowest_s: Math.round(s[n - 1]),
+    health,
+  };
+}
+
+/** Chats where the AI said the same thing twice running, and how many customers got the holding line. */
+export function sentQuality(sent: SentRow[]): { loops: { lead_id: string; repeats: number }[]; holding: number } {
+  const holdTexts = Object.values(HOLDING);
+  let holding = 0;
+  const byLead = new Map<string, SentRow[]>();
+  for (const m of sent) {
+    if (holdTexts.some((h) => isNearDuplicate(m.body, h))) { holding++; continue; }
+    if (!m.lead_id) continue;
+    let a = byLead.get(m.lead_id);
+    if (!a) byLead.set(m.lead_id, (a = []));
+    a.push(m);
+  }
+  const loops: { lead_id: string; repeats: number }[] = [];
+  byLead.forEach((rows, lead_id) => {
+    rows.sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+    let repeats = 0;
+    for (let i = 1; i < rows.length; i++) if (isNearDuplicate(rows[i].body, rows[i - 1].body)) repeats++;
+    if (repeats > 0) loops.push({ lead_id, repeats });
+  });
+  loops.sort((a, b) => b.repeats - a.repeats);
+  return { loops, holding };
+}
 
 const nameOf = (l?: LeadRow) => l?.company || l?.name || l?.phone || l?.whatsapp || "Lead";
 const clock = (ms: number, tz: number) => {
@@ -243,6 +362,24 @@ export function buildOverview(inp: OverviewInput): Overview {
   const agendaTotal = agenda.length + Math.max(0, first_messages.length - FIRST_SHOWN) + Math.max(0, followups.length - FOLLOW_SHOWN);
 
   const skipped24 = skipped.filter((x) => nowMs - Date.parse(x.at) < 86_400_000);
+
+  // ── how the AI is actually doing ──
+  const samples = replySamples(inp.messages).filter((x) => x.by === "brain");
+  const dayAgo = nowMs - 86_400_000;
+  const reply_speed = {
+    day: speedStats(samples.filter((x) => x.at >= dayAgo).map((x) => x.seconds)),
+    week: speedStats(samples.map((x) => x.seconds)),
+  };
+  const sq = sentQuality(inp.sent ?? []);
+  const quality: Quality = {
+    loops: sq.loops.slice(0, 10).map((l) => ({ ...l, name: nameOf(leads[l.lead_id]) })),
+    holding: sq.holding,
+    needs_you: Object.values(leads)
+      .filter((l) => l.needs_attention && !l.opt_out)
+      .slice(0, 10)
+      .map((l) => ({ lead_id: l.id, name: nameOf(l), reason: l.needs_attention_reason || "Needs you" })),
+  };
+
   return {
     generated_at: new Date(nowMs).toISOString(),
     state,
@@ -268,6 +405,8 @@ export function buildOverview(inp: OverviewInput): Overview {
     skipped: skipped24.slice(0, 10),
     timeline,
     upcoming,
+    reply_speed,
+    quality,
   };
 }
 
@@ -283,6 +422,17 @@ export async function loadOverview(tenantId: string, nowMs = Date.now(), opts: {
   ]);
   const messages = (msgs ?? []) as MsgRow[];
   const queueRows = (queue ?? []) as QueueRow[];
+  // The AI's own words, last 24 h, for the repeat / holding check. Bounded, and read only here — the
+  // 7-day message query above deliberately carries no bodies.
+  const { data: sentRows } = await supabase
+    .from("outreach_messages")
+    .select("lead_id, body, created_at")
+    .eq("tenant_id", tenantId)
+    .eq("direction", "out")
+    .eq("answered_by", "brain")
+    .gte("created_at", new Date(nowMs - 86_400_000).toISOString())
+    .order("created_at", { ascending: false })
+    .limit(400);
 
   // The leads that matter: those with a last message from them, those in the queue, and those due a nudge.
   const ids = new Set<string>();
@@ -324,6 +474,6 @@ export async function loadOverview(tenantId: string, nowMs = Date.now(), opts: {
   return buildOverview({
     nowMs, settings, connection, holder, dailyCount, drafts, full: opts.full,
     firstConnectedAtMs: (sess as any)?.first_connected_at ? Date.parse((sess as any).first_connected_at) : null,
-    messages, leads, queue: queueRows,
+    messages, leads, queue: queueRows, sent: (sentRows ?? []) as SentRow[],
   });
 }

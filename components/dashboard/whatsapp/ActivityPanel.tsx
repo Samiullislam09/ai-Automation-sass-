@@ -30,7 +30,29 @@ export type Overview = {
   skipped: { lead_id: string; name: string; reason: string; at: string }[];
   timeline: { hour: string; ai: number; you: number; received: number }[];
   upcoming: { hour: string; first: number; followups: number }[];
+  reply_speed: { day: SpeedStats; week: SpeedStats };
+  quality: Quality;
 };
+
+export type SpeedStats = {
+  samples: number; p50_s: number | null; p95_s: number | null; avg_s: number | null; fast_pct: number | null; slowest_s: number | null;
+  health: "good" | "slow" | "bad" | "no_data";
+};
+export type Quality = {
+  loops: { lead_id: string; name: string; repeats: number }[];
+  holding: number;
+  needs_you: { lead_id: string; name: string; reason: string }[];
+};
+
+const NO_SPEED: SpeedStats = { samples: 0, p50_s: null, p95_s: null, avg_s: null, fast_pct: null, slowest_s: null, health: "no_data" };
+
+/** 14 -> "14 s", 95 -> "2 min", 4000 -> "1.1 h". */
+function dur(s: number | null): string {
+  if (s == null) return "–";
+  if (s < 60) return `${s} s`;
+  if (s < 3600) return `${Math.round(s / 60)} min`;
+  return `${(s / 3600).toFixed(1)} h`;
+}
 
 const C = { green: "#008069", ink: "#111b21", sub: "#667781", line: "#e9edef", soft: "#f5f6f6", blue: "#2f9bd6", slate: "#8696a0", amber: "#d98a0b", amberText: "#7a5b00", amberSoft: "#fff8e1", red: "#b42318", redSoft: "#fdeaea", greenSoft: "#e7f6ec", greenText: "#067647" };
 
@@ -86,6 +108,9 @@ export function normalizeOverview(raw: Partial<Overview> | null): Overview | nul
     skipped: Array.isArray(raw.skipped) ? raw.skipped : [],
     timeline: Array.isArray(raw.timeline) ? raw.timeline : [],
     upcoming: Array.isArray(raw.upcoming) ? raw.upcoming : [],
+    // An older agent server does not send these: the page then simply has no speed card.
+    reply_speed: { day: { ...NO_SPEED, ...(raw.reply_speed?.day ?? {}) }, week: { ...NO_SPEED, ...(raw.reply_speed?.week ?? {}) } },
+    quality: { loops: [], holding: 0, needs_you: [], ...(raw.quality ?? {}) },
   };
 }
 
@@ -153,6 +178,9 @@ function ActivityBody({ data, loading, showAll, onShowAll, onOpenChat }: { data:
           <Stat label="Needs you" value={`${data.counts.held}`} sub="the AI will not answer" warn={data.counts.held > 0} />
         </section>
 
+        {/* 2b · how fast, and how well */}
+        <Health data={data} onOpenChat={onOpenChat} />
+
         {/* 3 · what happens next */}
         <section>
           <div className="mb-3">
@@ -197,6 +225,56 @@ function ActivityBody({ data, loading, showAll, onShowAll, onOpenChat }: { data:
         </p>
       </div>
     </div>
+  );
+}
+
+const HEALTH_TONE: Record<SpeedStats["health"], { bg: string; fg: string; dot: string; title: string; sub: string }> = {
+  good: { bg: C.greenSoft, fg: C.greenText, dot: "#17c964", title: "Replies are fast", sub: "Customers who write in are answered within seconds." },
+  slow: { bg: C.amberSoft, fg: C.amberText, dot: "#f5a623", title: "Replies are slower than they should be", sub: "A customer may start to lose interest. Check that the server is healthy." },
+  bad: { bg: C.redSoft, fg: C.red, dot: "#e11d48", title: "Replies are too slow", sub: "Customers are waiting minutes. This is the thing that makes them leave — look at it first." },
+  no_data: { bg: C.soft, fg: C.sub, dot: "#98a2b3", title: "Not enough replies yet to judge", sub: "This fills in once a few customers have written in and been answered." },
+};
+
+/** How fast the AI answers people who write to it, and the things that mean it is not doing well. All of it is
+ *  read back from the messages themselves — a measurement, not a promise. */
+function Health({ data, onOpenChat }: { data: Overview; onOpenChat: (id: string) => void }) {
+  const d = data.reply_speed.day, w = data.reply_speed.week, q = data.quality;
+  const h = HEALTH_TONE[d.health];
+  const hasAnything = d.samples > 0 || w.samples > 0 || q.loops.length > 0 || q.holding > 0 || q.needs_you.length > 0;
+  if (!hasAnything) return null;
+  return (
+    <section className="space-y-3" aria-label="Reply speed">
+      <div className="rounded-xl p-4" style={{ background: h.bg }} role="status">
+        <div className="flex items-center gap-2.5">
+          <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: h.dot }} />
+          <h3 className="text-[15px] font-semibold" style={{ color: h.fg }}>{h.title}</h3>
+        </div>
+        <p className="mt-1 text-[13px] leading-relaxed" style={{ color: h.fg }}>{h.sub}</p>
+      </div>
+      {d.samples > 0 && (
+        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl sm:grid-cols-4" style={{ background: C.line, border: `1px solid ${C.line}` }}>
+          <Stat label="Typical reply time" value={dur(d.p50_s)} sub={`last 24 h · ${d.samples} repl${d.samples === 1 ? "y" : "ies"}`} />
+          <Stat label="Slowest 1 in 20" value={dur(d.p95_s)} sub="most are faster than this" warn={d.health === "slow" || d.health === "bad"} />
+          <Stat label="Answered within 30 s" value={d.fast_pct == null ? "–" : `${d.fast_pct}%`} sub="of replies" />
+          <Stat label="Last 7 days" value={dur(w.p50_s)} sub={w.fast_pct == null ? "typical reply" : `typical · ${w.fast_pct}% within 30 s`} />
+        </div>
+      )}
+      {q.loops.length > 0 && (
+        <List title="The AI repeated itself" hint="Same message sent twice in a row, last 24 hours" empty="" rows={q.loops.length}>
+          {q.loops.map((l) => <Row key={l.lead_id} onClick={() => onOpenChat(l.lead_id)} name={l.name} sub="Open the chat and send a proper answer yourself." chip={{ t: "Repeat", bg: C.redSoft, fg: C.red }} right={`${l.repeats} repeat${l.repeats === 1 ? "" : "s"}`} />)}
+        </List>
+      )}
+      {q.holding > 0 && (
+        <p className="rounded-xl px-4 py-3 text-[13px] leading-relaxed" style={{ background: C.amberSoft, color: C.amberText }}>
+          <b>{q.holding}</b> customer{q.holding === 1 ? " was" : "s were"} told a team member would reply, because the AI could not answer in time (last 24 h). Each one is flagged for you below.
+        </p>
+      )}
+      {q.needs_you.length > 0 && (
+        <List title="Flagged for you" hint="The AI handed these to a person" empty="" rows={q.needs_you.length}>
+          {q.needs_you.map((l) => <Row key={l.lead_id} onClick={() => onOpenChat(l.lead_id)} name={l.name} sub={l.reason} chip={{ t: "Needs you", bg: C.amberSoft, fg: C.amberText }} right="open chat" />)}
+        </List>
+      )}
+    </section>
   );
 }
 

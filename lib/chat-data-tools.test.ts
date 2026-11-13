@@ -278,3 +278,20 @@ test("shapeWhatsappActivity: the model gets names, reasons and limits it can rea
   assert.equal(held.replies, undefined, "a narrow question gets a narrow answer");
   assert.deepEqual(shapeWhatsappActivity(null, "all").counts, null, "no overview: no invented numbers");
 });
+
+test("shapeWhatsappActivity: reply speed and quality reach the model, and an old agent server reads as 'not measured'", () => {
+  const withSpeed = {
+    ...overview,
+    reply_speed: { day: { samples: 12, p50_s: 14, p95_s: 41, fast_pct: 92, health: "good" }, week: { samples: 80, p50_s: 16, p95_s: 50, fast_pct: 90, health: "good" } },
+    quality: { loops: [{ lead_id: "9", name: "Zed", repeats: 2 }], holding: 1, needs_you: [{ lead_id: "2", name: "Beta", reason: "asked for the price" }] },
+  };
+  const a: any = shapeWhatsappActivity(withSpeed, "speed");
+  assert.deepEqual(a.reply_speed.last_24h, { replies_measured: 12, typical_seconds: 14, slowest_1_in_20_seconds: 41, answered_within_30s_percent: 92, verdict: "good" });
+  assert.deepEqual(a.quality.chats_where_ai_repeated_itself, [{ lead: "Zed", repeats: 2 }]);
+  assert.equal(a.quality.customers_told_a_team_member_will_reply_last_24h, 1);
+  assert.equal(a.replies, undefined, "a narrow question gets a narrow answer");
+  const old: any = shapeWhatsappActivity(overview, "speed");
+  assert.equal(old.reply_speed, undefined, "an older agent server sends no numbers: nothing invented");
+  const t = READ_TOOLS.find((x) => x.function.name === LOOKUP_WHATSAPP_ACTIVITY)!;
+  assert.ok((t.function.parameters as any).properties.focus.enum.includes("speed"));
+});

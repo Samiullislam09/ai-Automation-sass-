@@ -230,10 +230,11 @@ const RAW_READ_TOOLS: ChatTool[] = [
         properties: {
           focus: {
             type: "string",
-            enum: ["all", "queue", "replies", "held", "followups", "today"],
+            enum: ["all", "queue", "replies", "held", "followups", "today", "speed"],
             description:
               "'queue' = first messages waiting to go out; 'replies' = people who wrote and the AI's answer status; " +
-              "'held' = only the ones the AI will NOT answer and why; 'followups' = nudges coming due; 'today' = how many sent versus the limit. Default 'all'.",
+              "'held' = only the ones the AI will NOT answer and why; 'followups' = nudges coming due; 'today' = how many sent versus the limit; "
+              + "'speed' = how FAST the AI answers customers (typical and slowest reply time, % within 30 s), whether it repeated itself, and how many customers it had to hand to a person. Use it for \"reply kitna fast de raha hai\", \"customers ko jawab dene mein kitna time lag raha hai\", \"is the bot slow\". Default 'all'.",
           },
         },
         required: [],
@@ -568,6 +569,17 @@ export function shapeWhatsappActivity(o: any, focus: string): Record<string, unk
     out.skipped_last_24h = L<any>(o?.skipped, 6).map((x) => ({ lead: x.name, reason: x.reason }));
   }
   if (all || focus === "followups") out.followups_due = L<any>(o?.followups, 8).map((f) => ({ lead: f.name, nudge_number: f.which, due_at: f.due_at }));
+  // How fast and how well the AI is answering — measured from the messages themselves. Only when the agent server
+  // sends it (an older one does not), so a missing block reads as "not measured", never as "fine".
+  if ((all || focus === "speed") && o?.reply_speed) {
+    const speed = (s: any) => (s ? { replies_measured: s.samples, typical_seconds: s.p50_s, slowest_1_in_20_seconds: s.p95_s, answered_within_30s_percent: s.fast_pct, verdict: s.health } : null);
+    out.reply_speed = { last_24h: speed(o.reply_speed.day), last_7_days: speed(o.reply_speed.week) };
+    out.quality = {
+      chats_where_ai_repeated_itself: L<any>(o?.quality?.loops, 6).map((l) => ({ lead: l.name, repeats: l.repeats })),
+      customers_told_a_team_member_will_reply_last_24h: o?.quality?.holding ?? 0,
+      flagged_for_a_person: L<any>(o?.quality?.needs_you, 6).map((l) => ({ lead: l.name, why: l.reason })),
+    };
+  }
   return out;
 }
 
