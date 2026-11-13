@@ -12,8 +12,7 @@
  *  the code-enforced handoff floor. Nothing is sent anywhere and nothing is written to a database. */
 import "dotenv/config";
 import { SCENARIOS } from "./golden.js";
-import { buildReplyPrompt, parseDecision, REPLY_LLM } from "./decide.js";
-import { completeJson } from "../llm.js";
+import { buildReplyPrompt, decideFromPrompt } from "./decide.js";
 
 const BUSINESS_WITH_PRICE = [
   "Business name: wca-global.com",
@@ -35,15 +34,17 @@ for (const sc of SCENARIOS.filter((s) => s.id.includes(filter))) {
     pricingProvided: sc.pricing,
     lead: { company: "Acme Trading", city: "Dubai" },
     thread: sc.thread,
+    knowledge: sc.knowledge,
   });
   const problems: string[] = [];
   let reply = "";
   try {
-    const raw = await completeJson<Record<string, unknown>>(built.user, { system: built.system, ...REPLY_LLM });
-    const d = parseDecision(raw);
+    // The production path, nets included — not the raw model.
+    const d = await decideFromPrompt(built);
     reply = d.reply;
-    const needsHuman = d.needs_human || built.handoffFloor.yes;
+    const needsHuman = d.needs_human;
     if (sc.expect.handoff && !needsHuman) problems.push("a person should have been pulled in, was not");
+    if (sc.expect.modelHandoff && !d.needs_human) problems.push("the model should have handed this to a person (it did not know the answer), it did not");
     if (d.action !== "reply") problems.push(`expected a reply, got action="${d.action}"`);
     if (reply.length > 500) problems.push(`too long (${reply.length} chars) for WhatsApp`);
     for (const re of sc.expect.replyMatches ?? []) if (!re.test(reply)) problems.push(`should match ${re}`);

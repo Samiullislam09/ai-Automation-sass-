@@ -157,13 +157,92 @@ export const STAGE_GUIDE: Record<Stage, string> = {
 /** Should a person be pulled in, whatever the model said? True for: an angry customer, a complaint
  *  about our slowness, a request for a document we cannot send, and a price question when we hold no
  *  pricing. The model's own `handoff` flag is honoured too (decide.ts); this is the floor under it. */
-export function mustHandOff(s: Signals, pricingProvided: boolean): { yes: boolean; reason: string } {
+export function mustHandOff(s: Signals, pricingProvided: boolean, unverified: string[] = []): { yes: boolean; reason: string } {
   if (s.angry) return { yes: true, reason: "customer sounds upset" };
   if (s.delayComplaint) return { yes: true, reason: "customer complained about slow replies" };
   if (s.wantsCall) return { yes: true, reason: "customer wants to talk to a person" };
   if (s.document) return { yes: true, reason: "asked for a document the assistant cannot send" };
   if (s.price && !pricingProvided) return { yes: true, reason: "asked for the price — none is set" };
+  if (unverified.length) return { yes: true, reason: `asked about ${unverified.join(", ")} — nothing in our facts about it` };
   return { yes: false, reason: "" };
+}
+
+/** A reply that tells the customer what we do NOT do or cover ("we don't offer X", "X isn't one of the
+ *  standards we cover"). Returns a short description of the claim, or null. Such a statement is only
+ *  safe when the facts say so in so many words, and a model that has seen a list of offerings tends to
+ *  treat a missing item as a "no" — measured on the live model, 2026-11-14 (kb-missing: "ISO 27001
+ *  isn't one of the standards we cover directly", with no source for it). Positive claims are not
+ *  caught here: they are usually the facts being repeated, which is the point of giving them. */
+export function riskyClaim(reply: string): string | null {
+  const t = String(reply ?? "").toLowerCase().replace(/[’]/g, "'");
+  const m =
+    t.match(/\b(?:we|our team|the team)\s+(?:currently\s+|do\s+)?(?:don't|do not|doesn't|cannot|can't|no longer|never)\s+(?:currently\s+|really\s+|actually\s+|directly\s+)?(?:offer|provide|cover|support|certify|do|work|handle|deal)\b[^.?!]*/) ??
+    t.match(/\b[^.?!]*\b(?:isn't|is not|aren't|are not)\s+(?:one of |something |part of |among )[^.?!]*\bwe\b[^.?!]*/) ??
+    t.match(/\b(?:we|that)\s+(?:is|are)?\s*(?:not|n't)\s+(?:available|offered|supported|covered)\b[^.?!]*/) ??
+    t.match(/\b(?:isn't|is not|aren't|are not)\s+in our (?:scope|range|offering|portfolio|list)\b[^.?!]*/) ??
+    t.match(/(?:focus|specialise|specialize)[^.?!]*[—–-]\s*not \w[^.?!]*/);
+  return m ? m[0].trim().slice(0, 90) : null;
+}
+
+
+/* ── things asked about that we have no facts for ───────────────────────────────────────── */
+
+/** Specific things in a customer's question that appear NOWHERE in what the assistant has been told:
+ *  a standard number ("27001"), a place after "in/across/serve…" ("Saudi Arabia"). A model that
+ *  has seen a list of offerings treats a missing item as a "no" and invents the rest — live, 2026-11-14:
+ *  "Do you certify ISO 27001 in Saudi Arabia?" was answered "We focus on 9001, 14001, 45001 — not
+ *  27001 … we do work with companies in Saudi Arabia", none of it in the facts. Telling the model to
+ *  be careful did not stop it (it failed 3 runs in 4), so the check is made in code and the model is
+ *  told the result as a fact.
+ *
+ *  `factsText` is everything we may state: the business brief, the website passages, and OUR OWN
+ *  earlier messages. The customer's own words are deliberately not in it — their saying "Saudi" does not
+ *  make it something we know about ourselves. `ignore` is the customer's own company and city. */
+export function unverifiedTerms(question: string, factsText: string, ignore: string[] = []): string[] {
+  const q = String(question ?? "");
+  const facts = ' ' + String(factsText ?? '').toLowerCase();
+  const skip = new Set(ignore.flatMap((s) => String(s ?? "").toLowerCase().split(/[^a-z0-9]+/)).filter(Boolean));
+  const found: string[] = [];
+  const add = (raw: string) => {
+    const t = raw.trim();
+    const l = t.toLowerCase();
+    if (!t || skip.has(l) || found.some((f) => f.toLowerCase() === l)) return;
+    if (facts.includes(l)) return;
+    found.push(t);
+  };
+  // Numbers that name a thing (a standard, a model, a year-less code): 27001, 45001, 9001.
+  for (const m of q.matchAll(/[A-Za-z]*\d[\w-]{2,}/g)) if (/\d{3,}/.test(m[0])) add(m[0].replace(/^[A-Za-z]{1,4}(?=\d)/, (p) => p));
+  // A place or scope named right after a preposition of coverage: "in Saudi Arabia", "across the GCC".
+  const scope = /\b(?:in|across|within|throughout|serve|serving|cover|covering|operate in|work in|available in|deliver to|ship to|office in|branch in|based in)\s+(?:the\s+)?((?:[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)?)|[A-Z]{2,})/g;
+  for (const m of q.matchAll(scope)) for (const w of m[1].split(/\s+/)) add(w);
+  return found.slice(0, 4);
+}
+
+/** Words that mean "a person will confirm" / "I do not have that" — the only honest thing to say about
+ *  something we have no facts on. */
+export const CONFIRM_LANG = /(team member|colleague|someone (from|on) (our|the) team|will confirm|let me confirm|confirm (this|that|it|whether)|check (this|that|it|with)|don't have that|do not have that|not sure|verify|get back to you|follow up)|(team (ka|ke) (member|sadasya|koi)|confirm kar|pata karke|check karke|team se)|(पुष्टि|टीम)/i;
+
+/** Does the reply say something about an unverified term in a sentence that is not a question and does
+ *  not defer to a person? That is an assertion with no source. */
+export function assertsUnverified(reply: string, terms: string[]): boolean {
+  if (!terms.length) return false;
+  const sentences = String(reply ?? "").split(/(?<=[.!?])\s+|\n+/).map((s) => s.trim()).filter(Boolean);
+  return sentences.some((s) => {
+    const l = s.toLowerCase();
+    const mentions = terms.some((t) => l.includes(t.toLowerCase()));
+    return mentions && !s.endsWith("?") && !CONFIRM_LANG.test(s);
+  });
+}
+
+/** The safe line used when a rewrite still states something unverified: acknowledge, defer, move on. */
+export function confirmLine(lang: Lang, terms: string[]): string {
+  const what = terms.join(" / ");
+  switch (lang) {
+    case "hinglish": return `Achha sawal — ${what} ke baare mein main team se confirm karwa deta hoon, aapko jaldi bata denge. Tab tak, aapki company ko kis cheez ki sabse zyada zaroorat hai?`;
+    case "hi": return `अच्छा सवाल — ${what} के बारे में मैं टीम से पुष्टि करवा देता हूँ, वे आपको जल्द बताएँगे। तब तक, आपको सबसे ज़्यादा किस चीज़ की ज़रूरत है?`;
+    case "ur": return `Achha sawal — ${what} ke baare mein main team se confirm karwa deta hoon, woh aap ko jald bata denge. Tab tak, aap ko sab se zyada kis cheez ki zaroorat hai?`;
+    default: return `Good question — I'll have a team member confirm ${what} for you and get back to you shortly. In the meantime, what matters most to you?`;
+  }
 }
 
 /** The facts line handed to the model. Only signals that are TRUE are mentioned. */
@@ -186,8 +265,9 @@ const APOLOGY: Record<Lang, string> = {
   ur: "Maazrat, der ho gayi.",
 };
 
-export function signalsBrief(s: Signals, pricingProvided: boolean, lang: Lang = "en"): string[] {
+export function signalsBrief(s: Signals, pricingProvided: boolean, lang: Lang = "en", unverified: string[] = []): string[] {
   const out: string[] = [];
+  if (unverified.length) out.push(`They asked about ${unverified.join(", ")}, which appear NOWHERE in the facts you were given. Do NOT say whether we do or do not handle it, do NOT say where we operate, and do NOT infer anything from what we do list. Say plainly that a team member will confirm, then ask ONE useful question. Set handoff true.`);
   if (s.whoAreYou) out.push("They are asking WHO YOU ARE — follow the 'who you are' rule.");
   if (s.botQuestion) out.push("They are asking whether you are a bot/AI — answer honestly (you are the team's AI assistant; a person can join any time).");
   if (s.price) out.push(pricingProvided

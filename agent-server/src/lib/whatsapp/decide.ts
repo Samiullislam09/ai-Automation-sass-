@@ -18,8 +18,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { brandName } from "./brand.js";
 import {
   detectLanguage, detectSignals, conversationStage, mustHandOff, signalsBrief,
-  LANG_INSTRUCTION, STAGE_GUIDE, type Msg,
+  LANG_INSTRUCTION, STAGE_GUIDE, riskyClaim, unverifiedTerms, assertsUnverified, confirmLine, type Lang, type Msg,
 } from "./conversation.js";
+import { retrieveKnowledge, queryFor, renderKnowledge, type Passage } from "./knowledge.js";
 
 export type Intent =
   | "greeting" | "question" | "affirmation" | "objection"
@@ -204,6 +205,12 @@ export const REPLY_SYSTEM = [
   "- Use the REPLY LANGUAGE given with the conversation. Keep it simple and warm, the way a real person types.",
   "- 'yes'/'ok' as an answer to OUR question → act on that question, don't send a generic blurb.",
   "",
+  "THE BUSINESS'S OWN WEBSITE:",
+  "- When a FACTS FROM OUR WEBSITE block is given, those are real passages from the business's own pages and are as trustworthy as the business facts. Use them for specifics — what the service includes, how the process works, how long it takes, what is required — and say it in your own short words, never paste a paragraph.",
+  "- If the customer asks something that neither the business facts nor the website facts answer, do NOT guess and do NOT fill the gap with general knowledge about the topic. Say plainly that a team member will confirm, and set handoff true. A confident wrong answer loses the customer; an honest 'I'll have the team confirm' keeps them.",
+  "- Mention a page address only if it genuinely helps them (one at most), and only an address that appears in the facts.",
+  "- A thing being ABSENT from the facts does not mean we do not do it, and its being present elsewhere does not mean we do. Never say 'we do offer X' or 'we don't offer X' (or where we operate, how many clients or years we have) unless the facts say it in so many words. For anything else say a team member will confirm, and set handoff true.",
+  "",
   "WHAT YOU CAN AND CANNOT DO (critical):",
   "- You can ONLY send text messages in this chat. You CANNOT send files, PDFs, outlines, brochures, quotes, images or links you were not given, and you cannot call.",
   "- NEVER promise something you cannot deliver in this very message. Never write 'I'll send it now / shortly / right away / in a moment'. If they ask for details or an outline, GIVE the useful content right now in 2-4 short lines (scope, timeline, what is included), then offer a call or say a team member will share the full document — and set handoff true.",
@@ -228,18 +235,24 @@ export type ReplyPromptInput = {
   lead: { company?: string | null; city?: string | null; reason?: string | null } | null;
   thread: Msg[];
   avoid?: string[];
+  /** Passages from the business's own site that bear on the customer's question (knowledge.ts). */
+  knowledge?: Passage[];
 };
 
 /** Assemble the call. Pure — the whole point of splitting it from decideReply is that the golden
  *  conversations (golden.test.ts) can assert on exactly what the model would be told, with no
  *  database and no network. */
-export function buildReplyPrompt(input: ReplyPromptInput): { system: string; user: string; lang: ReturnType<typeof detectLanguage>; handoffFloor: { yes: boolean; reason: string } } {
+export function buildReplyPrompt(input: ReplyPromptInput): { system: string; user: string; lang: ReturnType<typeof detectLanguage>; handoffFloor: { yes: boolean; reason: string }; unverified: string[] } {
   const { thread, business, lead } = input;
   const lastIn = [...thread].reverse().find((m) => m.direction === "in");
   const signals = detectSignals(lastIn?.body ?? "");
   const lang = detectLanguage(thread);
   const stage = conversationStage(thread);
-  const facts = signalsBrief(signals, input.pricingProvided, lang);
+  // What we may state: the brief, the website passages and OUR OWN earlier lines. The customer's own
+  // words are not facts about us.
+  const factsText = [input.business, ...(input.knowledge ?? []).map((p) => p.text), ...thread.filter((m) => m.direction === "out").map((m) => m.body)].join("\n");
+  const unverified = lastIn ? unverifiedTerms(lastIn.body, factsText, [lead?.company ?? "", lead?.city ?? ""]) : [];
+  const facts = signalsBrief(signals, input.pricingProvided, lang, unverified);
   const avoid = (input.avoid ?? []).filter(Boolean).slice(0, 3);
 
   const transcript = thread
@@ -247,9 +260,12 @@ export function buildReplyPrompt(input: ReplyPromptInput): { system: string; use
     .join("\n");
 
   const user = [
-    `ABOUT THE BUSINESS YOU REPRESENT (these are the ONLY facts you may state):\n${business}`,
-    lead?.company ? `THE LEAD: ${lead.company}${lead.city ? `, ${lead.city}` : ""}${lead.reason ? ` — noted because: ${lead.reason}` : ""}` : "",
+    `ABOUT THE BUSINESS YOU REPRESENT (together with any website facts given below, these are the ONLY facts you may state):\n${business}`,
+    lead?.company ? `THE CUSTOMER YOU ARE TALKING TO (not us — their company and their city, NOT ours): ${lead.company}${lead.city ? `, ${lead.city}` : ""}${lead.reason ? ` — noted because: ${lead.reason}` : ""}` : "",
     "",
+    input.knowledge && input.knowledge.length
+      ? `FACTS FROM OUR WEBSITE (passages from the business's own pages that bear on their question):\n${renderKnowledge(input.knowledge)}`
+      : "",
     `REPLY LANGUAGE: ${LANG_INSTRUCTION[lang]}`,
     `WHERE THE CONVERSATION IS: ${STAGE_GUIDE[stage]}`,
     facts.length ? `READ FROM THEIR LAST MESSAGE (treat as fact):\n${facts.map((f) => `- ${f}`).join("\n")}` : "",
@@ -261,7 +277,7 @@ export function buildReplyPrompt(input: ReplyPromptInput): { system: string; use
     "Decide about THEIR most recent message and answer with the JSON.",
   ].join("\n");
 
-  return { system: REPLY_SYSTEM, user, lang, handoffFloor: mustHandOff(signals, input.pricingProvided) };
+  return { system: REPLY_SYSTEM, user, lang, handoffFloor: mustHandOff(signals, input.pricingProvided, unverified), unverified };
 }
 
 /** Read the thread + Site Brain, ask the model for a decision, return the parsed Decision. Throws
@@ -273,11 +289,15 @@ export async function decideReply(
   leadId: string,
   opts: { avoid?: string[] } = {},
 ): Promise<Decision> {
-  const [{ data: lead }, thread, profile, { data: tenant }] = await Promise.all([
+  // The thread is read first and the website lookup starts the moment its last question is known, so
+  // the ~0.4 s embedding overlaps the profile and tenant reads instead of following them.
+  const threadP = loadRecentThread(supabase, tenantId, leadId, 30);
+  const [{ data: lead }, thread, profile, { data: tenant }, knowledge] = await Promise.all([
     supabase.from("leads").select("company, name, reason, city").eq("id", leadId).eq("tenant_id", tenantId).maybeSingle(),
-    loadRecentThread(supabase, tenantId, leadId, 30),
+    threadP,
     loadActiveProfile(tenantId),
     supabase.from("tenants").select("name, website_url").eq("id", tenantId).maybeSingle(),
+    threadP.then((t) => retrieveKnowledge(supabase, tenantId, queryFor(t))),
   ]);
 
   if (thread.length === 0) throw new Error("No conversation yet — nothing to decide on.");
@@ -286,18 +306,60 @@ export async function decideReply(
   const pricingProvided = !!(p?.pricing && (p.pricing.range || p.pricing.note || p.pricing.model));
   const business = buildBusinessBrief(p, (tenant as any) ?? null);
 
-  const { system, user, handoffFloor } = buildReplyPrompt({ business, pricingProvided, lead: lead as any, thread, avoid: opts.avoid });
-  // The reply lane: its own rate-limit window, a 12 s request timeout with one retry, and a small
-  // output cap. A customer is waiting — better to fail fast into a holding message and a human than
-  // to sit 90 s per attempt behind a busy pool (autoReply.ts handles the failure).
-  const answer = await completeReplyJson(user, system);
-  const decision = parseDecision(answer);
+  return decideFromPrompt(buildReplyPrompt({ business, pricingProvided, lead: lead as any, thread, avoid: opts.avoid, knowledge }));
+}
 
-  // ESCALATION IS ENFORCED HERE, not trusted to the model: some situations always need a person
-  // (an upset customer, a document request, a price question with no price set), whatever the model
-  // felt about its own confidence.
-  if (handoffFloor.yes && !decision.needs_human) {
-    return { ...decision, needs_human: true, reason: decision.reason || handoffFloor.reason };
+/** Everything after the prompt is built, exactly as production runs it — shared with golden.live.ts so
+ *  the live eval exercises the same nets (finalizeDecision) and not just the raw model.
+ *
+ *  The reply lane: its own rate-limit window, a 12 s request timeout with one retry, and a small output
+ *  cap. A customer is waiting — better to fail fast into a holding message and a human than to sit 90 s
+ *  per attempt behind a busy pool (autoReply.ts handles the failure). */
+export async function decideFromPrompt(built: ReturnType<typeof buildReplyPrompt>): Promise<Decision> {
+  const { system, user } = built;
+  const answer = await completeReplyJson(user, system);
+  return finalizeDecision(parseDecision(answer), {
+    handoffFloor: built.handoffFloor, unverified: built.unverified, lang: built.lang,
+    rewrite: async (instruction) => parseDecision(await completeReplyJson(`${user}
+
+${instruction}`, system)),
+  });
+}
+
+/** What happens to the model's decision before anything is sent. Three nets, in order, each one there
+ *  because the model was seen to get past the prompt (live eval, 2026-11-14):
+ *   1. UNVERIFIED SPECIFICS — the customer asked about something that is nowhere in our facts and the
+ *      reply asserted something about it anyway ("we don't do 27001", "we work in Saudi Arabia").
+ *      One rewrite with the violation named; if that still asserts, the safe "a team member will
+ *      confirm" line is sent instead. The model never gets to answer a question it has no facts for.
+ *   2. RISKY CLAIMS — a "we don't offer X" with no source: a person is told to look.
+ *   3. THE ESCALATION FLOOR — situations that always need a person, whatever the model felt.
+ *  Pure apart from `rewrite`, so every branch is a unit test with a fake one. */
+export async function finalizeDecision(
+  first: Decision,
+  ctx: { handoffFloor: { yes: boolean; reason: string }; unverified: string[]; lang: Lang; rewrite: (instruction: string) => Promise<Decision> },
+): Promise<Decision> {
+  let d = first;
+
+  if (ctx.unverified.length && d.action === "reply" && assertsUnverified(d.reply, ctx.unverified)) {
+    const what = ctx.unverified.join(", ");
+    let better: Decision | null = null;
+    try {
+      better = await ctx.rewrite(
+        `YOUR PREVIOUS DRAFT STATED THINGS ABOUT ${what} THAT ARE NOT IN THE FACTS: "${d.reply.slice(0, 200)}". Rewrite it: acknowledge their question, say plainly that a team member will confirm ${what}, do not say whether we do or do not handle it and do not mention any place or standard we have not been told about, and ask ONE useful question. Set handoff true.`,
+      );
+    } catch { /* fall through to the safe line */ }
+    d = better && better.action === "reply" && better.reply && !assertsUnverified(better.reply, ctx.unverified)
+      ? better
+      : { ...d, action: "reply", reply: confirmLine(ctx.lang, ctx.unverified) };
+    d = { ...d, needs_human: true, reason: d.reason || `asked about ${what} — not in our facts` };
   }
-  return decision;
+
+  if (d.action === "reply" && !d.needs_human) {
+    const claim = riskyClaim(d.reply);
+    if (claim) d = { ...d, needs_human: true, reason: d.reason ? `${d.reason} — check: ${claim}` : `check: ${claim}` };
+  }
+
+  if (ctx.handoffFloor.yes && !d.needs_human) d = { ...d, needs_human: true, reason: d.reason || ctx.handoffFloor.reason };
+  return d;
 }

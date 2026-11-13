@@ -58,6 +58,9 @@ export type CompleteJsonOptions = {
   retries?: number;
   /** Output cap; default 3000. A WhatsApp reply is a few sentences — a small cap also makes it faster. */
   maxTokens?: number;
+  /** Sampling temperature. Unset = the provider default. Customer replies run cold: a lower value
+   *  makes the model stick to the facts it was given instead of improvising around them. */
+  temperature?: number;
 };
 
 export async function completeJson<T = any>(prompt: string, opts: CompleteJsonOptions = {}): Promise<T> {
@@ -73,7 +76,7 @@ export async function completeJson<T = any>(prompt: string, opts: CompleteJsonOp
       retries: opts.retries,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model, chat_template_kwargs: { thinking: false }, max_tokens: opts.maxTokens ?? 3000, messages: opts.system ? [{ role: "system", content: opts.system }, { role: "user", content: prompt }] : [{ role: "user", content: prompt }] }),
+      body: JSON.stringify({ model, chat_template_kwargs: { thinking: false }, max_tokens: opts.maxTokens ?? 3000, ...(opts.temperature != null ? { temperature: opts.temperature } : {}), messages: opts.system ? [{ role: "system", content: opts.system }, { role: "user", content: prompt }] : [{ role: "user", content: prompt }] }),
     });
     if (r.ok) { res = r; used = model; break; }
     const body = (await r.text().catch(() => "")).slice(0, 200);

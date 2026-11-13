@@ -15,7 +15,7 @@ const { classifyLanguage, detectLanguage, detectSignals, conversationStage, must
 
 for (const sc of SCENARIOS) {
   test(`golden/${sc.id}: ${sc.why}`, () => {
-    const built = buildReplyPrompt({ business: "Business name: wca-global.com", pricingProvided: sc.pricing, lead: null, thread: sc.thread });
+    const built = buildReplyPrompt({ business: "Business name: wca-global.com", pricingProvided: sc.pricing, lead: null, thread: sc.thread, knowledge: sc.knowledge });
     assert.equal(built.lang, sc.expect.lang, "reply language");
     assert.equal(built.handoffFloor.yes, sc.expect.handoff, `handoff floor (${built.handoffFloor.reason || "none"})`);
     // The model is always told the language and always sees the customer's newest line last.
@@ -23,6 +23,13 @@ for (const sc of SCENARIOS) {
     const lastIn = [...sc.thread].reverse().find((m) => m.direction === "in")!;
     assert.ok(built.user.trimEnd().includes(`THEM: ${lastIn.body}`), "the newest customer message is in the transcript");
     assert.ok(built.user.indexOf(`THEM: ${lastIn.body}`) > built.user.indexOf("THE CONVERSATION SO FAR"), "…inside the transcript");
+    // Website facts reach the model exactly when there are some, and only then.
+    if (sc.knowledge?.length) {
+      assert.match(built.user, /FACTS FROM OUR WEBSITE \(passages/);
+      assert.ok(built.user.includes(sc.knowledge[0].text.slice(0, 40)));
+    } else {
+      assert.doesNotMatch(built.user, /FACTS FROM OUR WEBSITE \(passages/);
+    }
   });
 }
 
@@ -32,6 +39,7 @@ test("the system prompt carries the rules that stopped the 2026-11-13 failures",
   assert.match(REPLY_SYSTEM, /ANSWER THEIR QUESTION FIRST/);
   assert.match(REPLY_SYSTEM, /Never claim to be a human/);
   assert.match(REPLY_SYSTEM, /Do NOT apologise for delays/);
+  assert.match(REPLY_SYSTEM, /do NOT guess and do NOT fill the gap with general knowledge/);
 });
 
 test("price: the model is told to lead with the price when we hold one, and to hand off when we do not", () => {

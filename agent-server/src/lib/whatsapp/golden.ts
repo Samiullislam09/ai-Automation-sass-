@@ -14,6 +14,7 @@
  *                        Runs each scenario through decideReply's own prompt and applies the checks.
  *                        Run it before changing the prompt, and after. */
 import type { Lang, Msg } from "./conversation.js";
+import type { Passage } from "./knowledge.js";
 
 export type Scenario = {
   id: string;
@@ -21,10 +22,14 @@ export type Scenario = {
   why: string;
   pricing: boolean;
   thread: Msg[];
+  /** Passages the website lookup would have returned for this question (knowledge.ts). */
+  knowledge?: Passage[];
   expect: {
     lang: Lang;
     /** The floor under the model: must a person be pulled in whatever it says? */
     handoff: boolean;
+    /** Live: the MODEL itself must have asked for a person (beyond the code-enforced floor above). */
+    modelHandoff?: boolean;
     /** Live: the reply must match every one of these … */
     replyMatches?: RegExp[];
     /** … and none of these. */
@@ -126,5 +131,26 @@ export const SCENARIOS: Scenario[] = [
     pricing: false,
     thread: [OPENER, IN("[Voice message]")],
     expect: { lang: "en", handoff: false, replyMatches: [/type|text|write|call/i] },
+  },
+  {
+    id: "kb-answerable",
+    why: "A question the website answers is answered from the website — specifically, not with a generic sentence.",
+    pricing: false,
+    thread: [OPENER, IN("How long does ISO 14001 take and what do you need from us?")],
+    knowledge: [
+      { url: "https://wca-global.com/iso-14001", title: "ISO 14001", score: 0.9, text: "ISO 14001 implementation typically takes 4 to 6 months depending on the size of the organisation and how mature its environmental controls already are." },
+      { url: "https://wca-global.com/iso-14001", title: "ISO 14001", score: 0.8, text: "What we need from you: a nominated management representative, a list of your sites and processes, and access to your existing environmental permits and records." },
+    ],
+    expect: { lang: "en", handoff: false, replyMatches: [/4\s*(to|-|–)\s*6|four to six/i, /month/i], replyAvoids: [EMPTY_PROMISE, SORRY_FOR_DELAY] },
+  },
+  {
+    id: "kb-missing",
+    why: "A question neither the brief nor the website answers is NOT answered from general knowledge: say a team member will confirm, and flag it.",
+    pricing: false,
+    thread: [OPENER, IN("Do you also certify companies in Saudi Arabia for ISO 27001?")],
+    knowledge: [
+      { url: "https://wca-global.com/iso-14001", title: "ISO 14001", score: 0.4, text: "ISO 14001 implementation typically takes 4 to 6 months depending on the size of the organisation." },
+    ],
+    expect: { lang: "en", handoff: true, replyAvoids: [EMPTY_PROMISE, /\b(yes|yeah|sure)[,!. ]+(we|i)\b.*27001/i, /\bwe (do|can) (certify|offer|provide)\b.*(27001|saudi)/i], replyMatches: [/team|confirm|check/i] },
   },
 ];

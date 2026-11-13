@@ -15,12 +15,24 @@ import { nvidiaFetch } from "./nvidia.js";
  *  rate-limited call must not kill the whole gap scan). `nemotron-3-embed-1b` is the
  *  replacement verified live (200, 2048-dim) — see migration 022 for the column-width change
  *  this forces on every table that stores one of these vectors. */
-export async function embed(text: string): Promise<number[]> {
+export type EmbedOptions = {
+  /** Rate-limit lane (nvidia.ts). Default "bg"; a customer's question uses "wa". */
+  lane?: "bg" | "wa";
+  /** Per-request timeout. Default 90 s (a crawl); a customer waiting asks for far less. */
+  timeoutMs?: number;
+  /** Retries for 429/5xx/timeouts. Default 3. */
+  retries?: number;
+};
+
+export async function embed(text: string, opts: EmbedOptions = {}): Promise<number[]> {
   // Through the shared key-pool limiter (nvidia.ts, NVIDIA_API_KEYS_BG): the crawler calls
   // this once per page, up to ~300 times in a row, which is the one place in this product
   // that can outrun a single key's rpm ceiling — nvidiaFetch picks the key and injects it.
   const res = await nvidiaFetch("https://integrate.api.nvidia.com/v1/embeddings", {
     label: "embeddings",
+    lane: opts.lane,
+    timeoutMs: opts.timeoutMs,
+    retries: opts.retries,
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
