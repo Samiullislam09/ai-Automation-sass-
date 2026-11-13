@@ -132,7 +132,7 @@ export async function enqueueBrainDispatch(data: { task_id: string; tenant_id: s
 /** Schedule a WhatsApp auto-reply. `startAfter` (seconds) is the randomised human delay; the
  *  per-lead `singletonKey` collapses a burst of inbounds into one pending reply job. */
 export async function enqueueWhatsappAutoReply(
-  data: { tenantId: string; leadId: string; phone: string; waitedOnce?: boolean },
+  data: { tenantId: string; leadId: string; phone: string; waitedOnce?: boolean; redecided?: boolean; deferred?: number },
   options?: { startAfter?: number; singletonKey?: string },
 ) {
   await ensureBossStarted();

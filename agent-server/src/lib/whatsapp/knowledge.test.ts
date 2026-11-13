@@ -236,3 +236,121 @@ test("confirmLine: one line in each language, naming what will be confirmed", ()
   assert.match(confirmLine("hi", ["27001"]), /[ऀ-ॿ]/);
   assert.doesNotMatch(confirmLine("hinglish", ["27001"]), /[ऀ-ॿ]/);
 });
+
+const { detectLanguage, classifyLanguage: classifyLang, offersCall, stripCallOffer } = await import("./conversation.js");
+
+test("sim regressions: a competitor's price is not an 'unverified standard', a standard number still is", () => {
+  assert.deepEqual(unverifiedTerms("bohot zyada hai. ek aur company 3500 mein kar rahi hai", FACTS), []);
+  assert.deepEqual(unverifiedTerms("they charge 4500 for it", FACTS), []);
+  assert.deepEqual(unverifiedTerms("aur ISO 27001 bhi karte ho?", FACTS), ["27001"]);
+  assert.deepEqual(unverifiedTerms("do you do ISO27001?", FACTS), ["ISO27001"]);
+});
+
+test("sim regressions: a short English-looking line from a Hinglish customer stays Hinglish", () => {
+  assert.equal(classifyLang("aur ISO 27001 bhi karte ho?"), "hinglish", "'karte' is Hinglish");
+  const th = (rows: string[]) => rows.map((b) => ({ direction: "in" as const, body: b }));
+  assert.equal(detectLanguage(th(["bohot zyada hai, kuch kam hoga kya", "kitna time lagega bhai", "ISO 27001 price?"])), "hinglish");
+  // …but a customer who is really writing English is not forced into Hinglish.
+  assert.equal(detectLanguage(th(["Hello, we are interested in certification", "How long does it take for a small company", "What is the price?"])), "en");
+  // …and a long English message from a Hinglish customer is a real switch.
+  assert.equal(detectLanguage(th(["bohot zyada hai", "kitna time lagega", "Could you please send me a detailed proposal covering scope, timeline and the exact audit schedule for our three sites?"])), "en");
+});
+
+test("call fatigue: a call offer is recognised, and removed from a reply that repeats it", () => {
+  assert.equal(offersCall("Samajh gaya. Kya aapko ek 15-minute call helpful lagega?"), true);
+  assert.equal(offersCall("Would a short call help? I can send you a few time slots."), true);
+  assert.equal(offersCall("We can call you on Monday."), false, "a statement is not an offer");
+  assert.equal(offersCall("ISO 9001 takes 3-4 months. How many staff do you have?"), false);
+  assert.equal(stripCallOffer("Hum audit tak saath rehte hain. Kya aapko ek call helpful lagega?"), "Hum audit tak saath rehte hain.");
+  assert.equal(stripCallOffer("Would a quick call help?"), "Would a quick call help?", "never returns an empty message");
+});
+
+test("finalizeDecision: the call question is dropped when one was offered in the last two messages and not taken", async () => {
+  const ask = "Hum audit tak saath rehte hain. Kya aapko ek 15-minute call helpful lagega?";
+  const base = { handoffFloor: { yes: false, reason: "" }, unverified: [] as string[], lang: "hinglish" as const, rewrite: async () => D("x") };
+  const dropped = await finalizeDecision(D(ask), { ...base, recentOut: ["Pehle ek call kar lete hain? Kya aap free hain?"], callWanted: false });
+  assert.equal(dropped.reply, "Hum audit tak saath rehte hain.");
+  // first offer ever: kept
+  assert.equal((await finalizeDecision(D(ask), { ...base, recentOut: ["ISO 9001 takes 3-4 months."], callWanted: false })).reply, ask);
+  // they asked for a call themselves: kept
+  assert.equal((await finalizeDecision(D(ask), { ...base, recentOut: ["Kya call helpful rahegi?"], callWanted: true })).reply, ask);
+  // the model says the customer accepted (intent meeting): the system sends real slots; the fallback is what
+  // would be sent otherwise — never the model's own wording
+  assert.equal((await finalizeDecision(D(ask, { intent: "meeting" }), { ...base, recentOut: ["Kya call helpful rahegi?"], callWanted: false })).reply, MEETING_FALLBACK.hinglish);
+});
+
+test("the system prompt forbids invented times and personal experiences, and tells the AI to say it is the business's assistant", async () => {
+  const { REPLY_SYSTEM } = await import("./decide.js");
+  assert.match(REPLY_SYSTEM, /NEVER propose, promise or confirm a specific day or time/);
+  assert.match(REPLY_SYSTEM, /never claim to have watched, visited, eaten, travelled/);
+  assert.match(REPLY_SYSTEM, /Do NOT give the owner's name as your own name/);
+  assert.match(REPLY_SYSTEM, /Use "meeting" when they ASK FOR or ACCEPT a call/);
+});
+
+const { missingDetails, proposesTime, stripTimeProposals, claimsExperience, MEETING_FALLBACK, SMALLTALK_DEFLECT, OPT_OUT_ACK } = await import("./conversation.js");
+
+test("missingDetails: an address / phone / hours / licence the customer asks for and we do not hold is found", () => {
+  assert.deepEqual(missingDetails("tumhara office kaha hai? address bhejo", FACTS), ["our office address"]);
+  assert.deepEqual(missingDetails("what is your office address", FACTS), ["our office address"]);
+  assert.deepEqual(missingDetails("aapka phone number do", FACTS), ["our phone number / email"]);
+  assert.deepEqual(missingDetails("what are your working hours?", FACTS), ["our working hours"]);
+  assert.deepEqual(missingDetails("do you have a trade licence?", FACTS), ["our licence / registration details"]);
+  // held facts are not 'missing'
+  assert.deepEqual(missingDetails("what is your office address", FACTS + "\nOur address: Office 12, Al Majaz Tower, Sharjah"), []);
+  assert.deepEqual(missingDetails("send me your email", FACTS + "\nContact: info@wca-global.com"), []);
+  // ordinary questions are not details questions
+  assert.deepEqual(missingDetails("how long does ISO 9001 take", FACTS), []);
+  assert.deepEqual(missingDetails("mera number 5551234 hai call karo", FACTS), []);
+});
+
+test("calls: a time the assistant names for a call is removed; a reply with no time is untouched", () => {
+  assert.equal(proposesTime("Kya kal subah 10 baje 10 minute ka call theek rahega?"), true);
+  assert.equal(proposesTime("Let's do a call tomorrow at 10 AM."), true);
+  assert.equal(proposesTime("Kaam ke din (Mon-Fri) 10 AM - 4 PM ke beech call?"), true);
+  assert.equal(proposesTime("ISO 9001 takes 3-4 months."), false, "a duration is not a proposed time");
+  assert.equal(proposesTime("Would a short call help?"), false);
+  assert.equal(stripTimeProposals("Hum audit tak saath rehte hain. Kal subah 10 baje call karein?"), "Hum audit tak saath rehte hain.");
+});
+
+test("small talk: a claimed experience is caught; an honest deflection is not", () => {
+  assert.equal(claimsExperience("Haan, match tha toh interesting — last over tak gaya."), true);
+  assert.equal(claimsExperience("Haan dekha, kya match tha! 😄"), true);
+  assert.equal(claimsExperience("Yes, I watched it yesterday."), true);
+  assert.equal(claimsExperience("Main sirf assistant hoon, is baare mein kuch keh nahi sakta."), false);
+  assert.equal(claimsExperience("I'm the assistant, so I can't say — back to your ISO question."), false);
+});
+
+test("finalizeDecision: intent 'meeting' always sends the honest fallback; invented times are stripped; small-talk claims replaced", async () => {
+  const base = { handoffFloor: { yes: false, reason: "" }, unverified: [] as string[], lang: "hinglish" as const, rewrite: async () => D("x"), recentOut: [] as string[], callWanted: false };
+  const m = await finalizeDecision(D("Badhiya — main time slots bhejta hu. Kaam ke din (Mon-Fri) 10 AM - 4 PM theek?", { intent: "meeting" }), base);
+  assert.equal(m.reply, MEETING_FALLBACK.hinglish);
+  const t = await finalizeDecision(D("Hum audit tak saath rehte hain. Kal subah 10 baje call karein?", { intent: "question" }), base);
+  assert.equal(t.reply, "Hum audit tak saath rehte hain.");
+  const only = await finalizeDecision(D("Kal subah 10 baje call karein?", { intent: "question" }), base);
+  assert.equal(only.reply, MEETING_FALLBACK.hinglish, "nothing left after stripping → the honest fallback");
+  const s = await finalizeDecision(D("Haan, match tha toh interesting — last over tak gaya.", { intent: "smalltalk" }), base);
+  assert.equal(s.reply, SMALLTALK_DEFLECT.hinglish);
+});
+
+test("finalizeDecision: a detail we do not hold (an address) is never invented", async () => {
+  const gaps = ["our office address"];
+  const base = { handoffFloor: { yes: true, reason: "r" }, unverified: [] as string[], detailGaps: gaps, lang: "hinglish" as const, recentOut: [] as string[], callWanted: false };
+  // the model invents an office; the rewrite defers properly → the rewrite is used
+  const ok = await finalizeDecision(D("Hamara Dubai office Business Bay mein hai."), { ...base, rewrite: async () => D("Address team member share karenge. Aapki company mein kitne log hain?") });
+  assert.match(ok.reply, /team member share/);
+  assert.equal(ok.needs_human, true);
+  // the rewrite invents again → the safe line, never the invention
+  const bad = await finalizeDecision(D("Hamara office Business Bay mein hai."), { ...base, rewrite: async () => D("Office Al Majaz Tower mein hai.") });
+  assert.equal(bad.reply, confirmLine("hinglish", gaps));
+  assert.ok(!/business bay|majaz/i.test(bad.reply));
+  // a reply that already defers is untouched
+  const fine = await finalizeDecision(D("Address ke liye team member aapko confirm karenge."), { ...base, rewrite: async () => D("x") });
+  assert.equal(fine.reply, "Address ke liye team member aapko confirm karenge.");
+});
+
+test("opt-out confirmation: one line in each language", () => {
+  for (const l of ["en", "hinglish", "hi", "ur"] as const) assert.ok(OPT_OUT_ACK[l].length > 20 && OPT_OUT_ACK[l].length < 140);
+  assert.match(OPT_OUT_ACK.hi, /[ऀ-ॿ]/);
+  assert.doesNotMatch(OPT_OUT_ACK.hinglish, /[ऀ-ॿ]/);
+  assert.ok(!/\?/.test(OPT_OUT_ACK.en), "no question — they asked us to stop");
+});

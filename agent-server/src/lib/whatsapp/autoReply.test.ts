@@ -11,7 +11,7 @@ process.env.DATABASE_URL ||= "postgres://unit-test/none";
 process.env.SUPABASE_URL ||= "http://unit-test.invalid";
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= "unit-test";
 
-const { autoReplyGate, warmupCap, typingMs } = await import("./autoReply.js");
+const { autoReplyGate, warmupCap, typingMs, reactiveCeiling } = await import("./autoReply.js");
 
 const DAY = 86_400_000;
 const NOW = Date.UTC(2026, 9, 7, 12, 0, 0); // a fixed noon
@@ -65,11 +65,31 @@ test("gate: never twice in a row — our own last message blocks a second", () =
   assert.equal(autoReplyGate({ ...base(), lastMessageDirection: null }).ok, false);
 });
 
-test("gate: daily cap respects the warmup for the number's age", () => {
-  // brand-new number, cap 20: 19 sent → ok, 20 sent → blocked
+test("gate: replies have their own ceiling — the warm-up cap is for what WE start, not for answering people who wrote first", () => {
   const fresh = { ...base(), firstConnectedAtMs: NOW };
-  assert.equal(autoReplyGate({ ...fresh, dailyAutoSendCount: 19 }).ok, true);
-  assert.equal(autoReplyGate({ ...fresh, dailyAutoSendCount: 20 }).ok, false);
-  // aged number, cap 250: 20 is nowhere near
-  assert.equal(autoReplyGate({ ...base(), dailyAutoSendCount: 20 }).ok, true);
+  // A new number's warm-up cap is 20, but replies are allowed up to max(150, 4 x cap) in 24 h.
+  assert.equal(reactiveCeiling(NOW, NOW), 150);
+  assert.equal(autoReplyGate({ ...fresh, dailyAutoSendCount: 20 }).ok, true, "past the warm-up cap: still answers");
+  assert.equal(autoReplyGate({ ...fresh, dailyAutoSendCount: 149 }).ok, true);
+  const hit = autoReplyGate({ ...fresh, dailyAutoSendCount: 150 });
+  assert.equal(hit.ok, false);
+  assert.match(hit.reason!, /ceiling/, "the reason names the ceiling so autoReply can alert the owner instead of staying silent");
+  // an aged number: cap 250 -> ceiling 1000
+  assert.equal(reactiveCeiling(NOW - 30 * DAY, NOW), 1000);
+  assert.equal(autoReplyGate({ ...base(), dailyAutoSendCount: 999 }).ok, true);
+  assert.equal(autoReplyGate({ ...base(), dailyAutoSendCount: 1000 }).ok, false);
+});
+
+const { makePingGate } = await import("./ownerPing.js");
+
+test("owner pings: one WhatsApp per tenant per window, the next one says how many it stands for", () => {
+  let t = 1_000_000;
+  const g = makePingGate(180_000, () => t);
+  assert.deepEqual(g.take("t1"), { send: true, held: 0 }, "the first goes out");
+  for (let i = 1; i <= 5; i++) { t += 10_000; assert.equal(g.take("t1").send, false, `#${i} is held`); }
+  t += 200_000; // window over
+  assert.deepEqual(g.take("t1"), { send: true, held: 5 }, "the next one carries the count of the five it replaces");
+  assert.equal(g.take("t1").send, false, "and the window restarts");
+  // tenants do not ration each other
+  assert.equal(g.take("t2").send, true);
 });

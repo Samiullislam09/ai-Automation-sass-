@@ -25,7 +25,7 @@ const HINGLISH = new Set([
   "tumhara", "tumhare", "hum", "humara", "humein", "bhej", "bhejo", "bhejna", "batao", "bata", "batana", "karo", "karna", "karke", "kare", "kar",
   "chahiye", "chahie", "chahta", "chahti", "jaldi", "abhi", "theek", "thik", "acha", "accha", "achha", "haan", "han", "ji", "bhai", "yaha", "yahan",
   "wahan", "wala", "wali", "wale", "matlab", "bilkul", "samajh", "samjha", "paise", "rupay", "rupaye", "zyada", "kitna", "itna", "itne", "bahut",
-  "bohot", "lekin", "magar", "aur", "ya", "toh", "bhi", "sirf", "sab", "kuch", "koi", "dena", "lena", "dedo", "dijiye", "kijiye", "bolo", "boliye",
+  "bohot", "lekin", "magar", "aur", "ya", "toh", "bhi", "karte", "karta", "karti", "karein", "kiya", "kiye", "karenge", "milta", "milti", "milte", "lagta", "lagti", "lagega", "lagegi", "dekha", "dekh", "dekhna", "hota", "hoti", "hote", "sakte", "sakta", "sakti", "waise", "isliye", "kyunki", "mehnga", "sasta", "zaroor", "pata", "chal", "chalega", "chalegi", "sirf", "sab", "kuch", "koi", "dena", "lena", "dedo", "dijiye", "kijiye", "bolo", "boliye",
   "dekho", "dekhiye", "milega", "milegi", "hoon", "hu", "ho", "chale", "jate", "jata", "raha", "rahi", "rahe", "pe", "ka", "ki", "ke", "ko", "se",
   "mein", "ne", "kal", "aaj", "pehle", "baad", "phir", "fir", "bas", "sahi", "galat", "dikhao", "dikha", "samay", "waqt", "der", "jawab", "jawaab",
 ]);
@@ -68,12 +68,23 @@ export function classifyLanguage(text: string): Lang | null {
 /** The language to answer in: that of the customer's MOST RECENT message that says enough to tell.
  *  "Ok" / a thumbs-up / a voice-note placeholder never flips it. Defaults to English. */
 export function detectLanguage(thread: Msg[]): Lang {
-  for (let i = thread.length - 1; i >= 0; i--) {
+  // The customer's last few messages that say enough to classify, newest first.
+  const recent: Lang[] = [];
+  for (let i = thread.length - 1; i >= 0 && recent.length < 3; i--) {
     if (thread[i].direction !== "in") continue;
     const l = classifyLanguage(thread[i].body);
-    if (l) return l;
+    if (l) recent.push(l);
   }
-  return "en";
+  if (!recent.length) return "en";
+  const [latest, ...before] = recent;
+  // STICKY: a short English-looking line ("aur ISO 27001 bhi karte ho?") from someone who has been
+  // writing Hinglish is still Hinglish — a few English nouns in a Hindi sentence do not make it
+  // English, and switching language mid-chat reads as a different person (live sim, 2026-11-14).
+  if (latest === "en" && before.length && before.filter((l) => l === "hinglish").length >= Math.ceil(before.length / 2)) {
+    const last = [...thread].reverse().find((m) => m.direction === "in" && classifyLanguage(m.body));
+    if (last && String(last.body).trim().split(/\s+/).length <= 7) return "hinglish";
+  }
+  return latest;
 }
 
 export const LANG_INSTRUCTION: Record<Lang, string> = {
@@ -157,13 +168,14 @@ export const STAGE_GUIDE: Record<Stage, string> = {
 /** Should a person be pulled in, whatever the model said? True for: an angry customer, a complaint
  *  about our slowness, a request for a document we cannot send, and a price question when we hold no
  *  pricing. The model's own `handoff` flag is honoured too (decide.ts); this is the floor under it. */
-export function mustHandOff(s: Signals, pricingProvided: boolean, unverified: string[] = []): { yes: boolean; reason: string } {
+export function mustHandOff(s: Signals, pricingProvided: boolean, unverified: string[] = [], detailGaps: string[] = []): { yes: boolean; reason: string } {
   if (s.angry) return { yes: true, reason: "customer sounds upset" };
   if (s.delayComplaint) return { yes: true, reason: "customer complained about slow replies" };
   if (s.wantsCall) return { yes: true, reason: "customer wants to talk to a person" };
   if (s.document) return { yes: true, reason: "asked for a document the assistant cannot send" };
   if (s.price && !pricingProvided) return { yes: true, reason: "asked for the price — none is set" };
   if (unverified.length) return { yes: true, reason: `asked about ${unverified.join(", ")} — nothing in our facts about it` };
+  if (detailGaps.length) return { yes: true, reason: `asked for ${detailGaps.join(", ")} — not in our facts` };
   return { yes: false, reason: "" };
 }
 
@@ -198,6 +210,9 @@ export function riskyClaim(reply: string): string | null {
  *  `factsText` is everything we may state: the business brief, the website passages, and OUR OWN
  *  earlier messages. The customer's own words are deliberately not in it — their saying "Saudi" does not
  *  make it something we know about ourselves. `ignore` is the customer's own company and city. */
+/** Words that introduce a numbered standard or code: "ISO 27001", "IEC 62304", "SOC 2". */
+const CODE_WORDS = new Set(["iso", "iec", "en", "bs", "soc", "pci", "sa", "ohsas", "din", "ieee", "rfc", "gmp", "haccp", "itil", "cmmi", "as", "nz", "gdpr", "hipaa", "fda", "ce", "ul"]);
+
 export function unverifiedTerms(question: string, factsText: string, ignore: string[] = []): string[] {
   const q = String(question ?? "");
   const facts = ' ' + String(factsText ?? '').toLowerCase();
@@ -210,8 +225,19 @@ export function unverifiedTerms(question: string, factsText: string, ignore: str
     if (facts.includes(l)) return;
     found.push(t);
   };
-  // Numbers that name a thing (a standard, a model, a year-less code): 27001, 45001, 9001.
-  for (const m of q.matchAll(/[A-Za-z]*\d[\w-]{2,}/g)) if (/\d{3,}/.test(m[0])) add(m[0].replace(/^[A-Za-z]{1,4}(?=\d)/, (p) => p));
+  // Numbers that NAME a standard or a code: attached to letters ("ISO27001") or following one of the
+  // words that introduce one ("ISO 27001", "SOC 2022"). A bare amount is not one — a customer saying a
+  // competitor charges "3500" is quoting a price, not asking about a standard (live sim, 2026-11-14:
+  // it was flagged as unverified and a person was alerted for nothing).
+  const words = q.split(/\s+/);
+  words.forEach((w, i) => {
+    const clean = w.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9-]+$/g, "");
+    if (/^[A-Za-z]{2,6}\d{3,}[\w-]*$/.test(clean)) { add(clean); return; }
+    if (/^\d{3,}[\w-]*$/.test(clean)) {
+      const prev = (words[i - 1] ?? "").toLowerCase().replace(/[^a-z]/g, "");
+      if (CODE_WORDS.has(prev)) add(clean);
+    }
+  });
   // A place or scope named right after a preposition of coverage: "in Saudi Arabia", "across the GCC".
   const scope = /\b(?:in|across|within|throughout|serve|serving|cover|covering|operate in|work in|available in|deliver to|ship to|office in|branch in|based in)\s+(?:the\s+)?((?:[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)?)|[A-Z]{2,})/g;
   for (const m of q.matchAll(scope)) for (const w of m[1].split(/\s+/)) add(w);
@@ -245,6 +271,112 @@ export function confirmLine(lang: Lang, terms: string[]): string {
   }
 }
 
+
+/* ── company details the assistant cannot know ──────────────────────────────────────────── */
+
+const DETAIL_TOPICS: { label: string; ask: RegExp; have: RegExp }[] = [
+  {
+    label: "our office address",
+    ask: /\b(address|headquarters?|head office|branch|where (is|are) (your|ur) office|office (kaha|kahan|kidhar|location)|(your|aapka|tumhara|aapki|tumhari) office|location)\b/i,
+    have: /\b(address|street|tower|building|p\.?o\.? ?box|located (at|in)|headquartered|our office (is|at|in)|plot|floor)\b/i,
+  },
+  {
+    label: "our phone number / email",
+    ask: /((your|aapka|tumhara|aapki|tumhari|company|boss|owner|manager|sir)\s+(phone|number|email|e-mail|mobile|contact)|\b(phone|contact) (number|details)\b|\bemail (id|address)\b|\bcall (karne ka|kaise karun) number\b)/i,
+    have: /[\w.+-]+@[\w-]+\.[\w.]+|\+?\d[\d\s-]{8,}/,
+  },
+  {
+    label: "our working hours",
+    ask: /\b(timings?|opening hours|working hours|office hours|open on|closed on|kab (tak )?(khula|open|milte))\b/i,
+    have: /\b(opening hours|working hours|office hours|\d\s?(am|pm)\b.*\b(mon|tue|sun|sat|daily)|(mon|sun|sat)\w*\s*[-–]\s*\w+)/i,
+  },
+  {
+    label: "our licence / registration details",
+    ask: /\b(licen[cs]e|trn|vat number|gst|registration (number|no)|trade licen[cs]e|accredited by|accreditation)\b/i,
+    have: /\b(licen[cs]e|trn|registration (number|no)|accredited|accreditation)\b/i,
+  },
+];
+
+/** Things about the BUSINESS ITSELF that the customer asked for and that appear nowhere in the facts —
+ *  an address, a phone number, opening hours, a licence number. A model asked for an office address will
+ *  produce one: live sim, 2026-11-14, "tumhara office kaha hai? address bhejo" was answered with an
+ *  office in "Business Bay, Dubai" that exists in no fact we hold. These are never guessed. */
+export function missingDetails(question: string, factsText: string): string[] {
+  const q = String(question ?? "");
+  const facts = String(factsText ?? "");
+  return DETAIL_TOPICS.filter((t) => t.ask.test(q) && !t.have.test(facts)).map((t) => t.label);
+}
+
+/** What the customer is told when the assistant is asked to arrange a call but there is nothing to
+ *  arrange it with (no calendar connected, no booking link): honest, and it asks the one thing that helps
+ *  a person book it. It must never promise slots that are not going to arrive. */
+export const MEETING_FALLBACK: Record<Lang, string> = {
+  en: "Happy to arrange a call — a team member will reach out to fix a time. Which part of the day suits you best: morning, afternoon or evening?",
+  hinglish: "Zaroor — hamari team ka member aapse contact karke time fix kar lega. Aapke liye din ka kaunsa time theek rahega: subah, dopahar ya shaam?",
+  hi: "ज़रूर — हमारी टीम का सदस्य आपसे संपर्क करके समय तय कर लेगा। दिन का कौन सा समय आपके लिए ठीक रहेगा: सुबह, दोपहर या शाम?",
+  ur: "Zaroor — hamari team ka member aap se rabta karke waqt tay kar lega. Din ka kaunsa waqt theek rahega: subah, dopahar ya shaam?",
+};
+
+/** One short confirmation when someone asks us to stop. Silence after "band karo" reads as being ignored. */
+export const OPT_OUT_ACK: Record<Lang, string> = {
+  en: "Understood — I won't message you again. If you ever need us, just write.",
+  hinglish: "Samajh gaya — aage se aapko message nahi karunga. Kabhi zaroorat ho to bas likh dena.",
+  hi: "समझ गया — अब आगे आपको संदेश नहीं भेजूँगा। कभी ज़रूरत हो तो बस लिख देना।",
+  ur: "Samajh gaya — ab aap ko message nahi karunga. Kabhi zaroorat ho to bas likh dena.",
+};
+
+/* ── not asking for a call in every message ─────────────────────────────────────────────── */
+
+const CALL_WORDS = /\b(call|meeting|demo|time slots?|quick chat|catch[- ]?up)\b/i;
+const sentences = (t: string) => String(t ?? "").split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean);
+
+/** Does this message ask whether they would like a call / meeting / demo? */
+export function offersCall(text: string): boolean {
+  return sentences(text).some((s) => s.endsWith("?") && CALL_WORDS.test(s));
+}
+
+/** The same message without its call-offering question(s). Returns the original if nothing else is left. */
+export function stripCallOffer(text: string): string {
+  const kept = sentences(text).filter((s) => !(s.endsWith("?") && CALL_WORDS.test(s)));
+  return kept.length ? kept.join(" ").trim() : String(text ?? "");
+}
+
+
+/* ── things a model says that a real assistant must not ─────────────────────────────────── */
+
+const TIME_WORDS = /\b(\d{1,2}(:\d{2})?\s?(am|pm)|\d{1,2}\s?baje|tomorrow|tonight|today at|kal|aaj (shaam|raat|subah)|next (week|monday)|(mon|tues?|wednes|thurs?|fri|satur|sun)day)\b/i;
+
+/** A call/meeting proposed at a specific time ("tomorrow 10 AM", "Mon-Fri 10-4"). The assistant cannot
+ *  see a calendar, so a time it names is one nobody has checked. */
+export function proposesTime(text: string): boolean {
+  return sentences(text).some((s) => CALL_WORDS.test(s) && TIME_WORDS.test(s));
+}
+
+/** The reply without its sentences that propose a time for a call. */
+export function stripTimeProposals(text: string): string {
+  const kept = sentences(text).filter((s) => !(CALL_WORDS.test(s) && TIME_WORDS.test(s)));
+  return kept.join(" ").trim();
+}
+
+/** Small talk answered as if the assistant had a life: "Haan dekha, kya match tha!", "last over tak
+ *  gaya". It is an assistant: it has watched, eaten and visited nothing. */
+export function claimsExperience(text: string): boolean {
+  const t = String(text ?? "").trim();
+  return (
+    /^(haan|ha|yes|yeah|yep|ji)\b[^.?!]{0,70}\b(dekh|dekha|watched|saw|match|game|film|movie|khaya|khana|trip|gaya|gayi|ghuma|visited)/i.test(t) ||
+    /\b(i|main|maine|mai)\s+(also |bhi |too )?(watched|saw|visited|ate|went|travell?ed|dekha|dekh|khaya|gaya|gayi|ghuma)\b/i.test(t) ||
+    /\b(last over|super over|so good|kya match|what a match|loved it)\b/i.test(t)
+  );
+}
+
+/** What is said instead: honest about being an assistant, warm, and back to their need. */
+export const SMALLTALK_DEFLECT: Record<Lang, string> = {
+  en: "Ha, I'm only the assistant here, so I can't say 😄 — anyway, back to what you need. What can I help you with?",
+  hinglish: "Main yahan sirf assistant hoon, is baare mein kuch keh nahi sakta 😄 — chaliye aapke kaam ki baat par wapas aate hain. Aap kis cheez mein help chahte hain?",
+  hi: "मैं यहाँ सिर्फ़ असिस्टेंट हूँ, इस बारे में कुछ कह नहीं सकता 😄 — चलिए आपके काम की बात पर वापस आते हैं। आपको किस चीज़ में मदद चाहिए?",
+  ur: "Main yahan sirf assistant hoon, is baare mein kuch keh nahi sakta 😄 — chaliye aap ke kaam ki baat par wapas aate hain. Aap ko kis cheez mein madad chahiye?",
+};
+
 /** The facts line handed to the model. Only signals that are TRUE are mentioned. */
 /** What the customer is told when the assistant genuinely cannot produce an answer in time (the
  *  model timed out or failed). It promises ONLY what is then made true: autoReply.ts flags the lead
@@ -265,9 +397,10 @@ const APOLOGY: Record<Lang, string> = {
   ur: "Maazrat, der ho gayi.",
 };
 
-export function signalsBrief(s: Signals, pricingProvided: boolean, lang: Lang = "en", unverified: string[] = []): string[] {
+export function signalsBrief(s: Signals, pricingProvided: boolean, lang: Lang = "en", unverified: string[] = [], detailGaps: string[] = []): string[] {
   const out: string[] = [];
   if (unverified.length) out.push(`They asked about ${unverified.join(", ")}, which appear NOWHERE in the facts you were given. Do NOT say whether we do or do not handle it, do NOT say where we operate, and do NOT infer anything from what we do list. Say plainly that a team member will confirm, then ask ONE useful question. Set handoff true.`);
+  if (detailGaps.length) out.push(`They asked for ${detailGaps.join(" and ")}, which is NOT in the facts you were given. Do NOT make it up — no street, area, building, phone number, email, timings or licence number. Say plainly that a team member will share it, then ask ONE useful question. Set handoff true.`);
   if (s.whoAreYou) out.push("They are asking WHO YOU ARE — follow the 'who you are' rule.");
   if (s.botQuestion) out.push("They are asking whether you are a bot/AI — answer honestly (you are the team's AI assistant; a person can join any time).");
   if (s.price) out.push(pricingProvided

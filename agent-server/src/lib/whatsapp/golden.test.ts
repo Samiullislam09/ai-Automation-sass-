@@ -37,7 +37,7 @@ test("the system prompt carries the rules that stopped the 2026-11-13 failures",
   assert.match(REPLY_SYSTEM, /CANNOT send files/);
   assert.match(REPLY_SYSTEM, /NEVER repeat or rephrase/);
   assert.match(REPLY_SYSTEM, /ANSWER THEIR QUESTION FIRST/);
-  assert.match(REPLY_SYSTEM, /Never claim to be a human/);
+  assert.match(REPLY_SYSTEM, /never claim to be a human/i);
   assert.match(REPLY_SYSTEM, /Do NOT apologise for delays/);
   assert.match(REPLY_SYSTEM, /do NOT guess and do NOT fill the gap with general knowledge/);
 });

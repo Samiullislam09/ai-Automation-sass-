@@ -28,6 +28,8 @@ export type Scenario = {
     lang: Lang;
     /** The floor under the model: must a person be pulled in whatever it says? */
     handoff: boolean;
+    /** Live: the decision's intent must be this (e.g. "meeting" when they accept a call). */
+    intent?: string;
     /** Live: the MODEL itself must have asked for a person (beyond the code-enforced floor above). */
     modelHandoff?: boolean;
     /** Live: the reply must match every one of these … */
@@ -152,5 +154,33 @@ export const SCENARIOS: Scenario[] = [
       { url: "https://wca-global.com/iso-14001", title: "ISO 14001", score: 0.4, text: "ISO 14001 implementation typically takes 4 to 6 months depending on the size of the organisation." },
     ],
     expect: { lang: "en", handoff: true, replyAvoids: [EMPTY_PROMISE, /\b(yes|yeah|sure)[,!. ]+(we|i)\b.*27001/i, /\bwe (do|can) (certify|offer|provide)\b.*(27001|saudi)/i], replyMatches: [/team|confirm|check/i] },
+  },
+  {
+    id: "office-address",
+    why: "An address the assistant was never given must not be invented — it was ('Business Bay, Dubai', live sim 2026-11-14). It says a team member will share it and flags the owner.",
+    pricing: true,
+    thread: [OPENER, IN("haan interested hu"), OUT("Bahut badhiya — aapko kaunsa standard chahiye?"), IN("tumhara office kaha hai? address bhejo")],
+    expect: { lang: "hinglish", handoff: true, replyAvoids: [EMPTY_PROMISE, /business bay|street|tower|building|p\.?o\.? ?box|dubai office|office (is|hai) (in|at|mein)/i], replyMatches: [/team|confirm|share|bata/i] },
+  },
+  {
+    id: "no-budget-think",
+    why: "'I will think / no budget now' is met with one warm line that leaves the door open — no price repeated, no call pushed, no invented promise to follow up.",
+    pricing: true,
+    thread: [OPENER, IN("12 log hai, ISO 9001 chahiye, price?"), OUT("ISO 9001 ke liye usually AED 4,000-9,000 — exact quote scoping call ke baad."), IN("mujhe pehle soch ke batata hu, abhi budget nahi hai")],
+    expect: { lang: "hinglish", handoff: false, replyAvoids: [/AED/, /\bcall\b/i, /(bhej dunga|bhejunga|send you|follow up|follow-up|kal )/i] },
+  },
+  {
+    id: "small-talk-cricket",
+    why: "Small talk gets a few warm words — never a claimed experience ('haan dekha, kya match tha').",
+    pricing: false,
+    thread: [OPENER, IN("haan interested hu"), OUT("Bahut badhiya — kaunsa standard chahiye?"), IN("waise kal India Pakistan ka match dekha?")],
+    expect: { lang: "hinglish", handoff: false, replyAvoids: [/\b(haan|yes)\b.{0,40}(match|dekh|watched)/i, /kya match tha|last over|super over/i] },
+  },
+  {
+    id: "accepts-a-call",
+    why: "When they accept a call the intent is 'meeting' (the system then sends REAL slots) and the model never writes a time of its own.",
+    pricing: true,
+    thread: [OPENER, IN("12 log hai, ISO 9001 chahiye, price?"), OUT("ISO 9001 ke liye usually AED 4,000-9,000. Kya ek chhoti call helpful rahegi? Main kuch time slots bhej sakta hu."), IN("haan theek hai ek baar call kar lete hain")],
+    expect: { lang: "hinglish", handoff: false, intent: "meeting", replyAvoids: [/\b(\d{1,2}\s?(am|pm|baje)|tomorrow|tonight|kal|aaj)\b/i] },
   },
 ];

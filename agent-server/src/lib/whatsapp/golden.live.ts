@@ -44,6 +44,7 @@ for (const sc of SCENARIOS.filter((s) => s.id.includes(filter))) {
     reply = d.reply;
     const needsHuman = d.needs_human;
     if (sc.expect.handoff && !needsHuman) problems.push("a person should have been pulled in, was not");
+    if (sc.expect.intent && d.intent !== sc.expect.intent) problems.push(`intent should be "${sc.expect.intent}", got "${d.intent}"`);
     if (sc.expect.modelHandoff && !d.needs_human) problems.push("the model should have handed this to a person (it did not know the answer), it did not");
     if (d.action !== "reply") problems.push(`expected a reply, got action="${d.action}"`);
     if (reply.length > 500) problems.push(`too long (${reply.length} chars) for WhatsApp`);

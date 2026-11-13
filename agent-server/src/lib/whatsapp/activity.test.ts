@@ -55,7 +55,13 @@ test("held reasons: opted out, auto replies off, daily limit", () => {
   const msgs = [inbound("1", 20 * MIN)];
   assert.match(buildOverview(base({ messages: msgs, leads: { "1": lead("1", { opt_out: true }) } })).replies[0].reason, /stop/i);
   assert.match(buildOverview(base({ messages: msgs, leads: { "1": lead("1") }, settings: { ...DEFAULT_WHATSAPP_SETTINGS, auto_reply: false } })).replies[0].reason, /OFF/);
-  assert.match(buildOverview(base({ messages: msgs, leads: { "1": lead("1") }, firstConnectedAtMs: NOW, dailyCount: 20 })).replies[0].reason, /Daily limit/);
+  // A brand-new number (warm-up cap 20) that has hit its cap still ANSWERS people who wrote to it: the cap is for
+  // what we start, and replies have their own, higher ceiling (autoReply.ts reactiveCeiling = 150 here).
+  const capped = buildOverview(base({ messages: msgs, leads: { "1": lead("1") }, firstConnectedAtMs: NOW, dailyCount: 20 }));
+  assert.notEqual(capped.replies[0].state, "held", "the warm-up cap does not hold replies");
+  assert.equal(capped.state.code, "cap_reached", "…but it does pause first messages and follow-ups");
+  assert.match(capped.state.detail, /Replies to people who write to you keep going/);
+  assert.match(buildOverview(base({ messages: msgs, leads: { "1": lead("1") }, firstConnectedAtMs: NOW, dailyCount: 150 })).replies[0].reason, /daily reply limit \(150\)/);
 });
 
 test("an old unanswered message the AI never replied to is 'reviewed', not silently ignored", () => {

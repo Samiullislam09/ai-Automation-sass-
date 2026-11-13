@@ -573,7 +573,12 @@ export function shapeWhatsappActivity(o: any, focus: string): Record<string, unk
   // sends it (an older one does not), so a missing block reads as "not measured", never as "fine".
   if ((all || focus === "speed") && o?.reply_speed) {
     const speed = (s: any) => (s ? { replies_measured: s.samples, typical_seconds: s.p50_s, slowest_1_in_20_seconds: s.p95_s, answered_within_30s_percent: s.fast_pct, verdict: s.health } : null);
-    out.reply_speed = { last_24h: speed(o.reply_speed.day), last_7_days: speed(o.reply_speed.week) };
+    out.reply_speed = {
+      note: "last_24h / last_7_days = replies inside a live conversation (should be seconds). The FIRST message of an exchange is answered after a deliberate 1-5 minute pause and is reported apart as first_reply_last_24h; it is not slowness.",
+      last_24h: speed(o.reply_speed.day),
+      last_7_days: speed(o.reply_speed.week),
+      first_reply_last_24h: speed(o.reply_speed.first_reply),
+    };
     out.quality = {
       chats_where_ai_repeated_itself: L<any>(o?.quality?.loops, 6).map((l) => ({ lead: l.name, repeats: l.repeats })),
       customers_told_a_team_member_will_reply_last_24h: o?.quality?.holding ?? 0,

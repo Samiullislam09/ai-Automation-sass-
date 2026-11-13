@@ -16,13 +16,14 @@
  *  this file only explains them, it never sends. buildOverview is pure: rows and a clock in, answer out. */
 import { supabase } from "../../supabase.js";
 import { getWhatsappSettings, type WhatsappSettings } from "../outreach/settings.js";
-import { dailyAutoSendCount, warmupCap } from "./autoReply.js";
+import { dailyAutoSendCount, warmupCap, reactiveCeiling } from "./autoReply.js";
 import { isQuietHours, nextAllowedTime } from "./outbound.js";
 import { FOLLOWUP_GAP_HOURS } from "./followup.js";
 import { sessionStatus } from "./session.js";
 import { prepareDraft } from "./opener.js";
 import { isNearDuplicate } from "./decide.js";
 import { HOLDING } from "./conversation.js";
+import { replyTiming, ACTIVE_WINDOW_MS } from "./timing.js";
 
 /** A reply is sent within ~30 s of a message arriving (4–12 s delay, a few seconds of quiet, the model, typing); past this the AI either chose not to answer or it is stuck. */
 const REPLY_WINDOW_S = 45;
@@ -71,7 +72,9 @@ export type Overview = {
   /** The current hour and the next five, one bucket each: what is scheduled to go out. */
   upcoming: { hour: string; first: number; followups: number }[];
   /** How fast the AI answers people who write to it — measured from their first unanswered message to our reply. */
-  reply_speed: { day: SpeedStats; week: SpeedStats };
+  /** `day`/`week` = replies in a live conversation (the ones that must be fast). `first_reply` = the first answer of
+   *  an exchange, which waits 1–5 minutes ON PURPOSE (timing.ts) and so is reported apart, never as "slow". */
+  reply_speed: { day: SpeedStats; week: SpeedStats; first_reply: SpeedStats };
   /** Things that mean the AI is not doing its job well, found in what it actually sent. */
   quality: Quality;
 };
@@ -142,7 +145,9 @@ const BAD_P95_S = 120;
  *  like it takes two days. */
 const MAX_REPLY_GAP_S = 6 * 3600;
 
-export type ReplySample = { lead_id: string; at: number; seconds: number; by: "brain" | "human" };
+/** `opening` = the first message of an exchange (their first ever, an answer to our opener or a nudge, or the first
+ *  after 5 quiet hours): the assistant pauses 1–5 minutes before answering these, by design. */
+export type ReplySample = { lead_id: string; at: number; seconds: number; by: "brain" | "human"; opening: boolean };
 
 /** Pair each unanswered inbound burst with the outbound that closed it. `messages` is newest first. */
 export function replySamples(messages: MsgRow[]): ReplySample[] {
@@ -157,14 +162,27 @@ export function replySamples(messages: MsgRow[]): ReplySample[] {
   byLead.forEach((rows, lead_id) => {
     rows.sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
     let waitingSince: number | null = null;
+    let burstOpening = true;
+    // The same rule timing.ts uses: a chat is live only if our last outbound was a REPLY (they wrote between it
+    // and the outbound before it) and it was under 5 hours ago.
+    let lastOutT: number | null = null, lastOutWasReply = false, inboundSinceOut = false;
     for (const m of rows) {
       const t = Date.parse(m.created_at);
       if (m.direction === "in") {
-        if (waitingSince == null) waitingSince = t;
-      } else if (waitingSince != null) {
-        const seconds = (t - waitingSince) / 1000;
-        if (seconds >= 0 && seconds <= MAX_REPLY_GAP_S) out.push({ lead_id, at: t, seconds, by: m.answered_by === "brain" ? "brain" : "human" });
-        waitingSince = null;
+        inboundSinceOut = true;
+        if (waitingSince == null) {
+          waitingSince = t;
+          burstOpening = !(lastOutWasReply && lastOutT != null && t - lastOutT < ACTIVE_WINDOW_MS);
+        }
+      } else {
+        if (waitingSince != null) {
+          const seconds = (t - waitingSince) / 1000;
+          if (seconds >= 0 && seconds <= MAX_REPLY_GAP_S) out.push({ lead_id, at: t, seconds, by: m.answered_by === "brain" ? "brain" : "human", opening: burstOpening });
+          waitingSince = null;
+        }
+        lastOutWasReply = inboundSinceOut;
+        lastOutT = t;
+        inboundSinceOut = false;
       }
     }
   });
@@ -224,12 +242,15 @@ const clock = (ms: number, tz: number) => {
 export function buildOverview(inp: OverviewInput): Overview {
   const { nowMs, settings: s, leads } = inp;
   const cap = warmupCap(inp.firstConnectedAtMs, nowMs);
+  const replyCeiling = reactiveCeiling(inp.firstConnectedAtMs, nowMs);
   const quiet = isQuietHours(nowMs, s.tz_offset, s.send_start, s.send_end);
   const online = inp.connection === "connected";
 
   // ── fold the messages per lead: the last one, and whether they ever wrote ──
   const lastByLead = new Map<string, MsgRow>();
   for (const m of inp.messages) if (m.lead_id && !lastByLead.has(m.lead_id)) lastByLead.set(m.lead_id, m);
+  const rowsByLead = new Map<string, MsgRow[]>();
+  for (const m of inp.messages) if (m.lead_id) { const a = rowsByLead.get(m.lead_id); if (a) a.push(m); else rowsByLead.set(m.lead_id, [m]); }
   const lastInboundMs = inp.messages.find((m) => m.direction === "in");
   const activeConversation = !!lastInboundMs && nowMs - Date.parse(lastInboundMs.created_at) < ACTIVE_CONVO_MS;
 
@@ -239,7 +260,7 @@ export function buildOverview(inp: OverviewInput): Overview {
   else if (inp.connection === "reconnecting") state = { code: "reconnecting", label: "Reconnecting", detail: "WhatsApp is coming back online. Nothing is lost and no scan is needed.", sending: false };
   else if (!online) state = { code: "not_connected", label: "WhatsApp is not connected", detail: "The AI cannot send until WhatsApp is linked.", sending: false };
   else if (!s.auto_reply) state = { code: "auto_off", label: "Auto replies are OFF", detail: "The AI will not send anything on its own. Turn Auto replies on to start.", sending: false };
-  else if (inp.dailyCount >= cap) state = { code: "cap_reached", label: "Daily limit reached", detail: `${inp.dailyCount} of ${cap} messages sent in the last 24 hours. This keeps a new number safe; sending resumes as older messages age out.`, sending: false };
+  else if (inp.dailyCount >= cap) state = { code: "cap_reached", label: "Daily limit reached", detail: `${inp.dailyCount} of ${cap} messages sent in the last 24 hours. First messages and follow-ups wait — that keeps a new number safe — and resume as older messages age out. Replies to people who write to you keep going (up to ${replyCeiling} a day).`, sending: false };
   else if (quiet) {
     const at = nextAllowedTime(nowMs, s.tz_offset, s.send_start, s.send_end);
     state = { code: "quiet_hours", label: "Quiet hours", detail: `First messages and follow-ups wait until ${clock(at, s.tz_offset)}. Replies to people who write to you still go out.`, resumes_at: new Date(at).toISOString(), sending: true };
@@ -268,7 +289,14 @@ export function buildOverview(inp: OverviewInput): Overview {
     else if (inp.connection === "reconnecting") replies.push({ ...base, state: "held", reason: "WhatsApp is reconnecting; the AI answers once it is back." });
     else if (!online) replies.push({ ...base, state: "held", reason: "WhatsApp is not connected." });
     else if (!s.auto_reply) replies.push({ ...base, state: "held", reason: "Auto replies are OFF. Answer this one yourself." });
-    else if (inp.dailyCount >= cap) replies.push({ ...base, state: "held", reason: "Daily limit reached, so the AI cannot answer right now." });
+    else if (inp.dailyCount >= replyCeiling) replies.push({ ...base, state: "held", reason: `The daily reply limit (${replyCeiling}) was reached, so the AI cannot answer right now. Please answer this one yourself.` });
+    else if ((() => {
+      // A FIRST message of an exchange is answered after a deliberate pause (timing.ts) — say when.
+      const tm = replyTiming(rowsByLead.get(leadId) ?? [], leadId);
+      if (tm.mode !== "opening" || tm.dueAtMs == null || nowMs >= tm.dueAtMs + SETTLE_S * 1000) return false;
+      replies.push({ ...base, state: "queued", due_by: new Date(Math.max(tm.dueAtMs, nowMs)).toISOString(), reason: `A first message: the AI waits a natural pause, then answers around ${clock(tm.dueAtMs, s.tz_offset)}.` });
+      return true;
+    })()) { /* pushed above */ }
     else if (ageS <= REPLY_WINDOW_S + 15) replies.push({ ...base, state: "queued", due_by: new Date(sinceMs + REPLY_WINDOW_S * 1000).toISOString(), reason: "The AI is reading the thread and will answer in a few seconds." });
     else if (ageS <= SETTLE_S) replies.push({ ...base, state: "queued", due_by: new Date(nowMs + 60_000).toISOString(), reason: "The AI is finishing this reply." });
     else if (ageS < 7 * 86_400) replies.push({ ...base, state: "reviewed", reason: l.needs_attention ? (l.needs_attention_reason || "Needs you.") : l.last_intent ? `The AI read it (it looks like a ${l.last_intent}) and chose not to reply. Open the chat if it needs an answer.` : "The AI looked at it and sent nothing. Most likely a short acknowledgement such as \"ok\". Open the chat if it needs an answer." });
@@ -366,9 +394,14 @@ export function buildOverview(inp: OverviewInput): Overview {
   // ── how the AI is actually doing ──
   const samples = replySamples(inp.messages).filter((x) => x.by === "brain");
   const dayAgo = nowMs - 86_400_000;
+  // The verdict is about live conversations. First replies wait 1–5 minutes on purpose and would make a
+  // healthy system read "slow", so they are reported on their own.
+  const live = samples.filter((x) => !x.opening);
+  const first = samples.filter((x) => x.opening);
   const reply_speed = {
-    day: speedStats(samples.filter((x) => x.at >= dayAgo).map((x) => x.seconds)),
-    week: speedStats(samples.map((x) => x.seconds)),
+    day: speedStats(live.filter((x) => x.at >= dayAgo).map((x) => x.seconds)),
+    week: speedStats(live.map((x) => x.seconds)),
+    first_reply: speedStats(first.filter((x) => x.at >= dayAgo).map((x) => x.seconds)),
   };
   const sq = sentQuality(inp.sent ?? []);
   const quality: Quality = {

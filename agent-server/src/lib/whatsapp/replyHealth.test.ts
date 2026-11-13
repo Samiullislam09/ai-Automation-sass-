@@ -113,13 +113,61 @@ test("the overview carries reply_speed and quality, and still builds with no mes
   assert.equal(empty.reply_speed.day.health, "no_data");
   assert.deepEqual(empty.quality, { loops: [], holding: 0, needs_you: [] });
 
-  const rows = newestFirst([IN("a", 0), OUT("a", 12), IN("b", 100), OUT("b", 118), IN("c", 200), OUT("c", 215)]);
+  // Each lead had an earlier exchange a few minutes before, so these are replies in a live chat.
+  const live = (id: string, t: number, reply: number) => [IN(id, t - 600), OUT(id, t - 580), IN(id, t), OUT(id, t + reply)];
+  const rows = newestFirst([...live("a", 0, 12), ...live("b", 100, 18), ...live("c", 200, 15)]);
   const o = buildOverview({
     ...base, messages: rows,
     leads: { a: { id: "a", company: "Acme", needs_attention: true, needs_attention_reason: "asked for the price — none is set" }, b: { id: "b" }, c: { id: "c" } },
     sent: [],
   } as any);
-  assert.equal(o.reply_speed.day.samples, 3);
+  assert.equal(o.reply_speed.day.samples, 3, "the three live replies");
   assert.equal(o.reply_speed.day.health, "good");
+  assert.equal(o.reply_speed.first_reply.samples, 3, "and the three opening exchanges, reported apart");
   assert.deepEqual(o.quality.needs_you, [{ lead_id: "a", name: "Acme", reason: "asked for the price — none is set" }]);
+});
+
+test("a first message's deliberate 1-5 minute pause is NOT 'slow': it is measured apart from live replies", () => {
+  // Three customers write for the first time and are answered after 90 s, 150 s, 240 s — exactly as designed.
+  const rows = newestFirst([IN("a", 0), OUT("a", 90), IN("b", 10), OUT("b", 160), IN("c", 20), OUT("c", 260)]);
+  const samples = replySamples(rows);
+  assert.equal(samples.length, 3);
+  assert.ok(samples.every((x) => x.opening), "all three are openings");
+  const o = buildOverview({
+    nowMs: T0 + 3600_000, settings: { ...DEFAULT_WHATSAPP_SETTINGS }, connection: "connected", firstConnectedAtMs: null, dailyCount: 0,
+    messages: rows, leads: { a: { id: "a" }, b: { id: "b" }, c: { id: "c" } }, queue: [], sent: [],
+  } as any);
+  assert.equal(o.reply_speed.day.samples, 0, "no live replies yet → nothing to judge as slow");
+  assert.equal(o.reply_speed.day.health, "no_data");
+  assert.equal(o.reply_speed.first_reply.samples, 3);
+  assert.equal(o.reply_speed.first_reply.p50_s, 150);
+});
+
+test("the same lead: the first answer is an opening, the follow-ups inside 5 hours are live", () => {
+  const s = replySamples(newestFirst([IN("a", 0), OUT("a", 120), IN("a", 200), OUT("a", 214), IN("a", 300), OUT("a", 309)]));
+  assert.deepEqual(s.map((x) => [x.opening, x.seconds]), [[true, 120], [false, 14], [false, 9]]);
+});
+
+test("after 5 quiet hours the next exchange is an opening again", () => {
+  const s = replySamples(newestFirst([IN("a", 0), OUT("a", 100), IN("a", 100 + 6 * 3600), OUT("a", 100 + 6 * 3600 + 130)]));
+  assert.deepEqual(s.map((x) => x.opening), [true, true]);
+});
+
+test("answering our opener or a nudge counts as an opening", () => {
+  const s = replySamples(newestFirst([OUT("a", -50_000), IN("a", 0), OUT("a", 140)]));
+  assert.equal(s[0].opening, true);
+});
+
+test("the Activity list says WHEN a first message will be answered", () => {
+  const nowMs = T0 + 40_000; // 40 s after the customer's first message
+  const rows = newestFirst([IN("a", 0)]);
+  const o = buildOverview({
+    nowMs, settings: { ...DEFAULT_WHATSAPP_SETTINGS, auto_reply: true }, connection: "connected", firstConnectedAtMs: T0 - 30 * 86400_000, dailyCount: 0,
+    messages: rows, leads: { a: { id: "a", company: "Acme", stage: "contacted" } }, queue: [],
+  } as any);
+  const r = o.replies.find((x) => x.lead_id === "a")!;
+  assert.equal(r.state, "queued");
+  assert.match(r.reason, /first message.*natural pause/i);
+  assert.ok(Date.parse(r.due_by!) >= nowMs, "due in the future");
+  assert.ok(Date.parse(r.due_by!) - (T0) <= 300_000 + 1000, "within 5 minutes of the message");
 });

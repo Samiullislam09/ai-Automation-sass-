@@ -30,7 +30,7 @@ export type Overview = {
   skipped: { lead_id: string; name: string; reason: string; at: string }[];
   timeline: { hour: string; ai: number; you: number; received: number }[];
   upcoming: { hour: string; first: number; followups: number }[];
-  reply_speed: { day: SpeedStats; week: SpeedStats };
+  reply_speed: { day: SpeedStats; week: SpeedStats; first_reply: SpeedStats };
   quality: Quality;
 };
 
@@ -109,7 +109,7 @@ export function normalizeOverview(raw: Partial<Overview> | null): Overview | nul
     timeline: Array.isArray(raw.timeline) ? raw.timeline : [],
     upcoming: Array.isArray(raw.upcoming) ? raw.upcoming : [],
     // An older agent server does not send these: the page then simply has no speed card.
-    reply_speed: { day: { ...NO_SPEED, ...(raw.reply_speed?.day ?? {}) }, week: { ...NO_SPEED, ...(raw.reply_speed?.week ?? {}) } },
+    reply_speed: { day: { ...NO_SPEED, ...(raw.reply_speed?.day ?? {}) }, week: { ...NO_SPEED, ...(raw.reply_speed?.week ?? {}) }, first_reply: { ...NO_SPEED, ...(raw.reply_speed?.first_reply ?? {}) } },
     quality: { loops: [], holding: 0, needs_you: [], ...(raw.quality ?? {}) },
   };
 }
@@ -238,9 +238,9 @@ const HEALTH_TONE: Record<SpeedStats["health"], { bg: string; fg: string; dot: s
 /** How fast the AI answers people who write to it, and the things that mean it is not doing well. All of it is
  *  read back from the messages themselves — a measurement, not a promise. */
 function Health({ data, onOpenChat }: { data: Overview; onOpenChat: (id: string) => void }) {
-  const d = data.reply_speed.day, w = data.reply_speed.week, q = data.quality;
+  const d = data.reply_speed.day, w = data.reply_speed.week, f = data.reply_speed.first_reply, q = data.quality;
   const h = HEALTH_TONE[d.health];
-  const hasAnything = d.samples > 0 || w.samples > 0 || q.loops.length > 0 || q.holding > 0 || q.needs_you.length > 0;
+  const hasAnything = d.samples > 0 || w.samples > 0 || f.samples > 0 || q.loops.length > 0 || q.holding > 0 || q.needs_you.length > 0;
   if (!hasAnything) return null;
   return (
     <section className="space-y-3" aria-label="Reply speed">
@@ -258,6 +258,11 @@ function Health({ data, onOpenChat }: { data: Overview; onOpenChat: (id: string)
           <Stat label="Answered within 30 s" value={d.fast_pct == null ? "–" : `${d.fast_pct}%`} sub="of replies" />
           <Stat label="Last 7 days" value={dur(w.p50_s)} sub={w.fast_pct == null ? "typical reply" : `typical · ${w.fast_pct}% within 30 s`} />
         </div>
+      )}
+      {f.samples > 0 && (
+        <p className="rounded-xl px-4 py-3 text-[12.5px] leading-relaxed" style={{ background: C.soft, color: C.sub }}>
+          <b style={{ color: C.ink }}>First messages</b> are answered after a deliberate pause of 1 to 5 minutes (typical {dur(f.p50_s)}, last 24 h, {f.samples} chat{f.samples === 1 ? "" : "s"}) so it reads like a person at a phone. Once the chat is going, replies are immediate for the next 5 hours. The speed numbers above only count live replies.
+        </p>
       )}
       {q.loops.length > 0 && (
         <List title="The AI repeated itself" hint="Same message sent twice in a row, last 24 hours" empty="" rows={q.loops.length}>

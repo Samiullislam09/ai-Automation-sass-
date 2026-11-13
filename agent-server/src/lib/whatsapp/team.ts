@@ -91,8 +91,11 @@ export async function markNotificationsRead(tenantId: string, id?: string): Prom
 export async function notifyAdmins(
   tenantId: string,
   n: { type: "meeting" | "hot_lead" | "system"; title: string; body?: string | null; leadId?: string | null; whatsappText?: string },
+  /** `whatsapp: false` files the dashboard notification only (ownerPing.ts rations the phone interruptions). */
+  opts: { whatsapp?: boolean } = {},
 ): Promise<void> {
   await createNotification(tenantId, n);
+  if (opts.whatsapp === false) return;
   const text = n.whatsappText ?? `${n.title}${n.body ? `\n${n.body}` : ""}`;
   const admins = (await listAdmins(tenantId)).filter((a) => a.notify && digits(a.phone).length >= 8);
   for (const a of admins) {

@@ -18,7 +18,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { brandName } from "./brand.js";
 import {
   detectLanguage, detectSignals, conversationStage, mustHandOff, signalsBrief,
-  LANG_INSTRUCTION, STAGE_GUIDE, riskyClaim, unverifiedTerms, assertsUnverified, confirmLine, type Lang, type Msg,
+  LANG_INSTRUCTION, STAGE_GUIDE, riskyClaim, unverifiedTerms, assertsUnverified, confirmLine, offersCall, stripCallOffer, missingDetails, CONFIRM_LANG, proposesTime, stripTimeProposals, claimsExperience, MEETING_FALLBACK, SMALLTALK_DEFLECT, type Lang, type Msg,
 } from "./conversation.js";
 import { retrieveKnowledge, queryFor, renderKnowledge, type Passage } from "./knowledge.js";
 
@@ -192,7 +192,7 @@ export const REPLY_SYSTEM = [
   "You are the person answering on a business's WhatsApp, deciding how to handle a lead's latest message. Be genuinely useful, fast and honest — like the best salesperson at a well-run company, never a bot reading a script.",
   "",
   "Return ONLY JSON: " + '{"intent":"...","confidence":0.0,"action":"...","reply":"...","handoff":false,"reason":"..."}',
-  '- "intent": one of greeting, question, affirmation, objection, smalltalk, ready, meeting, stop, other.',
+  '- "intent": one of greeting, question, affirmation, objection, smalltalk, ready, meeting, stop, other. Use "meeting" when they ASK FOR or ACCEPT a call/meeting/demo (the system then sends real available time slots — you never write times yourself).',
   '- "confidence": 0..1, how sure you are about intent AND that a reply is appropriate.',
   '- "action": "ignore" (a bare acknowledgement that needs no reply: "ok", "thanks", "hmm", "👍"), "wait" (the message looks half-typed; they are still writing) or "reply" (answer now).',
   '- "reply": if action is "reply", the ACTUAL next WhatsApp message from US. Else "".',
@@ -217,9 +217,18 @@ export const REPLY_SYSTEM = [
   "- Price: if Pricing is provided, state it plainly first (range/model), then one line of what it depends on. If Pricing is NOT PROVIDED, say honestly that it depends on their situation, ask the ONE detail you need (e.g. company size / which standard), and set handoff true so a person sends the exact quote. Never say 'let me confirm' without also giving them something useful.",
   "- Never invent a price, date, guarantee, client name or number that is not in the facts. If you do not know, say so simply and say a team member will confirm — and set handoff true.",
   "",
+  "CALLS AND MEETINGS:",
+  "- You cannot see anyone's calendar. NEVER propose, promise or confirm a specific day or time yourself (no 'tomorrow 10 AM', no 'tonight', no 'this week'). A time you invent may be one nobody can keep.",
+  "- To move toward a call, offer it ONCE, and only when they have shown real interest (given their need or size, asked the price, raised an objection you have answered): e.g. 'Would a short call help? I can send you a few time slots.' When they say yes or ask for a call, set intent to \"meeting\".",
+  "- Do not bring a call up in every message. If you already offered one and they did not take it, do not repeat it unless they raise it. Do not end every message with the same kind of question either — answer, and ask something only when it genuinely moves things on.",
+  "",
   "WHO YOU ARE:",
   "- If asked 'who are you' / 'kaun ho': one line — your name (if given) and the business name, what we do and how it helps THEM, then ONE question about their need. Do not repeat the business pitch word for word.",
-  "- If they sincerely ask whether you are a bot/AI/human, answer honestly: you are the team's AI assistant and a team member can join any time. Never claim to be a human.",
+  "- If they sincerely ask whether you are a bot/AI/human, answer honestly and plainly: you are the AI assistant of the business (say its name), and a team member can join any time. Do NOT give the owner's name as your own name in that answer, and never claim to be a human.",
+  "- You are an assistant, not a person with a life: never claim to have watched, visited, eaten, travelled or experienced anything. For small talk (cricket, weather, how are you) answer in a few warm words without inventing an experience, then come back to their need naturally.",
+  "",
+  "WHEN THEY NEED TIME:",
+  "- If they say they will think about it, need time, or have no budget right now: respect it in one warm line and leave the door open ('message me whenever you are ready'). Do NOT repeat the price, do NOT push a call, and do NOT promise anything you will do later ('I'll send you slots', 'I'll follow up tomorrow') — you cannot schedule that.",
   "",
   "TONE AND HONESTY:",
   "- NEVER repeat or rephrase anything US already said in the conversation. Every reply must move the conversation FORWARD with new information or a concrete next step.",
@@ -242,7 +251,7 @@ export type ReplyPromptInput = {
 /** Assemble the call. Pure — the whole point of splitting it from decideReply is that the golden
  *  conversations (golden.test.ts) can assert on exactly what the model would be told, with no
  *  database and no network. */
-export function buildReplyPrompt(input: ReplyPromptInput): { system: string; user: string; lang: ReturnType<typeof detectLanguage>; handoffFloor: { yes: boolean; reason: string }; unverified: string[] } {
+export function buildReplyPrompt(input: ReplyPromptInput): { system: string; user: string; lang: ReturnType<typeof detectLanguage>; handoffFloor: { yes: boolean; reason: string }; unverified: string[]; detailGaps: string[]; recentOut: string[]; callWanted: boolean } {
   const { thread, business, lead } = input;
   const lastIn = [...thread].reverse().find((m) => m.direction === "in");
   const signals = detectSignals(lastIn?.body ?? "");
@@ -252,7 +261,8 @@ export function buildReplyPrompt(input: ReplyPromptInput): { system: string; use
   // words are not facts about us.
   const factsText = [input.business, ...(input.knowledge ?? []).map((p) => p.text), ...thread.filter((m) => m.direction === "out").map((m) => m.body)].join("\n");
   const unverified = lastIn ? unverifiedTerms(lastIn.body, factsText, [lead?.company ?? "", lead?.city ?? ""]) : [];
-  const facts = signalsBrief(signals, input.pricingProvided, lang, unverified);
+  const detailGaps = lastIn ? missingDetails(lastIn.body, factsText) : [];
+  const facts = signalsBrief(signals, input.pricingProvided, lang, unverified, detailGaps);
   const avoid = (input.avoid ?? []).filter(Boolean).slice(0, 3);
 
   const transcript = thread
@@ -277,7 +287,7 @@ export function buildReplyPrompt(input: ReplyPromptInput): { system: string; use
     "Decide about THEIR most recent message and answer with the JSON.",
   ].join("\n");
 
-  return { system: REPLY_SYSTEM, user, lang, handoffFloor: mustHandOff(signals, input.pricingProvided, unverified), unverified };
+  return { system: REPLY_SYSTEM, user, lang, handoffFloor: mustHandOff(signals, input.pricingProvided, unverified, detailGaps), unverified, detailGaps, recentOut: thread.filter((m) => m.direction === "out").slice(-2).map((m) => String(m.body)), callWanted: signals.wantsCall };
 }
 
 /** Read the thread + Site Brain, ask the model for a decision, return the parsed Decision. Throws
@@ -319,7 +329,7 @@ export async function decideFromPrompt(built: ReturnType<typeof buildReplyPrompt
   const { system, user } = built;
   const answer = await completeReplyJson(user, system);
   return finalizeDecision(parseDecision(answer), {
-    handoffFloor: built.handoffFloor, unverified: built.unverified, lang: built.lang,
+    handoffFloor: built.handoffFloor, unverified: built.unverified, detailGaps: built.detailGaps, lang: built.lang, recentOut: built.recentOut, callWanted: built.callWanted,
     rewrite: async (instruction) => parseDecision(await completeReplyJson(`${user}
 
 ${instruction}`, system)),
@@ -337,7 +347,7 @@ ${instruction}`, system)),
  *  Pure apart from `rewrite`, so every branch is a unit test with a fake one. */
 export async function finalizeDecision(
   first: Decision,
-  ctx: { handoffFloor: { yes: boolean; reason: string }; unverified: string[]; lang: Lang; rewrite: (instruction: string) => Promise<Decision> },
+  ctx: { handoffFloor: { yes: boolean; reason: string }; unverified: string[]; detailGaps?: string[]; lang: Lang; rewrite: (instruction: string) => Promise<Decision>; recentOut?: string[]; callWanted?: boolean },
 ): Promise<Decision> {
   let d = first;
 
@@ -353,6 +363,46 @@ export async function finalizeDecision(
       ? better
       : { ...d, action: "reply", reply: confirmLine(ctx.lang, ctx.unverified) };
     d = { ...d, needs_human: true, reason: d.reason || `asked about ${what} — not in our facts` };
+  }
+
+  // 1b. DETAILS ABOUT THE BUSINESS ITSELF that we do not hold (address, phone, hours, licence number):
+  //     unless the reply already defers to a person, it is rewritten once, else replaced by the safe line.
+  if ((ctx.detailGaps ?? []).length && d.action === "reply" && !CONFIRM_LANG.test(d.reply)) {
+    const what = (ctx.detailGaps ?? []).join(" and ");
+    let better: Decision | null = null;
+    try {
+      better = await ctx.rewrite(`YOUR PREVIOUS DRAFT GAVE DETAILS ABOUT ${what} THAT ARE NOT IN THE FACTS: "${d.reply.slice(0, 200)}". Rewrite it: say plainly that a team member will share ${what}, invent nothing, and ask ONE useful question. Set handoff true.`);
+    } catch { /* fall through */ }
+    d = better && better.action === "reply" && better.reply && CONFIRM_LANG.test(better.reply)
+      ? better
+      : { ...d, action: "reply", reply: confirmLine(ctx.lang, ctx.detailGaps ?? []) };
+    d = { ...d, needs_human: true, reason: d.reason || `asked for ${what} — not in our facts` };
+  }
+
+  // 1c. CALLS. When they ask for or accept a call the system sends REAL slots (autoReply.ts); whatever the
+  //     model wrote around that is never the message that goes out, so for intent "meeting" it is the
+  //     honest fallback — a person will fix a time — and nothing the model invented ("10 AM - 4 PM, Mon-Fri",
+  //     "I'll send you slots" when none are coming). Any OTHER reply that proposes a time for a call has
+  //     those sentences removed. The assistant cannot see a calendar.
+  if (d.action === "reply") {
+    if (d.intent === "meeting") d = { ...d, reply: MEETING_FALLBACK[ctx.lang] };
+    else if (proposesTime(d.reply)) {
+      const cleaned = stripTimeProposals(d.reply);
+      d = { ...d, reply: cleaned || MEETING_FALLBACK[ctx.lang] };
+    }
+  }
+
+  // 1d. SMALL TALK. An assistant has watched, eaten and visited nothing.
+  if (d.action === "reply" && d.intent === "smalltalk" && claimsExperience(d.reply)) {
+    d = { ...d, reply: SMALLTALK_DEFLECT[ctx.lang] };
+  }
+
+  // 2b. A CALL ASKED FOR AGAIN. One offer is salesmanship; the same question under every message is
+  //     pressure (live sim, 2026-11-14: three offers in six replies). If a call was offered in either of
+  //     our last two messages, they have not taken it, and they are not asking for one now, the offer is
+  //     dropped from this reply — deterministically, with no second model call.
+  if (d.action === "reply" && d.intent !== "meeting" && !ctx.callWanted && offersCall(d.reply) && (ctx.recentOut ?? []).some(offersCall)) {
+    d = { ...d, reply: stripCallOffer(d.reply) };
   }
 
   if (d.action === "reply" && !d.needs_human) {
