@@ -193,7 +193,7 @@ function ActivityBody({ data, loading, showAll, onShowAll, onOpenChat }: { data:
         <p className="text-[12.5px] leading-relaxed" style={{ color: C.sub }}>
           <b style={{ color: C.ink }}>The rules:</b> sends between {hh(p.window_start)} and {hh(p.window_end)} (UTC{p.tz_offset >= 0 ? "+" : ""}{p.tz_offset})
           {p.first_messages_enabled ? `, one first message every ${p.gap_min} to ${p.gap_max} min` : ", first messages off"}
-          , at most {data.today.cap} messages per 24 h.{p.followups_enabled ? " Follow-ups at 24 h, 90 h and 160 h if there is no answer." : ""}{warm} Updated {clock(data.generated_at)}; this page refreshes by itself.
+          , at most {data.today.cap} messages per 24 h.{p.followups_enabled ? " Follow-ups after 48 h, 5 days and 7 days of silence." : ""}{warm} Updated {clock(data.generated_at)}; this page refreshes by itself.
         </p>
       </div>
     </div>

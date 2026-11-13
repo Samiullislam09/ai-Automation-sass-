@@ -1,6 +1,6 @@
 import type { JobWithMetadata } from "pg-boss";
 import { boss, ensureBossStarted } from "./db.js";
-import { AGENT_TYPES, BRAIN_QUEUE, WA_AUTOREPLY_QUEUE, WORKER_POLLING, type AgentType } from "./queues.js";
+import { AGENT_TYPES, BRAIN_QUEUE, WA_AUTOREPLY_QUEUE, WORKER_POLLING, WA_WORKER_POLLING, type AgentType } from "./queues.js";
 import { handleAutoReply, type AutoReplyJob } from "./lib/whatsapp/autoReply.js";
 import { BossAgent } from "./agents/boss.js";
 import { KeywordAgent } from "./agents/keyword.js";
@@ -312,7 +312,7 @@ export async function startWorkers() {
 
   // §28 — WhatsApp auto-reply. Low concurrency: a tenant's replies are naturally serialised by the
   // per-lead singletonKey, and sending too many at once is the opposite of what we want.
-  await boss.work<AutoReplyJob>(WA_AUTOREPLY_QUEUE, { localConcurrency: 2, ...WORKER_POLLING }, async ([job]) => {
+  await boss.work<AutoReplyJob>(WA_AUTOREPLY_QUEUE, { localConcurrency: 2, ...WA_WORKER_POLLING }, async ([job]) => {
     try {
       await handleAutoReply(job.data);
     } catch (e: any) {

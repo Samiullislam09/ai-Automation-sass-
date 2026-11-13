@@ -15,6 +15,7 @@
 import { completeJson } from "../llm.js";
 import { loadActiveProfile } from "../siteProfile.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { loadRecentThread } from "./decide.js";
 
 type ThreadMsg = { direction: "in" | "out"; body: string };
 
@@ -25,19 +26,13 @@ export async function suggestReply(
   tenantId: string,
   leadId: string
 ): Promise<{ reply: string }> {
-  const [{ data: lead }, { data: msgs }, profile] = await Promise.all([
+  const [{ data: lead }, thread, profile] = await Promise.all([
     supabase.from("leads").select("company, name, reason, city").eq("id", leadId).eq("tenant_id", tenantId).maybeSingle(),
-    supabase
-      .from("outreach_messages")
-      .select("direction, body, created_at")
-      .eq("tenant_id", tenantId)
-      .eq("lead_id", leadId)
-      .order("created_at", { ascending: true })
-      .limit(30),
+    // The NEWEST 30, oldest-first — the old query took the oldest 30 and went blind past that.
+    loadRecentThread(supabase, tenantId, leadId, 30),
     loadActiveProfile(tenantId),
   ]);
 
-  const thread = (msgs ?? []) as ThreadMsg[];
   if (thread.length === 0) {
     // No conversation to reply into — the first-message draft (lead.draft) is the right thing
     // there, and the UI already loads that. Say so rather than inventing an opener here.

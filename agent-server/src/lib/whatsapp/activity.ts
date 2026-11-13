@@ -18,13 +18,13 @@ import { supabase } from "../../supabase.js";
 import { getWhatsappSettings, type WhatsappSettings } from "../outreach/settings.js";
 import { dailyAutoSendCount, warmupCap } from "./autoReply.js";
 import { isQuietHours, nextAllowedTime } from "./outbound.js";
-import { FOLLOWUP_HOURS } from "./followup.js";
+import { FOLLOWUP_GAP_HOURS } from "./followup.js";
 import { sessionStatus } from "./session.js";
 import { prepareDraft } from "./opener.js";
 
-/** A reply is sent 30–180s after a message arrives; past this the AI either chose not to answer or it is stuck. */
-const REPLY_WINDOW_S = 180;
-const SETTLE_S = 360;
+/** A reply is sent within ~30 s of a message arriving (4–12 s delay, a few seconds of quiet, the model, typing); past this the AI either chose not to answer or it is stuck. */
+const REPLY_WINDOW_S = 45;
+const SETTLE_S = 120;
 const ACTIVE_CONVO_MS = 60 * 60 * 1000;
 const HOUR = 3_600_000;
 
@@ -150,7 +150,7 @@ export function buildOverview(inp: OverviewInput): Overview {
     else if (!online) replies.push({ ...base, state: "held", reason: "WhatsApp is not connected." });
     else if (!s.auto_reply) replies.push({ ...base, state: "held", reason: "Auto replies are OFF. Answer this one yourself." });
     else if (inp.dailyCount >= cap) replies.push({ ...base, state: "held", reason: "Daily limit reached, so the AI cannot answer right now." });
-    else if (ageS <= REPLY_WINDOW_S + 15) replies.push({ ...base, state: "queued", due_by: new Date(sinceMs + REPLY_WINDOW_S * 1000).toISOString(), reason: "The AI is reading the thread and will answer within about 3 minutes." });
+    else if (ageS <= REPLY_WINDOW_S + 15) replies.push({ ...base, state: "queued", due_by: new Date(sinceMs + REPLY_WINDOW_S * 1000).toISOString(), reason: "The AI is reading the thread and will answer in a few seconds." });
     else if (ageS <= SETTLE_S) replies.push({ ...base, state: "queued", due_by: new Date(nowMs + 60_000).toISOString(), reason: "The AI is finishing this reply." });
     else if (ageS < 7 * 86_400) replies.push({ ...base, state: "reviewed", reason: l.needs_attention ? (l.needs_attention_reason || "Needs you.") : l.last_intent ? `The AI read it (it looks like a ${l.last_intent}) and chose not to reply. Open the chat if it needs an answer.` : "The AI looked at it and sent nothing. Most likely a short acknowledgement such as \"ok\". Open the chat if it needs an answer." });
   });
@@ -180,11 +180,12 @@ export function buildOverview(inp: OverviewInput): Overview {
       if (l.opt_out) continue;
       if (!["contacted", "delivered", "read", "replied", "in_conversation", "interested"].includes(String(l.stage))) continue;
       const done = l.auto_followups_done ?? 0;
-      if (done >= FOLLOWUP_HOURS.length) continue;
+      if (done >= FOLLOWUP_GAP_HOURS.length) continue;
       if (lastByLead.get(l.id)?.direction !== "out") continue; // their turn is not ours to nudge
-      const anchor = Date.parse(l.replied_at ?? l.contacted_at ?? "");
+      // Each gap runs from OUR LAST MESSAGE (the first message, or the previous nudge) — see followup.ts.
+      const anchor = Date.parse(lastByLead.get(l.id)?.created_at ?? "");
       if (!Number.isFinite(anchor)) continue;
-      const dueMs = goesAt(anchor + FOLLOWUP_HOURS[done] * HOUR);
+      const dueMs = goesAt(anchor + FOLLOWUP_GAP_HOURS[done] * HOUR);
       followups.push({ lead_id: l.id, name: nameOf(l), which: done + 1, due_at: new Date(dueMs).toISOString() });
     }
     followups.sort((a, b) => Date.parse(a.due_at) - Date.parse(b.due_at));
@@ -220,7 +221,7 @@ export function buildOverview(inp: OverviewInput): Overview {
   // ── the agenda: everything about to happen, in time order, with what each message will say ──
   const FIRST_SHOWN = inp.full ? 150 : 12;
   const FOLLOW_SHOWN = inp.full ? 60 : 6;
-  const NUDGE = ["a light check-in", "an offer to clarify anything", "a last, no-pressure note"];
+  const NUDGE = ["a light check-in about what they asked", "a message with something new and useful", "a last, graceful, no-pressure note"];
   const agenda: AgendaItem[] = [];
   if (state.sending) {
     if (state.code === "quiet_hours" && state.resumes_at) agenda.push({ kind: "resume", at: state.resumes_at, title: "Sending window opens", detail: `First messages and follow-ups start again at ${clock(Date.parse(state.resumes_at), s.tz_offset)}.` });

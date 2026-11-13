@@ -412,15 +412,24 @@ export async function connect(
         if (alt && alt.includes("@s.whatsapp.net")) jid = alt;
       }
       if (!jid || jid.endsWith("@g.us") || jid === "status@broadcast") continue; // skip groups + status
+      const m0 = msg.message;
       const text =
-        msg.message?.conversation ??
-        msg.message?.extendedTextMessage?.text ??
-        msg.message?.imageMessage?.caption ??
-        msg.message?.videoMessage?.caption ??
-        msg.message?.buttonsResponseMessage?.selectedDisplayText ??
-        msg.message?.listResponseMessage?.title ??
-        "";
-      if (!String(text).trim()) continue; // a reaction/receipt with no body — nothing to show
+        (m0?.conversation ??
+        m0?.extendedTextMessage?.text ??
+        m0?.imageMessage?.caption ??
+        m0?.videoMessage?.caption ??
+        m0?.buttonsResponseMessage?.selectedDisplayText ??
+        m0?.listResponseMessage?.title ??
+        "") ||
+        // Media with no caption used to be dropped without a trace: a customer who sent a voice
+        // note (very common in India) got total silence and the owner never saw it. A placeholder
+        // line is stored instead, so it shows in the inbox and the reply engine can answer it
+        // honestly ("I can't play voice notes here — could you type it?") — see decide.ts.
+        (m0?.audioMessage ? "[Voice message]" : "") ||
+        (m0?.imageMessage ? "[Photo]" : "") ||
+        (m0?.videoMessage ? "[Video]" : "") ||
+        (m0?.documentMessage || m0?.documentWithCaptionMessage ? "[Document]" : "");
+      if (!String(text).trim()) continue; // a reaction/sticker/receipt with no body — nothing to show
       const phone = jid.split("@")[0];
       const linked = await linkIncoming(supabase, tenantId, {
         phone,

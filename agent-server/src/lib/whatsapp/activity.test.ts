@@ -82,18 +82,18 @@ test("first messages: queued in due order, skipped ones listed with their reason
   assert.equal(o.next?.lead, "Co a");
 });
 
-test("follow-ups: only for a lead we spoke to last, at 24h / 90h / 160h from the anchor", () => {
+test("follow-ups: only for a lead we spoke to last, after 48h / 5 days / 7 days of silence from our last message", () => {
   const o = buildOverview(base({
-    messages: [outbound("1", 30 * H), outbound("2", 2 * H), inbound("3", 5 * H)],
+    messages: [outbound("1", 50 * H), outbound("2", 2 * H), inbound("3", 5 * H)],
     leads: {
-      "1": lead("1", { contacted_at: iso(NOW - 30 * H), auto_followups_done: 0 }),
+      "1": lead("1", { contacted_at: iso(NOW - 50 * H), auto_followups_done: 0 }),
       "2": lead("2", { contacted_at: iso(NOW - 2 * H), auto_followups_done: 0 }),
       "3": lead("3", { contacted_at: iso(NOW - 40 * H), replied_at: iso(NOW - 5 * H), auto_followups_done: 0 }),
     },
   }));
   const byId = Object.fromEntries(o.followups.map((f) => [f.lead_id, f]));
   assert.equal(Date.parse(byId["1"].due_at), NOW, "already overdue: due now");
-  assert.equal(Date.parse(byId["2"].due_at), NOW - 2 * H + 24 * H);
+  assert.equal(Date.parse(byId["2"].due_at), NOW - 2 * H + 48 * H);
   assert.equal(byId["3"], undefined, "their message is last: nothing to nudge");
   assert.equal(byId["1"].which, 1);
 });
@@ -176,8 +176,8 @@ test("agenda: stale slots held by a conversation come out one after another, not
 test("agenda: says what each message will be, the exact text when it is already written", () => {
   const good = "Hi, this is Acme.\n\n— Acme\nhttps://acme.ae\nIf you would rather not hear from me, reply with the word STOP and I will not write again.";
   const o = buildOverview(base({
-    leads: { a: lead("a"), b: lead("b"), f: lead("f", { contacted_at: iso(NOW - 30 * H), auto_followups_done: 0 }) },
-    messages: [outbound("f", 30 * H)],
+    leads: { a: lead("a"), b: lead("b"), f: lead("f", { contacted_at: iso(NOW - 50 * H), auto_followups_done: 0 }) },
+    messages: [outbound("f", 50 * H)],
     queue: [
       { lead_id: "a", scheduled_at: iso(NOW + 5 * MIN), status: "pending", reason: null },
       { lead_id: "b", scheduled_at: iso(NOW + 15 * MIN), status: "pending", reason: null },

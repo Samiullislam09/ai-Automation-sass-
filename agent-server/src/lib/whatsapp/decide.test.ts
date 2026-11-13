@@ -71,3 +71,43 @@ test("parseDecision: clamps confidence to 0..1 and trims long replies", () => {
   const long = parseDecision({ action: "reply", reply: "x".repeat(2000), confidence: 0.9 });
   assert.ok(long.reply.length <= 900);
 });
+
+const { isNearDuplicate, buildBusinessBrief } = await import("./decide.js");
+
+test("isNearDuplicate: the 'Sorry for the delay' loop from the real client chat is caught", () => {
+  // The four replies the bot actually sent on 2026-11-13, each one a rewording of the last.
+  const sent = [
+    "Sorry for the delay — I'll send the ISO 9001 outline right away. Best email or WhatsApp number to share it?",
+    "Sorry for the delay — I'll send the ISO 9001 outline now.",
+    "Sorry for the delay — I was preparing the ISO 9001 outline. I'll send it now.",
+    "Sorry for the delay. I'm here now — sending the ISO 9001 outline shortly.",
+  ];
+  assert.equal(isNearDuplicate(sent[1], sent[0]), true);
+  assert.equal(isNearDuplicate(sent[2], sent[1]), true);
+  assert.equal(isNearDuplicate(sent[3], sent[2]), true);
+});
+
+test("isNearDuplicate: a genuinely new answer is not flagged", () => {
+  const old = "Sorry for the delay — I'll send the ISO 9001 outline now.";
+  const fresh = "ISO 9001 certification usually takes 3-4 months and costs depend on your company size. How many employees do you have?";
+  assert.equal(isNearDuplicate(fresh, old), false);
+  assert.equal(isNearDuplicate("Yes, we can start next week.", "Which city are you in?"), false);
+});
+
+test("parseDecision: handoff=true flags the lead for a person even at high confidence", () => {
+  const d = parseDecision({ intent: "question", confidence: 0.95, action: "reply", reply: "Our range is X.", handoff: true });
+  assert.equal(d.needs_human, true);
+  assert.equal(parseDecision({ intent: "question", confidence: 0.95, action: "reply", reply: "Hi", handoff: false }).needs_human, false);
+});
+
+test("buildBusinessBrief: carries the name and the price, and says so when there is no price", () => {
+  const withPrice = buildBusinessBrief(
+    { what_they_do: "ISO consultancy", pricing: { model: "quote", range: "AED 4,000-9,000", note: "depends on company size" }, owner_name: "Sami" },
+    { name: "heysamiul09", website_url: "https://www.wca-global.com" },
+  );
+  assert.match(withPrice, /Business name: wca-global\.com/);
+  assert.match(withPrice, /You write as: Sami from wca-global\.com/);
+  assert.match(withPrice, /AED 4,000-9,000/);
+  const noPrice = buildBusinessBrief({ what_they_do: "ISO consultancy" }, { name: "x", website_url: null });
+  assert.match(noPrice, /Pricing: NOT PROVIDED/);
+});

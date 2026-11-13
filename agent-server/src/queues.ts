@@ -47,6 +47,17 @@ const QUEUE_OPTIONS = {
 const WORKER_POLLING = { pollingIntervalSeconds: 15, notifyPollingIntervalSeconds: 300 };
 export { WORKER_POLLING };
 
+/** The WhatsApp reply queue is the one place a long wait is a product defect, not a cost saving.
+ *
+ *  pg-boss sends a NOTIFY only for a job that is runnable the instant it is created
+ *  (`start_after <= now()`); a reply job is deliberately created a few seconds in the future, so it
+ *  wakes nobody and sits until the worker's own next poll — which under WORKER_POLLING is the
+ *  300 s notify backstop. Delay + that gap is how a customer waited 4-5 minutes per reply
+ *  (client chat, 2026-11-13). This queue therefore polls every 2-3 s. It is one queue on a
+ *  dedicated Postgres (db.ts), so the cost is a few queries a second — the egress incident that
+ *  motivated the 300 s default was thirteen queues on Supabase's metered pooler. */
+export const WA_WORKER_POLLING = { pollingIntervalSeconds: 2, notifyPollingIntervalSeconds: 3 };
+
 // A full-site crawl (up to ~300 pages, one fetch+embed each, sequential) can genuinely run
 // long. pg-boss's default expireInSeconds (900 = 15min) would kill/retry it mid-crawl on a
 // bigger site — 1 hour gives real headroom.

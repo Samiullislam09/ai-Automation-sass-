@@ -436,7 +436,7 @@ function SettingsPanel({ open, onClose, toast }: { open: boolean; onClose: () =>
             <>
               <Toggle label="Auto-replies" sub="Mr Lxwa answers incoming messages and runs the outbound timeline. Off = everything pauses." on={s.auto_reply} onChange={(v) => save({ auto_reply: v })} disabled={saving} />
               <Toggle label="Outbound timeline" sub="Send the first message to new approved leads, one at a time, on a random schedule. Pauses while a conversation is active." on={s.outbound_enabled} onChange={(v) => save({ outbound_enabled: v })} disabled={saving || !s.auto_reply} />
-              <Toggle label="Follow-ups" sub="Nudge a lead who went quiet at 24h, 90h and 160h, then stop. A reply resets it." on={s.followups_enabled} onChange={(v) => save({ followups_enabled: v })} disabled={saving || !s.auto_reply} />
+              <Toggle label="Follow-ups" sub="Nudge a lead who went quiet: after 48 hours, then 5 days, then 7 days, then stop. A reply is answered at once and restarts the count." on={s.followups_enabled} onChange={(v) => save({ followups_enabled: v })} disabled={saving || !s.auto_reply} />
 
               <div className="mt-4 rounded-xl p-3" style={{ background: WA.listHover }}>
                 <div className="mb-1 text-[12.5px] font-semibold">Sending hours</div>
