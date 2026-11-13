@@ -1,6 +1,6 @@
 import type { JobWithMetadata } from "pg-boss";
 import { boss, ensureBossStarted } from "./db.js";
-import { AGENT_TYPES, BRAIN_QUEUE, WA_AUTOREPLY_QUEUE, WORKER_POLLING, WA_WORKER_POLLING, type AgentType } from "./queues.js";
+import { AGENT_TYPES, BRAIN_QUEUE, WA_AUTOREPLY_QUEUE, WORKER_POLLING, WA_WORKER_POLLING, waReplyConcurrency, type AgentType } from "./queues.js";
 import { handleAutoReply, type AutoReplyJob } from "./lib/whatsapp/autoReply.js";
 import { BossAgent } from "./agents/boss.js";
 import { KeywordAgent } from "./agents/keyword.js";
@@ -310,9 +310,14 @@ export async function startWorkers() {
     }
   });
 
-  // §28 — WhatsApp auto-reply. Low concurrency: a tenant's replies are naturally serialised by the
-  // per-lead singletonKey, and sending too many at once is the opposite of what we want.
-  await boss.work<AutoReplyJob>(WA_AUTOREPLY_QUEUE, { localConcurrency: 2, ...WA_WORKER_POLLING }, async ([job]) => {
+  // §28 — WhatsApp auto-reply. Replies to the SAME lead are serialised by autoReply.ts's per-lead
+  // lock, so concurrency here only means "different customers at once" — which is exactly what a
+  // product with many customers needs. It was 2: with a few dozen people writing in at the same
+  // minute, the third waited for one of the first two to finish (each holds its slot through the
+  // quiet window, the model and the typing delay — tens of seconds). WA_REPLY_CONCURRENCY tunes it
+  // (default 6, ceiling 16 so a typo cannot starve the other queues of Postgres connections); the
+  // per-account sending caps and the LLM lane, not this number, are what keep it safe.
+  await boss.work<AutoReplyJob>(WA_AUTOREPLY_QUEUE, { localConcurrency: waReplyConcurrency(), ...WA_WORKER_POLLING }, async ([job]) => {
     try {
       await handleAutoReply(job.data);
     } catch (e: any) {

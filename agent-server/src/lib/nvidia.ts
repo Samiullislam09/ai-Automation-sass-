@@ -1,5 +1,6 @@
 import { env } from "../env.js";
 import { recordUsage } from "./costLedger.js";
+import { buildLanes } from "./keyPool.js";
 
 /** One door for every NVIDIA call this server makes, with a speed limit on it — and, since
  *  2026-08-31, the key itself.
@@ -31,76 +32,58 @@ import { recordUsage } from "./costLedger.js";
  *  In-process only, which is correct here — agent-server is one process.
  */
 
-const WINDOW_MS = 60_000;
 // A small safety margin under the account's per-key ceiling (free tier: 40/min) — the window
 // is measured from when WE send and the provider counts when it receives, so a limiter sitting
-// exactly on the line trips anyway. NOT "leave headroom for chat" anymore — chat has its own
-// separate keys now (see file header) — so this can sit much closer to the real ceiling than
-// the old single-shared-key default of 30.
+// exactly on the line trips anyway.
 const RPM = Math.max(1, Number(env.NVIDIA_RPM) || 35);
 
 function parseKeys(raw: string): string[] {
   return raw.split(",").map((k) => k.trim()).filter(Boolean);
 }
 
-const KEYS = parseKeys(env.NVIDIA_API_KEYS_BG).length
+const BG_KEYS = parseKeys(env.NVIDIA_API_KEYS_BG).length
   ? parseKeys(env.NVIDIA_API_KEYS_BG)
   : env.NVIDIA_API_KEY
     ? [env.NVIDIA_API_KEY]
     : [];
 
-type KeyState = { key: string; sent: number[] };
-const keyStates: KeyState[] = KEYS.map((key) => ({ key, sent: [] }));
-let cursor = 0;
-let chain: Promise<void> = Promise.resolve();
+/** TWO LANES (see lib/keyPool.ts for the full reason).
+ *   "bg" — everything this server does in the background: crawler, keyword, writer, leads, audit…
+ *   "wa" — a customer's WhatsApp reply, the one call where a person is waiting on the answer.
+ *  With NVIDIA_API_KEYS_WA set the reply lane has keys of its own. Without it, replies share the
+ *  background keys but background work may only fill (rpm - NVIDIA_WA_RESERVE) of each key's window,
+ *  so the last NVIDIA_WA_RESERVE requests a minute are always free for a customer. */
+const lanes = buildLanes({
+  bgKeys: BG_KEYS,
+  waKeys: parseKeys(env.NVIDIA_API_KEYS_WA),
+  rpm: RPM,
+  reserve: Number(env.NVIDIA_WA_RESERVE) || 8,
+});
+export const llmLanes = lanes;
+
+export type NvidiaLane = "bg" | "wa";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Picks a key with room in its own window and reserves a slot on it; waits (and retries) if
- *  every key in the pool is currently full. Round-robins the starting point each call so load
- *  spreads evenly across the pool instead of filling keyStates[0] before ever touching [1].
- *  Serialised through a single promise chain — cheap, in-memory bookkeeping only, never the
- *  actual HTTP call — so two concurrent workers can't both see the same free slot and both
- *  take it. */
-async function reserve(): Promise<string> {
-  const mine = chain.then(reserveLocked);
-  chain = mine.then(
-    () => {},
-    () => {},
-  );
-  return mine;
-}
-
 // Every key staying saturated this long means demand has genuinely outrun the pool (many
 // concurrent tasks, system-wide) — not a bug, but silently queuing forever behind it looks
-// identical to a hang from the live canvas's point of view. Failing with a clear reason after a
-// bounded wait turns that into a real, reported error the task can act on (retry, or the owner
-// adding capacity) instead of a task that just never seems to move.
-const MAX_RESERVE_WAIT_MS = 5 * 60_000;
+// identical to a hang. Failing with a clear reason after a bounded wait turns that into a real,
+// reported error the task can act on. A customer's reply has far less patience than a crawl: it
+// waits seconds, then the caller falls back to a holding message and a human.
+const MAX_WAIT_MS: Record<NvidiaLane, number> = { bg: 5 * 60_000, wa: 8_000 };
 
-async function reserveLocked(): Promise<string> {
-  if (keyStates.length === 0) {
-    throw new Error("No NVIDIA key configured — set NVIDIA_API_KEYS_BG or NVIDIA_API_KEY");
-  }
-  const waitStarted = Date.now();
-  for (;;) {
-    const start = cursor++ % keyStates.length;
-    for (let i = 0; i < keyStates.length; i++) {
-      const state = keyStates[(start + i) % keyStates.length];
-      const now = Date.now();
-      while (state.sent.length && now - state.sent[0] >= WINDOW_MS) state.sent.shift();
-      if (state.sent.length < RPM) {
-        state.sent.push(now);
-        return state.key;
-      }
+async function reserve(lane: NvidiaLane, maxWaitMs?: number): Promise<string> {
+  const l = lane === "wa" ? lanes.wa : lanes.bg;
+  try {
+    return await l.pool.reserve(l.limit, maxWaitMs ?? MAX_WAIT_MS[lane]);
+  } catch (e: any) {
+    if (e?.name === "PoolSaturated") {
+      throw new Error(`NVIDIA key pool (${lane}) has been at its rate limit for ${Math.round((e.waitedMs ?? 0) / 1000)}s — too many requests at once, not a hang`);
     }
-    if (Date.now() - waitStarted >= MAX_RESERVE_WAIT_MS) {
-      throw new Error(`NVIDIA key pool has been at its rate limit for ${Math.round(MAX_RESERVE_WAIT_MS / 60_000)} minutes straight — too many jobs running at once, not a hang`);
+    if (/No API key/.test(String(e?.message))) {
+      throw new Error("No NVIDIA key configured — set NVIDIA_API_KEYS_BG or NVIDIA_API_KEY");
     }
-    // Every key in the pool is full — wait for whichever frees up soonest, then recheck.
-    const now = Date.now();
-    const soonestFree = Math.min(...keyStates.map((s) => s.sent[0] ?? now));
-    await sleep(Math.max(0, WINDOW_MS - (now - soonestFree) + 25));
+    throw e;
   }
 }
 
@@ -108,6 +91,10 @@ export type NvidiaFetchOptions = RequestInit & {
   /** Retries for 429 and 5xx only. A 400 is a bad request and repeating it just burns rpm. */
   retries?: number;
   label?: string;
+  /** Which rate-limit lane to draw from. Default "bg". Customer replies use "wa". */
+  lane?: NvidiaLane;
+  /** Per-request timeout. Default 90 s (a writer section); a customer reply asks for far less. */
+  timeoutMs?: number;
 };
 
 // No per-request timeout existed here at all until now — a stalled NVIDIA connection (dead
@@ -120,10 +107,10 @@ export type NvidiaFetchOptions = RequestInit & {
 const REQUEST_TIMEOUT_MS = 90_000;
 
 export async function nvidiaFetch(url: string, init: NvidiaFetchOptions = {}): Promise<Response> {
-  const { retries = 3, label = "nvidia", headers, signal, ...rest } = init;
+  const { retries = 3, label = "nvidia", headers, signal, lane = "bg", timeoutMs = REQUEST_TIMEOUT_MS, ...rest } = init;
 
   for (let attempt = 1; ; attempt++) {
-    const key = await reserve();
+    const key = await reserve(lane);
     let res: Response;
     try {
       res = await fetch(url, {
@@ -131,7 +118,7 @@ export async function nvidiaFetch(url: string, init: NvidiaFetchOptions = {}): P
         headers: { ...headers, Authorization: `Bearer ${key}` },
         // A caller's own signal (if any) still wins for cancellation; the timeout is added
         // alongside it, not instead of it.
-        signal: signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: signal ?? AbortSignal.timeout(timeoutMs),
       });
     } catch (e: any) {
       // A hang/timeout or a dropped connection — retried exactly like a 429/5xx below (same
@@ -183,11 +170,5 @@ async function captureUsage(res: Response, label: string): Promise<void> {
  *  Not a quota — the provider exposes none — just what this process has sent, summed across
  *  every key in the pool, in the last 60 seconds. */
 export function nvidiaWindow(): { usedLastMinute: number; limitPerMinute: number } {
-  const now = Date.now();
-  let used = 0;
-  for (const state of keyStates) {
-    while (state.sent.length && now - state.sent[0] >= WINDOW_MS) state.sent.shift();
-    used += state.sent.length;
-  }
-  return { usedLastMinute: used, limitPerMinute: RPM * keyStates.length };
+  return { usedLastMinute: lanes.bg.pool.used(), limitPerMinute: RPM * lanes.bg.pool.size };
 }

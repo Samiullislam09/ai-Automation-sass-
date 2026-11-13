@@ -32,6 +32,15 @@ export const env = {
   // send/receive timing skew, not headroom-for-chat (that's now a structurally separate pool,
   // not a shared budget). Raise it to match a paid tier. See src/lib/nvidia.ts.
   NVIDIA_RPM: process.env.NVIDIA_RPM || "",
+  // Keys reserved for CUSTOMER WHATSAPP REPLIES — the one LLM call where a person is waiting on the
+  // answer. With these set, replies have rate-limit windows of their own and nothing a crawl, a
+  // writer or a lead run does can slow them. Unset, replies share NVIDIA_API_KEYS_BG but background
+  // work is held to (rpm - NVIDIA_WA_RESERVE) per key, so a customer is never queued behind it.
+  // Strongly recommended in production: the provider's limit is per key, so separate keys are the
+  // only complete isolation. See src/lib/keyPool.ts.
+  NVIDIA_API_KEYS_WA: process.env.NVIDIA_API_KEYS_WA || "",
+  // Requests/min/key held back for replies when the lanes share keys (ignored with dedicated keys).
+  NVIDIA_WA_RESERVE: process.env.NVIDIA_WA_RESERVE || "",
   // Cloudflare Workers AI — Mr. Image's primary image generator (MASTER_PLAN §19.4).
   // One account gives 10,000 free neurons a day, and one FLUX image costs 172.8 of them
   // (measured 2026-09-05), so a single account is ~57 images/day for the whole SaaS. Hence a

@@ -163,6 +163,29 @@ export function buildBusinessBrief(profile: any, tenant: { name?: string | null;
   return lines.join("\n");
 }
 
+/** One request to the model for a reply. Kept well under the 90 s a background job is allowed. */
+export const REPLY_TIMEOUT_MS = 12_000;
+/** The exact call settings for a customer reply — shared with golden.live.ts so the live eval runs
+ *  what production runs (a 700-token cap that truncated replies would otherwise only show up live). */
+export const REPLY_LLM = { lane: "wa" as const, timeoutMs: REPLY_TIMEOUT_MS, retries: 1, maxTokens: 700 };
+
+/** The model occasionally returns nothing or garbage instead of the JSON it was asked for — measured
+ *  live on 2026-11-13: two of twelve scenarios in one run ("did not return valid JSON: вар", and an
+ *  empty body), none in sixteen calls straight after. It is intermittent, not a prompt problem, and
+ *  one more attempt almost always succeeds. Without this, each such blip became a holding message and
+ *  an owner alert for a question the assistant could easily have answered. Only THIS kind of failure
+ *  is retried here (timeouts and rate limits are already retried inside nvidiaFetch); a second bad
+ *  answer falls through to the holding reply. */
+export async function completeReplyJson(user: string, system: string, call: typeof completeJson = completeJson): Promise<Record<string, unknown>> {
+  try {
+    return await call<Record<string, unknown>>(user, { system, ...REPLY_LLM });
+  } catch (e: any) {
+    if (!/valid JSON|unexpected response shape/i.test(String(e?.message))) throw e;
+    console.warn(`[whatsapp] reply model returned a bad answer (${String(e.message).slice(0, 80)}) — one more try`);
+    return await call<Record<string, unknown>>(user, { system, ...REPLY_LLM });
+  }
+}
+
 /** The instructions that never change between conversations. Travels as the `system` message. */
 export const REPLY_SYSTEM = [
   "You are the person answering on a business's WhatsApp, deciding how to handle a lead's latest message. Be genuinely useful, fast and honest — like the best salesperson at a well-run company, never a bot reading a script.",
@@ -264,7 +287,10 @@ export async function decideReply(
   const business = buildBusinessBrief(p, (tenant as any) ?? null);
 
   const { system, user, handoffFloor } = buildReplyPrompt({ business, pricingProvided, lead: lead as any, thread, avoid: opts.avoid });
-  const answer = await completeJson<Record<string, unknown>>(user, { system });
+  // The reply lane: its own rate-limit window, a 12 s request timeout with one retry, and a small
+  // output cap. A customer is waiting — better to fail fast into a holding message and a human than
+  // to sit 90 s per attempt behind a busy pool (autoReply.ts handles the failure).
+  const answer = await completeReplyJson(user, system);
   const decision = parseDecision(answer);
 
   // ESCALATION IS ENFORCED HERE, not trusted to the model: some situations always need a person

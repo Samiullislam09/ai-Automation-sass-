@@ -12,7 +12,7 @@
  *  the code-enforced handoff floor. Nothing is sent anywhere and nothing is written to a database. */
 import "dotenv/config";
 import { SCENARIOS } from "./golden.js";
-import { buildReplyPrompt, parseDecision } from "./decide.js";
+import { buildReplyPrompt, parseDecision, REPLY_LLM } from "./decide.js";
 import { completeJson } from "../llm.js";
 
 const BUSINESS_WITH_PRICE = [
@@ -39,7 +39,7 @@ for (const sc of SCENARIOS.filter((s) => s.id.includes(filter))) {
   const problems: string[] = [];
   let reply = "";
   try {
-    const raw = await completeJson<Record<string, unknown>>(built.user, { system: built.system });
+    const raw = await completeJson<Record<string, unknown>>(built.user, { system: built.system, ...REPLY_LLM });
     const d = parseDecision(raw);
     reply = d.reply;
     const needsHuman = d.needs_human || built.handoffFloor.yes;

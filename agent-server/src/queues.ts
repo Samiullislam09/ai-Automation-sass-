@@ -86,11 +86,24 @@ export const BRAIN_QUEUE = "brain-dispatch";
 const BRAIN_QUEUE_OPTIONS = { retryLimit: 0, notify: true };
 
 /** §28 — WhatsApp auto-reply. Not an agent (no cap, no office tile): a job here is "answer this
- *  lead's message after its randomised delay". singletonKey (set by the caller, per lead) coalesces
- *  a burst into one reply. retryLimit 1 because a transient send failure deserves one more try, but
- *  more than that risks double-messaging a real person. */
+ *  lead's message after its short randomised delay".
+ *
+ *  retryLimit 0, on purpose. It used to say 1 — but the worker (workers.ts) catches every error, so
+ *  pg-boss never saw a failure and that retry could never fire: the config described a safety net
+ *  that did not exist. Retrying here would be WRONG anyway: a failure after the message was sent
+ *  would send it twice to a real person. Failures are handled where the facts are, in autoReply.ts:
+ *  a model failure becomes a one-time holding reply plus an owner alert; any other failure flags the
+ *  lead "needs you". Nothing is dropped in silence. */
 export const WA_AUTOREPLY_QUEUE = "wa-autoreply";
-const WA_AUTOREPLY_OPTIONS = { retryLimit: 1, retryBackoff: true, retryDelay: 10, notify: true };
+
+/** How many different customers' replies are worked on at once. */
+export function waReplyConcurrency(raw: string | undefined = process.env.WA_REPLY_CONCURRENCY): number {
+  const n = Number(raw);
+  const v = Number.isFinite(n) && n > 0 ? Math.floor(n) : 6;
+  return Math.min(16, Math.max(1, v));
+}
+
+const WA_AUTOREPLY_OPTIONS = { retryLimit: 0, notify: true };
 
 /** Declares each agent's queue in Postgres. Must run once before send()/work() calls
  *  (pg-boss requires a queue to exist before it's used) — called from index.ts on boot. */

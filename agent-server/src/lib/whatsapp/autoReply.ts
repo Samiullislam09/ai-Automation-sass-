@@ -18,7 +18,8 @@
  *  (outbound timeline, follow-ups), not this one. */
 import { supabase } from "../../supabase.js";
 import { enqueueWhatsappAutoReply } from "../../queues.js";
-import { decideReply, detectOptOut, detectBuyIntent, isNearDuplicate } from "./decide.js";
+import { decideReply, detectOptOut, detectBuyIntent, isNearDuplicate, loadRecentThread } from "./decide.js";
+import { detectLanguage, HOLDING } from "./conversation.js";
 import { sendText, simulateTyping } from "./session.js";
 import { recordOutgoing } from "./store.js";
 import { notifyAdmins, createNotification } from "./team.js";
@@ -181,6 +182,35 @@ async function flagForHuman(tenantId: string, leadId: string, title: string, rea
   }
 }
 
+/** The assistant could not produce an answer. Say so honestly, once, and get a person on it. */
+async function holdingReply(tenantId: string, leadId: string, phone: string, alreadySaid: string[], inboundAt: string | null): Promise<void> {
+  try {
+    const thread = await loadRecentThread(supabase, tenantId, leadId, 12);
+    const lang = detectLanguage(thread);
+    const text = HOLDING[lang];
+    // Never twice: a customer who already got this line and is still unanswered gets the owner's
+    // attention, not a second copy of an apology.
+    const already = alreadySaid.some((m) => Object.values(HOLDING).some((h) => isNearDuplicate(m, h)));
+    if (!already) {
+      await simulateTyping(tenantId, phone, typingMs(text));
+      const { waMessageId } = await sendText(tenantId, phone, text);
+      await recordOutgoing(supabase, tenantId, leadId, text, waMessageId, "brain");
+    }
+    await flagForHuman(tenantId, leadId, "A customer is waiting", "The assistant could not answer in time — please reply to this chat yourself.");
+    void notifyAdmins(tenantId, {
+      type: "system",
+      title: "🙋 A customer is waiting",
+      body: "The assistant could not answer in time.",
+      leadId,
+      whatsappText: "A customer messaged on WhatsApp and the assistant could not answer in time — please reply to them yourself.",
+    }).catch(() => {});
+    if (inboundAt) console.log(`[whatsapp] holding reply for ${leadId} after ${Math.round((Date.now() - Date.parse(inboundAt)) / 1000)}s`);
+  } catch (e: any) {
+    console.warn(`[whatsapp] holding reply failed for ${leadId}:`, e?.message);
+    await flagForHuman(tenantId, leadId, "A customer is waiting", "The assistant could not reply — please answer this chat yourself.");
+  }
+}
+
 /** The worker body — runs when a scheduled reply is due. Reads FRESH state (the thread may have
  *  grown since the job was enqueued), checks the gate, then types and sends ONE message. Every
  *  exit is logged, nothing is thrown past the queue, so one bad lead never stalls the worker. */
@@ -243,7 +273,17 @@ async function handleAutoReplyLocked(job: AutoReplyJob): Promise<void> {
 
     // THE DECISION ENGINE (§28.3): one call → intent + confidence + action + a drafted reply.
     const alreadySaid = await recentOutgoing(tenantId, leadId, 3);
-    let decision = await decideReply(supabase, tenantId, leadId);
+    let decision;
+    try {
+      decision = await decideReply(supabase, tenantId, leadId);
+    } catch (e: any) {
+      // The model timed out, was rate-limited for too long, or returned nonsense. The customer has
+      // just written in and must not be left with silence: tell them, once, that a person will
+      // answer — and make that true by flagging the lead and alerting the owner.
+      console.warn(`[whatsapp] reply model failed for ${leadId}: ${e?.message}`);
+      await holdingReply(tenantId, leadId, phone, alreadySaid, last.at);
+      return;
+    }
 
     // The customer may have written again WHILE the model was thinking. Answering the old message
     // now would talk past them — so decide again on the fuller thread (once), and if they are STILL
@@ -375,6 +415,9 @@ async function handleAutoReplyLocked(job: AutoReplyJob): Promise<void> {
     await simulateTyping(tenantId, phone, typingMs(reply));
     const { waMessageId } = await sendText(tenantId, phone, reply);
     await recordOutgoing(supabase, tenantId, leadId, reply, waMessageId, "brain");
+    // Reply time, as the customer felt it: their message arriving → ours leaving. The number every
+    // "is it fast enough?" question should be answered with, instead of a feeling.
+    if (last.at) console.log(`[whatsapp] replied to ${leadId} in ${Math.round((Date.now() - Date.parse(last.at)) / 1000)}s`);
   } catch (e: any) {
     console.warn(`[whatsapp] auto-reply failed for ${leadId}:`, e?.message);
     // The customer's message is NOT left unanswered in silence: the owner sees it on the Leads page.

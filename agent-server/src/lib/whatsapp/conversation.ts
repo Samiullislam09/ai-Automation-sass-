@@ -167,6 +167,18 @@ export function mustHandOff(s: Signals, pricingProvided: boolean): { yes: boolea
 }
 
 /** The facts line handed to the model. Only signals that are TRUE are mentioned. */
+/** What the customer is told when the assistant genuinely cannot produce an answer in time (the
+ *  model timed out or failed). It promises ONLY what is then made true: autoReply.ts flags the lead
+ *  "needs you" and alerts the owner in the same breath, so "a team member will get back to you" is
+ *  a promise somebody has actually been asked to keep. Sent at most once per silence — never a
+ *  second time to the same unanswered customer. */
+export const HOLDING: Record<Lang, string> = {
+  en: "Thanks for your message — a team member will get back to you shortly.",
+  hinglish: "Aapka message mil gaya — hamari team ka member jaldi aapko jawab dega.",
+  hi: "आपका संदेश मिल गया — हमारी टीम का सदस्य जल्द ही आपको जवाब देगा।",
+  ur: "Aapka paigham mil gaya — hamari team ka member jald aap ko jawab dega.",
+};
+
 const APOLOGY: Record<Lang, string> = {
   en: "Sorry for the wait.",
   hinglish: "Sorry, der ho gayi.",

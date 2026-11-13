@@ -48,17 +48,32 @@ const MODEL_UNAVAILABLE = new Set([400, 404, 410, 422, 503]);
  *  that never change (role, rules) travel as a real `system` message and `prompt` carries only the
  *  facts of THIS call — the structure instruction-tuned models were trained on, which holds long rule
  *  lists far better than one big user turn (the WhatsApp reply engine, 2026-11-13). */
-export async function completeJson<T = any>(prompt: string, opts: { system?: string } = {}): Promise<T> {
+export type CompleteJsonOptions = {
+  system?: string;
+  /** Rate-limit lane. "wa" = a customer is waiting (lib/keyPool.ts). Default "bg". */
+  lane?: "bg" | "wa";
+  /** Per-request timeout; default is the 90 s a long background call needs. */
+  timeoutMs?: number;
+  /** Retries for 429/5xx/timeouts inside one model attempt; default 3. */
+  retries?: number;
+  /** Output cap; default 3000. A WhatsApp reply is a few sentences — a small cap also makes it faster. */
+  maxTokens?: number;
+};
+
+export async function completeJson<T = any>(prompt: string, opts: CompleteJsonOptions = {}): Promise<T> {
   const tryOrder = resolvedModel ? [resolvedModel, ...MODEL_CANDIDATES.filter((m) => m !== resolvedModel)] : MODEL_CANDIDATES;
   let lastErr = "";
   let res: Awaited<ReturnType<typeof nvidiaFetch>> | null = null;
   let used = "";
   for (const model of tryOrder) {
     const r = await nvidiaFetch("https://integrate.api.nvidia.com/v1/chat/completions", {
-      label: "llm",
+      label: opts.lane === "wa" ? "llm-reply" : "llm",
+      lane: opts.lane,
+      timeoutMs: opts.timeoutMs,
+      retries: opts.retries,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model, chat_template_kwargs: { thinking: false }, max_tokens: 3000, messages: opts.system ? [{ role: "system", content: opts.system }, { role: "user", content: prompt }] : [{ role: "user", content: prompt }] }),
+      body: JSON.stringify({ model, chat_template_kwargs: { thinking: false }, max_tokens: opts.maxTokens ?? 3000, messages: opts.system ? [{ role: "system", content: opts.system }, { role: "user", content: prompt }] : [{ role: "user", content: prompt }] }),
     });
     if (r.ok) { res = r; used = model; break; }
     const body = (await r.text().catch(() => "")).slice(0, 200);
