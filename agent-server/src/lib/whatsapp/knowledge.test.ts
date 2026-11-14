@@ -398,7 +398,7 @@ test("no published price: an invented number, or a reply that never says it cann
   assert.equal(calls, 0);
   assert.match(good.reply, /can't share the price/);
   // a published price → this net is off
-  const published = await finalizeDecision(D("ISO 9001 is AED 4,000-9,000."), { ...ctxBase, priceUnknown: false, handoffFloor: { yes: false, reason: "" }, rewrite: async () => D("x") });
+  const published = await finalizeDecision(D("ISO 9001 is AED 4,000-9,000."), { ...ctxBase, priceUnknown: false, factsText: "Pricing: priced per quote — AED 4,000-9,000", handoffFloor: { yes: false, reason: "" }, rewrite: async () => D("x") });
   assert.equal(published.reply, "ISO 9001 is AED 4,000-9,000.");
   // language follows the customer
   const hi = await finalizeDecision(D("Yeh AED 4,000 hai."), { ...ctxBase, lang: "hinglish", rewrite: async () => D("AED 5,000") });

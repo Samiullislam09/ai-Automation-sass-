@@ -360,14 +360,18 @@ function SettingsPanel({ open, onClose, toast }: { open: boolean; onClose: () =>
   const [s, setS] = useState<WaSettings | null>(null);
   const [outbox, setOutbox] = useState<OutboxItem[] | null>(null);
   const [saving, setSaving] = useState(false);
+  const [tab, setTab] = useState<"replies" | "meetings" | "team" | "sending" | "queue">("replies");
+  const [teamCount, setTeamCount] = useState<number | null>(null);
 
   const load = useCallback(async () => {
-    const [a, b] = await Promise.all([
+    const [a, b, c] = await Promise.all([
       fetch("/api/whatsapp/settings").then((r) => r.json()).catch(() => null),
       fetch("/api/whatsapp/outbox").then((r) => r.json()).catch(() => null),
+      fetch("/api/whatsapp/admins").then((r) => r.json()).catch(() => null),
     ]);
     if (a?.ok) setS(a.settings);
     if (b?.ok) setOutbox(b.items ?? []);
+    if (c?.ok && Array.isArray(c.admins)) setTeamCount(c.admins.filter((x: any) => x?.active !== false).length);
   }, []);
 
   // WHY A REF. This effect used to list `onClose` as a dependency, and the parent passes a fresh arrow function
@@ -380,7 +384,7 @@ function SettingsPanel({ open, onClose, toast }: { open: boolean; onClose: () =>
 
   useEffect(() => {
     if (!open) return;
-    setS(null); setOutbox(null);
+    setS(null); setOutbox(null); setTab("replies");
     void load();
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onCloseRef.current(); };
     document.addEventListener("keydown", onKey);
@@ -428,14 +432,60 @@ function SettingsPanel({ open, onClose, toast }: { open: boolean; onClose: () =>
     else groups.push([k, [o]]);
   }
 
+  const TABS: { id: typeof tab; label: string }[] = [
+    { id: "replies", label: "Replies" },
+    { id: "meetings", label: "Meetings" },
+    { id: "team", label: "Team" },
+    { id: "sending", label: "Sending" },
+    { id: "queue", label: outbox && outbox.length ? `Queue · ${outbox.length}` : "Queue" },
+  ];
+  // The things that decide whether a customer's "let's talk" actually ends in a call.
+  const checklist = s ? [
+    { ok: s.auto_reply, text: "Auto-replies are on", fix: "Turn on Auto-replies", go: "replies" as const },
+    { ok: !!s.booking_link?.trim(), text: "A meeting link is ready to send", fix: "Add a booking link (or connect Google Calendar)", go: "meetings" as const },
+    { ok: (teamCount ?? 0) > 0, text: "Your team gets a WhatsApp when someone wants a call", fix: "Add your number under Team", go: "team" as const },
+  ] : [];
+  const todo = checklist.filter((c) => !c.ok);
+
   return (
     <div className="fixed inset-0 z-[90] flex justify-end" style={{ background: "rgba(0,0,0,.4)" }} onClick={onClose}>
-      <div className="flex h-full w-full max-w-md flex-col" style={{ background: "#fff", color: WA.text }} onClick={(e) => e.stopPropagation()}>
+      <div className="flex h-full w-full max-w-lg flex-col" style={{ background: "#fff", color: WA.text }} onClick={(e) => e.stopPropagation()}>
         <div className="flex shrink-0 items-center justify-between px-5 py-4" style={{ borderBottom: `1px solid ${WA.divider}` }}>
-          <b className="text-[15px]">Auto-reply & timeline</b>
+          <div>
+            <b className="text-[15px]">WhatsApp assistant settings</b>
+            <div className="text-[11.5px]" style={{ color: WA.sub }}>{saving ? "Saving…" : "Changes save by themselves"}</div>
+          </div>
           <button onClick={onClose} className="rounded-full p-1.5" style={{ color: WA.sub }} aria-label="Close">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
           </button>
+        </div>
+
+        {s && (
+          <div className="shrink-0 px-5 pt-3">
+            <div className="rounded-xl p-3" style={{ background: todo.length ? "#fff8e1" : "#e7f6ec" }}>
+              <div className="text-[12.5px] font-semibold" style={{ color: todo.length ? "#7a5b00" : "#067647" }}>
+                {todo.length ? `${todo.length} thing${todo.length === 1 ? "" : "s"} left to finish setup` : "Everything is set up"}
+              </div>
+              <ul className="mt-1.5 space-y-1">
+                {checklist.map((c) => (
+                  <li key={c.text} className="flex items-center gap-2 text-[12.5px]">
+                    <span aria-hidden style={{ color: c.ok ? "#067647" : "#b7791f" }}>{c.ok ? "✓" : "○"}</span>
+                    {c.ok ? <span style={{ color: WA.text }}>{c.text}</span> : (
+                      <button onClick={() => setTab(c.go)} className="text-left underline-offset-2 hover:underline" style={{ color: "#7a5b00" }}>{c.fix}</button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )}
+
+        <div className="flex shrink-0 gap-1 overflow-x-auto px-5 pt-3" style={{ borderBottom: `1px solid ${WA.divider}` }} role="tablist">
+          {TABS.map((t) => (
+            <button key={t.id} role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)}
+              className="shrink-0 whitespace-nowrap px-3 pb-2 text-[13px] font-medium"
+              style={{ color: tab === t.id ? WA.green : WA.sub, borderBottom: `2px solid ${tab === t.id ? WA.green : "transparent"}`, marginBottom: -1 }}>{t.label}</button>
+          ))}
         </div>
 
         <div className="wa-scroll flex-1 overflow-y-auto p-5">
@@ -443,80 +493,101 @@ function SettingsPanel({ open, onClose, toast }: { open: boolean; onClose: () =>
             <p className="text-[13px]" style={{ color: WA.sub }}>Loading…</p>
           ) : (
             <>
-              <Toggle label="Auto-replies" sub="Mr Lxwa answers incoming messages and runs the outbound timeline. Off = everything pauses." on={s.auto_reply} onChange={(v) => save({ auto_reply: v })} disabled={saving} />
-              <Toggle label="Outbound timeline" sub="Send the first message to new approved leads, one at a time, on a random schedule. Pauses while a conversation is active." on={s.outbound_enabled} onChange={(v) => save({ outbound_enabled: v })} disabled={saving || !s.auto_reply} />
-              <Toggle label="Follow-ups" sub="Nudge a lead who went quiet: after 48 hours, then 5 days, then 7 days, then stop. A reply is answered at once and restarts the count." on={s.followups_enabled} onChange={(v) => save({ followups_enabled: v })} disabled={saving || !s.auto_reply} />
-
-              <Toggle label="Meeting reminders" sub="Reminds the customer 24 hours and 1 hour before a booked call, and sends you and your team a short briefing an hour before." on={s.meeting_reminders !== false} onChange={(v) => save({ meeting_reminders: v })} disabled={saving || !s.auto_reply} />
-              <Toggle label="Daily summary" sub="Every evening, one WhatsApp to your team numbers: messages and replies, hot leads, tomorrow's calls and who needs you. Nothing is sent on a quiet day." on={s.daily_summary !== false} onChange={(v) => save({ daily_summary: v })} disabled={saving || !s.auto_reply} />
-              {s.daily_summary !== false && (
-                <div className="-mt-1 mb-2 flex items-center gap-2 rounded-xl px-3 py-2 text-[12.5px]" style={{ background: WA.listHover }}>
-                  <span style={{ color: WA.sub }}>Send the summary at</span>
-                  <HourInput value={s.summary_hour ?? 20} onChange={(v) => save({ summary_hour: v })} />
-                  <span style={{ color: WA.sub }}>local time</span>
-                </div>
+              {tab === "replies" && (
+                <>
+                  <Toggle label="Auto-replies" sub="The assistant answers incoming messages by itself. Off = everything pauses." on={s.auto_reply} onChange={(v) => save({ auto_reply: v })} disabled={saving} />
+                  <p className="mb-3 mt-1 text-[12px] leading-relaxed" style={{ color: WA.sub }}>
+                    It answers the first message after a short natural pause (1–5 minutes), then replies within seconds for the next 5 hours. If someone asks for the price or a call, it tells you here and on WhatsApp.
+                  </p>
+                  <Toggle label="Follow-ups" sub="Nudge a lead who went quiet: after 48 hours, then 5 days, then 7 days, then stop. Any reply is answered at once." on={s.followups_enabled} onChange={(v) => save({ followups_enabled: v })} disabled={saving || !s.auto_reply} />
+                </>
               )}
 
-              <div className="mt-4 rounded-xl p-3" style={{ background: WA.listHover }}>
-                <div className="mb-1 text-[12.5px] font-semibold">Sending hours</div>
-                <div className="mb-2 text-[11.5px]" style={{ color: WA.sub }}>Cold messages only go out between these hours (local). Replies to a live message are always allowed.</div>
-                <div className="flex items-center gap-2 text-[13px]">
-                  <HourInput value={s.send_start} onChange={(v) => save({ send_start: v })} />
-                  <span style={{ color: WA.sub }}>to</span>
-                  <HourInput value={s.send_end} onChange={(v) => save({ send_end: v })} />
-                </div>
-              </div>
-
-              <div className="mt-4 rounded-xl p-3" style={{ background: WA.listHover }}>
-                <div className="mb-1 text-[12.5px] font-semibold">Booking link (no Google needed)</div>
-                <div className="mb-2 text-[11.5px]" style={{ color: WA.sub }}>Paste your Calendly / Cal.com / Google appointment link. When a lead asks for a meeting and Google Calendar isn't connected, Mr Lxwa sends this link so they self-book.</div>
-                <BookingLinkRow initial={s.booking_link} onSave={(v) => save({ booking_link: v })} />
-              </div>
-
-              <div className="mt-5">
-                <TeamAlerts
-                  toast={toast}
-                  palette={{ rowBg: WA.listHover, text: WA.text, sub: WA.sub, line: WA.divider, accent: WA.green, inputBg: WA.listHover, inputText: WA.text, onBg: "#e7f6ec", onText: "#067647", danger: "#b42318" }}
-                />
-              </div>
-
-              <div className="mt-5">
-                <div className="mb-2 flex items-center justify-between">
-                  <b className="text-[13.5px]">📆 Timeline{outbox ? ` · ${outbox.length} queued` : ""}</b>
-                  <button onClick={() => void load()} className="text-[12px]" style={{ color: WA.green }}>Refresh</button>
-                </div>
-                {!outbox ? (
-                  <p className="text-[12.5px]" style={{ color: WA.sub }}>Loading…</p>
-                ) : outbox.length === 0 ? (
-                  <div className="rounded-xl p-4 text-center" style={{ background: WA.listHover }}>
-                    <div className="text-[20px]">🗓️</div>
-                    <p className="mt-1 text-[12px]" style={{ color: WA.sub }}>Nothing scheduled. New approved leads with WhatsApp line up here — one at a time, at their own time.</p>
+              {tab === "meetings" && (
+                <>
+                  <div className="rounded-xl p-3" style={{ background: WA.listHover }}>
+                    <div className="mb-1 text-[12.5px] font-semibold">Meeting link</div>
+                    <div className="mb-2 text-[11.5px]" style={{ color: WA.sub }}>When a customer wants a call, the assistant asks for a time, tells you, and sends this link so they can book. Paste your Calendly / Cal.com / Google appointment link. If Google Calendar is connected, a link is made for you instead.</div>
+                    <BookingLinkRow initial={s.booking_link} onSave={(v) => save({ booking_link: v })} />
+                    {!s.booking_link?.trim() && <div className="mt-2 rounded-lg px-2.5 py-1.5 text-[12px]" style={{ background: "#fff8e1", color: "#7a5b00" }}>No link yet. Customers will be told the team will send one, and you will be alerted.</div>}
                   </div>
-                ) : (
-                  <div className="space-y-3">
-                    {groups.map(([label, items]) => (
-                      <div key={label}>
-                        <div className="mb-1.5 flex items-center gap-2">
-                          <span className="rounded-full px-2 py-0.5 text-[11px] font-bold" style={{ background: label === "Today" ? WA.green : WA.divider, color: label === "Today" ? "#fff" : WA.sub }}>{label}</span>
-                          <span className="text-[11px]" style={{ color: WA.sub }}>{items.length} send{items.length === 1 ? "" : "s"}</span>
-                        </div>
-                        <div className="relative pl-4" style={{ borderLeft: `2px solid ${WA.divider}` }}>
-                          {items.map((o) => (
-                            <div key={o.id} className="group relative mb-1.5 flex items-center gap-2.5 rounded-lg py-1.5 pl-2 pr-2" style={{ background: WA.listHover }}>
-                              <span className="absolute -left-[21px] h-2.5 w-2.5 rounded-full" style={{ background: WA.green, boxShadow: `0 0 0 3px #fff` }} />
-                              <span className="shrink-0 tabular-nums text-[12px] font-semibold" style={{ color: WA.green, minWidth: 58 }}>{timeLabel(o.scheduledAt)}</span>
-                              <span className="min-w-0 flex-1 truncate text-[13px]" style={{ color: WA.text }}>{o.name}</span>
-                              <button onClick={() => cancelSend(o.id)} title="Cancel this send" className="shrink-0 rounded-full p-1" style={{ color: "#b42318" }}>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
+                  <div className="mt-3" />
+                  <Toggle label="Meeting reminders" sub="Reminds the customer 24 hours and 1 hour before a booked call, and briefs you and your team an hour before." on={s.meeting_reminders !== false} onChange={(v) => save({ meeting_reminders: v })} disabled={saving || !s.auto_reply} />
+                </>
+              )}
+
+              {tab === "team" && (
+                <>
+                  <TeamAlerts
+                    toast={toast}
+                    palette={{ rowBg: WA.listHover, text: WA.text, sub: WA.sub, line: WA.divider, accent: WA.green, inputBg: WA.listHover, inputText: WA.text, onBg: "#e7f6ec", onText: "#067647", danger: "#b42318" }}
+                  />
+                  <div className="mt-4" />
+                  <Toggle label="Daily summary" sub="Every evening, one WhatsApp to your team: messages, hot leads, tomorrow's calls and who needs you. Nothing is sent on a quiet day." on={s.daily_summary !== false} onChange={(v) => save({ daily_summary: v })} disabled={saving || !s.auto_reply} />
+                  {s.daily_summary !== false && (
+                    <div className="-mt-1 mb-2 flex items-center gap-2 rounded-xl px-3 py-2 text-[12.5px]" style={{ background: WA.listHover }}>
+                      <span style={{ color: WA.sub }}>Send the summary at</span>
+                      <HourInput value={s.summary_hour ?? 20} onChange={(v) => save({ summary_hour: v })} />
+                      <span style={{ color: WA.sub }}>local time</span>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {tab === "sending" && (
+                <>
+                  <Toggle label="First messages to new leads" sub="Send the first message to new approved leads, one at a time, on a random schedule. Pauses while a conversation is active." on={s.outbound_enabled} onChange={(v) => save({ outbound_enabled: v })} disabled={saving || !s.auto_reply} />
+                  <div className="mt-2 rounded-xl p-3" style={{ background: WA.listHover }}>
+                    <div className="mb-1 text-[12.5px] font-semibold">Sending hours</div>
+                    <div className="mb-2 text-[11.5px]" style={{ color: WA.sub }}>First messages and follow-ups only go out between these hours (local time). Replies to a customer who wrote to you are always allowed.</div>
+                    <div className="flex items-center gap-2 text-[13px]">
+                      <HourInput value={s.send_start} onChange={(v) => save({ send_start: v })} />
+                      <span style={{ color: WA.sub }}>to</span>
+                      <HourInput value={s.send_end} onChange={(v) => save({ send_end: v })} />
+                    </div>
                   </div>
-                )}
-              </div>
+                </>
+              )}
+
+              {tab === "queue" && (
+                <div>
+                  <div className="mb-2 flex items-center justify-between">
+                    <b className="text-[13.5px]">Upcoming first messages{outbox ? ` · ${outbox.length}` : ""}</b>
+                    <button onClick={() => void load()} className="text-[12px]" style={{ color: WA.green }}>Refresh</button>
+                  </div>
+                  {!outbox ? (
+                    <p className="text-[12.5px]" style={{ color: WA.sub }}>Loading…</p>
+                  ) : outbox.length === 0 ? (
+                    <div className="rounded-xl p-4 text-center" style={{ background: WA.listHover }}>
+                      <div className="text-[20px]">🗓️</div>
+                      <p className="mt-1 text-[12px]" style={{ color: WA.sub }}>Nothing scheduled. New approved leads with WhatsApp line up here, one at a time.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {groups.map(([label, items]) => (
+                        <div key={label}>
+                          <div className="mb-1.5 flex items-center gap-2">
+                            <span className="rounded-full px-2 py-0.5 text-[11px] font-bold" style={{ background: label === "Today" ? WA.green : WA.divider, color: label === "Today" ? "#fff" : WA.sub }}>{label}</span>
+                            <span className="text-[11px]" style={{ color: WA.sub }}>{items.length} send{items.length === 1 ? "" : "s"}</span>
+                          </div>
+                          <div className="relative pl-4" style={{ borderLeft: `2px solid ${WA.divider}` }}>
+                            {items.map((o) => (
+                              <div key={o.id} className="group relative mb-1.5 flex items-center gap-2.5 rounded-lg py-1.5 pl-2 pr-2" style={{ background: WA.listHover }}>
+                                <span className="absolute -left-[21px] h-2.5 w-2.5 rounded-full" style={{ background: WA.green, boxShadow: `0 0 0 3px #fff` }} />
+                                <span className="shrink-0 tabular-nums text-[12px] font-semibold" style={{ color: WA.green, minWidth: 58 }}>{timeLabel(o.scheduledAt)}</span>
+                                <span className="min-w-0 flex-1 truncate text-[13px]" style={{ color: WA.text }}>{o.name}</span>
+                                <button onClick={() => cancelSend(o.id)} title="Cancel this send" className="shrink-0 rounded-full p-1" style={{ color: "#b42318" }}>
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </>
           )}
         </div>

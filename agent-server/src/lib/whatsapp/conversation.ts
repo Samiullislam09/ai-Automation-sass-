@@ -368,6 +368,90 @@ export const PRICE_UNKNOWN_LINE: Record<Lang, string> = {
   ur: "Abhi main aap ko qeemat nahi bata sakta — hamari team aap ko exact quote bhejegi. Sahi quote ke liye aap apni zaroorat thori batayenge?",
 };
 
+
+/* ── arranging a call when there is no calendar to arrange it with ──────────────────────── */
+
+export type MeetingPref = { any: boolean; label: string };
+
+const PART = {
+  morning: /(subah|subha|savere|morning|सुबह)/i,
+  afternoon: /(dopahar|dopehar|afternoon|दोपहर)/i,
+  evening: /(shaam|sham\b|evening|raat|night|शाम|रात)/i,
+};
+const DAY_RE = /\b(today|aaj|tomorrow|kal|parso|day after tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun|somvar|mangalvar|budhvar|guruvar|veervar|shukravar|shanivar|ravivar)\b/i;
+const TIME_RE = /\b(\d{1,2})(?::(\d{2}))?\s?(am|pm|baje)\b/i;
+
+/** What the customer said about WHEN they would like the call: "subah", "kal shaam", "5 pm", "tomorrow morning".
+ *  Read deterministically — a call is arranged on this, so a model's guess is not good enough. */
+export function parseMeetingPreference(text: string): MeetingPref {
+  const t = String(text ?? "");
+  const part = PART.morning.test(t) ? "morning" : PART.afternoon.test(t) ? "afternoon" : PART.evening.test(t) ? "evening" : null;
+  const day = t.match(DAY_RE)?.[1]?.toLowerCase() ?? null;
+  const tm = t.match(TIME_RE);
+  const time = tm ? `${tm[1]}${tm[2] ? ":" + tm[2] : ""} ${tm[3].toLowerCase() === "baje" ? "o'clock" : tm[3].toUpperCase()}` : null;
+  const label = [day, time ?? part].filter(Boolean).join(" ");
+  return { any: !!(part || day || time), label };
+}
+
+/** Said once we know WHEN they would like the call. It promises only what is then made true: the owner is alerted
+ *  (autoReply.ts) with this preference and asked to send a time and a link. */
+export const MEETING_ACK: Record<Lang, (label: string) => string> = {
+  en: (l) => `Noted — ${l}. Our team will confirm the exact time and send the meeting link here shortly.`,
+  hinglish: (l) => `Theek hai — ${l}. Hamari team exact time confirm karke meeting link yahin bhej degi.`,
+  hi: (l) => `ठीक है — ${l}। हमारी टीम सही समय तय करके मीटिंग लिंक यहीं भेज देगी।`,
+  ur: (l) => `Theek hai — ${l}. Hamari team exact waqt confirm karke meeting link yahin bhej degi.`,
+};
+
+/** Asked when we already asked and the answer did not say when. Different words from the first question. */
+export const MEETING_REASK: Record<Lang, string> = {
+  en: "No problem — which day works best for you, and is morning, afternoon or evening better?",
+  hinglish: "Koi baat nahi — kaunsa din theek rahega, aur subah, dopahar ya shaam mein se kya behtar hai?",
+  hi: "कोई बात नहीं — कौन सा दिन ठीक रहेगा, और सुबह, दोपहर या शाम में से क्या बेहतर है?",
+  ur: "Koi baat nahi — kaunsa din theek rahega, aur subah, dopahar ya shaam mein se kya behtar hai?",
+};
+
+/** Is this one of OUR messages asking when they would like the call? */
+export function isMeetingAsk(text: string): boolean {
+  return /morning, afternoon or evening|subah, dopahar ya shaam|सुबह, दोपहर या शाम/i.test(String(text ?? ""));
+}
+
+/* ── short, like a person texting ───────────────────────────────────────────────────────── */
+
+/** Anything longer than this, or with more than three sentences, reads as an email, not a chat. Measured on a real
+ *  chat (2026-11-14): replies of 325, 202, 172, 390 and 247 characters — paragraphs a customer does not read. */
+export const MAX_CHAT_CHARS = 260;
+
+export function tooLongForChat(text: string): boolean {
+  const t = String(text ?? "").trim();
+  return t.length > MAX_CHAT_CHARS || t.split(/(?<=[.!?])\s+/).filter(Boolean).length > 3;
+}
+
+/** A long message as the two or three short ones a person would have sent. Cut at sentence ends, never mid-sentence unless a
+ *  single sentence is itself too long (then at the last comma or space). At most `maxParts`; any remainder joins the last. */
+export function splitForChat(text: string, max = 200, maxParts = 3): string[] {
+  const sentences = String(text ?? "").replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s+/).filter(Boolean);
+  const pieces: string[] = [];
+  for (const s of sentences) {
+    let rest = s;
+    while (rest.length > max) {
+      let cut = rest.lastIndexOf(", ", max);
+      if (cut < max / 2) cut = rest.lastIndexOf(" ", max);
+      if (cut < 1) cut = max;
+      pieces.push(rest.slice(0, cut + 1).trim());
+      rest = rest.slice(cut + 1).trim();
+    }
+    if (rest) pieces.push(rest);
+  }
+  const parts: string[] = [];
+  for (const p of pieces) {
+    const last = parts[parts.length - 1];
+    if (last && last.length + 1 + p.length <= max) parts[parts.length - 1] = `${last} ${p}`;
+    else parts.push(p);
+  }
+  while (parts.length > maxParts) { const tail = parts.pop()!; parts[parts.length - 1] += ` ${tail}`; }
+  return parts;
+}
+
 /* ── not asking for a call in every message ─────────────────────────────────────────────── */
 
 const CALL_WORDS = /\b(call|meeting|demo|time slots?|quick chat|catch[- ]?up)\b/i;

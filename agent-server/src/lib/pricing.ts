@@ -20,7 +20,7 @@
  *
  *  The pure parts (amounts, snippets, grounding, quote phrases) are unit-tested; only `detectPricing` calls
  *  a model, and it takes the call as a parameter so tests never touch the network. */
-import type { Pricing } from "./siteProfile.js";
+import type { Pricing, PricePackage } from "./siteProfile.js";
 
 export type PricePage = { url: string; title?: string | null; text: string };
 export type PriceFinding = { pricing: Pricing; sources: string[] };
@@ -120,6 +120,31 @@ export function mentionsQuoteOnly(text: string): boolean {
 export type CompleteFn = (prompt: string) => Promise<any>;
 
 const MODELS = ["fixed", "quote", "subscription", "free"] as const;
+
+/** The packages the model listed, kept only where the site backs them: the name is printed on a page and the `from` price's
+ *  figures are printed on the site; any other figure in best_for / duration / covers must be printed too. A package the site does not
+ *  show is dropped — the assistant quotes these to customers by name. */
+export function groundedPackages(raw: unknown, pages: PricePage[]): PricePackage[] {
+  if (!Array.isArray(raw)) return [];
+  const texts = pages.map((p) => String(p.text ?? ""));
+  const lower = texts.map((t) => t.toLowerCase());
+  const out: PricePackage[] = [];
+  for (const r of raw.slice(0, 8)) {
+    const name = clean((r as any)?.name, 60);
+    const from = clean((r as any)?.from, 60);
+    if (!name || !from) continue;
+    if (!lower.some((t) => t.includes(name.toLowerCase()))) continue;          // the name must be printed
+    if (!rangeIsGrounded(from, texts)) continue;                                // and so must the price's figures
+    const field = (v: unknown, max: number) => {
+      const s = clean(v, max);
+      return s && figures(s).every((n) => rangeIsGrounded(n, texts)) ? s : null;
+    };
+    if (out.some((p) => p.name.toLowerCase() === name.toLowerCase())) continue;
+    out.push({ name, from, best_for: field((r as any)?.best_for, 90), duration: field((r as any)?.duration, 40), covers: field((r as any)?.covers, 110) });
+    if (out.length >= 5) break;
+  }
+  return out;
+}
 const clean = (v: unknown, max: number) => {
   const s = typeof v === "string" ? v.replace(/\s+/g, " ").trim() : "";
   return s && s.toLowerCase() !== "null" ? s.slice(0, max) : null;
@@ -158,8 +183,9 @@ export async function detectPricing(pages: PricePage[], complete: CompleteFn): P
         "- If the excerpts do not clearly show what THIS business charges, the range is null. Do not guess.",
         "- model: EXACTLY one word from fixed | quote | subscription | free, only if the excerpts make it clear, else null. No other words.",
         "- note: any condition stated next to the price (per month, per site, plus VAT, starting from...), else null.",
+        "- packages: if the excerpts show NAMED packages, plans or tiers, list up to 5 of them, each: name (exactly as printed), from (its price exactly as printed with currency, e.g. 'from $2,400'), best_for (who it is for, as printed, or null), duration (as printed, or null), covers (what it includes, at most 12 words, or null). If there are no named packages, an empty list.",
         "",
-        'Reply with ONLY JSON: {"model":"...","range":"...","note":"..."}',
+        'Reply with ONLY JSON: {"model":"...","range":"...","note":"...","packages":[{"name":"...","from":"...","best_for":"...","duration":"...","covers":"..."}]}',
       ].join("\n"),
     );
   } catch {
@@ -167,8 +193,11 @@ export async function detectPricing(pages: PricePage[], complete: CompleteFn): P
   }
 
   const model = (clean(answer?.model, 20) ?? "").toLowerCase();
-  const range = clean(answer?.range, 160);
+  let range = clean(answer?.range, 160);
   const note = clean(answer?.note, 200);
+  const packages = groundedPackages(answer?.packages, pages);
+  // A site that prints packages but no summary line: the packages ARE the range.
+  if (!range && packages.length) range = packages.map((p) => `${p.name} ${p.from}`).join(" · ").slice(0, 160);
 
   // THE CHECK. Every figure in the range must be printed on the site. If not, the range is discarded — the
   // model was wrong or was making it up, and either way a customer must never be quoted it.
@@ -177,7 +206,12 @@ export async function detectPricing(pages: PricePage[], complete: CompleteFn): P
     const used = snippets.filter((s) => figures(range!).some((n) => normalise(s.text).includes(n)));
     const sources = [...new Set((used.length ? used : snippets).map((s) => s.url))].slice(0, 4);
     return {
-      pricing: { model: (MODELS as readonly string[]).includes(model) ? (model as Pricing["model"]) : null, range, note: note && figures(note).every((n) => rangeIsGrounded(n, pages.map((p) => p.text))) ? note : null },
+      pricing: {
+        model: (MODELS as readonly string[]).includes(model) ? (model as Pricing["model"]) : null,
+        range,
+        note: note && figures(note).every((n) => rangeIsGrounded(n, pages.map((p) => p.text))) ? note : null,
+        ...(packages.length ? { packages } : {}),
+      },
       sources,
     };
   }
@@ -188,4 +222,17 @@ export async function detectPricing(pages: PricePage[], complete: CompleteFn): P
   return hit.length
     ? { pricing: { model: "quote", range: null, note: "Pricing is shared on request, after understanding the requirement." }, sources: hit.map((p) => p.url) }
     : null;
+}
+
+/** Currency amounts in `text` whose figures are NOT printed in `facts`. Used on what the assistant is about to send: when a
+ *  price is published, every amount it quotes must be one of the published ones (or one the customer wrote) — a model
+ *  asked to be persuasive rounds, blends and invents ("about $5,000 for you" when the page says "from $2,400"). */
+export function unsupportedAmounts(text: string, facts: string): string[] {
+  const hay = normalise(facts);
+  const bad: string[] = [];
+  for (const a of findAmounts(text)) {
+    const nums = figures(a.text);
+    if (nums.length && !nums.every((n) => hay.includes(n))) bad.push(a.text);
+  }
+  return bad;
 }

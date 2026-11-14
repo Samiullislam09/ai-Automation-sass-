@@ -12,7 +12,8 @@
  *     three messages sent during that pause are one wait, answered together (the clock does not restart).
  *
  *   ACTIVE — we replied to them within the last 5 hours. Anything they write is answered within seconds
- *     (2–6 s, then the typing indicator, then the model — a person's pace, not a pause).
+ *     (1–3 s, then the typing indicator, then the model — a person's pace, not a pause). It was 2–6 s; with the quiet window
+ *     and typing on top, real chats measured 13–21 s per reply (2026-11-14), which reads as slow, not human.
  *
  *  An outbound counts as a "reply" only when the customer wrote something between it and the outbound
  *  before it. Our opener and our follow-up nudges are not replies: a lead who answers one of them is
@@ -28,8 +29,8 @@
 export const ACTIVE_WINDOW_MS = 5 * 3_600_000;
 export const OPENING_MIN_S = 60;
 export const OPENING_MAX_S = 300;
-export const ACTIVE_MIN_S = 2;
-export const ACTIVE_MAX_S = 6;
+export const ACTIVE_MIN_S = 1;
+export const ACTIVE_MAX_S = 3;
 
 export type TimingRow = { direction: "in" | "out"; created_at: string };
 export type Timing = {

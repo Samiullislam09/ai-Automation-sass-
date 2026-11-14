@@ -49,7 +49,8 @@ export type Cta = { text: string | null; url: string | null; contact: string | n
 
 /** How the business charges. `model` is the shape of the price, `range` the number people
  *  actually ask for; both may be absent, and "on request" is a real answer. */
-export type Pricing = { model: "fixed" | "quote" | "subscription" | "free" | null; range: string | null; note: string | null };
+export type PricePackage = { name: string; from: string; best_for: string | null; duration: string | null; covers: string | null };
+export type Pricing = { model: "fixed" | "quote" | "subscription" | "free" | null; range: string | null; note: string | null; packages?: PricePackage[] };
 
 /** How a customer finds and checks the business — the things asked on WhatsApp. Read off the site, owner-editable. */
 export type BusinessDetails = {
@@ -391,8 +392,12 @@ export function coerceField(field: ProfileField, raw: unknown): CoerceResult {
       if (typeof raw !== "object") return { ok: false, error: `"pricing" must be an object.` };
       const pr = raw as Partial<Pricing>;
       const model = pr.model === "fixed" || pr.model === "quote" || pr.model === "subscription" || pr.model === "free" ? pr.model : null;
-      const value: Pricing = { model, range: nullableStr(pr.range), note: nullableStr(pr.note) };
-      return { ok: true, value: value.model || value.range || value.note ? value : null };
+      const packages: PricePackage[] = (Array.isArray(pr.packages) ? pr.packages : [])
+        .map((x) => ({ name: nullableStr(x?.name), from: nullableStr(x?.from), best_for: nullableStr(x?.best_for), duration: nullableStr(x?.duration), covers: nullableStr(x?.covers) }))
+        .filter((x): x is PricePackage => !!x.name && !!x.from)
+        .slice(0, 5);
+      const value: Pricing = { model, range: nullableStr(pr.range), note: nullableStr(pr.note), ...(packages.length ? { packages } : {}) };
+      return { ok: true, value: value.model || value.range || value.note || packages.length ? value : null };
     }
 
     case "business_details": {

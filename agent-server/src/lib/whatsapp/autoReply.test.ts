@@ -38,10 +38,11 @@ test("warmup ramp: a brand-new number is tightly capped, an aged one is not", ()
   assert.equal(warmupCap(null, NOW), 20, "unknown age is treated as brand new");
 });
 
-test("typingMs is clamped to a human 1.2s–5s", () => {
-  assert.equal(typingMs("ok"), 1200, "short reply floors at 1.2s");
-  assert.equal(typingMs("x".repeat(1000)), 5000, "long reply caps at 5s");
-  assert.ok(typingMs("x".repeat(100)) > 1200 && typingMs("x".repeat(100)) < 5000, "mid scales");
+test("typingMs is clamped to a human 0.9s–3.5s (it was 1.2–5 s, which with the pauses made replies take 13-21 s)", () => {
+  assert.equal(typingMs("ok"), 900, "short reply floors at 0.9s");
+  assert.equal(typingMs("x".repeat(1000)), 3500, "long reply caps at 3.5s");
+  assert.ok(typingMs("x".repeat(100)) > 900 && typingMs("x".repeat(100)) < 3500, "mid scales");
+  assert.equal(typingMs("x".repeat(100)), 2200, "a ~100-character reply types for 2.2 s");
 });
 
 test("gate: opens on the happy path", () => {

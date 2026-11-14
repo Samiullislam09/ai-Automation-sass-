@@ -18,9 +18,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { brandName } from "./brand.js";
 import {
   detectLanguage, detectSignals, conversationStage, mustHandOff, signalsBrief,
-  LANG_INSTRUCTION, STAGE_GUIDE, riskyClaim, unverifiedTerms, assertsUnverified, confirmLine, offersCall, stripCallOffer, missingDetails, CONFIRM_LANG, containsPriceAmount, statesPriceUnavailable, PRICE_UNKNOWN_LINE, proposesTime, stripTimeProposals, claimsExperience, MEETING_FALLBACK, SMALLTALK_DEFLECT, type Lang, type Msg,
+  LANG_INSTRUCTION, STAGE_GUIDE, riskyClaim, unverifiedTerms, assertsUnverified, confirmLine, offersCall, stripCallOffer, missingDetails, CONFIRM_LANG, containsPriceAmount, statesPriceUnavailable, PRICE_UNKNOWN_LINE, proposesTime, parseMeetingPreference, MEETING_ACK, MEETING_REASK, isMeetingAsk, tooLongForChat, MAX_CHAT_CHARS, stripTimeProposals, claimsExperience, MEETING_FALLBACK, SMALLTALK_DEFLECT, type Lang, type Msg,
 } from "./conversation.js";
 import { retrieveKnowledge, queryFor, renderKnowledge, type Passage } from "./knowledge.js";
+import { unsupportedAmounts } from "../pricing.js";
 
 export type Intent =
   | "greeting" | "question" | "affirmation" | "objection"
@@ -34,6 +35,13 @@ export type Decision = {
   reply: string; // the message to send when action === "reply" (may be "" for ignore/wait)
   reason: string; // short why — shown on the needs-you flag and in logs
   needs_human: boolean; // complex/low-confidence → flag for the human (we still reply)
+  /** A sentence the code fixed or replaced, in plain words — shown in the Activity log so a manager can see WHY a
+   *  reply says what it says ("call offer removed: already offered", "price replaced: none published"). */
+  notes?: string[];
+  /** The reply is a fixed, code-written line (a meeting acknowledgement, "cannot share the price"), not the model's. */
+  templated?: boolean;
+  /** When they said they would like the call (MeetingPref.label): the owner is alerted with it. */
+  meeting_pref?: string;
 };
 
 const INTENTS: Intent[] = ["greeting", "question", "affirmation", "objection", "smalltalk", "ready", "meeting", "stop", "other"];
@@ -148,6 +156,11 @@ export function buildBusinessBrief(profile: any, tenant: { name?: string | null;
   if (p.pricing && p.pricing.range) {
     const model = p.pricing.model === "quote" ? "priced per quote" : p.pricing.model === "fixed" ? "fixed price" : p.pricing.model === "subscription" ? "subscription" : p.pricing.model === "free" ? "free" : "";
     lines.push(`Pricing: ${[model, p.pricing.range, p.pricing.note].filter(Boolean).join(" — ")}`);
+    const pk = (p.pricing.packages ?? []).filter((x: any) => x?.name && x?.from);
+    if (pk.length) {
+      lines.push("Packages (quote the ONE that fits the customer, with its own price — never the whole range):");
+      for (const x of pk) lines.push(`- ${[x.name, x.from, x.best_for ? `for ${x.best_for}` : "", x.duration, x.covers].filter(Boolean).join(" — ")}`);
+    }
   } else if (p.pricing && (p.pricing.note || p.pricing.model)) {
     // The site says HOW it charges ("on request") but prints no figure. That is not a price: say so, or the
     // model reads "priced per quote" as licence to estimate one.
@@ -212,18 +225,28 @@ export const REPLY_SYSTEM = [
   "You are the person answering on a business's WhatsApp, deciding how to handle a lead's latest message. Be genuinely useful, fast and honest — like the best salesperson at a well-run company, never a bot reading a script.",
   "",
   "Return ONLY JSON: " + '{"intent":"...","confidence":0.0,"action":"...","reply":"...","handoff":false,"reason":"..."}',
-  '- "intent": one of greeting, question, affirmation, objection, smalltalk, ready, meeting, stop, other. Use "meeting" when they ASK FOR or ACCEPT a call/meeting/demo (the system then sends real available time slots — you never write times yourself).',
+  '- "intent": one of greeting, question, affirmation, objection, smalltalk, ready, meeting, stop, other. Use "meeting" when they ASK FOR or ACCEPT a call/meeting/demo, or answer OUR question about when (the system then sends real slots, or notes their preferred time for the team — you never write times yourself).',
   '- "confidence": 0..1, how sure you are about intent AND that a reply is appropriate.',
   '- "action": "ignore" (a bare acknowledgement that needs no reply: "ok", "thanks", "hmm", "👍"), "wait" (the message looks half-typed; they are still writing) or "reply" (answer now).',
   '- "reply": if action is "reply", the ACTUAL next WhatsApp message from US. Else "".',
   '- "handoff": true ONLY if a real person must take over (they want something you cannot give from the facts — a quote, a document, a decision, a complaint). Else false.',
   '- "reason": a 3-8 word note on why (for the human), e.g. "asked about ISO 9001 price".',
   "",
-  "HOW TO WRITE THE REPLY:",
-  "- One short WhatsApp message, 1-3 sentences, no email formatting, no 'Dear', no signature. At most ONE question, and only if it moves the conversation forward.",
-  "- ANSWER THEIR QUESTION FIRST, in the first sentence. Only then, if useful, add one line of value or a next step. Never dodge, never restate the pitch if they moved past it.",
-  "- Use the REPLY LANGUAGE given with the conversation. Keep it simple and warm, the way a real person types.",
+  "HOW TO WRITE THE REPLY — like a real person texting on WhatsApp, not a company brochure:",
+  "- 1 or 2 SHORT sentences, about 25 words in all, never more than 40. One idea per message. If there is more to say, say the ONE most useful thing and ask a question; the rest can come in the next message.",
+  "- No lists, no bullet points, no headings, no semicolons, no 'Based on that', no 'I understand your concern', no 'Great question'. Plain everyday words and contractions — how you would text a client you respect.",
+  "- Do NOT repeat back what they just told you ('3 employees at one site in West Bengal') — they know. Use it silently.",
+  "- ANSWER THEIR QUESTION FIRST, in the first sentence. Then, if useful, one short line that moves things on. Never dodge, never restate the pitch if they moved past it.",
+  "- Use the REPLY LANGUAGE given with the conversation, and stay in it for the whole reply.",
   "- 'yes'/'ok' as an answer to OUR question → act on that question, don't send a generic blurb.",
+  "",
+  "SELLING — you are this business's best salesperson, and every message should earn the next step:",
+  "- The goal of the conversation is a short CALL (best) or an exact quote. Know where they are: just curious → find out what they need; clear need → show the ONE option that fits and its price; hesitating → handle the worry, then offer the next step again; ready → move now.",
+  "- ONE next step per message: either one question that moves them forward OR the offer of a call. Never both, never neither. Qualify lightly and one thing at a time — what they need, how big (people / sites), by when — and never ask something they have already told you.",
+  "- Price: lead with the specific PACKAGE that fits what they told you, by name, with its 'from' price and what it covers in a few words. Do NOT quote the whole range at a small buyer and never say 'at the lower end of our range'. Mention other packages only if they ask.",
+  "- 'Can you reduce the price / any discount?': you have no authority to discount and must never hint that you do. Be warm, point to what they get or to a smaller option that fits their budget (ask their budget), and offer a call where a manager can discuss options — that is the one place to negotiate.",
+  "- 'Another company is cheaper': never criticise them; ask what their quote includes, and restate only the differences that are in the facts.",
+  "- Hesitation ('I'll think'): see WHEN THEY NEED TIME below. A buying signal ('ok let's do it', 'how do I start'): take the next step at once — offer the call or the exact next action.",
   "",
   "THE BUSINESS'S OWN WEBSITE:",
   "- When a FACTS FROM OUR WEBSITE block is given, those are real passages from the business's own pages and are as trustworthy as the business facts. Use them for specifics — what the service includes, how the process works, how long it takes, what is required — and say it in your own short words, never paste a paragraph.",
@@ -271,7 +294,7 @@ export type ReplyPromptInput = {
 /** Assemble the call. Pure — the whole point of splitting it from decideReply is that the golden
  *  conversations (golden.test.ts) can assert on exactly what the model would be told, with no
  *  database and no network. */
-export function buildReplyPrompt(input: ReplyPromptInput): { system: string; user: string; lang: ReturnType<typeof detectLanguage>; handoffFloor: { yes: boolean; reason: string }; unverified: string[]; detailGaps: string[]; recentOut: string[]; callWanted: boolean; priceUnknown: boolean } {
+export function buildReplyPrompt(input: ReplyPromptInput): { system: string; user: string; lang: ReturnType<typeof detectLanguage>; handoffFloor: { yes: boolean; reason: string }; unverified: string[]; detailGaps: string[]; recentOut: string[]; callWanted: boolean; priceUnknown: boolean; lastInbound: string; factsText: string } {
   const { thread, business, lead } = input;
   const lastIn = [...thread].reverse().find((m) => m.direction === "in");
   const signals = detectSignals(lastIn?.body ?? "");
@@ -307,7 +330,7 @@ export function buildReplyPrompt(input: ReplyPromptInput): { system: string; use
     "Decide about THEIR most recent message and answer with the JSON.",
   ].join("\n");
 
-  return { system: REPLY_SYSTEM, user, lang, handoffFloor: mustHandOff(signals, input.pricingProvided, unverified, detailGaps), unverified, detailGaps, recentOut: thread.filter((m) => m.direction === "out").slice(-2).map((m) => String(m.body)), callWanted: signals.wantsCall, priceUnknown: signals.price && !input.pricingProvided };
+  return { system: REPLY_SYSTEM, user, lang, handoffFloor: mustHandOff(signals, input.pricingProvided, unverified, detailGaps), unverified, detailGaps, recentOut: thread.filter((m) => m.direction === "out").slice(-2).map((m) => String(m.body)), callWanted: signals.wantsCall, priceUnknown: signals.price && !input.pricingProvided, lastInbound: String(lastIn?.body ?? ""), factsText };
 }
 
 /** Read the thread + Site Brain, ask the model for a decision, return the parsed Decision. Throws
@@ -351,7 +374,7 @@ export async function decideFromPrompt(built: ReturnType<typeof buildReplyPrompt
   const { system, user } = built;
   const answer = await completeReplyJson(user, system);
   return finalizeDecision(parseDecision(answer), {
-    handoffFloor: built.handoffFloor, unverified: built.unverified, detailGaps: built.detailGaps, lang: built.lang, recentOut: built.recentOut, callWanted: built.callWanted, priceUnknown: built.priceUnknown,
+    handoffFloor: built.handoffFloor, unverified: built.unverified, detailGaps: built.detailGaps, lang: built.lang, recentOut: built.recentOut, callWanted: built.callWanted, priceUnknown: built.priceUnknown, lastInbound: built.lastInbound, factsText: built.factsText,
     rewrite: async (instruction) => parseDecision(await completeReplyJson(`${user}
 
 ${instruction}`, system)),
@@ -369,9 +392,22 @@ ${instruction}`, system)),
  *  Pure apart from `rewrite`, so every branch is a unit test with a fake one. */
 export async function finalizeDecision(
   first: Decision,
-  ctx: { handoffFloor: { yes: boolean; reason: string }; unverified: string[]; detailGaps?: string[]; lang: Lang; rewrite: (instruction: string) => Promise<Decision>; recentOut?: string[]; callWanted?: boolean; priceUnknown?: boolean },
+  ctx: { handoffFloor: { yes: boolean; reason: string }; unverified: string[]; detailGaps?: string[]; lang: Lang; rewrite: (instruction: string) => Promise<Decision>; recentOut?: string[]; callWanted?: boolean; priceUnknown?: boolean; lastInbound?: string; factsText?: string },
 ): Promise<Decision> {
   let d = first;
+  const note = (s: string) => { d = { ...d, notes: [...(d.notes ?? []), s] }; };
+
+  // 0. TOO LONG FOR A CHAT. First, so every net below checks the text that will actually be sent. One rewrite asking for the
+  //    short version; if the model still writes an essay, autoReply sends it as two or three short messages instead.
+  if (d.action === "reply" && tooLongForChat(d.reply)) {
+    try {
+      const shorter = await ctx.rewrite(`YOUR DRAFT IS TOO LONG FOR WHATSAPP (${d.reply.length} characters): "${d.reply.slice(0, 320)}". Rewrite it as a person would text it: 1 or 2 SHORT sentences, at most 35 words, same language, keep only the most useful point and one next step. Keep the same intent and handoff.`);
+      if (shorter.action === "reply" && shorter.reply && !tooLongForChat(shorter.reply) && shorter.reply.length < d.reply.length) {
+        d = { ...d, reply: shorter.reply };
+        note("shortened: it read like an email");
+      }
+    } catch { /* it will be split into short messages instead */ }
+  }
 
   if (ctx.unverified.length && d.action === "reply" && assertsUnverified(d.reply, ctx.unverified)) {
     const what = ctx.unverified.join(", ");
@@ -385,6 +421,7 @@ export async function finalizeDecision(
       ? better
       : { ...d, action: "reply", reply: confirmLine(ctx.lang, ctx.unverified) };
     d = { ...d, needs_human: true, reason: d.reason || `asked about ${what} — not in our facts` };
+    note(`${what}: not in our facts — a team member will confirm`);
   }
 
   // 1b. DETAILS ABOUT THE BUSINESS ITSELF that we do not hold (address, phone, hours, licence number):
@@ -399,6 +436,7 @@ export async function finalizeDecision(
       ? better
       : { ...d, action: "reply", reply: confirmLine(ctx.lang, ctx.detailGaps ?? []) };
     d = { ...d, needs_human: true, reason: d.reason || `asked for ${what} — not in our facts` };
+    note(`${what}: not held — a team member will share it`);
   }
 
   // 1a. NO PUBLISHED PRICE. A customer asked, the business has printed none, and the reply either contains an
@@ -412,7 +450,28 @@ export async function finalizeDecision(
     d = better && better.action === "reply" && better.reply && !containsPriceAmount(better.reply) && statesPriceUnavailable(better.reply)
       ? better
       : { ...d, action: "reply", reply: PRICE_UNKNOWN_LINE[ctx.lang] };
-    d = { ...d, needs_human: true, reason: d.reason || "asked for the price — none is published" };
+    d = { ...d, needs_human: true, reason: d.reason || "asked for the price — none is published", templated: d.reply === PRICE_UNKNOWN_LINE[ctx.lang] ? true : d.templated };
+    note("price: none published — said so instead of quoting");
+  }
+
+  // 1a-2. AN AMOUNT WE WERE NOT GIVEN. When a price IS published, every amount in the reply must be one of the published
+  //     ones (or one the customer themselves wrote). A model asked to be persuasive will round, blend or invent: "about
+  //     $5,000 for you" when the page says "from $2,400". The offending sentence is rewritten once, then removed.
+  if (!ctx.priceUnknown && d.action === "reply" && containsPriceAmount(d.reply)) {
+    const known = `${ctx.factsText ?? ""}\n${ctx.lastInbound ?? ""}`;
+    const bad = unsupportedAmounts(d.reply, known);
+    if (bad.length) {
+      let better: Decision | null = null;
+      try {
+        better = await ctx.rewrite(`YOUR DRAFT QUOTED ${bad.join(", ")}, WHICH IS NOT A PRICE IN THE FACTS: "${d.reply.slice(0, 220)}". Rewrite it using ONLY prices that appear in the facts above (copy them exactly, with the package they belong to), or no price at all. Keep it to 1-2 short sentences.`);
+      } catch { /* fall through */ }
+      if (better && better.action === "reply" && better.reply && unsupportedAmounts(better.reply, known).length === 0) d = { ...d, reply: better.reply };
+      else {
+        const kept = d.reply.split(/(?<=[.!?])\s+/).filter((s) => unsupportedAmounts(s, known).length === 0).join(" ").trim();
+        d = { ...d, reply: kept || "A team member will send you the exact figure for your case.", needs_human: true, reason: d.reason || "quoted a price that is not in the facts" };
+      }
+      note(`price corrected: ${bad.join(", ")} is not a published figure`);
+    }
   }
 
   // 1c. CALLS. When they ask for or accept a call the system sends REAL slots (autoReply.ts); whatever the
@@ -421,16 +480,29 @@ export async function finalizeDecision(
   //     "I'll send you slots" when none are coming). Any OTHER reply that proposes a time for a call has
   //     those sentences removed. The assistant cannot see a calendar.
   if (d.action === "reply") {
-    if (d.intent === "meeting") d = { ...d, reply: MEETING_FALLBACK[ctx.lang] };
-    else if (proposesTime(d.reply)) {
+    // WHERE ARE WE IN ARRANGING THE CALL? If our last words asked when they would like it ("morning, afternoon or
+    // evening?") and they have now said ("subah"), the answer is an acknowledgement and an alert to the team — NOT the
+    // same question again. Asking twice made the duplicate-guard see a repeat and the assistant went SILENT on a customer
+    // who had just said yes (live, 2026-11-14: "subah" -> nothing, "???" -> nothing).
+    const asked = (ctx.recentOut ?? []).some(isMeetingAsk);
+    const pref = parseMeetingPreference(ctx.lastInbound ?? "");
+    if (asked && pref.any) {
+      d = { ...d, intent: "meeting", reply: MEETING_ACK[ctx.lang](pref.label), meeting_pref: pref.label, templated: true, needs_human: true, reason: `wants a call — ${pref.label}` };
+      note("call time noted: team told to schedule it");
+    } else if (d.intent === "meeting") {
+      d = { ...d, reply: asked ? MEETING_REASK[ctx.lang] : MEETING_FALLBACK[ctx.lang], templated: true };
+      note(asked ? "asked again when they would like the call" : "call requested: no calendar or booking link, asked when they are free");
+    } else if (proposesTime(d.reply)) {
       const cleaned = stripTimeProposals(d.reply);
       d = { ...d, reply: cleaned || MEETING_FALLBACK[ctx.lang] };
+      note("invented call time removed");
     }
   }
 
   // 1d. SMALL TALK. An assistant has watched, eaten and visited nothing.
   if (d.action === "reply" && d.intent === "smalltalk" && claimsExperience(d.reply)) {
-    d = { ...d, reply: SMALLTALK_DEFLECT[ctx.lang] };
+    d = { ...d, reply: SMALLTALK_DEFLECT[ctx.lang], templated: true };
+    note("small talk: claimed an experience, replaced");
   }
 
   // 2b. A CALL ASKED FOR AGAIN. One offer is salesmanship; the same question under every message is
@@ -439,6 +511,7 @@ export async function finalizeDecision(
   //     dropped from this reply — deterministically, with no second model call.
   if (d.action === "reply" && d.intent !== "meeting" && !ctx.callWanted && offersCall(d.reply) && (ctx.recentOut ?? []).some(offersCall)) {
     d = { ...d, reply: stripCallOffer(d.reply) };
+    note("call offer removed: already offered");
   }
 
   if (d.action === "reply" && !d.needs_human) {

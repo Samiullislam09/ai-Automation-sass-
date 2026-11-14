@@ -84,7 +84,17 @@ export type Goals = {
 export type Cta = { text: string | null; url: string | null; contact: string | null };
 
 /** How the business charges. "On request" is a real answer; an empty one stays empty. */
-export type Pricing = { model: "fixed" | "quote" | "subscription" | "free" | null; range: string | null; note: string | null };
+export type Pricing = {
+  model: "fixed" | "quote" | "subscription" | "free" | null;
+  range: string | null;
+  note: string | null;
+  /** The named packages / plans the site prints, each with its own "from" price and who it is for. Lets the assistant quote the ONE that
+   *  fits a customer ("Essential — from $2,400 — teams under 50") instead of reciting the whole range at a three-person buyer. */
+  packages?: PricePackage[];
+};
+
+/** One package or plan, as the site prints it. `from` is a price with its currency, copied from the page. */
+export type PricePackage = { name: string; from: string; best_for: string | null; duration: string | null; covers: string | null };
 
 /** How a customer finds and checks the business: the things asked on WhatsApp ("where is your office?", "what is your
  *  number?", "are you licensed?"). Read off the business's own website (lib/businessDetails.ts) — only what the site

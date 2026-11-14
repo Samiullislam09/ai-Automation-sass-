@@ -1,5 +1,6 @@
 "use client";
 import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import LiveLog from "./LiveLog";
 
 /** Mr. WhatsApp · Activity — what the AI is doing on WhatsApp, in plain words.
  *
@@ -180,6 +181,9 @@ function ActivityBody({ data, loading, showAll, onShowAll, onOpenChat }: { data:
 
         {/* 2b · how fast, and how well */}
         <Health data={data} onOpenChat={onOpenChat} />
+
+        {/* 2c · the live log: who the AI talks to and what it does */}
+        <LiveLog onOpenChat={onOpenChat} />
 
         {/* 3 · what happens next */}
         <section>

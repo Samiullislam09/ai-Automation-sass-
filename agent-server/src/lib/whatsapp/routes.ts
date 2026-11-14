@@ -12,6 +12,7 @@ import { supabase } from "../../supabase.js";
 import { env } from "../../env.js";
 import { linkedState, connect, disconnect, sendText, sessionStatus, getContactInfo, checkNumbers } from "./session.js";
 import { loadOverview } from "./activity.js";
+import { listLog } from "./events.js";
 import { getWhatsappAutoReply, setWhatsappAutoReply, getWhatsappSettings, patchWhatsappSettings } from "../outreach/settings.js";
 import { listAdmins, upsertAdmin, deleteAdmin, listNotifications, markNotificationsRead } from "./team.js";
 import { recordOutgoing } from "./store.js";
@@ -75,6 +76,20 @@ export function mountWhatsapp(app: Express): void {
       res.json({ ok: true, overview: await loadOverview(req.params.tenantId, Date.now(), { full: req.query.full === "1" }) });
     } catch (e: any) {
       res.status(500).json({ ok: false, error: e?.message ?? "could not build the overview" });
+    }
+  });
+
+  /** The live log: every message and every decision, newest first — who the AI is talking to, what it said, what it
+   *  decided and why. `?lead=` narrows it to one customer, `?before=` pages back. */
+  app.get("/whatsapp/:tenantId/log", async (req, res) => {
+    if (!authed(req, res)) return;
+    try {
+      const lead = typeof req.query.lead === "string" && req.query.lead ? req.query.lead : null;
+      const before = typeof req.query.before === "string" ? req.query.before : null;
+      const limit = Number(req.query.limit) || 80;
+      res.json({ ok: true, items: await listLog(req.params.tenantId, { limit, leadId: lead, before }) });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message ?? "could not read the log" });
     }
   });
 

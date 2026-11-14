@@ -11,6 +11,7 @@ import { tickFollowups } from "./lib/whatsapp/followup.js";
 import { tickMeetingNoShows } from "./lib/whatsapp/meeting.js";
 import { tickMeetingReminders } from "./lib/whatsapp/reminders.js";
 import { tickDailyDigests } from "./lib/whatsapp/digest.js";
+import { pruneEvents } from "./lib/whatsapp/events.js";
 
 /** The thing that makes this product actually automatic.
  *
@@ -89,6 +90,8 @@ async function tickRemindersSafe() {
 /** The owner's evening summary: due at a given local hour, so a 10-minute sweep is plenty. */
 async function tickDigestsSafe() {
   if (!due("daily-digest", 10 * MIN)) return;
+  // The decision log keeps three weeks: once a day is plenty to trim it.
+  if (due("prune-events", 24 * 60 * MIN)) void pruneEvents();
   try {
     const n = await tickDailyDigests();
     if (n) console.log(`[scheduler] daily summaries: sent ${n}`);

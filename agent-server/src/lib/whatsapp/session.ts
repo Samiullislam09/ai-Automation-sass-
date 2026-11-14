@@ -512,6 +512,17 @@ export async function simulateTyping(tenantId: string, phone: string, ms: number
   }
 }
 
+/** Show or clear the "typing…" indicator. autoReply.ts turns it ON the moment it starts working on a reply, so the customer
+ *  sees someone typing within a second — not only after the model has finished — and OFF if nothing is sent after all.
+ *  Best effort: presence is cosmetic and must never block a send. */
+export async function setPresence(tenantId: string, phone: string, state: "composing" | "paused"): Promise<void> {
+  const s = sessions.get(tenantId);
+  if (!s || s.status !== "connected" || !s.sock) return;
+  try {
+    await s.sock.sendPresenceUpdate(state, `${phone.replace(/[^0-9]/g, "")}@s.whatsapp.net`);
+  } catch { /* cosmetic */ }
+}
+
 /** Race a promise against a timeout so a hung Baileys call can never freeze a request forever. */
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return Promise.race([

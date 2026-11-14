@@ -21,9 +21,10 @@
 import { supabase } from "../../supabase.js";
 import { enqueueWhatsappAutoReply } from "../../queues.js";
 import { decideReply, detectOptOut, detectBuyIntent, isNearDuplicate, loadRecentThread } from "./decide.js";
-import { detectLanguage, classifyLanguage, HOLDING, MEETING_FALLBACK, OPT_OUT_ACK } from "./conversation.js";
+import { detectLanguage, classifyLanguage, splitForChat, HOLDING, OPT_OUT_ACK } from "./conversation.js";
+import { logEvent } from "./events.js";
 import { replyTiming, delayUntilReplyS, activeDelayS } from "./timing.js";
-import { sendText, simulateTyping } from "./session.js";
+import { sendText, simulateTyping, setPresence } from "./session.js";
 import { recordOutgoing } from "./store.js";
 import { notifyAdmins, createNotification } from "./team.js";
 import { ownerPings } from "./ownerPing.js";
@@ -50,8 +51,8 @@ const WAIT_REQUEUE_S = 8;
 
 /** The customer must have been quiet this long before we answer, so a burst of short messages gets
  *  ONE answer to all of them. Capped, so a customer who keeps typing is still answered. */
-const QUIET_MS = 5_000;
-const QUIET_MAX_WAIT_MS = 20_000;
+const QUIET_MS = 3_000;
+const QUIET_MAX_WAIT_MS = 12_000;
 
 /** One reply at a time per lead. The worker runs two jobs at once and a burst creates several jobs
  *  for the same chat; without this they race — each reads the thread before the other has sent,
@@ -83,9 +84,12 @@ export function reactiveCeiling(firstConnectedAtMs: number | null, nowMs: number
   return Math.max(150, warmupCap(firstConnectedAtMs, nowMs) * 4);
 }
 
-/** A human-ish typing time for a reply: ~35ms/char, clamped 1.2s–5s. */
+/** A human-ish typing time for a reply: ~22 ms/char, clamped 0.9–3.5 s. It was 35 ms/char up to 5 s on top of a 5-second quiet
+ *  window and a 2-6 s pause: a customer waited 13-21 seconds for a short answer (measured on a real chat, 2026-11-14). Short
+ *  replies now type for 2-3 s, and the typing indicator is shown while the model is still working (see handleAutoReplyLocked),
+ *  so most of it overlaps. */
 export function typingMs(text: string): number {
-  return Math.min(5000, Math.max(1200, text.length * 35));
+  return Math.min(3500, Math.max(900, text.length * 22));
 }
 
 /** The pure decision: may we auto-reply to this lead right now? Everything is passed in — no DB,
@@ -120,7 +124,9 @@ export async function scheduleAutoReply(job: AutoReplyJob): Promise<void> {
   // (a reply that comes a little early is better than one that never comes).
   let startAfter = activeDelayS();
   try {
-    startAfter = delayUntilReplyS(replyTiming(await recentTimingRows(job.tenantId, job.leadId), job.leadId), Date.now());
+    const timing = replyTiming(await recentTimingRows(job.tenantId, job.leadId), job.leadId);
+    startAfter = delayUntilReplyS(timing, Date.now());
+    if (timing.mode === "opening") void logEvent(job.tenantId, job.leadId, "system", `First message: answering in about ${Math.round(startAfter / 60 * 10) / 10} min (a natural pause, like a person)`);
   } catch { /* keep the default */ }
   try {
     await enqueueWhatsappAutoReply(job, { startAfter });
@@ -216,6 +222,7 @@ async function flagForHuman(tenantId: string, leadId: string, title: string, rea
   try {
     await supabase.from("leads").update({ needs_attention: true, needs_attention_reason: reason, updated_at: new Date().toISOString() }).eq("id", leadId).eq("tenant_id", tenantId);
     await createNotification(tenantId, { type: "system", title, body: reason, leadId });
+    void logEvent(tenantId, leadId, "flagged", `Handed to a person: ${reason}`);
   } catch (e: any) {
     console.warn("[whatsapp] could not flag lead for a human:", e?.message);
   }
@@ -275,6 +282,8 @@ export async function handleAutoReply(job: AutoReplyJob): Promise<void> {
 
 async function handleAutoReplyLocked(job: AutoReplyJob): Promise<void> {
   const { tenantId, leadId, phone } = job;
+  let typingOn = false;
+  let startedAt = Date.now();
   try {
     // THE FIRST-MESSAGE PAUSE, enforced where the answer is actually produced. scheduleAutoReply already
     // delays the job, but a burst creates several jobs (one per message) and a later one is queued with
@@ -306,6 +315,7 @@ async function handleAutoReplyLocked(job: AutoReplyJob): Promise<void> {
         .eq("id", leadId)
         .eq("tenant_id", tenantId);
       console.log(`[whatsapp] auto-reply: ${leadId} opted out — stopping`);
+      void logEvent(tenantId, leadId, "system", "Asked to stop: confirmed once, and will not be messaged again");
       // One short confirmation, then never again (the flag above blocks every later send). Silence after
       // "band karo" reads as being ignored; a person would say "understood". Best effort.
       try {
@@ -329,6 +339,7 @@ async function handleAutoReplyLocked(job: AutoReplyJob): Promise<void> {
     });
     if (!gate.ok) {
       console.log(`[whatsapp] auto-reply skipped for ${leadId}: ${gate.reason}`);
+      void logEvent(tenantId, leadId, "skipped", `Not answered: ${gate.reason}`);
       // Most reasons are right to stay quiet about (opted out, a human has the chat, we spoke last). Hitting the
       // daily ceiling is not: a customer is being left unanswered, and the owner has to be able to see it.
       if (/ceiling/.test(gate.reason ?? "")) {
@@ -343,6 +354,12 @@ async function handleAutoReplyLocked(job: AutoReplyJob): Promise<void> {
     // re-offering. If it handled the message, we're done.
     if (last.direction === "in" && (await handleMeetingReply(tenantId, leadId, phone, last.body))) return;
 
+    // "typing…" from the first second. The customer used to see nothing until the model had finished and THEN a typing
+    // indicator for several more seconds; now they see someone typing at once and the answer lands when it is ready.
+    startedAt = Date.now();
+    await setPresence(tenantId, phone, "composing");
+    typingOn = true;
+
     // THE DECISION ENGINE (§28.3): one call → intent + confidence + action + a drafted reply.
     const alreadySaid = await recentOutgoing(tenantId, leadId, 3);
     let decision;
@@ -354,7 +371,9 @@ async function handleAutoReplyLocked(job: AutoReplyJob): Promise<void> {
       // answer — and make that true by flagging the lead and alerting the owner.
       console.warn(`[whatsapp] reply model failed for ${leadId}: ${e?.message}`);
       // The LLM lane is full (a surge): wait a little and try again before telling the customer anything.
+      void logEvent(tenantId, leadId, "error", `The reply model failed: ${String(e?.message ?? e).slice(0, 160)}`);
       if (isBusy(e) && (job.deferred ?? 0) < MAX_DEFERRALS) {
+        void logEvent(tenantId, leadId, "system", `The reply model was busy: trying again (${(job.deferred ?? 0) + 1} of ${MAX_DEFERRALS})`);
         await enqueueWhatsappAutoReply({ ...job, deferred: (job.deferred ?? 0) + 1 }, { startAfter: DEFER_MIN_S + Math.floor(Math.random() * DEFER_SPREAD_S) });
         return;
       }
@@ -389,9 +408,29 @@ async function handleAutoReplyLocked(job: AutoReplyJob): Promise<void> {
       .eq("id", leadId)
       .eq("tenant_id", tenantId);
 
+    // THE CUSTOMER HAS SAID WHEN THEY WOULD LIKE THE CALL ("subah"), and nothing can book it automatically (no calendar, no
+    // booking link — otherwise the slots flow would have caught it). Record it on the lead, move the lead on, and tell the team
+    // exactly what to do. Not throttled like the other alerts: a call request is the most valuable thing in the inbox.
+    if (decision.meeting_pref) {
+      const whoM = (lead as any).company || (lead as any).name || phone;
+      await supabase.from("leads").update({
+        stage: "meeting_requested", needs_attention: true,
+        needs_attention_reason: `Wants a call — ${decision.meeting_pref}. Send them a time and a meeting link.`,
+        updated_at: new Date().toISOString(),
+      }).eq("id", leadId).eq("tenant_id", tenantId);
+      await notifyAdmins(tenantId, {
+        type: "meeting",
+        title: `📅 ${whoM} wants a call — ${decision.meeting_pref}`,
+        body: "No calendar or booking link is set up, so the call has to be arranged by hand.",
+        leadId,
+        whatsappText: `${whoM} wants a call: ${decision.meeting_pref}. Please message them a time and a meeting link. (To make this automatic, connect Google Calendar or add a booking link in WhatsApp → Settings → Meetings.)`,
+      }).catch((e: any) => console.warn("[whatsapp] meeting alert failed:", e?.message));
+      void logEvent(tenantId, leadId, "meeting", `Wants a call — ${decision.meeting_pref}. Team told to schedule it by hand (no calendar or booking link).`);
+    }
+
     // The model says a person must take over (price / document / complaint it cannot settle from
     // the facts it has): tell the owner on the transition only, so a long exchange is one alert.
-    if (decision.needs_human && !(lead as any).needs_attention) {
+    if (decision.needs_human && !(lead as any).needs_attention && !decision.meeting_pref) {
       const who0 = (lead as any).company || (lead as any).name || phone;
       void notifyOwner(tenantId, {
         title: `🙋 ${who0} needs you`,
@@ -406,28 +445,33 @@ async function handleAutoReplyLocked(job: AutoReplyJob): Promise<void> {
     // about timing doesn't re-fire the alert on every message. The actual slot-offering is P7; here
     // the normal reply still goes (the model acknowledges), and a human/P7 takes the booking from here.
     const MEETING_PRE = ["new", "approved", "contacted", "delivered", "read", "replied", "in_conversation", "interested"];
-    if (decision.intent === "meeting" && MEETING_PRE.includes(String((lead as any).stage))) {
+    if (decision.intent === "meeting" && !decision.meeting_pref && MEETING_PRE.includes(String((lead as any).stage))) {
       const who = (lead as any).company || (lead as any).name || phone;
       await supabase.from("leads").update({ stage: "meeting_requested", updated_at: new Date().toISOString() }).eq("id", leadId).eq("tenant_id", tenantId);
-      await notifyAdmins(tenantId, {
-        type: "meeting",
-        title: `📅 Meeting request from ${who}`,
-        body: "A lead asked to schedule a call/demo on WhatsApp.",
-        leadId,
-        whatsappText: `Meeting request from ${who} — they want to schedule a call. Open the WhatsApp inbox to set a time.`,
-      }).catch((e: any) => console.warn("[whatsapp] meeting alert failed:", e?.message));
 
       // Meeting scheduling, in order of preference:
       //  1) Google Calendar connected → offer real free slots (Option B, auto Meet on reply).
       //  2) else a booking link set (Calendly/Cal.com) → send it, the lead self-books (no Google).
-      //  3) else nothing sent here → the normal reply goes and the admins (just alerted) book by hand.
-      if (await offerMeeting(tenantId, leadId, phone).catch(() => false)) return;
-      if (await offerBookingLink(tenantId, leadId, phone).catch(() => false)) return;
-      // Neither worked (no calendar connected, no booking link). The model's own reply says "I'll send you
-      // some time slots" — and none are coming. Send the honest version instead: a person will fix a time,
-      // and one question that helps them do it. The admins were alerted above, so that is true.
-      const lang = detectLanguage(await loadRecentThread(supabase, tenantId, leadId, 10));
-      decision = { ...decision, action: "reply", reply: MEETING_FALLBACK[lang] };
+      //  3) else nothing can be sent: the reply (already the honest, code-written one — decide.ts) asks WHEN they are free, and
+      //     the owner is told exactly what is missing so a missing link is never a silent gap.
+      if (await offerMeeting(tenantId, leadId, phone).catch(() => false)) {
+        await notifyAdmins(tenantId, { type: "meeting", title: `📅 Meeting request from ${who}`, body: "Real time slots were offered on WhatsApp.", leadId, whatsappText: `${who} asked for a call — I offered them real time slots. I'll confirm and send the Meet link when they pick one.` }).catch(() => {});
+        void logEvent(tenantId, leadId, "meeting", "Call requested: offered real time slots from the calendar");
+        return;
+      }
+      if (await offerBookingLink(tenantId, leadId, phone).catch(() => false)) {
+        await notifyAdmins(tenantId, { type: "meeting", title: `📅 Meeting request from ${who}`, body: "Your booking link was sent.", leadId, whatsappText: `${who} asked for a call — I sent them your booking link.` }).catch(() => {});
+        void logEvent(tenantId, leadId, "meeting", "Call requested: sent the booking link");
+        return;
+      }
+      await notifyAdmins(tenantId, {
+        type: "meeting",
+        title: `📅 Meeting request from ${who}`,
+        body: "No calendar or booking link is set up, so no meeting link could be sent automatically.",
+        leadId,
+        whatsappText: `${who} asked for a call. I could not send a meeting link automatically — no Google Calendar is connected and no booking link is set. I asked them when they are free; please message them a time and a link. To make this automatic: WhatsApp → Settings → Meetings.`,
+      }).catch((e: any) => console.warn("[whatsapp] meeting alert failed:", e?.message));
+      void logEvent(tenantId, leadId, "meeting", "Call requested, but NO calendar or booking link is set up: asked when they are free and told the team to arrange it by hand");
     }
 
     // READY TO BUY (§29.8). Two tiers:
@@ -459,6 +503,7 @@ async function handleAutoReplyLocked(job: AutoReplyJob): Promise<void> {
 
     if (action === "ignore") {
       console.log(`[whatsapp] auto-reply: ${leadId} intent=${decision.intent} → ignore (${decision.reason})`);
+      void logEvent(tenantId, leadId, "skipped", `Chose not to reply (${decision.intent}): ${decision.reason || "nothing to answer"}`);
       return;
     }
     if (action === "wait") {
@@ -473,11 +518,17 @@ async function handleAutoReplyLocked(job: AutoReplyJob): Promise<void> {
     // more with those lines marked off-limits; if it STILL repeats, say nothing and hand the chat to
     // a person — a repeated line ("Sorry for the delay…" four times) is what made the customer
     // leave, and silence plus an alert beats a fifth copy.
-    if (alreadySaid.some((m) => isNearDuplicate(reply, m))) {
+    // A line the code itself wrote (a meeting acknowledgement, "cannot share the price") is exempt: it is deliberate and
+    // different in each state. The guard used to catch the SECOND such line, give up and send nothing — a customer who had
+    // just answered "subah" got silence (live, 2026-11-14).
+    if (!decision.templated && alreadySaid.some((m) => isNearDuplicate(reply, m))) {
       const retry = await decideReply(supabase, tenantId, leadId, { avoid: alreadySaid });
       const next = retry.action === "reply" ? retry.reply.trim() : "";
       if (!next || alreadySaid.some((m) => isNearDuplicate(next, m))) {
-        await flagForHuman(tenantId, leadId, "A customer needs you", "The assistant was about to repeat itself — please reply to this chat yourself.");
+        // Still a repeat. Never go silent on someone who just wrote: a short honest holding line (once), the lead flagged,
+        // the owner told — and the log says exactly what happened.
+        void logEvent(tenantId, leadId, "skipped", "The reply would have repeated an earlier message: sent a holding line and handed it to a person instead");
+        await holdingReply(tenantId, leadId, phone, alreadySaid, last.at);
         return;
       }
       reply = next;
@@ -493,15 +544,30 @@ async function handleAutoReplyLocked(job: AutoReplyJob): Promise<void> {
       return;
     }
 
-    await simulateTyping(tenantId, phone, typingMs(reply));
-    const { waMessageId } = await sendText(tenantId, phone, reply);
-    await recordOutgoing(supabase, tenantId, leadId, reply, waMessageId, "brain");
+    // As a person would send it: a long reply goes out as two or three SHORT messages, each with its own moment of typing.
+    // The first one's typing was already shown while the model worked, so only the remainder of it is waited out.
+    const parts = splitForChat(reply);
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      if (i === 0) await sleep(Math.max(0, typingMs(part) - (Date.now() - startedAt)));
+      else { await setPresence(tenantId, phone, "composing"); await sleep(typingMs(part)); }
+      const { waMessageId } = await sendText(tenantId, phone, part);
+      await recordOutgoing(supabase, tenantId, leadId, part, waMessageId, "brain");
+    }
     // Reply time, as the customer felt it: their message arriving → ours leaving. The number every
     // "is it fast enough?" question should be answered with, instead of a feeling.
-    if (last.at) console.log(`[whatsapp] replied to ${leadId} in ${Math.round((Date.now() - Date.parse(last.at)) / 1000)}s`);
+    const latencyS = last.at ? Math.round((Date.now() - Date.parse(last.at)) / 1000) : null;
+    if (latencyS != null) console.log(`[whatsapp] replied to ${leadId} in ${latencyS}s`);
+    void logEvent(tenantId, leadId, "sent", `Replied${latencyS != null ? ` in ${latencyS}s` : ""}${parts.length > 1 ? ` (as ${parts.length} short messages)` : ""}`, {
+      text: reply.slice(0, 600), intent: decision.intent, needs_human: decision.needs_human, reason: decision.reason, notes: decision.notes ?? [], latency_s: latencyS, parts: parts.length,
+    });
   } catch (e: any) {
     console.warn(`[whatsapp] auto-reply failed for ${leadId}:`, e?.message);
+    void logEvent(tenantId, leadId, "error", `The reply failed: ${String(e?.message ?? e).slice(0, 200)}`);
     // The customer's message is NOT left unanswered in silence: the owner sees it on the Leads page.
     await flagForHuman(tenantId, leadId, "A customer is waiting", "The assistant could not reply (a technical error) — please answer this chat yourself.");
+  } finally {
+    // Whatever happened, do not leave "typing…" showing on the customer's phone.
+    if (typingOn) await setPresence(tenantId, phone, "paused").catch(() => {});
   }
 }
