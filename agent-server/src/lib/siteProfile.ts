@@ -86,6 +86,20 @@ export type Cta = { text: string | null; url: string | null; contact: string | n
 /** How the business charges. "On request" is a real answer; an empty one stays empty. */
 export type Pricing = { model: "fixed" | "quote" | "subscription" | "free" | null; range: string | null; note: string | null };
 
+/** How a customer finds and checks the business: the things asked on WhatsApp ("where is your office?", "what is your
+ *  number?", "are you licensed?"). Read off the business's own website (lib/businessDetails.ts) — only what the site
+ *  prints — and editable by the owner, whose version always wins. */
+export type BusinessDetails = {
+  address: string | null;
+  phone: string | null;
+  email: string | null;
+  whatsapp: string | null;
+  /** Opening or working hours, as the business states them. */
+  hours: string | null;
+  /** A licence, registration, tax or accreditation number or named registration. */
+  registration: string | null;
+};
+
 /** A buyer's worry with the honest answer — an article section, not a slogan. */
 export type Objection = { question: string; answer: string };
 
@@ -203,6 +217,7 @@ export const PROFILE_FIELDS = [
   "cta",
   "usp",
   "pricing",
+  "business_details",
   "objections",
   "credentials",
   "money_pages",
@@ -232,6 +247,7 @@ export type SiteProfile = {
   cta: Cta | null;
   usp: string[];
   pricing: Pricing | null;
+  business_details: BusinessDetails | null;
   objections: Objection[];
   credentials: Credential[];
   money_pages: MoneyPage[];
@@ -296,6 +312,7 @@ export function emptyProfile(): SiteProfile {
     cta: null,
     usp: [],
     pricing: null,
+    business_details: null,
     objections: [],
     credentials: [],
     money_pages: [],
@@ -577,6 +594,19 @@ export function profileBlock(profile: SiteProfile | null | undefined, options?: 
     }
   }
 
+  if (p.business_details) {
+    const d = p.business_details;
+    const c = [
+      d.address ? `Address: ${d.address}` : "",
+      d.phone ? `Phone: ${d.phone}` : "",
+      d.whatsapp ? `WhatsApp: ${d.whatsapp}` : "",
+      d.email ? `Email: ${d.email}` : "",
+      d.hours ? `Hours: ${d.hours}` : "",
+      d.registration ? `Licence / registration: ${d.registration}` : "",
+    ].filter(Boolean);
+    if (c.length) lines.push("", "CONTACT & BUSINESS DETAILS (state exactly as written; anything not listed is unknown):", ...c.map((x) => `- ${x}`));
+  }
+
   if (p.voice) {
     const v: string[] = [];
     if (p.voice.tone) v.push(`Tone: ${p.voice.tone}`);
@@ -705,6 +735,7 @@ function label(field: ProfileField): string {
     geo: "Location / service area",
     language: "Language",
     owner_name: "Your name",
+    business_details: "Contact & business details",
   };
   return LABELS[field] ?? field;
 }

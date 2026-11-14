@@ -30,7 +30,7 @@ let failed = 0;
 
 for (const sc of SCENARIOS.filter((s) => s.id.includes(filter))) {
   const built = buildReplyPrompt({
-    business: sc.pricing ? BUSINESS_WITH_PRICE : BUSINESS_NO_PRICE,
+    business: (sc.pricing ? BUSINESS_WITH_PRICE : BUSINESS_NO_PRICE) + (sc.extraBrief ?? ""),
     pricingProvided: sc.pricing,
     lead: { company: "Acme Trading", city: "Dubai" },
     thread: sc.thread,

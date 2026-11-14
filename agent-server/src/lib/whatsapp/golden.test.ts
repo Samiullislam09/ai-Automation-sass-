@@ -15,7 +15,7 @@ const { classifyLanguage, detectLanguage, detectSignals, conversationStage, must
 
 for (const sc of SCENARIOS) {
   test(`golden/${sc.id}: ${sc.why}`, () => {
-    const built = buildReplyPrompt({ business: "Business name: wca-global.com", pricingProvided: sc.pricing, lead: null, thread: sc.thread, knowledge: sc.knowledge });
+    const built = buildReplyPrompt({ business: "Business name: wca-global.com" + (sc.extraBrief ?? ""), pricingProvided: sc.pricing, lead: null, thread: sc.thread, knowledge: sc.knowledge });
     assert.equal(built.lang, sc.expect.lang, "reply language");
     assert.equal(built.handoffFloor.yes, sc.expect.handoff, `handoff floor (${built.handoffFloor.reason || "none"})`);
     // The model is always told the language and always sees the customer's newest line last.

@@ -3,6 +3,7 @@ import { Agent, type AgentContext, type AgentJobData } from "./base.js";
 import { supabase } from "../supabase.js";
 import { completeJson } from "../lib/llm.js";
 import { detectPricing, rangeIsGrounded } from "../lib/pricing.js";
+import { detectBusinessDetails } from "../lib/businessDetails.js";
 import { embed } from "../lib/embeddings.js";
 import { loadInsights } from "../lib/insights.js";
 import {
@@ -434,6 +435,25 @@ export class AnalystAgent extends Agent {
       } catch (e: any) {
         console.error("[analyst] price verification failed:", e?.message);
         failures.push({ field: "pricing", error: String(e?.message ?? e).slice(0, 200) });
+      }
+
+      // ── contact & business details: address, phone, email, WhatsApp, hours, licence ─────────
+      // What a customer asks on WhatsApp ("where is your office?", "what is your number?") and what every
+      // business prints in its footer or on /contact. Read off ALL the crawled pages by lib/businessDetails.ts:
+      // email and phone by pattern (a model can write a plausible number, a pattern can only find one that is
+      // there), the rest by a model whose every word must then be found on a single page. Nothing the site does
+      // not print is ever stored — so the assistant either states a real detail or says a person will share it.
+      // An owner-typed value is carried forward untouched in step 9.
+      try {
+        const found = await detectBusinessDetails(pages, (tenant as any)?.website_url ?? null, (prompt) => completeJson(prompt));
+        if (found) {
+          profile.business_details = found.details;
+          sources.business_details = found.sources;
+          confidence.business_details = "medium";
+        }
+      } catch (e: any) {
+        console.error("[analyst] business details failed:", e?.message);
+        failures.push({ field: "business_details", error: String(e?.message ?? e).slice(0, 200) });
       }
 
       const objections: Objection[] = [];

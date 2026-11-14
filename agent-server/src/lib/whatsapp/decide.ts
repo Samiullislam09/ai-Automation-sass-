@@ -156,6 +156,21 @@ export function buildBusinessBrief(profile: any, tenant: { name?: string | null;
   } else {
     lines.push("Pricing: NOT PROVIDED to you.");
   }
+  // How a customer reaches and checks the business. Read from the website and kept in the Site Brain (or typed
+  // by the owner); stated exactly as written. What is not listed here is NOT known — and when asked for it the
+  // assistant says a team member will share it (missingDetails in conversation.ts), it never makes one up.
+  const bd = p.business_details;
+  if (bd) {
+    const c = [
+      bd.address ? `Address: ${bd.address}` : "",
+      bd.phone ? `Phone: ${bd.phone}` : "",
+      bd.whatsapp ? `WhatsApp: ${bd.whatsapp}` : "",
+      bd.email ? `Email: ${bd.email}` : "",
+      bd.hours ? `Working hours: ${bd.hours}` : "",
+      bd.registration ? `Licence / registration: ${bd.registration}` : "",
+    ].filter(Boolean);
+    if (c.length) lines.push(`Contact details (you may give these exactly as written):\n${c.map((x) => `- ${x}`).join("\n")}`);
+  }
   if (Array.isArray(p.proof) && p.proof.length) lines.push(`Proven facts: ${p.proof.slice(0, 5).map((f: any) => f?.claim).filter(Boolean).join("; ")}`);
   if (Array.isArray(p.credentials) && p.credentials.length) lines.push(`Credentials: ${p.credentials.slice(0, 5).map((c: any) => c?.name).filter(Boolean).join(", ")}`);
   if (Array.isArray(p.objections) && p.objections.length) {

@@ -15,6 +15,7 @@ import {
   type Voice,
   type Cta,
   type Pricing,
+  type BusinessDetails,
   type Objection,
   type Credential,
   type MoneyPage,
@@ -350,6 +351,20 @@ function FieldValue({ field, profile }: { field: ProfileField; profile: SiteProf
       );
     }
 
+    case "business_details": {
+      const d = profile.business_details;
+      if (!d) return null;
+      const rows: [string, string | null][] = [
+        ["Address", d.address], ["Phone", d.phone], ["WhatsApp", d.whatsapp], ["Email", d.email],
+        ["Hours", d.hours], ["Licence / registration", d.registration],
+      ];
+      return (
+        <div>
+          {rows.filter(([, v]) => v).map(([k, v]) => <p key={k} className="sb-pv brk"><b>{k}:</b> {v}</p>)}
+        </div>
+      );
+    }
+
     case "objections":
       return (
         <ul className="sb-rows">
@@ -635,6 +650,39 @@ function FieldEditor({
             <label htmlFor="sb-price-note">Anything a price article must say</label>
             <textarea id="sb-price-note" rows={2} value={pr.note ?? ""} placeholder="e.g. audit days billed separately"
               onChange={(e) => onChange({ ...pr, note: e.target.value })} />
+          </div>
+        </div>
+      );
+    }
+
+    case "business_details": {
+      const d: BusinessDetails = value ?? { address: null, phone: null, email: null, whatsapp: null, hours: null, registration: null };
+      const set = (k: keyof BusinessDetails, v: string) => onChange({ ...d, [k]: v });
+      return (
+        <div className="sb-stack">
+          <div className="field">
+            <label htmlFor="sb-bd-address">Office address</label>
+            <input id="sb-bd-address" ref={firstRef} value={d.address ?? ""} placeholder="e.g. Office 12, Al Majaz Tower, Sharjah, UAE" onChange={(e) => set("address", e.target.value)} />
+          </div>
+          <div className="field">
+            <label htmlFor="sb-bd-phone">Phone (with country code)</label>
+            <input id="sb-bd-phone" inputMode="tel" value={d.phone ?? ""} placeholder="e.g. +971 6 000 0000" onChange={(e) => set("phone", e.target.value)} />
+          </div>
+          <div className="field">
+            <label htmlFor="sb-bd-whatsapp">WhatsApp number</label>
+            <input id="sb-bd-whatsapp" inputMode="tel" value={d.whatsapp ?? ""} placeholder="e.g. +971 50 000 0000" onChange={(e) => set("whatsapp", e.target.value)} />
+          </div>
+          <div className="field">
+            <label htmlFor="sb-bd-email">Email</label>
+            <input id="sb-bd-email" type="email" value={d.email ?? ""} placeholder="e.g. info@yourbusiness.com" onChange={(e) => set("email", e.target.value)} />
+          </div>
+          <div className="field">
+            <label htmlFor="sb-bd-hours">Working hours</label>
+            <input id="sb-bd-hours" value={d.hours ?? ""} placeholder="e.g. Sunday to Thursday, 9:00 AM – 6:00 PM" onChange={(e) => set("hours", e.target.value)} />
+          </div>
+          <div className="field">
+            <label htmlFor="sb-bd-reg">Licence / registration</label>
+            <input id="sb-bd-reg" value={d.registration ?? ""} placeholder="e.g. Trade licence no. 1234567" onChange={(e) => set("registration", e.target.value)} />
           </div>
         </div>
       );

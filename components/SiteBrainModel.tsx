@@ -51,6 +51,16 @@ export type Cta = { text: string | null; url: string | null; contact: string | n
  *  actually ask for; both may be absent, and "on request" is a real answer. */
 export type Pricing = { model: "fixed" | "quote" | "subscription" | "free" | null; range: string | null; note: string | null };
 
+/** How a customer finds and checks the business — the things asked on WhatsApp. Read off the site, owner-editable. */
+export type BusinessDetails = {
+  address: string | null;
+  phone: string | null;
+  email: string | null;
+  whatsapp: string | null;
+  hours: string | null;
+  registration: string | null;
+};
+
 /** A worry a buyer has, with the honest answer. Becomes an article section, not a slogan. */
 export type Objection = { question: string; answer: string };
 
@@ -95,6 +105,7 @@ export const PROFILE_FIELDS = [
   "cta",
   "usp",
   "pricing",
+  "business_details",
   "objections",
   "credentials",
   "money_pages",
@@ -123,6 +134,7 @@ export type SiteProfile = {
   cta: Cta | null;
   usp: string[];
   pricing: Pricing | null;
+  business_details: BusinessDetails | null;
   objections: Objection[];
   credentials: Credential[];
   money_pages: MoneyPage[];
@@ -175,6 +187,7 @@ export function emptyProfile(): SiteProfile {
     cta: null,
     usp: [],
     pricing: null,
+    business_details: null,
     objections: [],
     credentials: [],
     money_pages: [],
@@ -382,6 +395,23 @@ export function coerceField(field: ProfileField, raw: unknown): CoerceResult {
       return { ok: true, value: value.model || value.range || value.note ? value : null };
     }
 
+    case "business_details": {
+      if (raw === null) return { ok: true, value: null };
+      if (typeof raw !== "object" || Array.isArray(raw)) return { ok: false, error: `"business_details" must be an object.` };
+      const d = raw as Partial<BusinessDetails>;
+      const email = nullableStr(d.email);
+      if (email && !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]{2,}$/.test(email)) return { ok: false, error: "That does not look like an email address." };
+      const phone = nullableStr(d.phone);
+      const whatsapp = nullableStr(d.whatsapp);
+      for (const [label, v] of [["phone", phone], ["WhatsApp", whatsapp]] as const) {
+        if (v && (!/^[+()\d\s.-]{6,30}$/.test(v) || v.replace(/\D/g, "").length < 6)) return { ok: false, error: `The ${label} number should be digits with the country code, e.g. +971 50 123 4567.` };
+      }
+      const address = nullableStr(d.address), hours = nullableStr(d.hours), registration = nullableStr(d.registration);
+      if ((address && address.length > 200) || (hours && hours.length > 200) || (registration && registration.length > 160)) return { ok: false, error: "Please keep each detail short (a line or two)." };
+      const value: BusinessDetails = { address, phone, email, whatsapp, hours, registration };
+      return { ok: true, value: Object.values(value).some(Boolean) ? value : null };
+    }
+
     case "objections": {
       if (!Array.isArray(raw)) return { ok: false, error: `"objections" must be a list.` };
       const out: Objection[] = [];
@@ -452,6 +482,7 @@ export function isFieldEmpty(profile: SiteProfile, field: ProfileField): boolean
   if (field === "goals") return !v.primary && !v.kpis?.length && !v.focus?.length;
   if (field === "cta") return !v.text && !v.url && !v.contact;
   if (field === "pricing") return !v.model && !v.range && !v.note;
+  if (field === "business_details") return !v.address && !v.phone && !v.whatsapp && !v.email && !v.hours && !v.registration;
   if (field === "publishing_rules") return !v.words_min && !v.words_max && !v.byline && !v.image_policy && !v.disclaimer;
   if (typeof v === "string") return !v.trim();
   return false;
@@ -605,6 +636,18 @@ export const FIELD_GROUPS: FieldGroup[] = [
     title: "Your voice",
     sub: "How the writing should sound, and what it must never do.",
     fields: [{ field: "voice", label: "House voice", hint: "Tone plus the do / do-not list handed to every writer.", prompt: "e.g. formal, no hype, “we” voice, numbers with sources" }],
+  },
+  {
+    title: "How customers reach you",
+    sub: "Address, phone, email, hours and licence — the things people ask on WhatsApp. Read from your website; fix anything that is wrong.",
+    fields: [
+      {
+        field: "business_details",
+        label: "Contact & business details",
+        hint: "The assistant gives these exactly as written. A detail left empty is never guessed: it tells the customer a team member will share it.",
+        prompt: "e.g. Office 12, Al Majaz Tower, Sharjah · +971 6 000 0000 · info@yourbusiness.com",
+      },
+    ],
   },
   {
     title: "Who is writing",
@@ -767,6 +810,7 @@ export const FRIENDLY_LABEL: Record<ProfileField, string> = {
   cta: "Where readers should go next",
   usp: "What makes you different",
   pricing: "How you charge",
+  business_details: "How customers reach you",
   objections: "What buyers worry about",
   credentials: "Your credentials",
   money_pages: "Pages that earn",
@@ -794,6 +838,9 @@ export function previewOf(profile: SiteProfile, field: ProfileField): string {
   if (field === "pricing" && v) {
     const model = v.model ? { fixed: "Fixed price", quote: "Quote based", subscription: "Subscription", free: "Free" }[v.model as string] : null;
     return cut([model, v.range, v.note].filter(Boolean).join(" · ") || "Set");
+  }
+  if (field === "business_details" && v) {
+    return cut([v.address, v.phone || v.whatsapp, v.email].filter(Boolean).join(" · ") || "Set");
   }
   if (field === "publishing_rules" && v) {
     const len = v.words_min || v.words_max ? `${v.words_min ?? "?"}–${v.words_max ?? "?"} words` : null;

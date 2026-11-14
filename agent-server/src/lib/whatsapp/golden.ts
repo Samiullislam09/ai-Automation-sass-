@@ -21,6 +21,8 @@ export type Scenario = {
   /** What this protects, in a sentence — shown when it fails. */
   why: string;
   pricing: boolean;
+  /** Extra lines for the business brief, e.g. saved contact details. */
+  extraBrief?: string;
   thread: Msg[];
   /** Passages the website lookup would have returned for this question (knowledge.ts). */
   knowledge?: Passage[];
@@ -189,5 +191,13 @@ export const SCENARIOS: Scenario[] = [
     pricing: true,
     thread: [OPENER, IN("12 log hai, ISO 9001 chahiye, price?"), OUT("ISO 9001 ke liye usually AED 4,000-9,000. Kya ek chhoti call helpful rahegi? Main kuch time slots bhej sakta hu."), IN("haan theek hai ek baar call kar lete hain")],
     expect: { lang: "hinglish", handoff: false, intent: "meeting", replyAvoids: [/\b(\d{1,2}\s?(am|pm|baje)|tomorrow|tonight|kal|aaj)\b/i] },
+  },
+  {
+    id: "contact-known",
+    why: "Contact details saved in the Site Brain are GIVEN, exactly as written, in the customer's language — not deferred to a person.",
+    pricing: true,
+    extraBrief: "\nContact details (you may give these exactly as written):\n- Address: Office 12, Al Majaz Tower, Sharjah, UAE\n- Phone: +971 6 531 2345\n- Email: info@wca-global.com",
+    thread: [OPENER, IN("haan interested hu"), OUT("Bahut badhiya — kaunsa standard chahiye?"), IN("tumhara office address aur phone number do")],
+    expect: { lang: "hinglish", handoff: false, replyMatches: [/Al Majaz Tower/i, /531 2345/], replyAvoids: [EMPTY_PROMISE] },
   },
 ];
