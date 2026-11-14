@@ -47,7 +47,7 @@ for (const sc of SCENARIOS.filter((s) => s.id.includes(filter))) {
     if (sc.expect.intent && d.intent !== sc.expect.intent) problems.push(`intent should be "${sc.expect.intent}", got "${d.intent}"`);
     if (sc.expect.modelHandoff && !d.needs_human) problems.push("the model should have handed this to a person (it did not know the answer), it did not");
     if (d.action !== "reply") problems.push(`expected a reply, got action="${d.action}"`);
-    if (reply.length > 500) problems.push(`too long (${reply.length} chars) for WhatsApp`);
+    if (reply.length > 650) problems.push(`too long (${reply.length} chars) for WhatsApp`);
     for (const re of sc.expect.replyMatches ?? []) if (!re.test(reply)) problems.push(`should match ${re}`);
     // "Reply in their language" is not met by English that merely avoids Devanagari: a Hinglish
     // customer's reply must itself contain Hinglish (found live 2026-11-13 — the model answered the

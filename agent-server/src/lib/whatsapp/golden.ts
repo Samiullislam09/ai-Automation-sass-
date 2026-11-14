@@ -69,7 +69,14 @@ export const SCENARIOS: Scenario[] = [
     why: "No price on file: say so honestly, ask the ONE qualifying detail, and pull the owner in — never stall with 'sending shortly'.",
     pricing: false,
     thread: [OPENER, IN("Yes interested"), OUT("Great — which standard are you after?"), IN("ISO 9001. Give me price")],
-    expect: { lang: "en", handoff: true, replyMatches: [/\?/], replyAvoids: [EMPTY_PROMISE, SORRY_FOR_DELAY] },
+    expect: { lang: "en", handoff: true, replyMatches: [/can'?t share|cannot share|unable to share|not able to share/i], replyAvoids: [EMPTY_PROMISE, SORRY_FOR_DELAY, /AED|USD|[$€£₹]/i] },
+  },
+  {
+    id: "price-not-set-hinglish",
+    why: "Asked the price with none published, in Hinglish: say plainly 'abhi price nahi bata sakta', give no number, promise the team's quote.",
+    pricing: false,
+    thread: [OPENER, IN("haan batao, iska price kitna hai?")],
+    expect: { lang: "hinglish", handoff: true, replyMatches: [/nahi (bata|de|share|kar)|(share|bata|de) nahi|can'?t share/i], replyAvoids: [EMPTY_PROMISE, /AED|USD|[$€£₹]/i] },
   },
   {
     id: "send-outline",

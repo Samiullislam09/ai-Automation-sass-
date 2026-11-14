@@ -278,7 +278,7 @@ const DETAIL_TOPICS: { label: string; ask: RegExp; have: RegExp }[] = [
   {
     label: "our office address",
     ask: /\b(address|headquarters?|head office|branch|where (is|are) (your|ur) office|office (kaha|kahan|kidhar|location)|(your|aapka|tumhara|aapki|tumhari) office|location)\b/i,
-    have: /\b(address|street|tower|building|p\.?o\.? ?box|located (at|in)|headquartered|our office (is|at|in)|plot|floor)\b/i,
+    have: /\b(street|road|tower|building|p\.?o\.? ?box|plot|floor|suite|located (at|in)|headquartered|our office (is|at|in)|(unit|office|shop|villa|flat)\s*#?\d+)\b|\baddress\s*[:\-–]\s*\S|\b[A-Z]\d{1,3}[-–]\d{2,4}\b/i,
   },
   {
     label: "our phone number / email",
@@ -323,6 +323,49 @@ export const OPT_OUT_ACK: Record<Lang, string> = {
   hinglish: "Samajh gaya — aage se aapko message nahi karunga. Kabhi zaroorat ho to bas likh dena.",
   hi: "समझ गया — अब आगे आपको संदेश नहीं भेजूँगा। कभी ज़रूरत हो तो बस लिख देना।",
   ur: "Samajh gaya — ab aap ko message nahi karunga. Kabhi zaroorat ho to bas likh dena.",
+};
+
+
+/* ── "I cannot share the price" — said plainly, never replaced by a made-up number ─────── */
+
+const AMOUNT_IN_REPLY = /(?:\b(?:aed|usd|inr|sar|pkr|eur|gbp|qar|kwd|bhd|omr|rs\.?)\s?\d|[$€£₹]\s?\d|\d[\d,.]*\s?(?:aed|usd|inr|sar|pkr|eur|gbp|rs\b|dirhams?|rupees?|riyals?|dollars?|lakh|lac))/i;
+
+/** A currency amount in a reply. When the business has published no price, ANY amount in a reply is invented. */
+export function containsPriceAmount(text: string): boolean {
+  return AMOUNT_IN_REPLY.test(String(text ?? ""));
+}
+
+const PRICE_WORD = String.raw`(?:price|prices|pricing|cost|rate|rates|quote|quotation|fee|fees|figure|kimat|qeemat|keemat|daam|rate|कीमत|प्राइस|रेट)`;
+const SAYS_UNAVAILABLE = new RegExp(
+  [
+    String.raw`(?:can't|cannot|can not|unable to|not able to|won't be able to|don't have|do not have)[^.?!]{0,40}${PRICE_WORD}`,
+    String.raw`${PRICE_WORD}[^.?!]{0,40}(?:not available|can't be shared|cannot be shared|not something i can|isn't available)`,
+    String.raw`(?:abhi|filhaal|is waqt)[^.?!]{0,30}${PRICE_WORD}[^.?!]{0,30}(?:nahi|nahin)`,
+    String.raw`${PRICE_WORD}[^.?!]{0,30}(?:nahi|nahin)\s+(?:bata|de|share|bol|keh)`,
+    String.raw`(?:नहीं बता|नहीं दे)[^.?!]{0,30}`,
+  ].join("|"),
+  "i",
+);
+
+/** Does the reply say, in so many words, that the price cannot be shared right now? */
+export function statesPriceUnavailable(text: string): boolean {
+  return SAYS_UNAVAILABLE.test(String(text ?? ""));
+}
+
+/** What is said when a customer asks the price and the business has published none: clear, one next step,
+ *  and no figure. */
+export const PRICE_UNAVAILABLE_PHRASE: Record<Lang, string> = {
+  en: "I can't share the price right now",
+  hinglish: "Abhi main aapko price nahi bata sakta",
+  hi: "अभी मैं आपको कीमत नहीं बता सकता",
+  ur: "Abhi main aap ko qeemat nahi bata sakta",
+};
+
+export const PRICE_UNKNOWN_LINE: Record<Lang, string> = {
+  en: "I can't share the price right now — our team will send you an exact quote. To get it right, could you tell me a little about what you need?",
+  hinglish: "Abhi main aapko price nahi bata sakta — hamari team aapko exact quote bhejegi. Sahi quote ke liye aap apni requirement thodi batayenge?",
+  hi: "अभी मैं आपको कीमत नहीं बता सकता — हमारी टीम आपको सटीक कोटेशन भेजेगी। सही कोटेशन के लिए क्या आप अपनी ज़रूरत थोड़ी बताएँगे?",
+  ur: "Abhi main aap ko qeemat nahi bata sakta — hamari team aap ko exact quote bhejegi. Sahi quote ke liye aap apni zaroorat thori batayenge?",
 };
 
 /* ── not asking for a call in every message ─────────────────────────────────────────────── */
@@ -405,7 +448,7 @@ export function signalsBrief(s: Signals, pricingProvided: boolean, lang: Lang = 
   if (s.botQuestion) out.push("They are asking whether you are a bot/AI — answer honestly (you are the team's AI assistant; a person can join any time).");
   if (s.price) out.push(pricingProvided
     ? "They are asking about PRICE — state the pricing from the facts in your FIRST sentence."
-    : "They are asking about PRICE and no pricing was given to you — say honestly it depends on their situation, ask the ONE detail you need, and say a team member will send the exact figure. Set handoff true.");
+    : `They are asking about PRICE and the business has published NO price you may quote. Your FIRST sentence must say clearly that you cannot share the price right now, in THEIR language, e.g. "${PRICE_UNAVAILABLE_PHRASE[lang]}" — and the WHOLE reply stays in that one language. Give NO number, NO range, NO 'starting from' and NO estimate of any kind. Then say a team member will send an exact quote, and ask ONE question about what they need so the quote is right. Set handoff true.`);
   if (s.document) out.push("They want a DOCUMENT (outline/brochure/proposal). You cannot attach files: give the useful content in 2-4 short lines now and say a team member will share the full document. Set handoff true.");
   else if (s.details) out.push("They want DETAILS — give real content now, in this message.");
   if (s.delayComplaint) out.push(`They are complaining about slow replies — open with exactly this apology, in their language: "${APOLOGY[lang]}" — then, in the SAME language, answer their actual question in the same message. Set handoff true.`);

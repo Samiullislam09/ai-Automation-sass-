@@ -47,7 +47,8 @@ test("price: the model is told to lead with the price when we hold one, and to h
   const given = buildReplyPrompt({ business: "x", pricingProvided: true, lead: null, thread });
   assert.match(given.user, /state the pricing from the facts in your FIRST sentence/);
   const none = buildReplyPrompt({ business: "x", pricingProvided: false, lead: null, thread });
-  assert.match(none.user, /no pricing was given to you/);
+  assert.match(none.user, /published NO price you may quote/);
+  assert.match(none.user, /cannot share the price right now/);
   assert.match(none.user, /Set handoff true/);
 });
 

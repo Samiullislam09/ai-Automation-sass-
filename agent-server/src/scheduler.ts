@@ -9,6 +9,8 @@ import { recordRank } from "./lib/rankTracking.js";
 import { tickOutbound } from "./lib/whatsapp/outbound.js";
 import { tickFollowups } from "./lib/whatsapp/followup.js";
 import { tickMeetingNoShows } from "./lib/whatsapp/meeting.js";
+import { tickMeetingReminders } from "./lib/whatsapp/reminders.js";
+import { tickDailyDigests } from "./lib/whatsapp/digest.js";
 
 /** The thing that makes this product actually automatic.
  *
@@ -57,7 +59,7 @@ export function startScheduler() {
  *  everything booked before the brain existed — the old table drains, it is not migrated
  *  (plan §22 con #10). */
 async function sweep() {
-  await Promise.allSettled([tick(), tickOrders(), brainSweep(), tickAudits(), tickRanks(), tickOutboundSafe(), tickFollowupsSafe(), tickMeetingsSafe()]);
+  await Promise.allSettled([tick(), tickOrders(), brainSweep(), tickAudits(), tickRanks(), tickOutboundSafe(), tickFollowupsSafe(), tickMeetingsSafe(), tickRemindersSafe(), tickDigestsSafe()]);
 }
 
 // Supabase free tier bills LOG INGESTION (every query writes log lines). The WhatsApp sweeps don't
@@ -72,6 +74,28 @@ function due(key: string, intervalMs: number): boolean {
   return true;
 }
 const MIN = 60_000;
+
+/** Reminders for booked calls: the 1-hour reminder has a 55-minute window, so a 5-minute sweep always lands in it. */
+async function tickRemindersSafe() {
+  if (!due("meeting-reminders", 5 * MIN)) return;
+  try {
+    const n = await tickMeetingReminders();
+    if (n) console.log(`[scheduler] meeting reminders: sent ${n}`);
+  } catch (e: any) {
+    console.error("[scheduler] meeting reminder tick failed:", e?.message);
+  }
+}
+
+/** The owner's evening summary: due at a given local hour, so a 10-minute sweep is plenty. */
+async function tickDigestsSafe() {
+  if (!due("daily-digest", 10 * MIN)) return;
+  try {
+    const n = await tickDailyDigests();
+    if (n) console.log(`[scheduler] daily summaries: sent ${n}`);
+  } catch (e: any) {
+    console.error("[scheduler] daily summary tick failed:", e?.message);
+  }
+}
 
 async function tickMeetingsSafe() {
   if (!due("meetings", 15 * MIN)) return; // no-show nudges are a 48h/150h thing — 15 min is plenty

@@ -18,7 +18,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { brandName } from "./brand.js";
 import {
   detectLanguage, detectSignals, conversationStage, mustHandOff, signalsBrief,
-  LANG_INSTRUCTION, STAGE_GUIDE, riskyClaim, unverifiedTerms, assertsUnverified, confirmLine, offersCall, stripCallOffer, missingDetails, CONFIRM_LANG, proposesTime, stripTimeProposals, claimsExperience, MEETING_FALLBACK, SMALLTALK_DEFLECT, type Lang, type Msg,
+  LANG_INSTRUCTION, STAGE_GUIDE, riskyClaim, unverifiedTerms, assertsUnverified, confirmLine, offersCall, stripCallOffer, missingDetails, CONFIRM_LANG, containsPriceAmount, statesPriceUnavailable, PRICE_UNKNOWN_LINE, proposesTime, stripTimeProposals, claimsExperience, MEETING_FALLBACK, SMALLTALK_DEFLECT, type Lang, type Msg,
 } from "./conversation.js";
 import { retrieveKnowledge, queryFor, renderKnowledge, type Passage } from "./knowledge.js";
 
@@ -145,9 +145,14 @@ export function buildBusinessBrief(profile: any, tenant: { name?: string | null;
   if (p.audience) lines.push(`Who we help: ${p.audience}`);
   if (Array.isArray(p.offerings) && p.offerings.length) lines.push(`We offer: ${p.offerings.slice(0, 8).map((o: any) => o?.name ?? o).filter(Boolean).join(", ")}`);
   if (Array.isArray(p.usp) && p.usp.length) lines.push(`Why us: ${p.usp.slice(0, 4).join("; ")}`);
-  if (p.pricing && (p.pricing.range || p.pricing.note || p.pricing.model)) {
+  if (p.pricing && p.pricing.range) {
     const model = p.pricing.model === "quote" ? "priced per quote" : p.pricing.model === "fixed" ? "fixed price" : p.pricing.model === "subscription" ? "subscription" : p.pricing.model === "free" ? "free" : "";
     lines.push(`Pricing: ${[model, p.pricing.range, p.pricing.note].filter(Boolean).join(" — ")}`);
+  } else if (p.pricing && (p.pricing.note || p.pricing.model)) {
+    // The site says HOW it charges ("on request") but prints no figure. That is not a price: say so, or the
+    // model reads "priced per quote" as licence to estimate one.
+    const how = p.pricing.model === "quote" ? "priced per quote" : p.pricing.model === "subscription" ? "a subscription" : p.pricing.model === "free" ? "free" : "";
+    lines.push(`Pricing: ${[how, p.pricing.note].filter(Boolean).join(" — ")}. NO FIGURE IS PUBLISHED — you cannot state any price, range or estimate.`);
   } else {
     lines.push("Pricing: NOT PROVIDED to you.");
   }
@@ -214,7 +219,7 @@ export const REPLY_SYSTEM = [
   "WHAT YOU CAN AND CANNOT DO (critical):",
   "- You can ONLY send text messages in this chat. You CANNOT send files, PDFs, outlines, brochures, quotes, images or links you were not given, and you cannot call.",
   "- NEVER promise something you cannot deliver in this very message. Never write 'I'll send it now / shortly / right away / in a moment'. If they ask for details or an outline, GIVE the useful content right now in 2-4 short lines (scope, timeline, what is included), then offer a call or say a team member will share the full document — and set handoff true.",
-  "- Price: if Pricing is provided, state it plainly first (range/model), then one line of what it depends on. If Pricing is NOT PROVIDED, say honestly that it depends on their situation, ask the ONE detail you need (e.g. company size / which standard), and set handoff true so a person sends the exact quote. Never say 'let me confirm' without also giving them something useful.",
+  "- Price: if a price or range is given in the facts, state it plainly first, then one line of what it depends on. If NO figure is given (Pricing NOT PROVIDED, or 'NO FIGURE IS PUBLISHED'), say clearly in the first sentence that you cannot share the price right now, give NO number, range, 'starting from' or estimate, say a team member will send an exact quote, ask ONE question about what they need, and set handoff true.",
   "- Never invent a price, date, guarantee, client name or number that is not in the facts. If you do not know, say so simply and say a team member will confirm — and set handoff true.",
   "",
   "CALLS AND MEETINGS:",
@@ -251,7 +256,7 @@ export type ReplyPromptInput = {
 /** Assemble the call. Pure — the whole point of splitting it from decideReply is that the golden
  *  conversations (golden.test.ts) can assert on exactly what the model would be told, with no
  *  database and no network. */
-export function buildReplyPrompt(input: ReplyPromptInput): { system: string; user: string; lang: ReturnType<typeof detectLanguage>; handoffFloor: { yes: boolean; reason: string }; unverified: string[]; detailGaps: string[]; recentOut: string[]; callWanted: boolean } {
+export function buildReplyPrompt(input: ReplyPromptInput): { system: string; user: string; lang: ReturnType<typeof detectLanguage>; handoffFloor: { yes: boolean; reason: string }; unverified: string[]; detailGaps: string[]; recentOut: string[]; callWanted: boolean; priceUnknown: boolean } {
   const { thread, business, lead } = input;
   const lastIn = [...thread].reverse().find((m) => m.direction === "in");
   const signals = detectSignals(lastIn?.body ?? "");
@@ -287,7 +292,7 @@ export function buildReplyPrompt(input: ReplyPromptInput): { system: string; use
     "Decide about THEIR most recent message and answer with the JSON.",
   ].join("\n");
 
-  return { system: REPLY_SYSTEM, user, lang, handoffFloor: mustHandOff(signals, input.pricingProvided, unverified, detailGaps), unverified, detailGaps, recentOut: thread.filter((m) => m.direction === "out").slice(-2).map((m) => String(m.body)), callWanted: signals.wantsCall };
+  return { system: REPLY_SYSTEM, user, lang, handoffFloor: mustHandOff(signals, input.pricingProvided, unverified, detailGaps), unverified, detailGaps, recentOut: thread.filter((m) => m.direction === "out").slice(-2).map((m) => String(m.body)), callWanted: signals.wantsCall, priceUnknown: signals.price && !input.pricingProvided };
 }
 
 /** Read the thread + Site Brain, ask the model for a decision, return the parsed Decision. Throws
@@ -313,7 +318,9 @@ export async function decideReply(
   if (thread.length === 0) throw new Error("No conversation yet — nothing to decide on.");
 
   const p: any = profile?.profile;
-  const pricingProvided = !!(p?.pricing && (p.pricing.range || p.pricing.note || p.pricing.model));
+  // "Provided" means a concrete figure exists. A site that only says "price on request" gives the assistant
+  // nothing to quote: it must say it cannot share the price, not estimate one.
+  const pricingProvided = !!p?.pricing?.range;
   const business = buildBusinessBrief(p, (tenant as any) ?? null);
 
   return decideFromPrompt(buildReplyPrompt({ business, pricingProvided, lead: lead as any, thread, avoid: opts.avoid, knowledge }));
@@ -329,7 +336,7 @@ export async function decideFromPrompt(built: ReturnType<typeof buildReplyPrompt
   const { system, user } = built;
   const answer = await completeReplyJson(user, system);
   return finalizeDecision(parseDecision(answer), {
-    handoffFloor: built.handoffFloor, unverified: built.unverified, detailGaps: built.detailGaps, lang: built.lang, recentOut: built.recentOut, callWanted: built.callWanted,
+    handoffFloor: built.handoffFloor, unverified: built.unverified, detailGaps: built.detailGaps, lang: built.lang, recentOut: built.recentOut, callWanted: built.callWanted, priceUnknown: built.priceUnknown,
     rewrite: async (instruction) => parseDecision(await completeReplyJson(`${user}
 
 ${instruction}`, system)),
@@ -347,7 +354,7 @@ ${instruction}`, system)),
  *  Pure apart from `rewrite`, so every branch is a unit test with a fake one. */
 export async function finalizeDecision(
   first: Decision,
-  ctx: { handoffFloor: { yes: boolean; reason: string }; unverified: string[]; detailGaps?: string[]; lang: Lang; rewrite: (instruction: string) => Promise<Decision>; recentOut?: string[]; callWanted?: boolean },
+  ctx: { handoffFloor: { yes: boolean; reason: string }; unverified: string[]; detailGaps?: string[]; lang: Lang; rewrite: (instruction: string) => Promise<Decision>; recentOut?: string[]; callWanted?: boolean; priceUnknown?: boolean },
 ): Promise<Decision> {
   let d = first;
 
@@ -377,6 +384,20 @@ export async function finalizeDecision(
       ? better
       : { ...d, action: "reply", reply: confirmLine(ctx.lang, ctx.detailGaps ?? []) };
     d = { ...d, needs_human: true, reason: d.reason || `asked for ${what} — not in our facts` };
+  }
+
+  // 1a. NO PUBLISHED PRICE. A customer asked, the business has printed none, and the reply either contains an
+  //     amount (invented) or never says plainly that the price cannot be shared. Rewritten once with the rule
+  //     spelled out; if that still fails, the standard line is sent — never a number.
+  if (ctx.priceUnknown && d.action === "reply" && (containsPriceAmount(d.reply) || !statesPriceUnavailable(d.reply))) {
+    let better: Decision | null = null;
+    try {
+      better = await ctx.rewrite(`YOUR PREVIOUS DRAFT DID NOT FOLLOW THE PRICE RULE: "${d.reply.slice(0, 200)}". The business has published no price. Rewrite it: in the FIRST sentence say clearly that you cannot share the price right now, give no number, range or estimate, say a team member will send an exact quote, and ask ONE question about what they need. Set handoff true.`);
+    } catch { /* fall through to the standard line */ }
+    d = better && better.action === "reply" && better.reply && !containsPriceAmount(better.reply) && statesPriceUnavailable(better.reply)
+      ? better
+      : { ...d, action: "reply", reply: PRICE_UNKNOWN_LINE[ctx.lang] };
+    d = { ...d, needs_human: true, reason: d.reason || "asked for the price — none is published" };
   }
 
   // 1c. CALLS. When they ask for or accept a call the system sends REAL slots (autoReply.ts); whatever the

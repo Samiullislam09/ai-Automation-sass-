@@ -2,6 +2,7 @@ import type { Job } from "pg-boss";
 import { Agent, type AgentContext, type AgentJobData } from "./base.js";
 import { supabase } from "../supabase.js";
 import { completeJson } from "../lib/llm.js";
+import { detectPricing, rangeIsGrounded } from "../lib/pricing.js";
 import { embed } from "../lib/embeddings.js";
 import { loadInsights } from "../lib/insights.js";
 import {
@@ -118,6 +119,9 @@ export class AnalystAgent extends Agent {
     // Every field group that failed, so a half-built profile says which half and why instead
     // of looking like a complete one with holes in it.
     const failures: { field: string; error: string }[] = [];
+    // Set when a price the model produced was NOT printed on the site and was dropped on purpose; the carry-forward in
+    // step 9 must not then put the old (equally unsupported) value back.
+    let pricingDropped = false;
     // Migration 026 not applied yet: every RPC below this line is missing, which would otherwise
     // read as "this site has no embedded pages at all" — no gaps, no new clusters, the previous
     // version's carried forward, and a Site Brain that looks merely stale rather than broken.
@@ -402,6 +406,36 @@ export class AnalystAgent extends Agent {
         confidence.pricing = priceRange ? "medium" : "low";
       }
 
+      // ── a verified second reading of the price, over EVERY crawled page ─────────────────────
+      // The digest above is the first eight pages, 1,400 characters each, and its range is whatever the model
+      // said. A /pricing page outside that sample was never read, and nothing checked that the figure the
+      // model returned is on the site at all. A wrong price here is quoted to customers on WhatsApp as the
+      // business's own, so: if the range is not grounded in the pages, look properly (lib/pricing.ts reads all
+      // of them, and discards any model answer whose numbers the site does not print); and if nothing on the
+      // site supports it, it is dropped. No price is better than an invented one — the assistant then says it
+      // cannot share a price rather than make one up. (A price the owner typed is carried forward untouched
+      // in step 9, after this.)
+      try {
+        const texts = pages.map((p) => p.text);
+        const current = profile.pricing;
+        if (!(current?.range && rangeIsGrounded(current.range, texts))) {
+          const found = await detectPricing(pages, (prompt) => completeJson(prompt));
+          if (found) {
+            profile.pricing = found.pricing;
+            sources.pricing = found.sources;
+            confidence.pricing = found.pricing.range ? "medium" : "low";
+          } else if (current?.range) {
+            profile.pricing = current.model ? ({ model: current.model, range: null, note: null } as Pricing) : null;
+            pricingDropped = true;
+            delete sources.pricing;
+            if (!profile.pricing) delete confidence.pricing;
+          }
+        }
+      } catch (e: any) {
+        console.error("[analyst] price verification failed:", e?.message);
+        failures.push({ field: "pricing", error: String(e?.message ?? e).slice(0, 200) });
+      }
+
       const objections: Objection[] = [];
       for (const o of answer?.objections ?? []) {
         const question = cleanText(o?.question, 200);
@@ -658,6 +692,7 @@ export class AnalystAgent extends Agent {
     if (previous) {
       for (const field of PROFILE_FIELDS) {
         if (userEdited.includes(field)) continue;      // already copied above
+        if (field === "pricing" && pricingDropped) continue; // dropped on purpose: it was not on the site
         if (!isEmptyValue((profile as any)[field])) continue;
         const old = (previous.profile as any)[field];
         if (isEmptyValue(old)) continue;

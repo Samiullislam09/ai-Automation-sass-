@@ -353,7 +353,7 @@ function NotificationsBell() {
 
 /* ── Settings + Outbox (§28.8): auto-reply master, outbound timeline on/off, send window, and the
  *    upcoming cold-message schedule with a cancel on each. ─────────────────────────────────────── */
-type WaSettings = { auto_reply: boolean; outbound_enabled: boolean; followups_enabled: boolean; send_start: number; send_end: number; tz_offset: number; gap_min_min: number; gap_max_min: number; booking_link: string };
+type WaSettings = { auto_reply: boolean; outbound_enabled: boolean; followups_enabled: boolean; send_start: number; send_end: number; tz_offset: number; gap_min_min: number; gap_max_min: number; booking_link: string; meeting_reminders: boolean; daily_summary: boolean; summary_hour: number };
 type OutboxItem = { id: string; leadId: string; name: string; scheduledAt: string; status: string };
 
 function SettingsPanel({ open, onClose, toast }: { open: boolean; onClose: () => void; toast: (m: string, t?: "error") => void }) {
@@ -446,6 +446,16 @@ function SettingsPanel({ open, onClose, toast }: { open: boolean; onClose: () =>
               <Toggle label="Auto-replies" sub="Mr Lxwa answers incoming messages and runs the outbound timeline. Off = everything pauses." on={s.auto_reply} onChange={(v) => save({ auto_reply: v })} disabled={saving} />
               <Toggle label="Outbound timeline" sub="Send the first message to new approved leads, one at a time, on a random schedule. Pauses while a conversation is active." on={s.outbound_enabled} onChange={(v) => save({ outbound_enabled: v })} disabled={saving || !s.auto_reply} />
               <Toggle label="Follow-ups" sub="Nudge a lead who went quiet: after 48 hours, then 5 days, then 7 days, then stop. A reply is answered at once and restarts the count." on={s.followups_enabled} onChange={(v) => save({ followups_enabled: v })} disabled={saving || !s.auto_reply} />
+
+              <Toggle label="Meeting reminders" sub="Reminds the customer 24 hours and 1 hour before a booked call, and sends you and your team a short briefing an hour before." on={s.meeting_reminders !== false} onChange={(v) => save({ meeting_reminders: v })} disabled={saving || !s.auto_reply} />
+              <Toggle label="Daily summary" sub="Every evening, one WhatsApp to your team numbers: messages and replies, hot leads, tomorrow's calls and who needs you. Nothing is sent on a quiet day." on={s.daily_summary !== false} onChange={(v) => save({ daily_summary: v })} disabled={saving || !s.auto_reply} />
+              {s.daily_summary !== false && (
+                <div className="-mt-1 mb-2 flex items-center gap-2 rounded-xl px-3 py-2 text-[12.5px]" style={{ background: WA.listHover }}>
+                  <span style={{ color: WA.sub }}>Send the summary at</span>
+                  <HourInput value={s.summary_hour ?? 20} onChange={(v) => save({ summary_hour: v })} />
+                  <span style={{ color: WA.sub }}>local time</span>
+                </div>
+              )}
 
               <div className="mt-4 rounded-xl p-3" style={{ background: WA.listHover }}>
                 <div className="mb-1 text-[12.5px] font-semibold">Sending hours</div>

@@ -354,3 +354,80 @@ test("opt-out confirmation: one line in each language", () => {
   assert.doesNotMatch(OPT_OUT_ACK.hinglish, /[ऀ-ॿ]/);
   assert.ok(!/\?/.test(OPT_OUT_ACK.en), "no question — they asked us to stop");
 });
+
+const { containsPriceAmount, statesPriceUnavailable, PRICE_UNKNOWN_LINE } = await import("./conversation.js");
+const { buildBusinessBrief } = await import("./decide.js");
+
+test("containsPriceAmount: an amount in a reply is found in the common shapes; a duration or a count is not", () => {
+  for (const t of ["It costs AED 4,000.", "around $500 a month", "4000 AED for 12 staff", "Rs. 15,000 onwards", "₹ 25,000", "roughly 3,500 dirhams", "starting from 2 lakh"]) assert.ok(containsPriceAmount(t), t);
+  for (const t of ["It takes 3-4 months.", "We have 300+ clients.", "You need 12 staff trained.", "Call us on 0501234567."]) assert.ok(!containsPriceAmount(t), t);
+});
+
+test("statesPriceUnavailable: 'I cannot share the price' is recognised in English, Hinglish and Hindi", () => {
+  for (const t of [
+    "I can't share the price right now — our team will send an exact quote.",
+    "Sorry, I'm unable to share pricing at the moment.",
+    "I don't have the price to hand.",
+    "Abhi main aapko price nahi bata sakta.",
+    "Price abhi nahi de sakta, team quote bhejegi.",
+    "Main abhi exact price share nahi kar sakta — team quote bhej degi.",
+    "Abhi price share nahi kar sakta — team member aapko exact quote bhejega.",
+    "अभी मैं कीमत नहीं बता सकता।",
+  ]) assert.ok(statesPriceUnavailable(t), t);
+  for (const t of ["ISO 9001 pricing depends on company size — how many employees?", "A team member will send an exact quote.", "It takes 3-4 months."]) assert.ok(!statesPriceUnavailable(t), t);
+  for (const l of ["en", "hinglish", "hi", "ur"] as const) assert.ok(PRICE_UNKNOWN_LINE[l].length > 40 && !containsPriceAmount(PRICE_UNKNOWN_LINE[l]));
+  assert.ok(statesPriceUnavailable(PRICE_UNKNOWN_LINE.en) && statesPriceUnavailable(PRICE_UNKNOWN_LINE.hinglish) && statesPriceUnavailable(PRICE_UNKNOWN_LINE.hi), "the standard line itself passes its own check");
+});
+
+test("no published price: an invented number, or a reply that never says it cannot share one, is rewritten, then replaced", async () => {
+  const ctxBase = { handoffFloor: { yes: true, reason: "r" }, unverified: [] as string[], lang: "en" as const, recentOut: [] as string[], callWanted: false, priceUnknown: true };
+  // the model invents a figure; the rewrite is clean → the rewrite is sent
+  const ok = await finalizeDecision(D("ISO 9001 usually costs AED 4,000 for a small company."), { ...ctxBase, rewrite: async () => D("I can't share the price right now — a team member will send an exact quote. What do you need it for?") });
+  assert.match(ok.reply, /can't share the price/);
+  assert.ok(!containsPriceAmount(ok.reply));
+  assert.equal(ok.needs_human, true);
+  // the rewrite STILL gives a number → the standard line, never the number
+  const bad = await finalizeDecision(D("It is around $500."), { ...ctxBase, rewrite: async () => D("Prices start from $450.") });
+  assert.equal(bad.reply, PRICE_UNKNOWN_LINE.en);
+  // no number, but it dodges ("depends on your situation") without ever saying it cannot share → rewritten
+  const dodge = await finalizeDecision(D("It depends on your company size — how many employees do you have?"), { ...ctxBase, rewrite: async () => { throw new Error("down"); } });
+  assert.equal(dodge.reply, PRICE_UNKNOWN_LINE.en);
+  // already correct → untouched, and the rewrite is never called
+  let calls = 0;
+  const good = await finalizeDecision(D("I can't share the price right now — our team will send an exact quote. What is your requirement?"), { ...ctxBase, rewrite: async () => { calls++; return D("x"); } });
+  assert.equal(calls, 0);
+  assert.match(good.reply, /can't share the price/);
+  // a published price → this net is off
+  const published = await finalizeDecision(D("ISO 9001 is AED 4,000-9,000."), { ...ctxBase, priceUnknown: false, handoffFloor: { yes: false, reason: "" }, rewrite: async () => D("x") });
+  assert.equal(published.reply, "ISO 9001 is AED 4,000-9,000.");
+  // language follows the customer
+  const hi = await finalizeDecision(D("Yeh AED 4,000 hai."), { ...ctxBase, lang: "hinglish", rewrite: async () => D("AED 5,000") });
+  assert.equal(hi.reply, PRICE_UNKNOWN_LINE.hinglish);
+});
+
+test("buildBusinessBrief: three honest pricing states — a figure, 'by quote' with NO figure, and nothing", () => {
+  const t = { name: "x", website_url: null };
+  assert.match(buildBusinessBrief({ pricing: { model: "quote", range: "AED 4,000-9,000", note: null } }, t), /Pricing: priced per quote — AED 4,000-9,000/);
+  const byQuote = buildBusinessBrief({ pricing: { model: "quote", range: null, note: "Pricing is shared on request." } }, t);
+  assert.match(byQuote, /NO FIGURE IS PUBLISHED/, "'by quote' is not a price the assistant may estimate");
+  assert.match(buildBusinessBrief({ what_they_do: "x" }, t), /Pricing: NOT PROVIDED/);
+});
+
+const { PRICE_UNAVAILABLE_PHRASE, signalsBrief, detectSignals: detectSig } = await import("./conversation.js");
+
+test("price unknown: the model is told to say it in the CUSTOMER's language, and to stay in it", () => {
+  const s = detectSig("price kitna hai bhai?");
+  const hing = signalsBrief(s, false, "hinglish").join(" ");
+  assert.ok(hing.includes(PRICE_UNAVAILABLE_PHRASE.hinglish));
+  assert.match(hing, /WHOLE reply stays in that one language/);
+  assert.ok(!hing.includes(PRICE_UNAVAILABLE_PHRASE.en), "a Hinglish customer is not handed the English sentence");
+  assert.ok(signalsBrief(detectSig("what is the price"), false, "en").join(" ").includes(PRICE_UNAVAILABLE_PHRASE.en));
+  assert.ok(signalsBrief(detectSig("कीमत क्या है"), false, "hi").join(" ").includes(PRICE_UNAVAILABLE_PHRASE.hi));
+  for (const l of ["en", "hinglish", "hi", "ur"] as const) assert.ok(statesPriceUnavailable(PRICE_UNAVAILABLE_PHRASE[l]) || l === "ur", `${l}: the phrase passes the net's own check`);
+});
+
+test("missingDetails: the bare word 'address' (email address) does not count as holding our office address", () => {
+  assert.deepEqual(missingDetails("what is your office address", FACTS + "\nSend us an email at the address on the contact form."), ["our office address"]);
+  assert.deepEqual(missingDetails("what is your office address", FACTS + "\nCompany: WCA GLOBAL, B21-057, SRTI Park, Sharjah, UAE."), [], "a real address in the facts is a held fact");
+  assert.deepEqual(missingDetails("where is your office", FACTS + "\nOur office is in Al Majaz, Sharjah."), []);
+});

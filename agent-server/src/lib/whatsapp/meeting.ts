@@ -116,6 +116,9 @@ export async function handleMeetingReply(tenantId: string, leadId: string, phone
   if (book.ok && book.eventId) {
     await supabase.from("lead_meetings").update({ status: "scheduled", start_at: slot.start, end_at: slot.end, calendar_event_id: book.eventId, meet_link: book.meetLink ?? null, updated_at: new Date().toISOString() }).eq("id", (m as any).id);
     await supabase.from("leads").update({ stage: "meeting_scheduled", updated_at: new Date().toISOString() }).eq("id", leadId).eq("tenant_id", tenantId);
+    // When it was booked — reminders.ts only sends the "24 hours before" note for a call booked well ahead of
+    // it. Best effort: before migration 043 the column does not exist and this simply does nothing.
+    await supabase.from("lead_meetings").update({ reminders: { booked_at: new Date().toISOString() } }).eq("id", (m as any).id);
     const body = `You're booked for ${fmtSlot(slot.start, s.tz_offset)}.${book.meetLink ? `\nGoogle Meet: ${book.meetLink}` : ""}\nSee you then!`;
     try { const { waMessageId } = await sendText(tenantId, phone, body); await recordOutgoing(supabase, tenantId, leadId, body, waMessageId, "brain"); } catch { /* best effort */ }
     await notifyAdmins(tenantId, { type: "meeting", title: `📅 Meeting booked with ${who}`, body: `${fmtSlot(slot.start, s.tz_offset)}${book.meetLink ? ` · ${book.meetLink}` : ""}`, leadId, whatsappText: `Meeting booked with ${who} for ${fmtSlot(slot.start, s.tz_offset)}.${book.meetLink ? ` Meet: ${book.meetLink}` : ""}` }).catch(() => {});
@@ -126,6 +129,7 @@ export async function handleMeetingReply(tenantId: string, leadId: string, phone
   // the team will confirm, and alert the admins to finish it by hand.
   await supabase.from("lead_meetings").update({ status: "scheduled", start_at: slot.start, end_at: slot.end, updated_at: new Date().toISOString() }).eq("id", (m as any).id);
   await supabase.from("leads").update({ stage: "meeting_scheduled", updated_at: new Date().toISOString() }).eq("id", leadId).eq("tenant_id", tenantId);
+  await supabase.from("lead_meetings").update({ reminders: { booked_at: new Date().toISOString() } }).eq("id", (m as any).id);
   const body = `Great — ${fmtSlot(slot.start, s.tz_offset)} it is. Our team will send the meeting invite shortly.`;
   try { const { waMessageId } = await sendText(tenantId, phone, body); await recordOutgoing(supabase, tenantId, leadId, body, waMessageId, "brain"); } catch { /* best effort */ }
   await notifyAdmins(tenantId, { type: "meeting", title: `📅 Confirm meeting with ${who}`, body: `${fmtSlot(slot.start, s.tz_offset)} — send them the invite (auto-booking was unavailable).`, leadId }).catch(() => {});

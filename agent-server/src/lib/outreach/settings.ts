@@ -151,6 +151,10 @@ export type WhatsappSettings = {
   gap_min_min: number;       // minimum minutes between two outbound sends
   gap_max_min: number;       // maximum minutes between two outbound sends
   booking_link: string;      // Calendly/Cal.com/any booking URL — the no-Google meeting path
+  meeting_reminders: boolean; // remind the customer 24 h and 1 h before a booked call, and brief the owner 1 h before
+  daily_summary: boolean;     // an evening WhatsApp to the team numbers: what happened today, who needs them, tomorrow's calls
+  summary_hour: number;       // local hour (0-23) the daily summary goes out
+  summary_last_sent: string;  // the local date (YYYY-MM-DD) the summary last went out — written by the sweep, never by the UI
 };
 
 export const DEFAULT_WHATSAPP_SETTINGS: WhatsappSettings = {
@@ -163,6 +167,10 @@ export const DEFAULT_WHATSAPP_SETTINGS: WhatsappSettings = {
   gap_min_min: 4,
   gap_max_min: 14,
   booking_link: "",
+  meeting_reminders: true,
+  daily_summary: true,
+  summary_hour: 20,
+  summary_last_sent: "",
 };
 
 export async function getWhatsappSettings(tenantId: string): Promise<WhatsappSettings> {
@@ -210,6 +218,10 @@ export function mergeWhatsapp(raw: unknown): WhatsappSettings {
     gap_min_min: gapMin,
     gap_max_min: gapMax,
     booking_link: typeof o.booking_link === "string" ? o.booking_link.trim().slice(0, 500) : "",
+    meeting_reminders: o.meeting_reminders !== false, // default true
+    daily_summary: o.daily_summary !== false,         // default true
+    summary_hour: clampHour(o.summary_hour, d.summary_hour),
+    summary_last_sent: typeof o.summary_last_sent === "string" && /^\d{4}-\d{2}-\d{2}$/.test(o.summary_last_sent) ? o.summary_last_sent : "",
   };
 }
 
