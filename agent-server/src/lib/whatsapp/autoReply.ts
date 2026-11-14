@@ -423,7 +423,7 @@ async function handleAutoReplyLocked(job: AutoReplyJob): Promise<void> {
         title: `📅 ${whoM} wants a call — ${decision.meeting_pref}`,
         body: "No calendar or booking link is set up, so the call has to be arranged by hand.",
         leadId,
-        whatsappText: `${whoM} wants a call: ${decision.meeting_pref}. Please message them a time and a meeting link. (To make this automatic, connect Google Calendar or add a booking link in WhatsApp → Settings → Meetings.)`,
+        whatsappText: `${whoM} wants a call: ${decision.meeting_pref}. Please message them a time and a meeting link. (To make this automatic: open the dashboard → Connect → Google and connect your Google account — then I will offer free times, create the Google Meet link, add it to your calendar and send it to you and the customer.)`,
       }).catch((e: any) => console.warn("[whatsapp] meeting alert failed:", e?.message));
       void logEvent(tenantId, leadId, "meeting", `Wants a call — ${decision.meeting_pref}. Team told to schedule it by hand (no calendar or booking link).`);
     }
@@ -469,7 +469,7 @@ async function handleAutoReplyLocked(job: AutoReplyJob): Promise<void> {
         title: `📅 Meeting request from ${who}`,
         body: "No calendar or booking link is set up, so no meeting link could be sent automatically.",
         leadId,
-        whatsappText: `${who} asked for a call. I could not send a meeting link automatically — no Google Calendar is connected and no booking link is set. I asked them when they are free; please message them a time and a link. To make this automatic: WhatsApp → Settings → Meetings.`,
+        whatsappText: `${who} asked for a call. I could not send a meeting link automatically — no Google Calendar is connected and no booking link is set. I asked them when they are free; please message them a time and a link. To make this automatic: dashboard → Connect → Google → Connect.`,
       }).catch((e: any) => console.warn("[whatsapp] meeting alert failed:", e?.message));
       void logEvent(tenantId, leadId, "meeting", "Call requested, but NO calendar or booking link is set up: asked when they are free and told the team to arrange it by hand");
     }

@@ -1,4 +1,5 @@
 "use client";
+import { useMeetingSetup, MeetingSetupBanner, googleOk, type MeetingSetup } from "./whatsapp/MeetingSetup";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useStore } from "@/lib/store";
 import WhatsAppConnectModal from "./WhatsAppConnectModal";
@@ -94,6 +95,7 @@ export default function WhatsAppSection() {
   const [search, setSearch] = useState("");
   const [adminOpen, setAdminOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const { setup: meetSetup, reload: reloadMeetSetup } = useMeetingSetup();
   const [view, setView] = useState<"chats" | "activity">("chats");
   const [focusLead, setFocusLead] = useState<string | null>(null);
   const [activity, setActivity] = useState<Overview | null>(null);
@@ -256,6 +258,7 @@ export default function WhatsAppSection() {
         <InboxSkeleton />
       ) : connected ? (
         <>
+          <MeetingSetupBanner setup={meetSetup} onOpenSettings={() => setSettingsOpen(true)} />
           {status.loaded && status.status === "in_use_elsewhere" && (
             <div className="flex shrink-0 items-center gap-2 px-4 py-1.5 text-[12.5px]" style={{ background: "#fff8e1", color: "#7a5b00", borderBottom: `1px solid ${WA.divider}` }} role="status">
               <span className="h-2 w-2 rounded-full" style={{ background: "#f5a623" }} />
@@ -280,7 +283,7 @@ export default function WhatsAppSection() {
       )}
 
       <WhatsAppConnectModal open={modal} onClose={() => { setModal(false); poll(); }} onConnected={() => { setHint(true); writeLinked(true); poll(); }} />
-      <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} toast={toast} />
+      <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} toast={toast} meetSetup={meetSetup} />
     </div>
   );
 }
@@ -356,7 +359,7 @@ function NotificationsBell() {
 type WaSettings = { auto_reply: boolean; outbound_enabled: boolean; followups_enabled: boolean; send_start: number; send_end: number; tz_offset: number; gap_min_min: number; gap_max_min: number; booking_link: string; meeting_reminders: boolean; daily_summary: boolean; summary_hour: number };
 type OutboxItem = { id: string; leadId: string; name: string; scheduledAt: string; status: string };
 
-function SettingsPanel({ open, onClose, toast }: { open: boolean; onClose: () => void; toast: (m: string, t?: "error") => void }) {
+function SettingsPanel({ open, onClose, toast, meetSetup }: { open: boolean; onClose: () => void; toast: (m: string, t?: "error") => void; meetSetup: MeetingSetup | null }) {
   const [s, setS] = useState<WaSettings | null>(null);
   const [outbox, setOutbox] = useState<OutboxItem[] | null>(null);
   const [saving, setSaving] = useState(false);
@@ -442,7 +445,7 @@ function SettingsPanel({ open, onClose, toast }: { open: boolean; onClose: () =>
   // The things that decide whether a customer's "let's talk" actually ends in a call.
   const checklist = s ? [
     { ok: s.auto_reply, text: "Auto-replies are on", fix: "Turn on Auto-replies", go: "replies" as const },
-    { ok: !!s.booking_link?.trim(), text: "A meeting link is ready to send", fix: "Add a booking link (or connect Google Calendar)", go: "meetings" as const },
+    { ok: googleOk(meetSetup) || !!s.booking_link?.trim(), text: googleOk(meetSetup) ? "Google Calendar is connected: the assistant books calls and makes the Meet link" : "A booking link is ready to send", fix: "Connect Google Calendar (or add a booking link)", go: "meetings" as const },
     { ok: (teamCount ?? 0) > 0, text: "Your team gets a WhatsApp when someone wants a call", fix: "Add your number under Team", go: "team" as const },
   ] : [];
   const todo = checklist.filter((c) => !c.ok);
@@ -505,8 +508,22 @@ function SettingsPanel({ open, onClose, toast }: { open: boolean; onClose: () =>
 
               {tab === "meetings" && (
                 <>
+                  <div className="mb-3 rounded-xl p-3" style={{ background: googleOk(meetSetup) ? "#e7f6ec" : "#fff8e1" }}>
+                    <div className="text-[12.5px] font-semibold" style={{ color: googleOk(meetSetup) ? "#067647" : "#7a5b00" }}>
+                      {googleOk(meetSetup) ? `Google Calendar connected${meetSetup?.email ? ` (${meetSetup.email})` : ""}` : meetSetup?.google === "needs_reconnect" ? "Reconnect Google to allow Calendar" : "Google Calendar is not connected"}
+                    </div>
+                    <div className="mt-0.5 text-[11.5px] leading-relaxed" style={{ color: googleOk(meetSetup) ? "#067647" : "#7a5b00" }}>
+                      {googleOk(meetSetup)
+                        ? "When a customer wants a call, the assistant offers free times from your calendar, creates the Google Meet link, adds the call to your calendar and sends the details to the customer and your team."
+                        : "Connect it once and the assistant offers free times, creates the Google Meet link, puts the call in your calendar and sends the details to the customer and to you."}
+                    </div>
+                    {!googleOk(meetSetup) && meetSetup?.google !== "not_configured" && (
+                      <a href="/api/integrations/google/start" className="mt-2 inline-flex h-8 items-center rounded-lg px-3.5 text-[12.5px] font-semibold text-white" style={{ background: WA.green }}>{meetSetup?.google === "needs_reconnect" ? "Reconnect Google" : "Connect Google"}</a>
+                    )}
+                    {meetSetup?.google === "not_configured" && <div className="mt-1 text-[11.5px]" style={{ color: "#7a5b00" }}>Google sign-in is not set up on this server (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET). Use a booking link below meanwhile.</div>}
+                  </div>
                   <div className="rounded-xl p-3" style={{ background: WA.listHover }}>
-                    <div className="mb-1 text-[12.5px] font-semibold">Meeting link</div>
+                    <div className="mb-1 text-[12.5px] font-semibold">Booking link (alternative)</div>
                     <div className="mb-2 text-[11.5px]" style={{ color: WA.sub }}>When a customer wants a call, the assistant asks for a time, tells you, and sends this link so they can book. Paste your Calendly / Cal.com / Google appointment link. If Google Calendar is connected, a link is made for you instead.</div>
                     <BookingLinkRow initial={s.booking_link} onSave={(v) => save({ booking_link: v })} />
                     {!s.booking_link?.trim() && <div className="mt-2 rounded-lg px-2.5 py-1.5 text-[12px]" style={{ background: "#fff8e1", color: "#7a5b00" }}>No link yet. Customers will be told the team will send one, and you will be alerted.</div>}
