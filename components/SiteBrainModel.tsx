@@ -87,6 +87,7 @@ export const PROFILE_FIELDS = [
   "voice",
   "geo",
   "language",
+  "owner_name",
   "competitors",
   "goals",
   // Phase 1 (SITE_BRAIN_PLAN.md). Order matters: this is the order the page lists them in.
@@ -114,6 +115,8 @@ export type SiteProfile = {
   voice: Voice | null;
   geo: string | null;
   language: string | null;
+  /** The name messages to leads are written from. Only the owner can say it. */
+  owner_name: string | null;
   competitors: string[];
   goals: Goals | null;
   never_say: string[];
@@ -165,6 +168,7 @@ export function emptyProfile(): SiteProfile {
     voice: null,
     geo: null,
     language: null,
+    owner_name: null,
     competitors: [],
     goals: null,
     never_say: [],
@@ -260,6 +264,19 @@ export function coerceField(field: ProfileField, raw: unknown): CoerceResult {
     case "language":
       if (raw !== null && typeof raw !== "string") return { ok: false, error: `"${field}" must be text.` };
       return { ok: true, value: nullableStr(raw) };
+
+    case "owner_name": {
+      // A person's name, written into messages to strangers: one short line, no links, no signature block.
+      if (raw !== null && typeof raw !== "string") return { ok: false, error: `"owner_name" must be text.` };
+      const given = str(raw);
+      // Checked BEFORE the spaces are collapsed: collapsing turns a line break into a space, and the check for
+      // line breaks then never sees one.
+      if (/https?:|www\.|@|[\n\r<>]/i.test(given)) return { ok: false, error: "Just your name, please: no links, emails or line breaks." };
+      const name = given.replace(/\s+/g, " ");
+      if (!name) return { ok: true, value: null };
+      if (name.length > 60) return { ok: false, error: "Keep your name to 60 characters or fewer." };
+      return { ok: true, value: name };
+    }
 
     case "buyer_intent":
     case "competitors":
@@ -476,7 +493,7 @@ export const SITE_TYPE_LABEL: Record<SiteType, string> = {
 
 /** Fields nobody can read off a website: house rules, hard limits and intent live in the
  *  owner's head. The screen says so instead of implying the next crawl will find them. */
-export const USER_ONLY_FIELDS: ProfileField[] = ["never_say", "publishing_rules", "goals", "competitors"];
+export const USER_ONLY_FIELDS: ProfileField[] = ["owner_name", "never_say", "publishing_rules", "goals", "competitors"];
 
 // ── how a person reads this ─────────────────────────────────────────────────────────────────
 
@@ -588,6 +605,18 @@ export const FIELD_GROUPS: FieldGroup[] = [
     title: "Your voice",
     sub: "How the writing should sound, and what it must never do.",
     fields: [{ field: "voice", label: "House voice", hint: "Tone plus the do / do-not list handed to every writer.", prompt: "e.g. formal, no hype, “we” voice, numbers with sources" }],
+  },
+  {
+    title: "Who is writing",
+    sub: "Messages to your leads are written from you, so they read like a person and not a form letter.",
+    fields: [
+      {
+        field: "owner_name",
+        label: "Your name",
+        hint: "Used on the first WhatsApp message and every reply: “I\u2019m Samiul from yourwebsite.com”. Leave it empty and the AI words it as it does today.",
+        prompt: "e.g. Samiul",
+      },
+    ],
   },
   {
     title: "Where you work",
@@ -731,6 +760,7 @@ export const FRIENDLY_LABEL: Record<ProfileField, string> = {
   voice: "How your writing should sound",
   geo: "Where you work",
   language: "Language you publish in",
+  owner_name: "Your name",
   competitors: "Your competitors",
   goals: "What you want from this",
   never_say: "Things we must never say",

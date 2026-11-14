@@ -74,18 +74,20 @@ export async function composeOpener(tenantId: string, lead: LeadForOpener): Prom
 
   const profile = (await loadActiveProfile(tenantId).catch(() => null))?.profile as any;
   const business = brandName(tenant as any);
+  const owner = String(profile?.owner_name ?? "").trim();
   const what = String(profile?.what_they_do ?? "").trim();
   if (!business || !what) return null; // nothing real to say, and we do not invent a business
   const who = lead.company || lead.name || "";
   const offerings = Array.isArray(profile?.offerings) ? profile.offerings.slice(0, 4).map((o: any) => o?.name ?? o).filter(Boolean).join(", ") : "";
 
   const prompt = [
-    `Write the first WhatsApp message from ${business} to ${who || "a business that may need us"}${lead.city ? ` in ${lead.city}` : ""}.`,
+    `Write the first WhatsApp message from ${owner ? `${owner} at ${business}` : business} to ${who || "a business that may need us"}${lead.city ? ` in ${lead.city}` : ""}.`,
     `About us: ${what}${offerings ? `. We offer: ${offerings}` : ""}.`,
     lead.reason ? `Why we are writing to them: ${lead.reason}.` : "",
     "",
     "Rules:",
     "- 2 or 3 short sentences, plain and polite, like a real person at a professional company. No emojis, no hype, no exclamation marks.",
+    ...(owner ? [`- Introduce yourself as ${owner} from ${business}, in exactly those words.`] : []),
     "- Say who we are in the first sentence, then one concrete reason it may matter to them, then ONE easy question.",
     "- Do not claim any result, number, certificate or client that is not in the text above. Do not mention a price.",
     "- Do not add a signature or an opt-out line: they are added for you.",

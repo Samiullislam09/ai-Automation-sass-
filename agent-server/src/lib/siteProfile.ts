@@ -194,6 +194,8 @@ export const PROFILE_FIELDS = [
   "voice",
   "geo",
   "language",
+  // Who is writing to leads. Only the owner knows it; the crawler never fills it in.
+  "owner_name",
   "competitors",
   "goals",
   // Phase 1 (docs/SITE_BRAIN_PLAN.md) — keep in step with the web mirror's order.
@@ -221,6 +223,8 @@ export type SiteProfile = {
   voice: Voice | null;
   geo: string | null;
   language: string | null;
+  /** The name messages to leads are written from ("Samiul"). Null = nobody told us, and the AI is left to its own wording. */
+  owner_name: string | null;
   competitors: string[];
   goals: Goals | null;
   /** Claims, words and guarantees this business must never publish. A hard block. */
@@ -285,6 +289,7 @@ export function emptyProfile(): SiteProfile {
     voice: null,
     geo: null,
     language: null,
+    owner_name: null,
     competitors: [],
     goals: null, // { primary: null, kpis: [], focus: [] } once set — normalize below fills a partial row
     never_say: [],
@@ -699,6 +704,7 @@ function label(field: ProfileField): string {
     audience: "Who they sell to",
     geo: "Location / service area",
     language: "Language",
+    owner_name: "Your name",
   };
   return LABELS[field] ?? field;
 }

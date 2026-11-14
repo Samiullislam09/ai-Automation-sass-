@@ -1,4 +1,4 @@
-import { brandName } from "../lib/whatsapp/brand.js";
+import { senderIdentity } from "../lib/leads/identity.js";
 import type { Job } from "pg-boss";
 import { Agent, type AgentContext, type AgentJobData } from "./base.js";
 import { supabase } from "../supabase.js";
@@ -155,7 +155,7 @@ export class LeadsAgent extends Agent {
     }
 
     // ── 2 · who we are, for the identification line every draft carries ────────────────────
-    const identity = senderIdentity(tenant);
+    const identity = senderIdentity(tenant, profile?.owner_name);
 
     // ── 3 · what we already know, so nobody is contacted twice or after saying no ──────────
     const { suppression, knownDomains, knownPhones, knownNames } = await loadHistory(tenantId);
@@ -294,20 +294,6 @@ export class LeadsAgent extends Agent {
  *  `icp_profile` is the onboarding jsonb blob; a tenant that filled in a contact name and a
  *  reply address gets both in the signature. Neither is invented: with no name on file the
  *  signature is the business alone, which is still a real identification. */
-function senderIdentity(tenant: { name?: string | null; website_url?: string | null; icp_profile?: any } | null): SenderIdentity {
-  const profile = (tenant?.icp_profile ?? {}) as Record<string, unknown>;
-  const str = (v: unknown) => {
-    const s = String(v ?? "").trim();
-    return s || null;
-  };
-  return {
-    personName: str(profile.contact_name ?? profile.owner_name ?? profile.sender_name),
-    // The business is its website ("wca-global.com"), not the account username the workspace happens to be named.
-    businessName: brandName(tenant),
-    website: str(tenant?.website_url),
-    replyTo: str(profile.reply_to ?? profile.contact_email ?? profile.email),
-  };
-}
 
 // ── what we already know ────────────────────────────────────────────────────────────────────
 

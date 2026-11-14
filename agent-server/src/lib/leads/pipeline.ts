@@ -743,6 +743,9 @@ export async function draft(researched: Researched, ctx: DraftContext, deps: Pip
           `- ${MAX_DRAFT_WORDS} words maximum, and shorter is better.`,
           '- No "I hope this finds you well", no "I came across your website", no flattery, no template smell.',
           "- Do not sign it and do not add an unsubscribe line — those are added afterwards.",
+          // Only when the owner told Site Brain their name: say who is writing, exactly. With no name on file this rule is
+          // absent and the wording is left as it always was.
+          ...(identity.personName ? [`- You are ${identity.personName} from ${identity.businessName}. Say so once, in the first sentence, in exactly those words.`] : []),
           "- Never say anything about them that is not in the opening line above.",
           ...(attempt > 0 && lastViolations.length
             ? ["", "Your last attempt broke a rule. Fix exactly this and change nothing else:", ...lastViolations.map((v) => `- ${v.detail}`)]
