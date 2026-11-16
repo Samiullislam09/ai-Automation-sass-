@@ -9,8 +9,8 @@ process.env.DATABASE_URL ||= "postgres://unit-test/none";
 process.env.SUPABASE_URL ||= "http://unit-test.invalid";
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= "unit-test";
 
-const { finalizeDecision, parseDecision, REPLY_SYSTEM } = await import("./decide.js");
-const { parseMeetingPreference, MEETING_HANDOFF, MEETING_ACK, MEETING_REASK, MEETING_FALLBACK, isMeetingAsk, tooLongForChat, splitForChat } = await import("./conversation.js");
+const { finalizeDecision, parseDecision, inventedSchedule, REPLY_SYSTEM } = await import("./decide.js");
+const { MEETING_ACK, MEETING_FALLBACK, tooLongForChat, splitForChat } = await import("./conversation.js");
 const { unsupportedAmounts } = await import("../pricing.js");
 const { ACTIVE_MIN_S, ACTIVE_MAX_S } = await import("./timing.js");
 
@@ -20,47 +20,63 @@ const ctx = (over: any = {}) => ({
   callWanted: false, priceUnknown: false, lastInbound: "", factsText: "", rewrite: async () => D("x"), ...over,
 });
 
-test("audit regression: 'subah' after 'morning, afternoon or evening?' is ACKNOWLEDGED — not the same question again, not silence", async () => {
-  // the exact line sent live, and the customer's one-word answer; the model flagged it a meeting request, as it did live
-  const r = await finalizeDecision(
-    D("Zaroor — hamari team ka member aapse contact karke time fix kar lega. Subah, dopahar ya shaam?", { intent: "meeting" }),
-    ctx({ lang: "hinglish", recentOut: [MEETING_FALLBACK.hinglish], lastInbound: "subah" }),
-  );
-  assert.equal(r.reply, MEETING_ACK.hinglish("morning"));
-  assert.notEqual(r.reply, MEETING_FALLBACK.hinglish);
-  assert.equal(r.meeting_pref, "morning");
-  assert.equal(r.templated, true, "exempt from the repeat guard that ended in silence");
-  assert.equal(r.needs_human, true, "the team is told to arrange it");
-  assert.ok((r.notes ?? []).some((n: string) => /call time noted/.test(n)));
-  // even if the model took it for small talk
-  const r2 = await finalizeDecision(D("Thik hai!", { intent: "other" }), ctx({ lang: "hinglish", recentOut: [MEETING_FALLBACK.hinglish], lastInbound: "subah" }));
-  assert.equal(r2.meeting_pref, "morning");
+const CALL = (stage: string, when: string | null = null) => ({ call: { stage, when } });
+
+test("the model READS the call state, in any language: the code acts on it and keeps the model's own reply", async () => {
+  // Hinglish, English, Hindi, Spanish, Arabic, Bengali — the code never inspects the words, only `call`
+  const cases: [string, string, string, string][] = [
+    ["Theek hai, subah ka time note kar liya. Team confirm karegi.", "time_given", "morning", "subah"],
+    ["Noted, tonight. The team will confirm and send the link here.", "time_given", "tonight", "Aj rat ko"],
+    ["Perfecto, mañana por la tarde. El equipo confirmará la hora aquí.", "time_given", "tomorrow afternoon", "mañana por la tarde"],
+    ["ঠিক আছে, আজ রাতে। আমাদের টিম সময় নিশ্চিত করবে।", "time_given", "tonight", "আজ রাতে"],
+    ["تمام، سأخبر الفريق الآن وسيراسلك هنا.", "wants_now", null as any, "الآن"],
+  ];
+  for (const [reply, stage, when, said] of cases) {
+    const r = await finalizeDecision(D(reply, { intent: "meeting", ...CALL(stage, when) }), ctx({ lastInbound: said }));
+    assert.equal(r.reply, reply, "the model's reply, in the customer's language, goes out unchanged");
+    assert.equal(r.intent, "meeting");
+    assert.equal(r.needs_human, true, "the team is told");
+    assert.equal(r.meeting_pref, stage === "wants_now" ? "right now" : when);
+    assert.ok(!r.templated, "not a canned line");
+  }
 });
 
-test("the call flow: the first request asks WHEN; an unclear answer asks again in other words; a clear one is noted", async () => {
-  const first = await finalizeDecision(D("Sure, let's do a call at 10 AM tomorrow!", { intent: "meeting" }), ctx({ lastInbound: "ek meeting kare?" }));
-  assert.equal(first.reply, MEETING_FALLBACK.en);
-  assert.ok(first.templated && !first.meeting_pref);
-  const unclear = await finalizeDecision(D("ok", { intent: "meeting" }), ctx({ recentOut: [MEETING_FALLBACK.en], lastInbound: "hmm not sure" }));
-  assert.equal(unclear.reply, MEETING_REASK.en);
-  assert.notEqual(unclear.reply, MEETING_FALLBACK.en);
-  assert.ok(isMeetingAsk(MEETING_REASK.en), "…and it is itself a question the next answer is read against");
-  const clear = await finalizeDecision(D("ok", { intent: "meeting" }), ctx({ recentOut: [MEETING_REASK.en], lastInbound: "tomorrow at 5 pm" }));
-  assert.equal(clear.meeting_pref, "tomorrow 5 PM");
-  assert.match(clear.reply, /Noted — tomorrow 5 PM/);
+test("a call with no time yet: the model's own question goes out; an invented clock time or link is removed", async () => {
+  const ask = await finalizeDecision(D("Sure! Which day suits you, and morning, afternoon or evening?", { intent: "meeting", ...CALL("wants_call") }), ctx({ lastInbound: "can we have a call?" }));
+  assert.equal(ask.reply, "Sure! Which day suits you, and morning, afternoon or evening?");
+  assert.ok(!ask.meeting_pref && !ask.needs_human, "nothing to arrange yet");
+  // the model invents "10 AM": rewritten once; if it still does, the standard line
+  const fixed = await finalizeDecision(D("Sure, let's do 10 AM tomorrow!", { intent: "meeting", ...CALL("wants_call") }), ctx({ lastInbound: "call?", rewrite: async () => D("Happy to — which day suits you?") }));
+  assert.equal(fixed.reply, "Happy to — which day suits you?");
+  const stubborn = await finalizeDecision(D("Let's do 10 AM tomorrow!", { intent: "meeting", ...CALL("wants_call") }), ctx({ lastInbound: "call?", rewrite: async () => D("How about 11:30 am?") }));
+  assert.equal(stubborn.reply, MEETING_FALLBACK.en);
+  assert.ok((stubborn.notes ?? []).some((n: string) => /invented call time or link removed/.test(n)));
+  // an intent "meeting" with no call field at all is treated as a call request
+  const bare = await finalizeDecision(D("Which day suits you?", { intent: "meeting" }), ctx({}));
+  assert.equal(bare.reply, "Which day suits you?");
+  // asked twice already, still nothing: the model says "unclear"; the team is told to message them
+  const unclear = await finalizeDecision(D("No worries — a team member will message you directly to fix a time.", { intent: "meeting", ...CALL("unclear") }), ctx({ lastInbound: "pata nahi" }));
+  assert.equal(unclear.meeting_pref, "time not clear — read the chat");
+  assert.equal(unclear.needs_human, true);
 });
 
-test("parseMeetingPreference: day, part of the day and time, in English, Hinglish and Hindi", () => {
-  const p = (s: string) => parseMeetingPreference(s);
-  assert.deepEqual(p("subah"), { any: true, label: "morning" });
-  assert.deepEqual(p("kal shaam"), { any: true, label: "kal evening" });
-  assert.deepEqual(p("tomorrow morning please"), { any: true, label: "tomorrow morning" });
-  assert.deepEqual(p("Monday 4 pm"), { any: true, label: "monday 4 PM" });
-  assert.deepEqual(p("dopahar 2 baje"), { any: true, label: "2 o'clock" });
-  assert.deepEqual(p("सुबह"), { any: true, label: "morning" });
-  assert.equal(p("hmm let me think").any, false);
-  assert.equal(p("").any, false);
-  assert.ok(MEETING_ACK.hi("morning").includes("ठीक है"));
+test("inventedSchedule: clock times and links are caught in any language; what the customer or the facts said is allowed", () => {
+  assert.equal(inventedSchedule("Perfecto, a las 5 pm.", "mañana", ""), true);
+  assert.equal(inventedSchedule("ठीक है, 10:30 बजे।", "kal", ""), true);
+  assert.equal(inventedSchedule("Book here: https://meet.google.com/abc", "call", ""), true);
+  assert.equal(inventedSchedule("5 pm works, noted.", "5 pm please", ""), false, "echoing the customer's own time is fine");
+  assert.equal(inventedSchedule("Our link: https://cal.example.com/x", "call", "Booking: https://cal.example.com/x"), false);
+  assert.equal(inventedSchedule("Noted — tonight.", "tonight", ""), false);
+  assert.equal(inventedSchedule("It takes 3 months.", "how long", ""), false);
+});
+
+test("the prompt makes the model read the call state itself, in any language", () => {
+  assert.match(REPLY_SYSTEM, /"call":\{"stage":"none","when":null\}/);
+  assert.match(REPLY_SYSTEM, /judged from THEIR words in any language or spelling/);
+  assert.match(REPLY_SYSTEM, /do NOT ask again and do NOT ask for a 'specific time'/);
+  assert.match(REPLY_SYSTEM, /already asked when twice/);
+  assert.equal(parseDecision({ intent: "meeting", reply: "x", call: { stage: "time_given", when: "tonight" } }).call?.stage, "time_given");
+  assert.equal(parseDecision({ intent: "meeting", reply: "x", call: { stage: "bogus" } }).call?.stage, "none", "a malformed stage is ignored");
 });
 
 test("short messages: the real 390-character reply is detected, and split the way a person would send it", () => {
@@ -138,22 +154,4 @@ test("packages: kept only when the site prints the name and the figures", () => 
   assert.deepEqual(out.map((p: any) => p.name), ["Essential"]);
   assert.equal(out[0].best_for, "teams under 50");
   assert.deepEqual(groundedPackages("nope", pages), []);
-});
-
-test("the live confusion: 'Abhi possible ha?', 'Aj rat ko' are understood; two unclear answers hand over instead of asking a third time", async () => {
-  const p = (s: string) => parseMeetingPreference(s);
-  assert.deepEqual(p("Aj rat ko"), { any: true, label: "aj evening" });
-  assert.deepEqual(p("Abhi possible ha ?"), { any: true, label: "right now" });
-  assert.equal(p("aaj raat ko ho jayega").any, true);
-  assert.equal(p("tonight").any, true);
-  assert.equal(p("hmm").any, false);
-  const now = await finalizeDecision(D("ok", { intent: "meeting" }), ctx({ lang: "hinglish", recentOut: [MEETING_REASK.hinglish], lastInbound: "Abhi possible ha ?" }));
-  assert.equal(now.meeting_pref, "right now");
-  assert.match(now.reply, /team ko abhi bata raha/);
-  const tonight = await finalizeDecision(D("ok", { intent: "meeting" }), ctx({ lang: "hinglish", recentOut: [MEETING_REASK.hinglish], lastInbound: "Aj rat ko" }));
-  assert.equal(tonight.meeting_pref, "aj evening");
-  const third = await finalizeDecision(D("ok", { intent: "meeting" }), ctx({ lang: "hinglish", recentOut: [MEETING_FALLBACK.hinglish, MEETING_REASK.hinglish], lastInbound: "pata nahi" }));
-  assert.equal(third.reply, MEETING_HANDOFF.hinglish);
-  assert.equal(third.needs_human, true);
-  assert.equal(third.templated, true);
 });

@@ -18,7 +18,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { brandName } from "./brand.js";
 import {
   detectLanguage, detectSignals, conversationStage, mustHandOff, signalsBrief,
-  LANG_INSTRUCTION, STAGE_GUIDE, riskyClaim, unverifiedTerms, assertsUnverified, confirmLine, offersCall, stripCallOffer, missingDetails, CONFIRM_LANG, containsPriceAmount, statesPriceUnavailable, PRICE_UNKNOWN_LINE, proposesTime, parseMeetingPreference, MEETING_ACK, MEETING_REASK, MEETING_HANDOFF, isMeetingAsk, tooLongForChat, MAX_CHAT_CHARS, stripTimeProposals, claimsExperience, MEETING_FALLBACK, SMALLTALK_DEFLECT, type Lang, type Msg,
+  LANG_INSTRUCTION, STAGE_GUIDE, riskyClaim, unverifiedTerms, assertsUnverified, confirmLine, offersCall, stripCallOffer, missingDetails, CONFIRM_LANG, containsPriceAmount, statesPriceUnavailable, PRICE_UNKNOWN_LINE, proposesTime, MEETING_ACK, tooLongForChat, MAX_CHAT_CHARS, stripTimeProposals, claimsExperience, MEETING_FALLBACK, SMALLTALK_DEFLECT, type Lang, type Msg,
 } from "./conversation.js";
 import { retrieveKnowledge, queryFor, renderKnowledge, type Passage } from "./knowledge.js";
 import { unsupportedAmounts } from "../pricing.js";
@@ -40,9 +40,15 @@ export type Decision = {
   notes?: string[];
   /** The reply is a fixed, code-written line (a meeting acknowledgement, "cannot share the price"), not the model's. */
   templated?: boolean;
-  /** When they said they would like the call (MeetingPref.label): the owner is alerted with it. */
+  /** When they said they would like the call (the model's `call.when`, a short English phrase): the owner is alerted with it. */
   meeting_pref?: string;
+  /** Where the arrangement of a call stands, READ BY THE MODEL from the customer's own words in whatever language they wrote
+   *  (never by keyword lists here). none = no call in play; wants_call = they want one but gave no time; time_given = they said
+   *  when; wants_now = they want it immediately; unclear = we have asked and still have no usable answer. */
+  call?: { stage: CallStage; when: string | null };
 };
+export type CallStage = "none" | "wants_call" | "time_given" | "wants_now" | "unclear";
+const CALL_STAGES: CallStage[] = ["none", "wants_call", "time_given", "wants_now", "unclear"];
 
 const INTENTS: Intent[] = ["greeting", "question", "affirmation", "objection", "smalltalk", "ready", "meeting", "stop", "other"];
 const ACTIONS: Action[] = ["reply", "wait", "ignore"];
@@ -99,7 +105,19 @@ export function parseDecision(raw: unknown): Decision {
   // `handoff` is the model saying "a person should take this" (it could not answer from the facts it
   // was given). Honoured on top of the old rules, so a missing field changes nothing.
   const needs_human = confidence < 0.5 || intent === "objection" || o.handoff === true;
-  return { intent, confidence, action, reply, reason, needs_human };
+  const c = (o.call && typeof o.call === "object" ? o.call : {}) as Record<string, unknown>;
+  const stage = CALL_STAGES.includes(c.stage as CallStage) ? (c.stage as CallStage) : "none";
+  const when = typeof c.when === "string" && c.when.trim() ? c.when.trim().slice(0, 60) : null;
+  return { intent, confidence, action, reply, reason, needs_human, call: { stage, when } };
+}
+
+/** Does the reply carry a clock time ("5 pm", "17:30") or a link that neither the customer's last message nor the business facts
+ *  contain? Digits and URLs mean the same in every language, so this needs no word lists. */
+export function inventedSchedule(reply: string, lastInbound: string, factsText: string): boolean {
+  const norm = (x: string) => x.toLowerCase().replace(/\s+/g, "");
+  const known = norm(`${lastInbound} ${factsText}`);
+  const found = String(reply ?? "").match(/https?:\/\/\S+|www\.\S+|\b\d{1,2}[:.]\d{2}\s?(?:am|pm)?|\b\d{1,2}\s?(?:am|pm)\b/gi) ?? [];
+  return found.some((m) => !known.includes(norm(m).replace(/[.,;!?)]+$/, "")));
 }
 
 type ThreadMsg = Msg;
@@ -224,7 +242,8 @@ export async function completeReplyJson(user: string, system: string, call: type
 export const REPLY_SYSTEM = [
   "You are the person answering on a business's WhatsApp, deciding how to handle a lead's latest message. Be genuinely useful, fast and honest — like the best salesperson at a well-run company, never a bot reading a script.",
   "",
-  "Return ONLY JSON: " + '{"intent":"...","confidence":0.0,"action":"...","reply":"...","handoff":false,"reason":"..."}',
+  "Return ONLY JSON: " + '{"intent":"...","confidence":0.0,"action":"...","reply":"...","handoff":false,"reason":"...","call":{"stage":"none","when":null}}',
+  '- "call": where arranging a call stands, judged from THEIR words in any language or spelling ("aaj raat", "kal subah", "tonight", "right now", "a las 5", "٥ بجے"). stage is one of: "none" (no call in play), "wants_call" (they want a call but have not said when), "time_given" (they said when, however loosely: a day, a part of the day, an hour, "after lunch"), "wants_now" (they want it right now / as soon as possible), "unclear" (you have already asked when twice and still have nothing usable). "when" = what they said, as a short English phrase ("tonight", "tomorrow morning", "right now", "5 pm"), else null.',
   '- "intent": one of greeting, question, affirmation, objection, smalltalk, ready, meeting, stop, other. Use "meeting" when they ASK FOR or ACCEPT a call/meeting/demo, or answer OUR question about when (the system then sends real slots, or notes their preferred time for the team — you never write times yourself).',
   '- "confidence": 0..1, how sure you are about intent AND that a reply is appropriate.',
   '- "action": "ignore" (a bare acknowledgement that needs no reply: "ok", "thanks", "hmm", "👍"), "wait" (the message looks half-typed; they are still writing) or "reply" (answer now).',
@@ -261,7 +280,12 @@ export const REPLY_SYSTEM = [
   "- Never invent a price, date, guarantee, client name or number that is not in the facts. If you do not know, say so simply and say a team member will confirm — and set handoff true.",
   "",
   "CALLS AND MEETINGS:",
-  "- You cannot see anyone's calendar. NEVER propose, promise or confirm a specific day or time yourself (no 'tomorrow 10 AM', no 'tonight', no 'this week'). A time you invent may be one nobody can keep.",
+  "- You cannot see anyone's calendar and cannot create a meeting link. NEVER propose, promise or confirm a specific day or time yourself, and never write a link. A time you invent may be one nobody can keep.",
+  "- When they ask for or accept a call and have NOT said when: ask ONE short question, in their language, about when suits them (which day, and morning / afternoon / evening). Set call.stage \"wants_call\".",
+  "- When they HAVE said when — in any wording or language — do NOT ask again and do NOT ask for a 'specific time'. Acknowledge it warmly in one short line, say our team will confirm the exact time and send the meeting link right here, and set call.stage \"time_given\" with call.when. If they want it right now, say you are letting the team know straight away and set \"wants_now\". Echo their own words for the time; never turn it into a clock time they did not say.",
+  "- Read the whole conversation before you ask when: if you have already asked when twice and still have nothing usable, do not ask a third time — say a team member will message them directly to fix a time, and set call.stage \"unclear\". Never ask the same question twice in a row; if their answer was a question of their own (is it possible now?), answer THAT first.",
+  "- Never say how soon the team will answer ('in 5-10 minutes', 'within the hour') — you cannot promise that. And do not introduce yourself or the business again in a reply about a call: one short line.",
+  "- Whenever call.stage is not \"none\", set intent to \"meeting\".",
   "- To move toward a call, offer it ONCE, and only when they have shown real interest (given their need or size, asked the price, raised an objection you have answered): e.g. 'Would a short call help? I can send you a few time slots.' When they say yes or ask for a call, set intent to \"meeting\".",
   "- Do not bring a call up in every message. If you already offered one and they did not take it, do not repeat it unless they raise it. Do not end every message with the same kind of question either — answer, and ask something only when it genuinely moves things on.",
   "",
@@ -480,22 +504,32 @@ export async function finalizeDecision(
   //     "I'll send you slots" when none are coming). Any OTHER reply that proposes a time for a call has
   //     those sentences removed. The assistant cannot see a calendar.
   if (d.action === "reply") {
-    // WHERE ARE WE IN ARRANGING THE CALL? If our last words asked when they would like it ("morning, afternoon or
-    // evening?") and they have now said ("subah"), the answer is an acknowledgement and an alert to the team — NOT the
-    // same question again. Asking twice made the duplicate-guard see a repeat and the assistant went SILENT on a customer
-    // who had just said yes (live, 2026-11-14: "subah" -> nothing, "???" -> nothing).
-    const asked = (ctx.recentOut ?? []).some(isMeetingAsk);
-    const pref = parseMeetingPreference(ctx.lastInbound ?? "");
-    if (asked && pref.any) {
-      d = { ...d, intent: "meeting", reply: MEETING_ACK[ctx.lang](pref.label), meeting_pref: pref.label, templated: true, needs_human: true, reason: `wants a call — ${pref.label}` };
-      note("call time noted: team told to schedule it");
-    } else if (asked && (ctx.recentOut ?? []).filter(isMeetingAsk).length >= 2) {
-      // Asked twice, still no time: a third question is what confuses people. Hand it to a person, who will just message them.
-      d = { ...d, intent: "meeting", reply: MEETING_HANDOFF[ctx.lang], meeting_pref: "time not clear — read the chat", templated: true, needs_human: true, reason: "wants a call — time not clear, message them directly" };
-      note("asked twice, time still unclear: handed to the team to message them");
-    } else if (d.intent === "meeting") {
-      d = { ...d, reply: asked ? MEETING_REASK[ctx.lang] : MEETING_FALLBACK[ctx.lang], templated: true };
-      note(asked ? "asked again when they would like the call" : "call requested: no calendar or booking link, asked when they are free");
+    // WHERE ARE WE IN ARRANGING THE CALL? The MODEL reads that from the customer's own words, in any language or spelling
+    // ("aaj raat", "tonight", "right now", "a las 5"), and says so in `call` — no keyword list here can keep up with every
+    // language a customer may write in. The code below only enforces what must always hold:
+    //   · a call in play is a meeting request (the team is told, with what they said about when);
+    //   · the reply never carries a clock time or a link the customer or the facts did not supply;
+    //   · a reply that is empty falls back to a short standard line, in the customer's language where we have one.
+    const stage: CallStage = d.call && d.call.stage !== "none" ? d.call.stage : d.intent === "meeting" ? "wants_call" : "none";
+    if (stage !== "none") {
+      d = { ...d, intent: "meeting" };
+      if (stage !== "wants_call") {
+        const label = stage === "wants_now" ? "right now" : stage === "unclear" ? "time not clear — read the chat" : (d.call?.when || "see the chat");
+        d = { ...d, meeting_pref: label, needs_human: true, reason: `wants a call — ${label}` };
+        note(stage === "unclear" ? "asked about the call time twice: team will message them directly" : `call time noted (${label}): team told to arrange it`);
+      } else {
+        note("call requested: asked when they are free");
+      }
+      if (inventedSchedule(d.reply, ctx.lastInbound ?? "", ctx.factsText ?? "")) {
+        let better: Decision | null = null;
+        try {
+          better = await ctx.rewrite(`YOUR DRAFT CONTAINS A CLOCK TIME OR A LINK THE CUSTOMER DID NOT GIVE: "${d.reply.slice(0, 200)}". You cannot see a calendar or create a meeting link. Rewrite it in the same language: ${stage === "wants_call" ? "ask ONE short question about which day and part of the day suits them" : "acknowledge what THEY said about the time in their own words, and say the team will confirm the exact time and send the meeting link here"}. No clock times, no links. Keep call.stage and call.when.`);
+        } catch { /* fall through */ }
+        d = better && better.action === "reply" && better.reply && !inventedSchedule(better.reply, ctx.lastInbound ?? "", ctx.factsText ?? "")
+          ? { ...d, reply: better.reply }
+          : { ...d, reply: stage === "wants_call" ? MEETING_FALLBACK[ctx.lang] : MEETING_ACK[ctx.lang](d.meeting_pref ?? ""), templated: true };
+        note("invented call time or link removed");
+      }
     } else if (proposesTime(d.reply)) {
       const cleaned = stripTimeProposals(d.reply);
       d = { ...d, reply: cleaned || MEETING_FALLBACK[ctx.lang] };

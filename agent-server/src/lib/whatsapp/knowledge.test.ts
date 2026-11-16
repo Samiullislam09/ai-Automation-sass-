@@ -274,9 +274,11 @@ test("finalizeDecision: the call question is dropped when one was offered in the
   assert.equal((await finalizeDecision(D(ask), { ...base, recentOut: ["ISO 9001 takes 3-4 months."], callWanted: false })).reply, ask);
   // they asked for a call themselves: kept
   assert.equal((await finalizeDecision(D(ask), { ...base, recentOut: ["Kya call helpful rahegi?"], callWanted: true })).reply, ask);
-  // the model says the customer accepted (intent meeting): the system sends real slots; the fallback is what
-  // would be sent otherwise — never the model's own wording
-  assert.equal((await finalizeDecision(D(ask, { intent: "meeting" }), { ...base, recentOut: ["Kya call helpful rahegi?"], callWanted: false })).reply, MEETING_FALLBACK.hinglish);
+  // the model says the customer accepted (intent meeting): the model's own wording stands (it is written in the customer's
+  // language and read for invented times/links by the code), and the call is treated as a request
+  const acc = await finalizeDecision(D(ask, { intent: "meeting" }), { ...base, recentOut: ["Kya call helpful rahegi?"], callWanted: false });
+  assert.equal(acc.reply, ask);
+  assert.equal(acc.intent, "meeting");
 });
 
 test("the system prompt forbids invented times and personal experiences, and tells the AI to say it is the business's assistant", async () => {
@@ -320,11 +322,11 @@ test("small talk: a claimed experience is caught; an honest deflection is not", 
   assert.equal(claimsExperience("I'm the assistant, so I can't say — back to your ISO question."), false);
 });
 
-test("finalizeDecision: intent 'meeting' always sends the honest fallback; invented times are stripped; small-talk claims replaced", async () => {
-  const base = { handoffFloor: { yes: false, reason: "" }, unverified: [] as string[], lang: "hinglish" as const, rewrite: async () => D("x"), recentOut: [] as string[], callWanted: false };
+test("finalizeDecision: a meeting reply with an invented time is rewritten; invented times are stripped elsewhere; small-talk claims replaced", async () => {
+  const base = { handoffFloor: { yes: false, reason: "" }, unverified: [] as string[], lang: "hinglish" as const, rewrite: async () => D("Kaunsa din theek rahega?"), recentOut: [] as string[], callWanted: false };
   const m = await finalizeDecision(D("Badhiya — main time slots bhejta hu. Kaam ke din (Mon-Fri) 10 AM - 4 PM theek?", { intent: "meeting" }), base);
-  assert.equal(m.reply, MEETING_FALLBACK.hinglish);
-  const t = await finalizeDecision(D("Hum audit tak saath rehte hain. Kal subah 10 baje call karein?", { intent: "question" }), base);
+  assert.equal(m.reply, "Kaunsa din theek rahega?");
+  const t = await finalizeDecision(D("Hum audit tak saath rehte hain. Kal subah 10 baje call karein?", { intent: "question" }), { ...base, rewrite: async () => D("x") });
   assert.equal(t.reply, "Hum audit tak saath rehte hain.");
   const only = await finalizeDecision(D("Kal subah 10 baje call karein?", { intent: "question" }), base);
   assert.equal(only.reply, MEETING_FALLBACK.hinglish, "nothing left after stripping → the honest fallback");
