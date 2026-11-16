@@ -7,7 +7,8 @@
 import { supabase } from "../../supabase.js";
 import { getWhatsappSettings } from "../outreach/settings.js";
 import { isQuietHours } from "./outbound.js";
-import { calendarFreeBusy, calendarBook, calendarCancel } from "./calendar.js";
+import { calendarFreeBusy, calendarBook, calendarCancel, explainCalendarCode } from "./calendar.js";
+import { logEvent } from "./events.js";
 import { sendText, simulateTyping } from "./session.js";
 import { leadDialDigits } from "./phone.js";
 import { recordOutgoing } from "./store.js";
@@ -53,7 +54,12 @@ async function leadName(tenantId: string, leadId: string, phone: string): Promis
 export async function offerMeeting(tenantId: string, leadId: string, phone: string): Promise<boolean> {
   const s = await getWhatsappSettings(tenantId);
   const fb = await calendarFreeBusy(tenantId, { tzOffset: s.tz_offset, sendStart: s.send_start, sendEnd: s.send_end, durationMin: DUR_MIN, want: 3 });
-  if (!fb.ok || !fb.slots?.length) return false;
+  if (!fb.ok || !fb.slots?.length) {
+    // Never a silent fallback: the owner reads WHY no meeting link was sent (Activity > Live log).
+    const why = !fb.ok ? explainCalendarCode(fb.code) : "Google Calendar is connected but has no free time in the coming days inside your sending hours.";
+    void logEvent(tenantId, leadId, "error", `No real meeting slots could be offered. ${why}`, { code: fb.ok ? "no_slots" : fb.code ?? "unknown" });
+    return false;
+  }
 
   await supabase.from("lead_meetings").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("tenant_id", tenantId).eq("lead_id", leadId).eq("status", "offered");
   await supabase.from("lead_meetings").insert({ tenant_id: tenantId, lead_id: leadId, status: "offered", offered_slots: fb.slots });

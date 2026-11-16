@@ -365,6 +365,16 @@ function SettingsPanel({ open, onClose, toast, meetSetup }: { open: boolean; onC
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState<"replies" | "meetings" | "team" | "sending" | "queue">("replies");
   const [teamCount, setTeamCount] = useState<number | null>(null);
+  const [calCheck, setCalCheck] = useState<{ working: boolean; message: string } | null>(null);
+  const [calChecking, setCalChecking] = useState(false);
+  const runCalCheck = async () => {
+    setCalChecking(true);
+    try {
+      const r = await fetch("/api/whatsapp/calendar-check", { cache: "no-store" }).then((x) => x.json());
+      setCalCheck(r?.ok ? { working: !!r.working, message: String(r.message ?? "") } : { working: false, message: r?.error || "The check could not run. The agent server may be mid-update." });
+    } catch { setCalCheck({ working: false, message: "The check could not run. Check your connection and try again." }); }
+    finally { setCalChecking(false); }
+  };
 
   const load = useCallback(async () => {
     const [a, b, c] = await Promise.all([
@@ -387,7 +397,7 @@ function SettingsPanel({ open, onClose, toast, meetSetup }: { open: boolean; onC
 
   useEffect(() => {
     if (!open) return;
-    setS(null); setOutbox(null); setTab("replies");
+    setS(null); setOutbox(null); setTab("replies"); setCalCheck(null);
     void load();
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onCloseRef.current(); };
     document.addEventListener("keydown", onKey);
@@ -519,6 +529,16 @@ function SettingsPanel({ open, onClose, toast, meetSetup }: { open: boolean; onC
                     </div>
                     {!googleOk(meetSetup) && meetSetup?.google !== "not_configured" && (
                       <a href="/api/integrations/google/start" className="mt-2 inline-flex h-8 items-center rounded-lg px-3.5 text-[12.5px] font-semibold text-white" style={{ background: WA.green }}>{meetSetup?.google === "needs_reconnect" ? "Reconnect Google" : "Connect Google"}</a>
+                    )}
+                    {googleOk(meetSetup) && (
+                      <div className="mt-2">
+                        <button onClick={() => void runCalCheck()} disabled={calChecking} className="h-8 rounded-lg px-3.5 text-[12.5px] font-semibold disabled:opacity-60" style={{ background: "#fff", border: "1px solid #9ae6b4", color: "#067647" }}>{calChecking ? "Checking…" : "Test: can it book a call?"}</button>
+                        {calCheck && (
+                          <div className="mt-2 rounded-lg px-2.5 py-2 text-[12px] leading-relaxed" role="status" style={{ background: calCheck.working ? "#fff" : "#fdeaea", color: calCheck.working ? "#067647" : "#b42318" }}>
+                            {calCheck.working ? "✓ " : "✗ "}{calCheck.message}
+                          </div>
+                        )}
+                      </div>
                     )}
                     {meetSetup?.google === "not_configured" && <div className="mt-1 text-[11.5px]" style={{ color: "#7a5b00" }}>Google sign-in is not set up on this server (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET). Use a booking link below meanwhile.</div>}
                   </div>

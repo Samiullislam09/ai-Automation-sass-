@@ -17,9 +17,26 @@ async function call(body: Record<string, unknown>): Promise<any> {
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(30_000),
     });
-    return await res.json().catch(() => ({ ok: false, code: "bad_response" }));
+    const j = await res.json().catch(() => ({ ok: false, code: "bad_response" }));
+    // A refusal from the web app (wrong token, error page) has no `code`: name it, so the owner is told what to fix.
+    if (!res.ok && j && !j.code) j.code = res.status === 401 ? "unauthorized" : `http_${res.status}`;
+    return j;
   } catch (e: any) {
     return { ok: false, code: "unreachable", error: e?.message };
+  }
+}
+
+/** What a failed calendar call means, in words an owner can act on. `where` says what to do and where. */
+export function explainCalendarCode(code: string | undefined): string {
+  switch (code) {
+    case "not_configured": return "The agent server (Railway) is not linked to the web app: set WEB_APP_URL (your Vercel address, e.g. https://ai-automation-sass.vercel.app) and AGENT_SERVER_TOKEN (the SAME value as on Vercel) on Railway, then redeploy.";
+    case "unreachable": return "The agent server could not reach the web app. Check that WEB_APP_URL on Railway is your live Vercel address.";
+    case "unauthorized": return "AGENT_SERVER_TOKEN on Railway is different from AGENT_SERVER_TOKEN on Vercel. Make them identical and redeploy both.";
+    case "not_connected": return "Google is not connected for this account. Connect it on the Connect page.";
+    case "no_scope": return "Google is connected but without Calendar permission. Disconnect and connect Google again, and tick Calendar.";
+    case "token": return "Google no longer accepts the saved login. Disconnect and connect Google again.";
+    case "bad_response": return "The web app answered with something unexpected. Check the Vercel deployment logs for /api/whatsapp/calendar.";
+    default: return code ? `Google Calendar could not be used (${code}). Check the Vercel logs for /api/whatsapp/calendar.` : "Google Calendar could not be used.";
   }
 }
 

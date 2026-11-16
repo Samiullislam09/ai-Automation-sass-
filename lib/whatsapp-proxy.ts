@@ -14,7 +14,7 @@ export type WaResult = { ok: boolean; status?: number; error?: string; [k: strin
 
 export async function callWhatsapp(
   tenantId: string,
-  path: "connect" | "status" | "send" | "disconnect" | "suggest" | "avatar" | "check" | "auto-reply" | "settings" | "outbox" | "admins" | "notifications" | "activity" | "log",
+  path: "connect" | "status" | "send" | "disconnect" | "suggest" | "avatar" | "check" | "auto-reply" | "settings" | "outbox" | "admins" | "notifications" | "activity" | "log" | "calendar-check",
   init: { method?: "GET" | "POST" | "DELETE"; body?: unknown; query?: string } = {}
 ): Promise<WaResult> {
   const base = process.env.AGENT_SERVER_URL;
@@ -23,7 +23,7 @@ export async function callWhatsapp(
   const url = `${base.replace(/\/+$/, "")}/whatsapp/${tenantId}/${path}${init.query ? `?${init.query}` : ""}`;
   const attempt = async (): Promise<WaResult> => {
     const res = await fetch(url, {
-      method: init.method ?? (["status", "avatar", "settings", "outbox", "admins", "notifications", "activity", "log"].includes(path) ? "GET" : "POST"),
+      method: init.method ?? (["status", "avatar", "settings", "outbox", "admins", "notifications", "activity", "log", "calendar-check"].includes(path) ? "GET" : "POST"),
       headers: {
         "Content-Type": "application/json",
         ...(process.env.AGENT_SERVER_TOKEN ? { "x-agent-token": process.env.AGENT_SERVER_TOKEN } : {}),

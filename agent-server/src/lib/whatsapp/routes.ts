@@ -13,6 +13,7 @@ import { env } from "../../env.js";
 import { linkedState, connect, disconnect, sendText, sessionStatus, getContactInfo, checkNumbers } from "./session.js";
 import { loadOverview } from "./activity.js";
 import { listLog } from "./events.js";
+import { calendarFreeBusy, explainCalendarCode } from "./calendar.js";
 import { getWhatsappAutoReply, setWhatsappAutoReply, getWhatsappSettings, patchWhatsappSettings } from "../outreach/settings.js";
 import { listAdmins, upsertAdmin, deleteAdmin, listNotifications, markNotificationsRead } from "./team.js";
 import { recordOutgoing } from "./store.js";
@@ -76,6 +77,20 @@ export function mountWhatsapp(app: Express): void {
       res.json({ ok: true, overview: await loadOverview(req.params.tenantId, Date.now(), { full: req.query.full === "1" }) });
     } catch (e: any) {
       res.status(500).json({ ok: false, error: e?.message ?? "could not build the overview" });
+    }
+  });
+
+  /** "Can the assistant really book a Meet?" — asks Google (through the web app) for free slots and says, in words, what is wrong. */
+  app.get("/whatsapp/:tenantId/calendar-check", async (req, res) => {
+    if (!authed(req, res)) return;
+    try {
+      const s = await getWhatsappSettings(req.params.tenantId);
+      const fb = await calendarFreeBusy(req.params.tenantId, { tzOffset: s.tz_offset, sendStart: s.send_start, sendEnd: s.send_end, durationMin: 30, want: 3 });
+      if (!fb.ok) return res.json({ ok: true, working: false, code: fb.code ?? "unknown", message: explainCalendarCode(fb.code) });
+      const n = fb.slots?.length ?? 0;
+      res.json({ ok: true, working: n > 0, code: n ? "ok" : "no_slots", slots: n, message: n ? `Working: ${n} free slots found. The assistant can offer times and create the Google Meet link.` : "Google Calendar answered but has no free time in the coming days inside your sending hours (Settings > Sending). Widen the hours or free some time." });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e?.message ?? "check failed" });
     }
   });
 
