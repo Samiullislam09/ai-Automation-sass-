@@ -767,6 +767,9 @@ const CONNECT_CSS = `
 /* a connected card is outline only: the same indigo border as the sidebar, no fill and no glow */
 .cn-card.on{border-color:var(--lx-sel-border)}
 .cn-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+/* connected cards first (WhatsApp, Team alerts, Google, WordPress... in whatever order they were drawn), the rest after; each group keeps its own order */
+.cn-grid > .cn-card{order:1}
+.cn-grid > .cn-card.on{order:0}
 .cn-card{position:relative;display:grid;grid-template-columns:auto minmax(0,1fr);grid-template-areas:"m b" "a a";gap:12px 12px;align-content:start;
   padding:14px;border-radius:14px;background:var(--lx-card);border:1px solid var(--lx-border);transition:border-color .15s,transform .15s}
 .cn-card:hover{border-color:rgba(139,92,246,.4)}
