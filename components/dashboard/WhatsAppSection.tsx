@@ -860,9 +860,9 @@ function Inbox({ search, setSearch, online, focusLead }: { search: string; setSe
             </button>
           </div>
           {/* All / Unread tabs */}
-          <div className="flex items-center gap-4 px-4 pt-2 text-[13px] font-semibold">
+          <div className="wa-scroll flex items-center gap-3 overflow-x-auto px-4 pt-2 text-[13px] font-semibold" style={{ scrollbarWidth: "none" }}>
             {tabs.map(([k, label, n]) => (
-              <button key={k} onClick={() => setTab(k)} className="flex items-center gap-1.5 pb-2" style={{ color: tab === k ? WA.green : WA.sub, borderBottom: `2px solid ${tab === k ? WA.green : "transparent"}` }}>
+              <button key={k} onClick={() => setTab(k)} className="flex shrink-0 items-center gap-1.5 whitespace-nowrap pb-2" style={{ color: tab === k ? WA.green : WA.sub, borderBottom: `2px solid ${tab === k ? WA.green : "transparent"}` }}>
                 {label}
                 <span className="rounded-full px-1.5 text-[11px] font-bold" style={{ background: tab === k ? WA.green : WA.divider, color: tab === k ? "#fff" : WA.sub }}>{n}</span>
               </button>

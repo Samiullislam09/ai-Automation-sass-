@@ -2755,6 +2755,17 @@ export default function MrLxwaDashboard({
   const netBottom = agentsRight.slice(1, 5);
 
   const [acctOpen, setAcctOpen] = useState(false);
+  // In the compact rail the account menu cannot expand in place (72px is too narrow: "Sign out" wrapped onto two lines inside a
+  // tiny box). It opens as a floating menu beside the rail instead, anchored to the avatar.
+  const acctBtnRef = useRef<HTMLButtonElement>(null);
+  const [acctFloat, setAcctFloat] = useState<{ left: number; bottom: number } | null>(null);
+  useEffect(() => {
+    if (!acctFloat) return;
+    const close = () => { setAcctFloat(null); setAcctOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [acctFloat]);
   const [confirmSignOut, setConfirmSignOut] = useState(false);
   const userName = account.user?.name || account.user?.email?.split("@")[0] || "Signed out";
   const userInitial = userName.charAt(0).toUpperCase() || "?";
@@ -3662,7 +3673,21 @@ export default function MrLxwaDashboard({
       <div className={mini ? "p-1.5" : "p-2"}>
         <button
           className={`lx-card2 flex w-full items-center gap-2 text-left ${mini ? "p-1 lg:justify-center" : "p-1.5"}`}
-          onClick={() => { setConfirmSignOut(false); setAcctOpen((o) => !o); }}
+          ref={acctBtnRef}
+          onClick={() => {
+            setConfirmSignOut(false);
+            const wide = typeof window !== "undefined" && window.innerWidth >= 1024;
+            if (mini && wide) {
+              // compact rail: a floating menu to the right of the avatar
+              if (acctFloat) { setAcctFloat(null); setAcctOpen(false); return; }
+              const r = acctBtnRef.current?.getBoundingClientRect();
+              setAcctFloat(r ? { left: r.right + 10, bottom: Math.max(8, window.innerHeight - r.bottom) } : { left: 84, bottom: 12 });
+              setAcctOpen(true);
+              return;
+            }
+            setAcctFloat(null);
+            setAcctOpen((o) => !o);
+          }}
           title={mini ? `${userName} \u00b7 ${planName}` : undefined}
         >
           <span
@@ -3694,7 +3719,35 @@ export default function MrLxwaDashboard({
             Collapsed (mini, desktop) rail is too narrow for "View full account" to read well, so
             it keeps only Sign out there — same reasoning the chevron/name text already follow
             (lg:hidden) in that state. */}
-        <div className={`lx-expand ${acctOpen ? "open" : ""}`}>
+        {acctFloat && acctOpen && (
+          <>
+            <div className="fixed inset-0 z-[80]" onClick={() => { setAcctFloat(null); setAcctOpen(false); }} />
+            <div className="lx-card2 fixed z-[81] overflow-hidden shadow-xl" role="menu" style={{ left: acctFloat.left, bottom: acctFloat.bottom, width: 232, padding: 4 }}>
+              <div className="px-3 py-2.5" style={{ borderBottom: "1px solid var(--lx-border)" }}>
+                <div className="truncate lx-12 font-semibold">{userName}</div>
+                <div className="truncate lx-10" style={{ color: "#9a9ab2" }}>
+                  {acctData?.ok ? (PLANS[acctData.plan]?.name ?? acctData.plan ?? planName) : planName}
+                  {acctData?.ok && acctData.website ? ` · ${String(acctData.website).replace(/^https?:\/\//, "")}` : ""}
+                </div>
+              </div>
+              <Link href="/dashboard/account" role="menuitem" className="lx-menurow" onClick={() => { setAcctFloat(null); setAcctOpen(false); }}>
+                <User size={13} className="lx-mut" /> View full account
+              </Link>
+              <button
+                role="menuitem"
+                className="lx-menurow danger"
+                style={{ whiteSpace: "nowrap" }}
+                onClick={() => {
+                  if (!confirmSignOut) { setConfirmSignOut(true); return; }
+                  void signOut();
+                }}
+              >
+                <LogOut size={13} /> {confirmSignOut ? "Click again to confirm" : "Sign out"}
+              </button>
+            </div>
+          </>
+        )}
+        <div className={`lx-expand ${acctOpen && !acctFloat ? "open" : ""}`}>
           <div>
             <div className="lx-card2 mt-1.5 overflow-hidden" style={{ padding: 4 }}>
               {!mini && (
