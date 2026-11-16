@@ -37,7 +37,12 @@ function whenLabel(iso: string, tz: string): string {
   }
 }
 
-export default function ScheduledRunCard({ kinds, className }: { kinds?: CurrentRun["kind"][]; className?: string }) {
+/** The Leads page is a light page inside the dark app: the card's own colour tokens are the dark theme's (near-black fill, light text),
+ *  and the page's rules turned the text dark — dark text on a black box (owner's screenshot, 2026-11-16). On a light page the card
+ *  re-declares the tokens it reads, so fill, border and text all agree. */
+const LIGHT_TOKENS = { "--lx-card": "#ffffff", "--lx-card2": "#f9fafb", "--lx-border": "#e5e7eb", "--lx-text": "#111827", "--lx-mut": "#667085", "--lx-dim": "#98a2b3", color: "#111827" } as React.CSSProperties;
+
+export default function ScheduledRunCard({ kinds, className, light = false }: { kinds?: CurrentRun["kind"][]; className?: string; light?: boolean }) {
   const cur = useScheduleCurrent();
   const router = useRouter();
   const pathname = usePathname();
@@ -67,7 +72,7 @@ export default function ScheduledRunCard({ kinds, className }: { kinds?: Current
   };
 
   return (
-    <section className={`lx-card p-3.5 ${className ?? ""}`} aria-label="Current task">
+    <section className={`lx-card p-3.5 ${className ?? ""}`} aria-label="Current task" style={light ? LIGHT_TOKENS : undefined}>
       <div className="flex items-center justify-between gap-2">
         <b className="lx-12" style={{ letterSpacing: ".02em" }}>
           {runs.length ? (runs.length > 1 ? `Current tasks · ${runs.length}` : "Current task") : "Schedule"}

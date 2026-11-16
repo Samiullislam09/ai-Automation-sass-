@@ -495,7 +495,7 @@ export default function LeadsSection() {
       ` }} />
 
       {/* What the leads schedule is doing right now (and next). Click a running task to follow it live in the chat. */}
-      <ScheduledRunCard kinds={["leads"]} className="mb-4" />
+      <ScheduledRunCard kinds={["leads"]} className="mb-4" light />
 
       {/* header: title + count, one primary action. Sections below are 24px apart. */}
       <div className="mb-6 flex items-start justify-between gap-3">
