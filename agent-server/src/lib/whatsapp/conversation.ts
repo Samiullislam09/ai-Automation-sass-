@@ -274,28 +274,53 @@ export function confirmLine(lang: Lang, terms: string[]): string {
 
 /* ── company details the assistant cannot know ──────────────────────────────────────────── */
 
-const DETAIL_TOPICS: { label: string; ask: RegExp; have: RegExp }[] = [
+const DETAIL_TOPICS: { key: DetailKey; label: string; ask: RegExp; have: RegExp }[] = [
   {
+    key: "address",
     label: "our office address",
     ask: /\b(address|headquarters?|head office|branch|where (is|are) (your|ur) office|office (kaha|kahan|kidhar|location)|(your|aapka|tumhara|aapki|tumhari) office|location)\b/i,
     have: /\b(street|road|tower|building|p\.?o\.? ?box|plot|floor|suite|located (at|in)|headquartered|our office (is|at|in)|(unit|office|shop|villa|flat)\s*#?\d+)\b|\baddress\s*[:\-–]\s*\S|\b[A-Z]\d{1,3}[-–]\d{2,4}\b/i,
   },
   {
+    key: "phone",
     label: "our phone number / email",
     ask: /((your|aapka|tumhara|aapki|tumhari|company|boss|owner|manager|sir)\s+(phone|number|email|e-mail|mobile|contact)|\b(phone|contact) (number|details)\b|\bemail (id|address)\b|\bcall (karne ka|kaise karun) number\b)/i,
     have: /[\w.+-]+@[\w-]+\.[\w.]+|\+?\d[\d\s-]{8,}/,
   },
   {
+    key: "hours",
     label: "our working hours",
     ask: /\b(timings?|opening hours|working hours|office hours|open on|closed on|kab (tak )?(khula|open|milte))\b/i,
     have: /\b(opening hours|working hours|office hours|\d\s?(am|pm)\b.*\b(mon|tue|sun|sat|daily)|(mon|sun|sat)\w*\s*[-–]\s*\w+)/i,
   },
   {
+    key: "licence",
     label: "our licence / registration details",
     ask: /\b(licen[cs]e|trn|vat number|gst|registration (number|no)|trade licen[cs]e|accredited by|accreditation)\b/i,
     have: /\b(licen[cs]e|trn|registration (number|no)|accredited|accreditation)\b/i,
   },
 ];
+
+export type DetailKey = "address" | "phone" | "hours" | "licence";
+export const DETAIL_KEYS: DetailKey[] = ["address", "phone", "hours", "licence"];
+
+/** The same check, but the asking was recognised by the MODEL (in any language) instead of by the keyword list above: of the
+ *  detail kinds it says were asked for, the ones our facts do not hold. */
+export function missingFromKeys(keys: readonly string[], factsText: string): string[] {
+  const facts = String(factsText ?? "");
+  return DETAIL_TOPICS.filter((t) => keys.includes(t.key) && !t.have.test(facts)).map((t) => t.label);
+}
+
+/** The customer's message as the MODEL read it (any language) merged with the keyword reading (English / Hinglish): a signal
+ *  counts if either saw it. The keywords stay as a backup; the model is what makes every other language work. */
+export function mergeSignals(kw: Signals, model?: Partial<Signals> | null): Signals {
+  const m = model ?? {};
+  return {
+    price: kw.price || !!m.price, details: kw.details || !!m.details, document: kw.document || !!m.document,
+    delayComplaint: kw.delayComplaint || !!m.delayComplaint, whoAreYou: kw.whoAreYou || !!m.whoAreYou, botQuestion: kw.botQuestion || !!m.botQuestion,
+    angry: kw.angry || !!m.angry, wantsCall: kw.wantsCall || !!m.wantsCall,
+  };
+}
 
 /** Things about the BUSINESS ITSELF that the customer asked for and that appear nowhere in the facts —
  *  an address, a phone number, opening hours, a licence number. A model asked for an office address will

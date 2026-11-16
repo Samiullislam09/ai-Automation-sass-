@@ -42,6 +42,10 @@ for (const sc of SCENARIOS.filter((s) => s.id.includes(filter))) {
     // The production path, nets included — not the raw model.
     const d = await decideFromPrompt(built);
     reply = d.reply;
+    if (sc.expect.silent) {
+      if (!(d.stop === "yes" || d.intent === "stop")) problems.push(`should be read as a stop request, got stop=${d.stop} intent=${d.intent}`);
+      if (d.action === "reply" && d.reply) problems.push("a stop request must send NOTHING, but there is a reply");
+    } else {
     const needsHuman = d.needs_human;
     if (sc.expect.handoff && !needsHuman) problems.push("a person should have been pulled in, was not");
     if (sc.expect.intent && d.intent !== sc.expect.intent) problems.push(`intent should be "${sc.expect.intent}", got "${d.intent}"`);
@@ -54,6 +58,7 @@ for (const sc of SCENARIOS.filter((s) => s.id.includes(filter))) {
     // Hinglish complaint in plain English and the Devanagari-only check let it through).
     if (sc.expect.lang === "hinglish" && !HINGLISH_REPLY.test(reply)) problems.push("customer writes Hinglish but the reply is plain English");
     for (const re of sc.expect.replyAvoids ?? []) if (re.test(reply)) problems.push(`must not match ${re}`);
+    }
   } catch (e: any) {
     problems.push(`model call failed: ${e?.message}`);
   }

@@ -17,7 +17,7 @@ import { loadActiveProfile } from "../siteProfile.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { brandName } from "./brand.js";
 import {
-  detectLanguage, detectSignals, conversationStage, mustHandOff, signalsBrief,
+  detectLanguage, detectSignals, conversationStage, mustHandOff, signalsBrief, mergeSignals, missingFromKeys, DETAIL_KEYS, type DetailKey, type Signals,
   LANG_INSTRUCTION, STAGE_GUIDE, riskyClaim, unverifiedTerms, assertsUnverified, confirmLine, offersCall, stripCallOffer, missingDetails, CONFIRM_LANG, containsPriceAmount, statesPriceUnavailable, PRICE_UNKNOWN_LINE, proposesTime, MEETING_ACK, tooLongForChat, MAX_CHAT_CHARS, stripTimeProposals, claimsExperience, MEETING_FALLBACK, SMALLTALK_DEFLECT, type Lang, type Msg,
 } from "./conversation.js";
 import { retrieveKnowledge, queryFor, renderKnowledge, type Passage } from "./knowledge.js";
@@ -46,6 +46,14 @@ export type Decision = {
    *  (never by keyword lists here). none = no call in play; wants_call = they want one but gave no time; time_given = they said
    *  when; wants_now = they want it immediately; unclear = we have asked and still have no usable answer. */
   call?: { stage: CallStage; when: string | null };
+  /** What the customer's last message is doing, as the MODEL read it — in any language (merged with the keyword reading). */
+  read?: Partial<Signals>;
+  /** Does the customer want us to stop messaging them? "yes" = in any form or language; "maybe" = clearly fed up / not interested. */
+  stop?: "yes" | "maybe" | "no";
+  /** An unmistakable decision to buy / start now, in any language. */
+  commit?: boolean;
+  /** Which details ABOUT THE BUSINESS the customer asked for (address, phone, hours, licence) — checked against our facts in code. */
+  asks_missing?: DetailKey[];
 };
 export type CallStage = "none" | "wants_call" | "time_given" | "wants_now" | "unclear";
 const CALL_STAGES: CallStage[] = ["none", "wants_call", "time_given", "wants_now", "unclear"];
@@ -108,7 +116,14 @@ export function parseDecision(raw: unknown): Decision {
   const c = (o.call && typeof o.call === "object" ? o.call : {}) as Record<string, unknown>;
   const stage = CALL_STAGES.includes(c.stage as CallStage) ? (c.stage as CallStage) : "none";
   const when = typeof c.when === "string" && c.when.trim() ? c.when.trim().slice(0, 60) : null;
-  return { intent, confidence, action, reply, reason, needs_human, call: { stage, when } };
+  const rd = (o.read && typeof o.read === "object" ? o.read : {}) as Record<string, unknown>;
+  const read: Partial<Signals> = {
+    price: rd.price === true, details: rd.details === true, document: rd.document === true, delayComplaint: rd.delay_complaint === true,
+    whoAreYou: rd.who_are_you === true, botQuestion: rd.bot_question === true, angry: rd.angry === true, wantsCall: rd.wants_call === true,
+  };
+  const stop = o.stop === "yes" || o.stop === "maybe" ? o.stop : "no";
+  const asks_missing = (Array.isArray(o.asks_missing) ? o.asks_missing : []).filter((k): k is DetailKey => DETAIL_KEYS.includes(k as DetailKey));
+  return { intent, confidence, action, reply, reason, needs_human, call: { stage, when }, read, stop, commit: o.commit === true, asks_missing };
 }
 
 /** Does the reply carry a clock time ("5 pm", "17:30") or a link that neither the customer's last message nor the business facts
@@ -242,7 +257,11 @@ export async function completeReplyJson(user: string, system: string, call: type
 export const REPLY_SYSTEM = [
   "You are the person answering on a business's WhatsApp, deciding how to handle a lead's latest message. Be genuinely useful, fast and honest — like the best salesperson at a well-run company, never a bot reading a script.",
   "",
-  "Return ONLY JSON: " + '{"intent":"...","confidence":0.0,"action":"...","reply":"...","handoff":false,"reason":"...","call":{"stage":"none","when":null}}',
+  "Return ONLY JSON: " + '{"intent":"...","confidence":0.0,"action":"...","reply":"...","handoff":false,"reason":"...","call":{"stage":"none","when":null},"read":{"price":false,"details":false,"document":false,"delay_complaint":false,"who_are_you":false,"bot_question":false,"angry":false,"wants_call":false},"stop":"no","commit":false,"asks_missing":[]}',
+  '- "read": what their LAST message is doing, as true/false, judged from its MEANING in any language, spelling or slang: price (asks cost, fees, a rate, a budget or a quote), details (asks for information, an outline, a brochure, "send me…"), document (asks for a file we cannot attach), delay_complaint (complains about slow replies or being ignored), who_are_you, bot_question (asks whether they are talking to a bot or a human), angry (upset, rude, calls us a scam or spam), wants_call (asks to talk to a person or to be called).',
+  '- "stop": "yes" if, in ANY form — any language, spelling, slang, emoji or hint — they do not want us to message them any more (stop, do not message, remove me, wrong number, leave me alone, unsubscribe, I will block you, a spam complaint, "not interested, do not contact me"). "maybe" if they sound clearly fed up or say they are not interested but did not actually ask us to stop. Otherwise "no". When "yes" or "maybe": action "ignore" and reply "" — nothing is sent to them.',
+  '- "commit": true ONLY for an unmistakable decision to buy or start now ("send the invoice", "send me the invoice", "let us start", "I will pay", "how do I pay", "sign me up") in any language — asking for the invoice or for how to pay IS a commitment. Hesitation, price questions and polite interest are false.',
+  '- "asks_missing": which details ABOUT THE BUSINESS ITSELF they asked for, from: "address" (office location), "phone" (phone number or email), "hours" (opening hours), "licence" (licence or registration number). Empty if none.',
   '- "call": where arranging a call stands, judged from THEIR words in any language or spelling ("aaj raat", "kal subah", "tonight", "right now", "a las 5", "٥ بجے"). stage is one of: "none" (no call in play), "wants_call" (they want a call but have not said when), "time_given" (they said when, however loosely: a day, a part of the day, an hour, "after lunch"), "wants_now" (they want it right now / as soon as possible), "unclear" (you have already asked when twice and still have nothing usable). "when" = what they said, as a short English phrase ("tonight", "tomorrow morning", "right now", "5 pm"), else null.',
   '- "intent": one of greeting, question, affirmation, objection, smalltalk, ready, meeting, stop, other. Use "meeting" when they ASK FOR or ACCEPT a call/meeting/demo, or answer OUR question about when (the system then sends real slots, or notes their preferred time for the team — you never write times yourself).',
   '- "confidence": 0..1, how sure you are about intent AND that a reply is appropriate.',
@@ -318,7 +337,7 @@ export type ReplyPromptInput = {
 /** Assemble the call. Pure — the whole point of splitting it from decideReply is that the golden
  *  conversations (golden.test.ts) can assert on exactly what the model would be told, with no
  *  database and no network. */
-export function buildReplyPrompt(input: ReplyPromptInput): { system: string; user: string; lang: ReturnType<typeof detectLanguage>; handoffFloor: { yes: boolean; reason: string }; unverified: string[]; detailGaps: string[]; recentOut: string[]; callWanted: boolean; priceUnknown: boolean; lastInbound: string; factsText: string } {
+export function buildReplyPrompt(input: ReplyPromptInput): { system: string; user: string; lang: ReturnType<typeof detectLanguage>; handoffFloor: { yes: boolean; reason: string }; unverified: string[]; detailGaps: string[]; recentOut: string[]; callWanted: boolean; priceUnknown: boolean; lastInbound: string; factsText: string; signals: Signals; pricingProvided: boolean } {
   const { thread, business, lead } = input;
   const lastIn = [...thread].reverse().find((m) => m.direction === "in");
   const signals = detectSignals(lastIn?.body ?? "");
@@ -354,7 +373,7 @@ export function buildReplyPrompt(input: ReplyPromptInput): { system: string; use
     "Decide about THEIR most recent message and answer with the JSON.",
   ].join("\n");
 
-  return { system: REPLY_SYSTEM, user, lang, handoffFloor: mustHandOff(signals, input.pricingProvided, unverified, detailGaps), unverified, detailGaps, recentOut: thread.filter((m) => m.direction === "out").slice(-2).map((m) => String(m.body)), callWanted: signals.wantsCall, priceUnknown: signals.price && !input.pricingProvided, lastInbound: String(lastIn?.body ?? ""), factsText };
+  return { system: REPLY_SYSTEM, user, lang, handoffFloor: mustHandOff(signals, input.pricingProvided, unverified, detailGaps), unverified, detailGaps, recentOut: thread.filter((m) => m.direction === "out").slice(-2).map((m) => String(m.body)), callWanted: signals.wantsCall, priceUnknown: signals.price && !input.pricingProvided, lastInbound: String(lastIn?.body ?? ""), factsText, signals, pricingProvided: input.pricingProvided };
 }
 
 /** Read the thread + Site Brain, ask the model for a decision, return the parsed Decision. Throws
@@ -397,8 +416,14 @@ export async function decideReply(
 export async function decideFromPrompt(built: ReturnType<typeof buildReplyPrompt>): Promise<Decision> {
   const { system, user } = built;
   const answer = await completeReplyJson(user, system);
-  return finalizeDecision(parseDecision(answer), {
-    handoffFloor: built.handoffFloor, unverified: built.unverified, detailGaps: built.detailGaps, lang: built.lang, recentOut: built.recentOut, callWanted: built.callWanted, priceUnknown: built.priceUnknown, lastInbound: built.lastInbound, factsText: built.factsText,
+  const first = parseDecision(answer);
+  // The keyword reading of their message (English / Hinglish) merged with the MODEL's reading (any language): a price question in
+  // Spanish now triggers "no price published → say so, never a number" exactly as it does in English.
+  const sig = mergeSignals(built.signals, first.read);
+  const modelGaps = missingFromKeys(first.asks_missing ?? [], built.factsText).filter((g) => !built.detailGaps.includes(g));
+  const detailGaps = [...built.detailGaps, ...modelGaps];
+  return finalizeDecision(first, {
+    handoffFloor: mustHandOff(sig, built.pricingProvided, built.unverified, detailGaps), unverified: built.unverified, detailGaps, lang: built.lang, recentOut: built.recentOut, callWanted: sig.wantsCall, priceUnknown: sig.price && !built.pricingProvided, lastInbound: built.lastInbound, factsText: built.factsText,
     rewrite: async (instruction) => parseDecision(await completeReplyJson(`${user}
 
 ${instruction}`, system)),

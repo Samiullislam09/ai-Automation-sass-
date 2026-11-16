@@ -308,24 +308,19 @@ async function handleAutoReplyLocked(job: AutoReplyJob): Promise<void> {
 
     // Deterministic opt-out FIRST — "stop" must always stop, never the model's judgement. Set the
     // forever flag and never message this lead again.
-    if (last.direction === "in" && detectOptOut(last.body)) {
+    // A customer who says stop is NOT messaged again — not even a confirmation (owner's rule, 2026-11-16: "usko msg nahi
+    // karna ha"). The flag below blocks every later send, follow-ups and first messages included.
+    const optOutNow = async (why: string) => {
       await supabase
         .from("leads")
         .update({ opt_out: true, opt_out_at: new Date().toISOString(), updated_at: new Date().toISOString() })
         .eq("id", leadId)
         .eq("tenant_id", tenantId);
-      console.log(`[whatsapp] auto-reply: ${leadId} opted out — stopping`);
-      void logEvent(tenantId, leadId, "system", "Asked to stop: confirmed once, and will not be messaged again");
-      // One short confirmation, then never again (the flag above blocks every later send). Silence after
-      // "band karo" reads as being ignored; a person would say "understood". Best effort.
-      try {
-        const ack = OPT_OUT_ACK[classifyLanguage(last.body) ?? "en"];
-        await simulateTyping(tenantId, phone, typingMs(ack));
-        const { waMessageId } = await sendText(tenantId, phone, ack);
-        await recordOutgoing(supabase, tenantId, leadId, ack, waMessageId, "brain");
-      } catch (e: any) {
-        console.warn(`[whatsapp] opt-out confirmation not sent for ${leadId}:`, e?.message);
-      }
+      console.log(`[whatsapp] auto-reply: ${leadId} opted out — stopping (${why})`);
+      void logEvent(tenantId, leadId, "system", `Asked not to be messaged (${why}): marked do-not-contact, nothing was sent`, { said: String(last.body).slice(0, 200) });
+    };
+    if (last.direction === "in" && detectOptOut(last.body)) {
+      await optOutNow("their words matched a stop request");
       return;
     }
 
@@ -388,6 +383,18 @@ async function handleAutoReplyLocked(job: AutoReplyJob): Promise<void> {
     if (fresh.at !== last.at) {
       if (!job.redecided) return handleAutoReplyLocked({ ...job, redecided: true });
       await scheduleAutoReply({ tenantId, leadId, phone });
+      return;
+    }
+
+    // THE MODEL READ A STOP REQUEST in whatever language, spelling or slang the customer used. "yes": do-not-contact, send nothing.
+    // "maybe": clearly fed up or "not interested" without saying stop — send nothing either, and let a person look.
+    if (decision.stop === "yes" || decision.intent === "stop") {
+      await optOutNow(`the assistant read it as a stop request: ${decision.reason || decision.intent}`);
+      return;
+    }
+    if (decision.stop === "maybe") {
+      await flagForHuman(tenantId, leadId, "May not want to be messaged", `${decision.reason || "They sound fed up or not interested"} — nothing was sent. Please look before anyone writes again.`);
+      void logEvent(tenantId, leadId, "flagged", "Sounds fed up or not interested: nothing was sent, a person should look", { said: String(last.body).slice(0, 200) });
       return;
     }
 
@@ -497,7 +504,7 @@ async function handleAutoReplyLocked(job: AutoReplyJob): Promise<void> {
     const STAGE = String((lead as any).stage);
     const NOT_DONE = !["won", "lost", "opted_out"].includes(STAGE);
     const who2 = (lead as any).company || (lead as any).name || phone;
-    if (last.direction === "in" && detectBuyIntent(last.body) && NOT_DONE) {
+    if (last.direction === "in" && (detectBuyIntent(last.body) || (decision.commit === true && decision.confidence >= 0.8)) && NOT_DONE) {
       await supabase.from("leads").update({ stage: "won", needs_attention: true, needs_attention_reason: "Became a client — confirm & follow up", updated_at: new Date().toISOString() }).eq("id", leadId).eq("tenant_id", tenantId);
       await notifyAdmins(tenantId, { type: "hot_lead", title: `🎉 New client: ${who2}`, body: "An explicit buying signal — the lead was auto-converted to a client. Confirm the details.", leadId, whatsappText: `New client: ${who2} just gave a buying signal on WhatsApp. Confirm the details.` }).catch(() => {});
       const body = "That's wonderful — thank you! I'll get everything set up and our team will send the next steps right away.";

@@ -155,3 +155,43 @@ test("packages: kept only when the site prints the name and the figures", () => 
   assert.equal(out[0].best_for, "teams under 50");
   assert.deepEqual(groundedPackages("nope", pages), []);
 });
+
+const { mergeSignals, missingFromKeys, detectSignals } = await import("./conversation.js");
+
+test("understanding in any language: the model's reading is parsed, merged with the keywords, and checked against our facts", () => {
+  const d = parseDecision({
+    intent: "question", reply: "x",
+    read: { price: true, delay_complaint: false, angry: true, wants_call: true, bogus: true },
+    stop: "yes", commit: true, asks_missing: ["address", "pizza", "hours"],
+  });
+  assert.equal(d.read?.price, true);
+  assert.equal(d.read?.angry, true);
+  assert.equal(d.read?.wantsCall, true);
+  assert.equal(d.stop, "yes");
+  assert.equal(d.commit, true);
+  assert.deepEqual(d.asks_missing, ["address", "hours"], "unknown kinds are dropped");
+  // malformed or absent: safe defaults, never a stop or a purchase by accident
+  const none = parseDecision({ intent: "question", reply: "x", stop: "definitely", commit: "yes", read: "oops" });
+  assert.equal(none.stop, "no");
+  assert.equal(none.commit, false);
+  assert.equal(none.read?.price, false);
+
+  // a Spanish price question: no keyword sees it, the model does — the merged signal drives the "no published price" net
+  const kw = detectSignals("¿Cuánto cuesta la certificación?");
+  assert.equal(kw.price, false);
+  assert.equal(mergeSignals(kw, d.read).price, true);
+  assert.equal(mergeSignals(detectSignals("what is the price"), {}).price, true, "the keyword reading still counts");
+
+  // the model says they asked for an address: only a MISSING one is a gap
+  assert.deepEqual(missingFromKeys(["address", "phone"], "We do ISO consulting."), ["our office address", "our phone number / email"]);
+  assert.deepEqual(missingFromKeys(["address"], "Our office is at Al Majaz Tower, Sharjah. Address: Office 12"), []);
+  assert.deepEqual(missingFromKeys([], "anything"), []);
+});
+
+test("the prompt tells the model to read stop requests, anger, price, buying and missing details in any language", () => {
+  assert.match(REPLY_SYSTEM, /"stop":"no","commit":false,"asks_missing":\[\]/);
+  assert.match(REPLY_SYSTEM, /in ANY form — any language, spelling, slang, emoji or hint — they do not want us to message them/);
+  assert.match(REPLY_SYSTEM, /action "ignore" and reply ""/);
+  assert.match(REPLY_SYSTEM, /judged from its MEANING in any language/);
+  assert.match(REPLY_SYSTEM, /asking for the invoice or for how to pay IS a commitment/);
+});

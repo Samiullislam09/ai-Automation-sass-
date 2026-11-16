@@ -32,6 +32,8 @@ export type Scenario = {
     handoff: boolean;
     /** Live: the decision's intent must be this (e.g. "meeting" when they accept a call). */
     intent?: string;
+    /** Live: the customer asked not to be messaged (in any language): the decision must be a stop, with NOTHING to send. */
+    silent?: boolean;
     /** Live: the MODEL itself must have asked for a person (beyond the code-enforced floor above). */
     modelHandoff?: boolean;
     /** Live: the reply must match every one of these … */
@@ -126,8 +128,29 @@ export const SCENARIOS: Scenario[] = [
     id: "angry",
     why: "An upset customer is met by a human tone, not the pitch — and the owner is alerted.",
     pricing: true,
+    thread: [OPENER, IN("Honestly your service has been terrible, I am very disappointed with how you handled my last enquiry")],
+    expect: { lang: "en", handoff: false, replyAvoids: [EMPTY_PROMISE] },
+  },
+  {
+    id: "stop-request-spam",
+    why: "'Stop spamming me' means STOP: the customer is marked do-not-contact and nothing at all is sent — not even a confirmation.",
+    pricing: true,
     thread: [OPENER, IN("This is a scam. Stop spamming me, waste of time")],
-    expect: { lang: "en", handoff: true, replyAvoids: [EMPTY_PROMISE] },
+    expect: { lang: "en", handoff: true, silent: true },
+  },
+  {
+    id: "stop-request-spanish",
+    why: "A stop request in a language the keyword lists do not know is still a stop: read by the model, nothing is sent.",
+    pricing: true,
+    thread: [OPENER, IN("Por favor no me escriban más")],
+    expect: { lang: "en", handoff: false, silent: true },
+  },
+  {
+    id: "stop-request-bengali",
+    why: "Same in Bengali script.",
+    pricing: true,
+    thread: [OPENER, IN("আমাকে আর মেসেজ করবেন না")],
+    expect: { lang: "en", handoff: false, silent: true },
   },
   {
     id: "wants-a-person",
