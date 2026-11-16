@@ -15,7 +15,11 @@ import { analyseNumber } from "@/lib/phone-wa";
  *  ?lead=<id> also returns that lead even if it is not in a chat stage yet (the WhatsApp button on the
  *  Leads page deep-links to a lead that is only approved). */
 
-const CHAT_STAGES = ["approved", "contacted", "delivered", "read", "replied", "in_conversation", "interested", "won", "lost"];
+// EVERY stage a conversation can be in. meeting_requested / meeting_scheduled / meeting_done / ready_to_buy were missing, so the moment a
+// customer asked for a call the assistant moved the lead to meeting_requested and the chat VANISHED from this list (the owner's
+// "sainul wala nahi aa raha", 2026-11-16) — the most valuable chats were the ones hidden. opted_out stays visible too: a manager must be
+// able to read why someone was marked do-not-contact.
+const CHAT_STAGES = ["approved", "contacted", "delivered", "read", "replied", "in_conversation", "interested", "meeting_requested", "meeting_scheduled", "meeting_done", "ready_to_buy", "won", "lost", "opted_out"];
 const COLUMNS = [
   "id", "company", "name", "whatsapp", "phone", "stage", "icp_score", "draft", "email", "website", "country", "city",
   "source", "reason", "created_at", "classification", "needs_attention", "needs_attention_reason", "last_intent",
