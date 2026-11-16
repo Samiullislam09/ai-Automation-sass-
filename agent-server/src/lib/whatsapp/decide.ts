@@ -18,7 +18,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { brandName } from "./brand.js";
 import {
   detectLanguage, detectSignals, conversationStage, mustHandOff, signalsBrief,
-  LANG_INSTRUCTION, STAGE_GUIDE, riskyClaim, unverifiedTerms, assertsUnverified, confirmLine, offersCall, stripCallOffer, missingDetails, CONFIRM_LANG, containsPriceAmount, statesPriceUnavailable, PRICE_UNKNOWN_LINE, proposesTime, parseMeetingPreference, MEETING_ACK, MEETING_REASK, isMeetingAsk, tooLongForChat, MAX_CHAT_CHARS, stripTimeProposals, claimsExperience, MEETING_FALLBACK, SMALLTALK_DEFLECT, type Lang, type Msg,
+  LANG_INSTRUCTION, STAGE_GUIDE, riskyClaim, unverifiedTerms, assertsUnverified, confirmLine, offersCall, stripCallOffer, missingDetails, CONFIRM_LANG, containsPriceAmount, statesPriceUnavailable, PRICE_UNKNOWN_LINE, proposesTime, parseMeetingPreference, MEETING_ACK, MEETING_REASK, MEETING_HANDOFF, isMeetingAsk, tooLongForChat, MAX_CHAT_CHARS, stripTimeProposals, claimsExperience, MEETING_FALLBACK, SMALLTALK_DEFLECT, type Lang, type Msg,
 } from "./conversation.js";
 import { retrieveKnowledge, queryFor, renderKnowledge, type Passage } from "./knowledge.js";
 import { unsupportedAmounts } from "../pricing.js";
@@ -489,6 +489,10 @@ export async function finalizeDecision(
     if (asked && pref.any) {
       d = { ...d, intent: "meeting", reply: MEETING_ACK[ctx.lang](pref.label), meeting_pref: pref.label, templated: true, needs_human: true, reason: `wants a call — ${pref.label}` };
       note("call time noted: team told to schedule it");
+    } else if (asked && (ctx.recentOut ?? []).filter(isMeetingAsk).length >= 2) {
+      // Asked twice, still no time: a third question is what confuses people. Hand it to a person, who will just message them.
+      d = { ...d, intent: "meeting", reply: MEETING_HANDOFF[ctx.lang], meeting_pref: "time not clear — read the chat", templated: true, needs_human: true, reason: "wants a call — time not clear, message them directly" };
+      note("asked twice, time still unclear: handed to the team to message them");
     } else if (d.intent === "meeting") {
       d = { ...d, reply: asked ? MEETING_REASK[ctx.lang] : MEETING_FALLBACK[ctx.lang], templated: true };
       note(asked ? "asked again when they would like the call" : "call requested: no calendar or booking link, asked when they are free");

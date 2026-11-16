@@ -376,9 +376,11 @@ export type MeetingPref = { any: boolean; label: string };
 const PART = {
   morning: /(subah|subha|savere|morning|सुबह)/i,
   afternoon: /(dopahar|dopehar|afternoon|दोपहर)/i,
-  evening: /(shaam|sham\b|evening|raat|night|शाम|रात)/i,
+  evening: /(shaam|sham\b|evening|raat|\brat\b|night|tonight|शाम|रात)/i,
 };
-const DAY_RE = /\b(today|aaj|tomorrow|kal|parso|day after tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun|somvar|mangalvar|budhvar|guruvar|veervar|shukravar|shanivar|ravivar)\b/i;
+/** "abhi possible hai?", "right now", "asap" — they want it now, not at some hour. */
+const NOW_RE = /(\babhi\b|\babi\b|right now|\bnow\b|\basap\b|immediately|turant|\bfauran\b|अभी|तुरंत)/i;
+const DAY_RE = /\b(today|aaj|aj|aajj|tonight|tomorrow|kal|parso|day after tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun|somvar|mangalvar|budhvar|guruvar|veervar|shukravar|shanivar|ravivar)\b/i;
 const TIME_RE = /\b(\d{1,2})(?::(\d{2}))?\s?(am|pm|baje)\b/i;
 
 /** What the customer said about WHEN they would like the call: "subah", "kal shaam", "5 pm", "tomorrow morning".
@@ -390,16 +392,39 @@ export function parseMeetingPreference(text: string): MeetingPref {
   const tm = t.match(TIME_RE);
   const time = tm ? `${tm[1]}${tm[2] ? ":" + tm[2] : ""} ${tm[3].toLowerCase() === "baje" ? "o'clock" : tm[3].toUpperCase()}` : null;
   const label = [day, time ?? part].filter(Boolean).join(" ");
+  // "abhi" alone (no day or hour given) = as soon as possible; "aaj raat" already says when, so it wins.
+  if (!part && !day && !time && NOW_RE.test(t)) return { any: true, label: "right now" };
   return { any: !!(part || day || time), label };
 }
 
 /** Said once we know WHEN they would like the call. It promises only what is then made true: the owner is alerted
  *  (autoReply.ts) with this preference and asked to send a time and a link. */
-export const MEETING_ACK: Record<Lang, (label: string) => string> = {
+const NOW_ACK: Record<Lang, string> = {
+  en: "Got it — I'm letting our team know right now. They'll message you here to start the call as soon as they can.",
+  hinglish: "Samajh gaya — main team ko abhi bata raha hoon. Wo jaldi se jaldi yahin aapko message karke call shuru karenge.",
+  hi: "समझ गया — मैं टीम को अभी बता रहा हूँ। वे जल्द से जल्द यहीं आपको मैसेज करके कॉल शुरू करेंगे।",
+  ur: "Samajh gaya — main team ko abhi bata raha hoon. Wo jaldi se jaldi yahin aap ko message karke call shuru karenge.",
+};
+const MEETING_ACK_BASE: Record<Lang, (label: string) => string> = {
   en: (l) => `Noted — ${l}. Our team will confirm the exact time and send the meeting link here shortly.`,
   hinglish: (l) => `Theek hai — ${l}. Hamari team exact time confirm karke meeting link yahin bhej degi.`,
   hi: (l) => `ठीक है — ${l}। हमारी टीम सही समय तय करके मीटिंग लिंक यहीं भेज देगी।`,
   ur: (l) => `Theek hai — ${l}. Hamari team exact waqt confirm karke meeting link yahin bhej degi.`,
+};
+
+export const MEETING_ACK: Record<Lang, (label: string) => string> = {
+  en: (l) => (l === "right now" ? NOW_ACK.en : MEETING_ACK_BASE.en(l)),
+  hinglish: (l) => (l === "right now" ? NOW_ACK.hinglish : MEETING_ACK_BASE.hinglish(l)),
+  hi: (l) => (l === "right now" ? NOW_ACK.hi : MEETING_ACK_BASE.hi(l)),
+  ur: (l) => (l === "right now" ? NOW_ACK.ur : MEETING_ACK_BASE.ur(l)),
+};
+
+/** We have asked WHEN twice and still do not have it: stop asking, hand it to a person. Asking a third time is what confuses people. */
+export const MEETING_HANDOFF: Record<Lang, string> = {
+  en: "No worries — I'll pass this to our team and they'll message you here directly to fix a time.",
+  hinglish: "Koi baat nahi — main ye team ko de raha hoon, wo yahin aapko seedha message karke time fix kar lenge.",
+  hi: "कोई बात नहीं — मैं यह टीम को दे रहा हूँ, वे यहीं आपको सीधे मैसेज करके समय तय कर लेंगे।",
+  ur: "Koi baat nahi — main ye team ko de raha hoon, wo yahin aap ko seedha message karke waqt fix kar lenge.",
 };
 
 /** Asked when we already asked and the answer did not say when. Different words from the first question. */

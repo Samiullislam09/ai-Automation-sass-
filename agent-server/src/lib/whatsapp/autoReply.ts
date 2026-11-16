@@ -411,6 +411,22 @@ async function handleAutoReplyLocked(job: AutoReplyJob): Promise<void> {
     // THE CUSTOMER HAS SAID WHEN THEY WOULD LIKE THE CALL ("subah"), and nothing can book it automatically (no calendar, no
     // booking link — otherwise the slots flow would have caught it). Record it on the lead, move the lead on, and tell the team
     // exactly what to do. Not throttled like the other alerts: a call request is the most valuable thing in the inbox.
+    // Google Calendar connected? Then the customer does not need to type a time: offer real free slots (the customer picks a
+    // number, the assistant books the Meet and tells the team). Skipped if slots were already offered in the last 30 minutes —
+    // the same list twice would just confuse them.
+    const slotsRecentlyOffered = async () => {
+      const { data } = await supabase.from("lead_meetings").select("id").eq("tenant_id", tenantId).eq("lead_id", leadId).eq("status", "offered").gt("created_at", new Date(Date.now() - 30 * 60_000).toISOString()).limit(1);
+      return !!data?.length;
+    };
+    if ((decision.meeting_pref || decision.intent === "meeting") && !(await slotsRecentlyOffered())) {
+      if (await offerMeeting(tenantId, leadId, phone).catch(() => false)) {
+        const whoS = (lead as any).company || (lead as any).name || phone;
+        await supabase.from("leads").update({ stage: "meeting_requested", updated_at: new Date().toISOString() }).eq("id", leadId).eq("tenant_id", tenantId);
+        await notifyAdmins(tenantId, { type: "meeting", title: `📅 ${whoS} wants a call`, body: "Real time slots from your calendar were offered on WhatsApp.", leadId, whatsappText: `${whoS} wants a call — I offered them real time slots. I'll book the Google Meet and send you the link when they pick one.` }).catch(() => {});
+        void logEvent(tenantId, leadId, "meeting", "Call requested: offered real free slots from Google Calendar");
+        return;
+      }
+    }
     if (decision.meeting_pref) {
       const whoM = (lead as any).company || (lead as any).name || phone;
       await supabase.from("leads").update({

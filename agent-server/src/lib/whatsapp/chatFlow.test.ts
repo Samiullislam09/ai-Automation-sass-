@@ -10,7 +10,7 @@ process.env.SUPABASE_URL ||= "http://unit-test.invalid";
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= "unit-test";
 
 const { finalizeDecision, parseDecision, REPLY_SYSTEM } = await import("./decide.js");
-const { parseMeetingPreference, MEETING_ACK, MEETING_REASK, MEETING_FALLBACK, isMeetingAsk, tooLongForChat, splitForChat } = await import("./conversation.js");
+const { parseMeetingPreference, MEETING_HANDOFF, MEETING_ACK, MEETING_REASK, MEETING_FALLBACK, isMeetingAsk, tooLongForChat, splitForChat } = await import("./conversation.js");
 const { unsupportedAmounts } = await import("../pricing.js");
 const { ACTIVE_MIN_S, ACTIVE_MAX_S } = await import("./timing.js");
 
@@ -138,4 +138,22 @@ test("packages: kept only when the site prints the name and the figures", () => 
   assert.deepEqual(out.map((p: any) => p.name), ["Essential"]);
   assert.equal(out[0].best_for, "teams under 50");
   assert.deepEqual(groundedPackages("nope", pages), []);
+});
+
+test("the live confusion: 'Abhi possible ha?', 'Aj rat ko' are understood; two unclear answers hand over instead of asking a third time", async () => {
+  const p = (s: string) => parseMeetingPreference(s);
+  assert.deepEqual(p("Aj rat ko"), { any: true, label: "aj evening" });
+  assert.deepEqual(p("Abhi possible ha ?"), { any: true, label: "right now" });
+  assert.equal(p("aaj raat ko ho jayega").any, true);
+  assert.equal(p("tonight").any, true);
+  assert.equal(p("hmm").any, false);
+  const now = await finalizeDecision(D("ok", { intent: "meeting" }), ctx({ lang: "hinglish", recentOut: [MEETING_REASK.hinglish], lastInbound: "Abhi possible ha ?" }));
+  assert.equal(now.meeting_pref, "right now");
+  assert.match(now.reply, /team ko abhi bata raha/);
+  const tonight = await finalizeDecision(D("ok", { intent: "meeting" }), ctx({ lang: "hinglish", recentOut: [MEETING_REASK.hinglish], lastInbound: "Aj rat ko" }));
+  assert.equal(tonight.meeting_pref, "aj evening");
+  const third = await finalizeDecision(D("ok", { intent: "meeting" }), ctx({ lang: "hinglish", recentOut: [MEETING_FALLBACK.hinglish, MEETING_REASK.hinglish], lastInbound: "pata nahi" }));
+  assert.equal(third.reply, MEETING_HANDOFF.hinglish);
+  assert.equal(third.needs_human, true);
+  assert.equal(third.templated, true);
 });
