@@ -49,16 +49,20 @@ export default function TeamAlerts({
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   const changed = () => { onChange?.(); };
 
   const add = async () => {
-    if (phone.replace(/[^0-9]/g, "").length < 8) { toast("Enter the full number with country code, e.g. +971 50 123 4567.", "error"); return; }
+    const digits = phone.replace(/[^0-9]/g, "");
+    if (/[a-z]/i.test(phone)) { setErr("A phone number has digits only — put the person's name in the Name field."); return; }
+    if (digits.length < 8) { setErr("Enter the full number with the country code, e.g. +91 98765 43210."); return; }
+    setErr(null);
     setBusy(true);
     try {
       const r = await fetch("/api/whatsapp/admins", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: name.trim() || null, phone }) }).then((x) => x.json());
-      if (!r.ok) toast(r.error ?? "Could not add this number.", "error");
-      else { setName(""); setPhone(""); await reload(); changed(); }
+      if (!r.ok) setErr(r.error ?? "Could not add this number.");
+      else { setName(""); setPhone(""); await reload(); changed(); toast("Added. This number now gets the alerts."); }
     } catch (e: any) { toast(e?.message ?? "Network error.", "error"); } finally { setBusy(false); }
   };
 
@@ -108,10 +112,20 @@ export default function TeamAlerts({
         {none && <div className="rounded-lg px-3 py-2.5 text-[12px] leading-relaxed" style={{ background: P.rowBg, color: P.sub }}>No numbers yet. Add your own WhatsApp number below to start receiving alerts.</div>}
       </div>
 
-      <div className="flex gap-2">
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (optional)" autoComplete="off" aria-label="Name" className="w-28 rounded-lg px-2.5 py-1.5 text-[12.5px] outline-none" style={{ background: P.inputBg, color: P.inputText, border: `1px solid ${P.line}` }} />
-        <input value={phone} onChange={(e) => setPhone(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void add(); }} placeholder="+971 50 123 4567" autoComplete="off" inputMode="tel" aria-label="WhatsApp number with country code" className="flex-1 rounded-lg px-2.5 py-1.5 text-[12.5px] outline-none" style={{ background: P.inputBg, color: P.inputText, border: `1px solid ${P.line}` }} />
-        <button onClick={add} disabled={busy} className="shrink-0 rounded-lg px-3 py-1.5 text-[12.5px] font-semibold text-white disabled:opacity-60" style={{ background: P.accent }}>{busy ? "Adding…" : "Add"}</button>
+      {/* Add a person: two labelled, full-width fields, stacked — a narrow panel can never squeeze one of them to nothing. */}
+      <div className="rounded-xl p-3" style={{ background: P.rowBg }}>
+        <div className="mb-2 text-[12.5px] font-semibold" style={{ color: P.text }}>Add a team member</div>
+        <label className="block">
+          <span className="mb-1 block text-[11.5px] font-medium" style={{ color: P.sub }}>Name <span style={{ opacity: 0.8 }}>(optional, e.g. Boss)</span></span>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Boss" autoComplete="off" className="block w-full rounded-lg px-3 py-2 text-[13px] outline-none" style={{ background: P.inputBg, color: P.inputText, border: `1px solid ${P.line}`, width: "100%" }} />
+        </label>
+        <label className="mt-2.5 block">
+          <span className="mb-1 block text-[11.5px] font-medium" style={{ color: P.sub }}>WhatsApp number, with country code</span>
+          <input value={phone} onChange={(e) => { setPhone(e.target.value); setErr(null); }} onKeyDown={(e) => { if (e.key === "Enter") void add(); }} placeholder="+91 98765 43210" autoComplete="off" inputMode="tel" aria-invalid={!!err}
+            className="block w-full rounded-lg px-3 py-2 text-[13px] outline-none" style={{ background: P.inputBg, color: P.inputText, border: `1px solid ${err ? P.danger : P.line}`, width: "100%" }} />
+        </label>
+        {err && <div className="mt-1.5 text-[12px]" role="alert" style={{ color: P.danger }}>{err}</div>}
+        <button onClick={add} disabled={busy || !phone.trim()} className="mt-3 block w-full rounded-lg px-3 py-2 text-[13px] font-semibold text-white disabled:opacity-50" style={{ background: P.accent, width: "100%" }}>{busy ? "Adding…" : "Add number"}</button>
       </div>
 
       <ul className="mt-2.5 space-y-1 text-[11.5px] leading-relaxed" style={{ color: P.sub, listStyle: "disc", paddingLeft: 16 }}>
