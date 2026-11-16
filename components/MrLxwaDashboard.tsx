@@ -2822,16 +2822,21 @@ export default function MrLxwaDashboard({
   // full width. Remembered per browser; the article reviewer (/dashboard/content/<id>) starts
   // collapsed the first time, since that page is all about the article's width. Read in an
   // effect, never during render — localStorage on the server is a hydration mismatch.
+  // WhatsApp and Leads are wide, two-column working pages (a chat list beside a conversation; a table): the rail starts COMPACT there
+  // whatever the saved choice is, so the page gets the width. Opening the rail by hand on such a page lasts for that visit only and
+  // does not overwrite the saved choice, which still decides every other page.
+  const compactPage = /^\/dashboard\/(whatsapp|leads)(\/|$)/.test(pathname);
   const [mini, setMini] = useState(false);
   useEffect(() => {
+    if (compactPage) { setMini(true); return; }
     let stored: string | null = null;
     try { stored = localStorage.getItem("lx-rail-mini"); } catch {}
     if (stored !== null) { setMini(stored === "1"); return; }
     setMini(/^\/dashboard\/content\/.+/.test(pathname));
-  }, [pathname]);
+  }, [pathname, compactPage]);
   const toggleMini = () => {
     setMini((m) => {
-      try { localStorage.setItem("lx-rail-mini", m ? "0" : "1"); } catch {}
+      if (!compactPage) { try { localStorage.setItem("lx-rail-mini", m ? "0" : "1"); } catch {} }
       return !m;
     });
   };
