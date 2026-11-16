@@ -185,7 +185,7 @@ export default function LeadsSection() {
   const [dateRange, setDateRange] = useState("all"); // all | today | 7d | 30d
   const [sort, setSort] = useState("newest"); // newest | oldest | score | name
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(25);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   // Advanced filters, applied on top of the tab + search. Empty = no constraint.
