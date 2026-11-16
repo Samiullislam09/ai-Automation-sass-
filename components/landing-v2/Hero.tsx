@@ -5,12 +5,12 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowRight, Search, PenLine, ShieldCheck, Send, MessageSquare, Brain, Check } from "lucide-react";
 
 const TABS = [
-  { icon: Search, label: "Keyword research", body: "Find what to write, from real search data. Measured numbers are always kept apart from AI suggestions.", cta: "See keywords", title: "Keywords from real search data", lines: ["solar panel cost in Pakistan — measured", "net metering rules 2026 — measured", "best inverter for home — AI-suggested"], tag: "Mr. Keyword" },
-  { icon: PenLine, label: "Article writer", body: "Drafts in your brand's tone with links to your own pages, then checked by a quality gate.", cta: "See the writer", title: "Drafts in your brand's tone", lines: ["Outline ready · 6 sections", "Internal links to 4 of your pages", "1,840 words drafted"], tag: "Mr. Writer" },
-  { icon: ShieldCheck, label: "Approvals", body: "Every article waits for your yes. Approve, edit or reject in one place.", cta: "Review approvals", title: "Nothing goes out without a yes", lines: ["Article: Net metering explained", "Quality gate: passed", "Waiting for your approval"], tag: "Mr. QA" },
-  { icon: Send, label: "Publish", body: "Send approved articles to WordPress or a webhook, now or on a schedule.", cta: "See publishing", title: "One click to WordPress", lines: ["Connected: your WordPress site", "Scheduled: tomorrow 9:00", "Published and tracked"], tag: "Mr. Publish" },
-  { icon: MessageSquare, label: "Chat manager", body: "Ask in plain language and the right agent starts working. English, Hinglish or Roman Urdu.", cta: "Try the chat", title: "Just tell it what you need", lines: ["“Write an article about solar loans”", "On it — keyword picked, drafting now", "Draft ready for your review"], tag: "Chat" },
-  { icon: Brain, label: "Site Brain", body: "Crawls your site once and remembers your services, tone and audience.", cta: "See Site Brain", title: "It learns your business", lines: ["Crawled 48 pages", "Services, tone and audience understood", "Used in every article it writes"], tag: "Site Brain" },
+  { icon: Search, short: "Keywords", label: "Keyword research", body: "Find what to write, from real search data. Measured numbers are always kept apart from AI suggestions.", cta: "Try keyword research free", title: "Keywords from real search data", lines: ["how to price consulting services — measured", "freelance invoice template — measured", "best accounting app for small teams — AI-suggested"], tag: "Mr. Keyword" },
+  { icon: PenLine, short: "Writer", label: "Article writer", body: "Drafts in your brand's tone with links to your own pages, then checked by a quality gate.", cta: "Try the writer free", title: "Drafts in your brand's tone", lines: ["Outline ready · 6 sections", "Internal links to 4 of your pages", "1,840 words drafted"], tag: "Mr. Writer" },
+  { icon: ShieldCheck, short: "Approvals", label: "Approvals", body: "Every article waits for your yes. Approve, edit or reject in one place.", cta: "Try approvals free", title: "Nothing goes out without a yes", lines: ["Article: How to price your services", "Quality gate: passed", "Waiting for your approval"], tag: "Mr. QA" },
+  { icon: Send, short: "Publish", label: "Publish", body: "Send approved articles to WordPress or a webhook, now or on a schedule.", cta: "Try publishing free", title: "One click to WordPress", lines: ["Connected: your WordPress site", "Scheduled: tomorrow 9:00", "Published and tracked"], tag: "Mr. Publish" },
+  { icon: MessageSquare, short: "Chat", label: "Chat manager", body: "Ask in plain language and the right agent starts working. English, Hinglish or Roman Urdu.", cta: "Try the chat free", title: "Just tell it what you need", lines: ["“Write an article about pricing your services”", "On it — keyword picked, drafting now", "Draft ready for your review"], tag: "Chat" },
+  { icon: Brain, short: "Site Brain", label: "Site Brain", body: "Crawls your site once and remembers your services, tone and audience.", cta: "Try Site Brain free", title: "It learns your business", lines: ["Crawled 48 pages", "Services, tone and audience understood", "Used in every article it writes"], tag: "Site Brain" },
 ];
 
 function Panel({ i }: { i: number }) {
@@ -33,7 +33,7 @@ function Panel({ i }: { i: number }) {
             <div key={l} className="flex items-center gap-3 rounded-xl border border-[#2a3238] bg-[#1d2327] px-5 py-4 text-[16px] text-[#e5e7e8]">
               <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#2a2552] text-[#a78bfa]"><Check size={14} /></span>
               <span className="min-w-0 flex-1 truncate">{l}</span>
-              <span className="text-[12px] text-[#6b757c]">Step {k + 1}</span>
+              <span className="text-[12px] text-[#9aa4ab]">Step {k + 1}</span>
             </div>
           ))}
         </div>
@@ -77,7 +77,7 @@ export function Hero() {
                 <span className="block lg:whitespace-nowrap">One Subscription.</span>
               </h1>
               <p className="lv-sub max-w-[760px] text-center">
-                AI agents research keywords, write ranking articles and publish to your website, all while you stay in control of every approval.
+                AI agents research keywords, write ranking articles in your voice and publish to your website, while you approve every step.
               </p>
               <div className="flex items-center gap-[10px] max-sm:flex-col">
                 <AuthLink guestHref="/signup" guestLabel="Start free" authedLabel="Go to dashboard" className="inline-flex h-12 items-center gap-2 rounded-full bg-[#262626] pl-6 pr-[22px] text-[16px] font-semibold text-[#fafafa] transition-colors hover:bg-[#3d3d3d]"><ArrowRight size={18} /></AuthLink>
@@ -99,6 +99,9 @@ export function Hero() {
                       style={{ left: 342 + k * 76, filter: "drop-shadow(0 10px 10px rgba(26,46,77,0.16))" }}>
                       <t.icon size={26} />
                     </button>
+                  ))}
+                  {TABS.map((t, k) => (
+                    <span key={t.label} aria-hidden className={`pointer-events-none absolute top-[62px] w-[76px] text-center text-[12px] font-semibold leading-[14px] ${i === k ? "text-[#0a0a0a]" : "text-[#3a3560]"}`} style={{ left: 342 + k * 76 - 10 }}>{t.short}</span>
                   ))}
                 </div>
                 <Panel i={i} />

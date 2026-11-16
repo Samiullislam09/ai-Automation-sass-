@@ -181,7 +181,7 @@ async function verifyLive(url: string | undefined, title: string | null): Promis
   if (!url) return { verified: false, note: "WordPress ne koi URL wapas nahi diya, isliye check nahi kar paye." };
   try {
     const res = await fetch(url, {
-      headers: { "User-Agent": "MrLxwaBot/1.0 (+https://mrlxwa.com; verifying a page we just published)" },
+      headers: { "User-Agent": "MenCraBot/1.0 (+https://mencra.com; verifying a page we just published)" },
       signal: AbortSignal.timeout(15_000),
       redirect: "follow",
     });

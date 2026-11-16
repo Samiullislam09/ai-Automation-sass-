@@ -44,7 +44,7 @@ export async function suggest(q: string, lang = "en"): Promise<string[]> {
     try {
       const url = `${SUGGEST_URL}?client=firefox&hl=${encodeURIComponent(lang)}&q=${encodeURIComponent(q)}`;
       const res = await fetch(url, {
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; MrLxwaKeyword/1.0)" },
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; MenCraKeyword/1.0)" },
         signal: AbortSignal.timeout(8000),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);

@@ -99,7 +99,7 @@ const REGISTRY: BrainRegistry = {
     },
     {
       id: "boss",
-      name: "Mr Lxwa",
+      name: "MenCra",
       version: "1.0.0",
       description: "Picks which topics the business should publish next.",
       enabled: true,
@@ -182,7 +182,7 @@ const REGISTRY: BrainRegistry = {
     "TEAM (4 kaam abhi ho sakte hain, 2 nahi)",
     "",
     "CAN DO NOW",
-    "  Mr Lxwa · plan_topics (~25s) — what should i write about / kya likhun / content plan",
+    "  MenCra · plan_topics (~25s) — what should i write about / kya likhun / content plan",
     "  Mr. Keyword · find_keywords (~20s) — keywords do / sirf keyword / keyword research",
     "  Mr. Writer · write_article (~5 min) — article likho / blog likho / write an article",
     "  Mr. Writer · research_brief (~90s) — research karo / brief banao / likhna mat",

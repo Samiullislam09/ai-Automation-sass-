@@ -1,17 +1,17 @@
 import Link from "next/link";
 
-export const metadata = { title: "Connect your Next.js site — MrLxwa" };
+export const metadata = { title: "Connect your Next.js site — MenCra" };
 
-const routeCode = `// app/api/mrlxwa-content/route.ts
+const routeCode = `// app/api/mencra-content/route.ts
 import crypto from "crypto";
 
 export async function POST(req: Request) {
   const body = await req.text();
 
-  // 1. Verify this really came from MrLxwa
-  const sig = req.headers.get("x-mrlxwa-signature");
+  // 1. Verify this really came from MenCra
+  const sig = req.headers.get("x-mencra-signature");
   const expected = "sha256=" + crypto
-    .createHmac("sha256", process.env.MRLXWA_WEBHOOK_SECRET!)
+    .createHmac("sha256", process.env.MENCRA_WEBHOOK_SECRET!)
     .update(body).digest("hex");
   if (sig !== expected) {
     return new Response("bad signature", { status: 401 });
@@ -27,13 +27,13 @@ export async function POST(req: Request) {
   //    - Push it into your CMS (Sanity, Contentful, ...)
   //
   // Example — just log it for now:
-  console.log("New article from MrLxwa:", article.title);
+  console.log("New article from MenCra:", article.title);
 
   return new Response("ok");
 }`;
 
 const envCode = `# .env / .env.local
-MRLXWA_WEBHOOK_SECRET=whsec_xxxxxxxxxxxxxxxxxxxxxxxx`;
+MENCRA_WEBHOOK_SECRET=whsec_xxxxxxxxxxxxxxxxxxxxxxxx`;
 
 const payloadCode = `{
   "title": "10 Mistakes Small Businesses Make Online",
@@ -69,12 +69,12 @@ export default function ConnectNextjs() {
     <div style={{ minHeight: "100vh", padding: "60px 20px", position: "relative", zIndex: 1 }}>
       <div style={{ maxWidth: 620, margin: "0 auto" }}>
         <Link href="/" style={{ display: "flex", alignItems: "center", gap: 9, fontWeight: 800, color: "var(--ink)", marginBottom: 28 }}>
-          <span style={{ width: 26, height: 26, borderRadius: 8, background: "linear-gradient(135deg,var(--ac),#2bb99a)", display: "grid", placeItems: "center", color: "#04120d", fontSize: 13 }}>⚡</span>MrLxwa
+          <span style={{ width: 26, height: 26, borderRadius: 8, background: "linear-gradient(135deg,var(--ac),#2bb99a)", display: "grid", placeItems: "center", color: "#04120d", fontSize: 13 }}>⚡</span>MenCra
         </Link>
 
         <h1 style={{ fontSize: 28, marginBottom: 10 }}>Apni Next.js site connect karo</h1>
         <p className="sm mut" style={{ marginBottom: 36, lineHeight: 1.6 }}>
-          Koi username/password nahi. Ek chhota API route banao apni site mein — MrLxwa har approved article wahan seedha bhej dega,
+          Koi username/password nahi. Ek chhota API route banao apni site mein — MenCra har approved article wahan seedha bhej dega,
           signed aur verified. Ye guide apne developer ko bhej sakte ho, ya khud follow kar sakte ho agar Next.js jaante ho.
         </p>
 
@@ -87,7 +87,7 @@ export default function ConnectNextjs() {
 
         <Step n={2} title="Ek naya file banao">
           <p className="sm mut" style={{ lineHeight: 1.6, marginBottom: 10 }}>
-            Apni Next.js project mein: <code style={{ color: "var(--ink)" }}>app/api/mrlxwa-content/route.ts</code>
+            Apni Next.js project mein: <code style={{ color: "var(--ink)" }}>app/api/mencra-content/route.ts</code>
           </p>
           <Code>{routeCode}</Code>
         </Step>
@@ -99,9 +99,9 @@ export default function ConnectNextjs() {
           <Code>{envCode}</Code>
         </Step>
 
-        <Step n={4} title="Deploy karo, phir MrLxwa mein URL do">
+        <Step n={4} title="Deploy karo, phir MenCra mein URL do">
           <p className="sm mut" style={{ lineHeight: 1.6 }}>
-            Apni live URL (jaise <code style={{ color: "var(--ink)" }}>https://yoursite.com/api/mrlxwa-content</code>) MrLxwa onboarding
+            Apni live URL (jaise <code style={{ color: "var(--ink)" }}>https://yoursite.com/api/mencra-content</code>) MenCra onboarding
             ya Settings mein paste karo aur "Send test ping" try karo. 200 aaye toh connected ho.
           </p>
         </Step>
@@ -113,7 +113,7 @@ export default function ConnectNextjs() {
         </div>
 
         <p className="xs mut" style={{ marginTop: 30, textAlign: "center" }}>
-          Article kabhi MrLxwa ke database mein permanently store nahi hota — direct tumhare endpoint pe jaata hai.
+          Article kabhi MenCra ke database mein permanently store nahi hota — direct tumhare endpoint pe jaata hai.
         </p>
       </div>
     </div>

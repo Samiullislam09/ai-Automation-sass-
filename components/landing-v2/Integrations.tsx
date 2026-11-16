@@ -26,30 +26,15 @@ const ZP: Item = { name: "Zapier", Icon: SiZapier, color: "#FF4F00", soon: true 
 const NO: Item = { name: "Notion", Icon: SiNotion, color: "#000000", soon: true };
 const HS: Item = { name: "HubSpot", Icon: SiHubspot, color: "#FF7A59", soon: true };
 
-const ROW1 = [WORDPRESS, GSC, GA, WA, GOOGLE, SHOPIFY, WEBFLOW, ZP];
-const ROW2 = [IG, LI, FB, X, YT, MC, NO, HS];
-const ROW3 = [GA, WORDPRESS, WA, GSC, FB, LI, IG, GOOGLE];
+/** Only integrations that work today are shown; the rest are named in one honest line below. */
+const LIVE = [WORDPRESS, GSC, GA, WA, GOOGLE];
 
 function Pill({ it }: { it: Item }) {
   return (
     <div className="flex h-[60px] shrink-0 items-center gap-3 rounded-full border border-[#ebebeb] bg-white px-7 text-[14px] font-medium leading-[1.5] shadow-sm md:text-[18px] max-[767px]:h-11 max-[600px]:gap-2 max-[600px]:px-4">
       <it.Icon className="h-6 w-6 shrink-0 max-[767px]:h-5 max-[767px]:w-5" style={it.color ? { color: it.color } : undefined} />
       <span className="whitespace-nowrap">{it.name}</span>
-      {it.soon && <span className="rounded-full bg-[#f4f4f5] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#737373]">Soon</span>}
-    </div>
-  );
-}
-
-function Row({ items, anim, label }: { items: Item[]; anim: string; label: string }) {
-  return (
-    <div className="lv-marquee-wrap group overflow-hidden py-1 max-[1279px]:px-4" aria-label={label}>
-      <div className={`flex w-max ${anim}`}>
-        {[0, 1].map(k => (
-          <div key={k} className="flex shrink-0 gap-4 pr-4" aria-hidden={k === 1}>
-            {items.map((it, i) => <Pill key={`${k}-${i}`} it={it} />)}
-          </div>
-        ))}
-      </div>
+      {it.soon && <span className="rounded-full bg-[#f4f4f5] px-2 py-0.5 text-[12px] font-semibold uppercase tracking-wide text-[#525252]">Soon</span>}
     </div>
   );
 }
@@ -62,11 +47,10 @@ export function Integrations() {
           <h2 id="int-h" className="lv-h2">Connects to the tools<br className="hidden max-md:inline" /> you already use.</h2>
           <p className="lv-sub mx-auto mt-[calc(16px*var(--mk-scale))] max-w-[760px]">Publish to your website, read your search data and talk to your team from one place.</p>
         </header>
-        <div className="mx-auto mt-[calc(56px*var(--mk-scale))] w-full space-y-8 [mask-image:linear-gradient(to_right,transparent,black_8%,black_92%,transparent)] max-[1279px]:space-y-3 max-[1279px]:[mask-image:linear-gradient(to_right,transparent,#262626_24px,#262626_calc(100%-24px),transparent)] max-[600px]:mt-10">
-          <Row items={ROW1} anim="lv-marquee-l" label="Integrations, row 1" />
-          <Row items={ROW2} anim="lv-marquee-r" label="Integrations, row 2" />
-          <Row items={ROW3} anim="lv-marquee-l" label="Integrations, row 3" />
-        </div>
+        <ul aria-label="Working integrations" className="mx-auto mt-[calc(48px*var(--mk-scale))] flex max-w-[1100px] flex-wrap items-center justify-center gap-4 px-4">
+          {LIVE.map(it => <li key={it.name}><Pill it={it} /></li>)}
+        </ul>
+        <p className="mx-auto mt-6 max-w-[640px] px-4 text-center text-[15px] leading-[1.5] text-[#525252]">More coming: Shopify, Webflow, Zapier, LinkedIn, Instagram and more.</p>
       </div>
     </section>
   );

@@ -114,7 +114,7 @@ export async function leadsDailyStatus(tenantId: string): Promise<{ cap: number 
 }
 
 /** Is WhatsApp auto-reply ON for this tenant? Stored in agent_settings(agent='whatsapp').
- *  When ON, Mr Lxwa drafts AND sends a reply the moment a message comes in (session.ts). */
+ *  When ON, MenCra drafts AND sends a reply the moment a message comes in (session.ts). */
 export async function getWhatsappAutoReply(tenantId: string): Promise<boolean> {
   try {
     const { data } = await supabase.from("agent_settings").select("settings").eq("tenant_id", tenantId).eq("agent", "whatsapp").maybeSingle();

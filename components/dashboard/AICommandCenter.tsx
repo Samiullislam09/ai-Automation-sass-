@@ -1380,7 +1380,7 @@ export default function AICommandCenter(): JSX.Element {
 
         // brand + plan card — genuine token/crawl data from the API, real plan name from the
         // client store (plan itself isn't a DB column yet — see the route's own comment on that)
-        const brandT = document.querySelector(".s-brand .t"); if (brandT) brandT.innerHTML = "GrowthTeam<br>AI";
+        const brandT = document.querySelector(".s-brand .t"); if (brandT) brandT.innerHTML = "MenCra";
         const planLabel = PLANS[sRef.current.plan]?.name ?? "Free";
         const planName = document.querySelector(".plan .row1 b"); if (planName) planName.textContent = planLabel + " Plan";
         const resetLine = document.querySelector(".plan .reset") as HTMLElement | null; if (resetLine) resetLine.style.display = "none"; // no real billing-cycle date yet — don't invent one

@@ -7,7 +7,7 @@ import { AGENT_PROFILES } from "@/lib/agents-data";
 /** The "TV": click a room in the office and the whole scene hands over to one agent.
  *
  *  The screen on the left is a picture of what that agent's job actually is — Mr. Keyword gets
- *  a search window, Mr. Writer a document, Mr Lxwa a planning board — and it is filled with the
+ *  a search window, Mr. Writer a document, MenCra a planning board — and it is filled with the
  *  REAL row from jobs_log: the topic he was given, the keywords he came back with (and their
  *  real volumes), the article he wrote and whether it passed the gate, or the exact error.
  *  While a job is running the screen animates; it never animates a step we cannot see.

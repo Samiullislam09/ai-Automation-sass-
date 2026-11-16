@@ -13,7 +13,7 @@
 import { normalizeSiteUrl } from "../crawl.js";
 import type { AuditPage, SiteContext } from "./checks.js";
 
-export const AUDIT_UA = "MrLxwaAuditBot/1.0 (+https://mrlxwa.com/bot; site audit for the site's own owner)";
+export const AUDIT_UA = "MenCraAuditBot/1.0 (+https://mencra.com/bot; site audit for the site's own owner)";
 
 /** 400ms between requests to the same host. The site belongs to the customer who asked for the
  *  audit, so this is politeness to their server rather than to a stranger's. */

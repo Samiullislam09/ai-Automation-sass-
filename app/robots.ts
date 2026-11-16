@@ -1,4 +1,6 @@
 import { MetadataRoute } from "next";
+import { SITE_URL } from "@/lib/brand";
+
 export default function robots(): MetadataRoute.Robots {
-  return { rules: { userAgent: "*", allow: "/", disallow: ["/app/", "/dashboard/", "/api/"] }, sitemap: "https://growthteam.example.com/sitemap.xml" };
+  return { rules: { userAgent: "*", allow: "/", disallow: ["/app/", "/dashboard/", "/api/"] }, sitemap: `${SITE_URL}/sitemap.xml`, host: SITE_URL };
 }

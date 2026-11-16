@@ -44,7 +44,7 @@ export async function resolveWebsiteUrl(supabase: SupabaseClient, tenantId: stri
   const wordpress = (rows ?? []).find((r) => r.type === "wordpress");
   const webhook = (rows ?? []).find((r) => r.type === "webhook");
   const creds = (wordpress ?? webhook)?.encrypted_credentials as Record<string, string> | undefined;
-  // A Custom Website's field is an API endpoint ("https://site.com/api/mrlxwa"), not a page —
+  // A Custom Website's field is an API endpoint ("https://site.com/api/mencra"), not a page —
   // only its origin is worth crawling. WordPress's siteUrl already IS the homepage.
   const raw = wordpress ? creds?.siteUrl : webhook ? originOf(creds?.url) : null;
   const verified = normalizeSiteUrl(raw ?? undefined);

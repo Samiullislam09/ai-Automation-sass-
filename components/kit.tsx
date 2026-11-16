@@ -12,14 +12,14 @@ import {
 /* ================= HELP: ? -> hover tooltip -> click detail ================= */
 export const HELP: Record<string, { t: string; s: string; d: string }> = {
   tokens:   { t: "Tokens", s: "Your monthly content credits. Article ⚡10, story ⚡4, post ⚡1 — refills every month.", d: "Tokens are the fuel of your AI team. Each plan includes a monthly allowance that refills on your billing date. Costs: Article = 10 (full SERP research + writing + QC), Web Story = 4, Social post = 1. Unused tokens don't roll over. Nothing is ever generated or charged without your explicit confirmation — every generation shows its cost first. Run out? Upgrade in one tap or wait for the refill." },
-  agents:   { t: "AI Team", s: "Six specialists — Mr Lxwa assigns, others execute, you approve.", d: "Mr Lxwa orchestrates and reviews everything; Mr. Keyword finds ranking opportunities; Mr. Writer writes from research blueprints; Mr. Story makes visuals; Miss Social distributes; Mr. SEO audits your site daily. Agents address each other by name — watch their coordination in the live feed. No agent ever publishes without your approval." },
-  approval: { t: "Approvals", s: "Nothing goes live without you. Approve / Edit / Reject every item.", d: "The approval queue is your control point. Finished work passes Mr Lxwa's quality checklist, then waits here. One tap approves; the editor lets you change anything; rejecting with a note teaches the team. Until you approve, nothing touches your website or accounts — guaranteed." },
-  reports:  { t: "Daily Reports", s: "Mr Lxwa writes a short report of every working day — stored forever.", d: "Each day the team works, Mr Lxwa compiles an end-of-day report: what was produced, published, tokens spent, and what's next. Unread reports are badged; everything is stored and searchable. Your manager's standup, without the meeting." },
-  memory:   { t: "AI Memory", s: "What your team knows about you. Auto-built at setup, fully editable.", d: "During the 2-minute setup Mr Lxwa studies your website and builds a memory: business, audience, tone, topics, goals. Every agent writes from this memory. Edit any item, add facts, or delete — all agents adjust instantly. Better memory = better content." },
-  pipeline: { t: "Content Pipeline", s: "Research → top-10 analysis → blueprint → writing → quality gate.", d: "Every article follows a 5-stage pipeline: Mr. Keyword validates the topic and pulls related queries; the top 10 ranking pages are analyzed for structure and gaps; a blueprint is generated (titles, outline, target length above the competition); Mr. Writer writes section-by-section in your tone; Mr Lxwa runs the quality gate (originality, keywords, links, length). Then it waits for your approval." },
+  agents:   { t: "AI Team", s: "Six specialists — MenCra assigns, others execute, you approve.", d: "MenCra orchestrates and reviews everything; Mr. Keyword finds ranking opportunities; Mr. Writer writes from research blueprints; Mr. Story makes visuals; Miss Social distributes; Mr. SEO audits your site daily. Agents address each other by name — watch their coordination in the live feed. No agent ever publishes without your approval." },
+  approval: { t: "Approvals", s: "Nothing goes live without you. Approve / Edit / Reject every item.", d: "The approval queue is your control point. Finished work passes MenCra's quality checklist, then waits here. One tap approves; the editor lets you change anything; rejecting with a note teaches the team. Until you approve, nothing touches your website or accounts — guaranteed." },
+  reports:  { t: "Daily Reports", s: "MenCra writes a short report of every working day — stored forever.", d: "Each day the team works, MenCra compiles an end-of-day report: what was produced, published, tokens spent, and what's next. Unread reports are badged; everything is stored and searchable. Your manager's standup, without the meeting." },
+  memory:   { t: "AI Memory", s: "What your team knows about you. Auto-built at setup, fully editable.", d: "During the 2-minute setup MenCra studies your website and builds a memory: business, audience, tone, topics, goals. Every agent writes from this memory. Edit any item, add facts, or delete — all agents adjust instantly. Better memory = better content." },
+  pipeline: { t: "Content Pipeline", s: "Research → top-10 analysis → blueprint → writing → quality gate.", d: "Every article follows a 5-stage pipeline: Mr. Keyword validates the topic and pulls related queries; the top 10 ranking pages are analyzed for structure and gaps; a blueprint is generated (titles, outline, target length above the competition); Mr. Writer writes section-by-section in your tone; MenCra runs the quality gate (originality, keywords, links, length). Then it waits for your approval." },
   billing:  { t: "Billing & Plans", s: "Simple monthly plans. Change anytime, cancel anytime, keep your data.", d: "Free = 10 tokens/month (one full article) forever, no card. Pro $5 = 120 tokens (~10 articles or a mix). Max $15 = 400 tokens + the premium writing model + lead generation. Upgrades apply instantly; downgrades at next cycle; cancellation keeps all your content and memory." },
   status:   { t: "Agent Status", s: "Green = working now · amber = idle · dark room = offline.", d: "The office shows your team live. A working agent's room is lit and animated with its current task on the name tag. Idle agents wait. Offline agents' rooms go dark (lights out, asleep). In production these states stream in real time from the agent server as jobs run." },
-  whoami:   { t: "Who Am I", s: "Mr Lxwa's summary of your business — check it, correct it, done.", d: "After setup Mr Lxwa writes a short brief: what your business does, who it serves, how it should sound, what it will write about. If anything is off, fix it in Memory — every agent adjusts immediately. This brief is the foundation of content quality." },
+  whoami:   { t: "Who Am I", s: "MenCra's summary of your business — check it, correct it, done.", d: "After setup MenCra writes a short brief: what your business does, who it serves, how it should sound, what it will write about. If anything is off, fix it in Memory — every agent adjusts immediately. This brief is the foundation of content quality." },
 };
 
 export function Help({ k }: { k: string }) {
@@ -37,7 +37,7 @@ export function Help({ k }: { k: string }) {
 
 /* ================= BOSS AI CHAT — real streaming + voice, fixed dock on desktop ================= */
 /** Index just past the last sentence-ending mark in `s`, or 0 if there isn't one yet.
- *  The Hindi/Urdu danda counts: Mr Lxwa answers in Hinglish and a full stop is not the
+ *  The Hindi/Urdu danda counts: MenCra answers in Hinglish and a full stop is not the
  *  only thing that ends a sentence there. */
 function lastSentenceEnd(s: string): number {
   const re = /[.!?…।](?=\s|$)|\n/g;
@@ -144,7 +144,7 @@ function renderMessage(txt: string): React.ReactNode {
  *
  *  `failed` marks a bot bubble whose reply was cut off; the reason and the Retry live on the
  *  system card that lands beside it, because "the connection dropped" is a fact about this
- *  app, not a sentence Mr Lxwa should be made to say. */
+ *  app, not a sentence MenCra should be made to say. */
 type ChatMsg = {
   who: "bot" | "me" | "sys";
   txt: string;
@@ -192,7 +192,7 @@ export function BossChat() {
   // changes — re-running it would re-post every notice it had already stored.
   const convIdRef = useRef<string | null>(null);
 
-  // Mr Lxwa confirming the work in the chat itself. LiveAgents fills the queue from the same
+  // MenCra confirming the work in the chat itself. LiveAgents fills the queue from the same
   // jobs_log rows the office animates, so the confirmation can't claim work that didn't run.
   const notices = store?.s?.chatNotices ?? [];
   useEffect(() => {
@@ -413,7 +413,7 @@ export function BossChat() {
     };
     const ctx = store ? { tokens: store.s.tokens, tokensMax: store.s.tokensMax, plan: store.s.plan, memory: store.s.memory, awaiting: store.s.content.filter((c: any) => c.status === "awaiting").length, report: store.s.reports[0]?.lines?.slice(-1)[0]?.s } : {};
     // The conversation so far. Without this every message was a cold start: ask for an
-    // article, then ask "kya update hai?" one message later and Mr Lxwa had no idea he had
+    // article, then ask "kya update hai?" one message later and MenCra had no idea he had
     // just been asked for anything. The empty placeholder bubble added a line above is
     // dropped, and old turns are trimmed so a long session can't grow the prompt forever.
     const history = msgs
@@ -477,7 +477,7 @@ export function BossChat() {
       // Whatever arrived stays on screen — an empty bubble with a blinking cursor forever was
       // the old behaviour, with the send button stuck disabled behind it. What did NOT arrive
       // is reported on the system channel: the reason and the Retry go on a card, so the
-      // failure is not written in Mr Lxwa's voice as if he had noticed it himself.
+      // failure is not written in MenCra's voice as if he had noticed it himself.
       const partial = full.trim();
       if (partial) patchSlot(b => ({ ...b, live: false, failed: true, txt: partial }));
       else setMsgs(m => m.filter((_, j) => j !== (slot >= 0 && slot < m.length ? slot : m.length - 1)));
@@ -530,7 +530,7 @@ export function BossChat() {
 
   return (
     <>
-      <button aria-label="Chat with Mr Lxwa" className={"bosschat-bubble" + (collapsed ? " is-collapsed" : "")} onClick={() => { setCollapsed(false); setOpen(o => !o); }}
+      <button aria-label="Chat with MenCra" className={"bosschat-bubble" + (collapsed ? " is-collapsed" : "")} onClick={() => { setCollapsed(false); setOpen(o => !o); }}
         style={{ position: "fixed", bottom: 22, right: 22, zIndex: 150, width: 54, height: 54, borderRadius: "50%", background: "linear-gradient(135deg,var(--ac),var(--ac-d))", color: "#ffffff", fontSize: 22, boxShadow: "0 8px 26px #6a5af044", border: "none", cursor: "pointer" }}>💬</button>
 
       {/* Size/position live in CSS only — they used to be inline, and inline styles beat the
@@ -538,7 +538,7 @@ export function BossChat() {
           panel stayed a 336x440 floating card that covered the office. */}
       <div className={"bosschat-panel" + (open ? " is-open" : "") + (collapsed ? " is-collapsed" : "")}>
         <div style={{ display: "flex", gap: 10, alignItems: "center", padding: "13px 15px", borderBottom: "1px solid var(--line)", background: "var(--bg2)" }}>
-          <div className="corb" /><div><b style={{ fontSize: 13.5 }}>Mr Lxwa</b><div className="xs acc">● online</div></div>
+          <div className="corb" /><div><b style={{ fontSize: 13.5 }}>MenCra</b><div className="xs acc">● online</div></div>
           <div style={{ flex: 1 }} />
           <button aria-label="Chat history" title="Past chats" onClick={() => setShowHistory(h => !h)}
             style={{ background: showHistory ? "var(--ac)" : "none", color: showHistory ? "#ffffff" : "var(--mut)", border: "1px solid " + (showHistory ? "var(--ac)" : "var(--line2)"), borderRadius: 8, width: 26, height: 26, cursor: "pointer", fontSize: 12 }}>🕐</button>
@@ -565,7 +565,7 @@ export function BossChat() {
           </div>
         ) : (
           <div ref={box} onScroll={onBoxScroll} style={{ flex: 1, overflowY: "auto", padding: 13, display: "flex", flexDirection: "column", gap: 9 }}>
-            {/* Mr Lxwa's "I've put the team on it" replies are numbered, multi-line — without the
+            {/* MenCra's "I've put the team on it" replies are numbered, multi-line — without the
                 \n -> <br> the whole pipeline collapsed into one unreadable paragraph. */}
             {msgs.map((m, i) =>
               // The one place the channel is decided, and it is decided on structure: a
@@ -606,7 +606,7 @@ export function BossChat() {
               {listening ? "●" : "🎤"}
             </button>
           )}
-          <input placeholder={listening ? "Listening…" : "Ask Mr Lxwa anything…"} value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === "Enter" && send()} />
+          <input placeholder={listening ? "Listening…" : "Ask MenCra anything…"} value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === "Enter" && send()} />
           <button className="btn btn-p btn-sm" onClick={send} disabled={busy}>➤</button>
         </div>
       </div>
@@ -639,7 +639,7 @@ export function BossChat() {
         .bosschat-panel.is-open { display: flex; }
 
         /* A reply that was cut off mid-sentence. Red edge on what did arrive; the reason and
-           the Retry are on the system card below it, not written in Mr Lxwa's voice. */
+           the Retry are on the system card below it, not written in MenCra's voice. */
         .cm.bot.is-failed { border-color: color-mix(in srgb, var(--red) 45%, transparent);
                             background: color-mix(in srgb, var(--red) 8%, transparent); }
 

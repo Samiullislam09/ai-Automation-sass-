@@ -15,7 +15,7 @@ import {
  *
  *  Two callers:
  *   - the browser (a signed-in user pressing "Refresh"), and
- *   - agent-server, right before Mr Lxwa plans topics, using the shared AGENT_SERVER_TOKEN.
+ *   - agent-server, right before MenCra plans topics, using the shared AGENT_SERVER_TOKEN.
  *  The second is why this isn't just inlined into the Connect page.
  */
 

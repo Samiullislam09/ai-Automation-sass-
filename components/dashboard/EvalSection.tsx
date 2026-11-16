@@ -155,7 +155,7 @@ export default function EvalSection() {
             </div>
             {row.prior_assistant ? (
               <p className="lx-in lx-11 lx-mut mb-2.5 p-3" style={{ whiteSpace: "pre-wrap" }}>
-                <span className="lx-10 mb-1 block font-bold">Mr Lxwa (before)</span>
+                <span className="lx-10 mb-1 block font-bold">MenCra (before)</span>
                 {row.prior_assistant}
               </p>
             ) : <p className="lx-10 lx-mut mb-2.5">No assistant turn before this message.</p>}

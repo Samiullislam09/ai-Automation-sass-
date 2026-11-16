@@ -85,7 +85,7 @@ export async function placeOrder(
 }
 
 /** Everything still waiting, soonest first. Powers the office board, the Schedule page, and
- *  Mr Lxwa's answer to "mera kya kya schedule pe hai" — one query, so those three can never
+ *  MenCra's answer to "mera kya kya schedule pe hai" — one query, so those three can never
  *  disagree with each other. */
 export async function listPending(
   supabase: SupabaseClient,

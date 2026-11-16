@@ -26,7 +26,7 @@ import { AGENT_PROFILES, HANDOFF_FROM, type AgentLook } from "@/lib/agents-data"
  *  the database can speak for itself, and expires on its own if the worker never runs.
  */
 
-// Five rooms, laid out big enough to actually read on a laptop: Mr Lxwa in the middle of the
+// Five rooms, laid out big enough to actually read on a laptop: MenCra in the middle of the
 // top row with the two researchers either side, and the two post-writing stages below.
 const ROOMS: Record<string, { cx: number; cy: number; w: number; h: number }> = {
   kw:      { cx: 195, cy: 250, w: 300, h: 215 },
@@ -51,7 +51,7 @@ export function agentIdFromText(text: string): string | null {
   if (/\bkeyword\b|\bresearch\b|\branking\b|\bsearch volume\b/.test(l)) return "kw";
   if (/\bqa\b|\bquality\b|\breview\b|\bgate\b/.test(l)) return "qa";
   if (/\bpublish\b|\bwordpress\b/.test(l)) return "publish";
-  if (/\blxwa\b|\bboss\b|\bmain ai\b|\borchestrat|\bplan\b/.test(l)) return "boss";
+  if (/\blxwa\b|\bmencra\b|\bboss\b|\bmain ai\b|\borchestrat|\bplan\b/.test(l)) return "boss";
   return null;
 }
 
@@ -427,7 +427,7 @@ export default function Office({ demo = false, solo = null, onSelect, flash = nu
 
           {/* The pipeline, drawn as it is actually wired: boss → keyword → writer → quality
               gate → publish (HANDOFF_FROM in lib/agents-data.ts). The old version drew a tube
-              from Mr Lxwa to every room with a dot marching along each one at all times, which
+              from MenCra to every room with a dot marching along each one at all times, which
               said "everything is flowing" while the office was asleep. These are dim until a
               handoff really happens. */}
           {AGENTS.filter((a) => HANDOFF_FROM[a.id]).map((a) => {
@@ -498,7 +498,7 @@ export default function Office({ demo = false, solo = null, onSelect, flash = nu
                     style={{ transition: "opacity .5s" }} />
                 )}
 
-                {/* Every room gets the same screen, boss included — "what is Mr Lxwa doing"
+                {/* Every room gets the same screen, boss included — "what is MenCra doing"
                     was exactly as unanswerable as it was for everyone else. */}
                 <WallScreen
                   x={r.cx - (isBoss ? 92 : 78)} y={r.cy - r.h / 2 + 18}

@@ -68,7 +68,7 @@ export const MANIFESTS: Manifest[] = [
 
   {
     id: "boss",
-    name: "Mr Lxwa",
+    name: "MenCra",
     version: "1.0.0",
     description: "Picks which topics the business should publish next, grounded in the site and what is already written.",
     actions: [

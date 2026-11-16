@@ -9,7 +9,7 @@ import { syncGoogleInsights } from "../lib/googleSync.js";
 import { checkDuplicate, type DuplicateVerdict } from "../lib/dedupe.js";
 import { duplicateSentence } from "./writer.js";
 
-/** Mr Lxwa — the orchestrator. Until now every agent only ran when a human poked an
+/** MenCra — the orchestrator. Until now every agent only ran when a human poked an
  *  endpoint, and nothing connected them: Mr. Keyword's research went into jobs_log and
  *  died there, and Mr. Writer had to be handed a topic by hand. This agent is the missing
  *  first link — it decides WHAT to work on, then starts the chain:
@@ -23,7 +23,7 @@ import { duplicateSentence } from "./writer.js";
  *  Topic choice is grounded in real tenant data (niche + what the crawler actually found
  *  on the site + what has already been written), not invented — if there is nothing to
  *  ground it in, it says so and enqueues nothing rather than making topics up. */
-/** The site-analysis + LLM call + duplicate locks shared by both of Mr Lxwa's actions:
+/** The site-analysis + LLM call + duplicate locks shared by both of MenCra's actions:
  *  `plan_topics` (several topics, then enqueues Mr. Keyword for each — the "kya likhun" chat
  *  flow and the scheduler) and `pick_topic` (exactly one, returned as the step's own output for
  *  the planner's graph to hand to Mr. Keyword/Mr. Writer — the "article likho" chat flow when
@@ -199,7 +199,7 @@ export class BossAgent extends Agent {
     // `{ value: <string>, cost }` instead. Returning a string here (2026-08-31's first attempt)
     // meant Mr. Keyword's own `topic` field resolved to that `{ value, cost }` object at
     // dispatch time, not the string — "topic?.trim is not a function", found live, task
-    // `needs_attention` with 0 steps ever completing past Mr Lxwa's own. adapter.ts's `topicOf()`
+    // `needs_attention` with 0 steps ever completing past MenCra's own. adapter.ts's `topicOf()`
     // is the one place that unwraps `{ topic }` back to a plain string for every consumer.
     if ((job.data as any).pickOne === true) {
       const result = await planTopics(tenantId, 1);

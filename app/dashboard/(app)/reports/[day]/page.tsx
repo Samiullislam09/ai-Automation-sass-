@@ -7,7 +7,7 @@ import { listReportItems } from "@/lib/reports-data";
  *  (owner, 2026-09-05). `day` is the local calendar date, YYYY-MM-DD, exactly the key the
  *  Reports list links with. The rows are read on the server so the page arrives filled in; the
  *  day itself is worked out in the browser, because "which day" is the visitor's own local date. */
-export const metadata: Metadata = { title: "Daily Report — MrLxwa" };
+export const metadata: Metadata = { title: "Daily Report — MenCra" };
 
 export default async function DashboardReportDayPage({ params }: { params: Promise<{ day: string }> }) {
   const { day } = await params;

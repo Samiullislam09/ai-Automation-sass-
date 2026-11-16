@@ -15,10 +15,10 @@ type SiteProfile = import("../siteProfile.js").SiteProfile;
 function profileFixture(over: Partial<SiteProfile> = {}): SiteProfile {
   return {
     what_they_do: "We write SEO articles for independent restaurants.",
-    offerings: [{ name: "Monthly article plan", url: "https://mrlxwa.com/plans", kind: "service" }],
+    offerings: [{ name: "Monthly article plan", url: "https://mencra.com/plans", kind: "service" }],
     audience: "independent restaurants and cafes",
     buyer_intent: [],
-    proof: [{ claim: "ISO 9001 certified", quote: "We are ISO 9001 certified", url: "https://mrlxwa.com/about" }],
+    proof: [{ claim: "ISO 9001 certified", quote: "We are ISO 9001 certified", url: "https://mencra.com/about" }],
     topic_clusters: [],
     content_gaps: [],
     voice: null,

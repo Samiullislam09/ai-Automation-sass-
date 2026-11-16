@@ -10,7 +10,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createNotification } from "./team.js";
 
-/** How long Mr Lxwa stays quiet on a lead after a human replies in that chat (§28 P3 handoff). Six
+/** How long MenCra stays quiet on a lead after a human replies in that chat (§28 P3 handoff). Six
  *  hours: long enough that the human owns the live exchange, short enough that a forgotten chat
  *  returns to auto. The auto-reply gate re-checks this each time, so a human reply during the window
  *  simply extends it. */
@@ -215,7 +215,7 @@ export async function recordOutgoing(
   } else {
     patch.follow_up_count = (lead?.follow_up_count ?? 0) + 1;
   }
-  // HUMAN HANDOFF (§28 P3): when a PERSON sends in this chat, Mr Lxwa steps back — auto-reply is
+  // HUMAN HANDOFF (§28 P3): when a PERSON sends in this chat, MenCra steps back — auto-reply is
   // paused for this one lead for a window, and its "needs you" flag is cleared (the human is now on
   // it). A brain reply never does this; it is the human taking over that hands the chat to the human.
   if (answeredBy === "human") {

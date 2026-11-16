@@ -1,6 +1,6 @@
 /** One place that talks to agent-server's POST /jobs/:type.
  *  Used by /api/agents/trigger (the "Run the team" button) AND by /api/chat, so that asking
- *  Mr Lxwa in chat for an article starts exactly the same real pg-boss job the button does —
+ *  MenCra in chat for an article starts exactly the same real pg-boss job the button does —
  *  the chat is not allowed to have its own, different, pretend pipeline. */
 
 // "crawler" is here for the Site Brain page's Refresh (MASTER_PLAN §25.9, manual refresh):

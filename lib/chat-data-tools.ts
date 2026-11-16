@@ -1,4 +1,4 @@
-/** lib/chat-data-tools.ts — the tools Mr Lxwa calls to LOOK THINGS UP.
+/** lib/chat-data-tools.ts — the tools MenCra calls to LOOK THINGS UP.
  *
  *  WHY THIS EXISTS. Until 2026-09-19 this product's chat could order work but could not read
  *  anything. lib/chat-tools.ts built one tool per agent action (write_article, audit_site,

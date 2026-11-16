@@ -1129,7 +1129,7 @@ export async function checkArticle(
 /** A real, live fetch. HEAD first, GET when a server refuses HEAD, one retry on a network
  *  error. Anything that never comes back under 400 did not load, and is reported that way. */
 export async function checkLinkLive(url: string): Promise<boolean> {
-  const headers = { "User-Agent": "MrLxwaBot/1.0 (+https://mrlxwa.com; checking that an article's links load)" };
+  const headers = { "User-Agent": "MenCraBot/1.0 (+https://mencra.com; checking that an article's links load)" };
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       let res = await fetch(url, { method: "HEAD", redirect: "follow", headers, signal: AbortSignal.timeout(8000) });

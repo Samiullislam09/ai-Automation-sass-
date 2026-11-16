@@ -1,12 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { parseTimeOfDay } from "@/lib/when";
 
-/** Changing the RECURRING schedule by talking to Mr Lxwa.
+/** Changing the RECURRING schedule by talking to MenCra.
  *
  *  "roz subah 9 baje 3 article banao", "automation band kar do", "seedha publish kar diya karo".
  *  Until this existed the chat could book a one-off order but not touch the timetable, so
  *  "control the whole site from the chat box" stopped at the one screen the customer most often
- *  wants to change — and asked to change it, Mr Lxwa could only describe the Schedule page.
+ *  wants to change — and asked to change it, MenCra could only describe the Schedule page.
  *
  *  A PARTIAL EDIT, NEVER A FORM SUBMIT. /api/schedule PUT upserts a whole row: send it a
  *  timeOfDay and nothing else and the frequency, the count and the auto-publish flag all snap
@@ -63,7 +63,7 @@ const WANTS_APPROVAL =
 /** Reads a timetable change out of a message, or returns null.
  *
  *  Null is the common answer and the safe one: everything it does not recognise falls through
- *  to a normal conversation, where the worst case is Mr Lxwa saying he is not sure. A wrong
+ *  to a normal conversation, where the worst case is MenCra saying he is not sure. A wrong
  *  patch silently rewrites when the customer's site publishes. */
 export function parseScheduleCommand(raw: string): SchedulePatch | null {
   const q = String(raw ?? "").trim();

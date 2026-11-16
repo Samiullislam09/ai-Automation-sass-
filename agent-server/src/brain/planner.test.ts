@@ -308,17 +308,17 @@ test("rows 8-9 · anything the registry does not know is refused, never guessed"
 
 // ══ failure modes ════════════════════════════════════════════════════════════════════════
 
-test("2026-08-31 · 'article likho' with no topic no longer dead-ends on 'which topic?' — Mr Lxwa picks one", () => {
+test("2026-08-31 · 'article likho' with no topic no longer dead-ends on 'which topic?' — MenCra picks one", () => {
   // Was: missing_slots asking the user for a topic. The owner asked for autonomous picking
   // instead (site memory + duplicate locks, no confirmation step) — `topic` moved from a
   // required INPUT slot to a NEED, so the planner's own "the user already handed us this one"
   // rule still short-circuits it the instant a literal topic IS given (see the next test), and
-  // only pulls Mr Lxwa's pick_topic in when it is genuinely blank.
+  // only pulls MenCra's pick_topic in when it is genuinely blank.
   const p = okPlan(plan(intent("write_article", {}), TODAY));
   assert.deepEqual(shape(p.steps), ["1:boss.pick_topic", "2:keyword.find_keywords", "3:writer.write_article", "4:seo.check_seo", "4:image.make_images"]);
 });
 
-test("a topic literally given still skips Mr Lxwa entirely — no picking step for the common case", () => {
+test("a topic literally given still skips MenCra entirely — no picking step for the common case", () => {
   const p = okPlan(plan(intent("write_article", { topic: "solar panels" }), TODAY));
   assert.equal(p.steps.some((s) => s.agent_id === "boss"), false, "the topic was given — nothing needed picking");
   // Mr. Image joined this plan on 2026-09-05 — every article gets pictures now (§19.4.2),
@@ -326,7 +326,7 @@ test("a topic literally given still skips Mr Lxwa entirely — no picking step f
   assert.deepEqual(shape(p.steps), ["1:keyword.find_keywords", "2:writer.write_article", "3:seo.check_seo", "3:image.make_images"]);
 });
 
-test("'sirf keywords do' with no topic also gets Mr Lxwa's pick, same as an article order", () => {
+test("'sirf keywords do' with no topic also gets MenCra's pick, same as an article order", () => {
   const p = okPlan(plan(intent("find_keywords", {}), TODAY));
   assert.deepEqual(shape(p.steps), ["1:boss.pick_topic", "2:keyword.find_keywords"]);
 });

@@ -302,7 +302,7 @@ export async function connect(
 
   const sock: Sock = makeWASocket({
     auth: state,
-    browser: Browsers.appropriate("MrLxwa"),
+    browser: Browsers.appropriate("MenCra"),
     // We drive the QR ourselves through the dashboard rather than Baileys' terminal printer.
     printQRInTerminal: false,
     // Read receipts and presence are only sent when a human is actually looking; we never fake

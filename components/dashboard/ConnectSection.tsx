@@ -72,7 +72,7 @@ const CARDS: Card[] = [
     category: "cms",
     blurb: "Connect your custom website and automate data exchange.",
     live: true,
-    fields: [{ key: "url", label: "Your endpoint URL", placeholder: "https://yourbusiness.com/api/mrlxwa" }],
+    fields: [{ key: "url", label: "Your endpoint URL", placeholder: "https://yourbusiness.com/api/mencra" }],
   },
   {
     type: "social_x",
@@ -344,7 +344,7 @@ export default function ConnectSection() {
       <header className="cn-head">
         <div className="min-w-0">
           <h1 className="text-lg font-bold">Connect</h1>
-          <p className="lx-11 lx-mut mt-1">Link your accounts once. Mr. Lxwa then publishes, replies and reports for you.</p>
+          <p className="lx-11 lx-mut mt-1">Link your accounts once. MenCra then publishes, replies and reports for you.</p>
         </div>
         <div className="cn-total" title="Connected out of all available">
           <span className="cn-total-n">{connectedCount}<small> / {totalSlots}</small></span>
@@ -386,7 +386,7 @@ export default function ConnectSection() {
         <div className="lx-card2 p-4" style={{ borderColor: "var(--lx-cyan)" }}>
           <div className="lx-12 font-bold">Signing secret — shown once</div>
           <p className="lx-11 lx-mut mt-1.5">
-            Save this in your site or automation and verify the <code>X-MrLxwa-Signature</code> header on every request.
+            Save this in your site or automation and verify the <code>X-MenCra-Signature</code> header on every request.
             It won&apos;t be shown again after you close this — reconnect to generate a new one.
           </p>
           <code className="lx-in lx-11 mt-2 block rounded-lg px-3 py-2" style={{ wordBreak: "break-all" }}>

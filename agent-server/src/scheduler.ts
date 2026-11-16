@@ -16,7 +16,7 @@ import { pruneEvents } from "./lib/whatsapp/events.js";
 /** The thing that makes this product actually automatic.
  *
  *  Every agent in here has always been reactive: a job existed because a human pressed
- *  "Run the team" or asked Mr Lxwa in chat. This ticks once a minute, reads the `schedules`
+ *  "Run the team" or asked MenCra in chat. This ticks once a minute, reads the `schedules`
  *  table (supabase/migrations/006_schedules.sql) and starts the boss chain for any tenant
  *  whose local wall-clock has just reached their chosen time.
  *

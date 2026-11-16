@@ -34,7 +34,7 @@ const REPLIED_STAGES = ["replied", "in_conversation", "interested"];
 const OUT = ["rejected", "opted_out", "invalid", "failed"];
 const TAB_MATCH: Record<string, (l: Lead) => boolean> = {
   all: () => true,
-  // Needs you: Mr Lxwa flagged it for a human, and it isn't already dead.
+  // Needs you: MenCra flagged it for a human, and it isn't already dead.
   needs: (l) => !!l.needs_attention && !OUT.includes(l.stage),
   new: (l) => isToday(l.created_at), // added in the last 24h
   // Engaged = they answered. Contacted = we wrote, they have not answered yet. No overlap.
@@ -681,7 +681,7 @@ export default function LeadsSection() {
                           <td className="px-3 py-3">
                             <div className="flex items-center gap-2">
                               <span className="truncate font-medium" style={{ maxWidth: 220 }}>{l.company || l.name || "Untitled"}</span>
-                              {l.needs_attention && <span title={l.needs_attention_reason ?? "Mr Lxwa replied but flagged this for you"} className="inline-flex shrink-0 items-center gap-1 text-[12px] font-medium" style={{ color: C.amber }}><TriangleAlert size={12} />Needs you</span>}
+                              {l.needs_attention && <span title={l.needs_attention_reason ?? "MenCra replied but flagged this for you"} className="inline-flex shrink-0 items-center gap-1 text-[12px] font-medium" style={{ color: C.amber }}><TriangleAlert size={12} />Needs you</span>}
                             </div>
                             <div className="mt-0.5 truncate text-[12px]" style={{ color: C.sub, maxWidth: 260 }}>{phoneDisplay(l)}{countryOf(l) ? ` · ${countryOf(l)}` : ""}</div>
                           </td>

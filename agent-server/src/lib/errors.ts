@@ -10,7 +10,7 @@
  *  simply gets no hint, rather than being guessed at. */
 
 export type ExplainedError = {
-  /** One human sentence, shown on the dashboard and read back by Mr Lxwa in chat. */
+  /** One human sentence, shown on the dashboard and read back by MenCra in chat. */
   message: string;
   /** The raw thing that went wrong, kept verbatim for debugging. */
   cause: string;
@@ -21,7 +21,7 @@ export type ExplainedError = {
 };
 
 const AGENT_LABEL: Record<string, string> = {
-  boss: "Mr Lxwa",
+  boss: "MenCra",
   keyword: "Mr. Keyword",
   writer: "Mr. Writer",
   crawler: "the site crawler",

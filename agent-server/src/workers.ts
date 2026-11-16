@@ -42,7 +42,7 @@ const MAX_ATTEMPTS = 3;
 const PROGRESS_MS = 2000;
 
 const AGENT_LABEL: Record<string, string> = {
-  boss: "Mr Lxwa", keyword: "Mr. Keyword", writer: "Mr. Writer",
+  boss: "MenCra", keyword: "Mr. Keyword", writer: "Mr. Writer",
   crawler: "the site crawler", social: "Miss Social", seo: "Mr. SEO", leads: "the leads agent",
   analyst: "Mr. Analyst", publish: "Mr. Publish", audit: "Mr. Audit",
 };

@@ -230,7 +230,7 @@ export function echoLine(
   return `${headline}. ${timing} ${lands}`;
 }
 
-/** What Mr. Lxwa actually says, in the chat, the moment a reversible action starts running
+/** What MenCra actually says, in the chat, the moment a reversible action starts running
  *  with no confirmation needed — the first-person sentence the customer reads before the live
  *  progress strip takes over. There used to be a bare "On it." here, removed 2026-08-31 for
  *  going stale (it sat in the transcript unchanged for the whole run). The fix was never "say

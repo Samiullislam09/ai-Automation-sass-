@@ -135,7 +135,7 @@ export default function ArticleReview({ item, editable, id }: { item: Item; edit
       const res = await fetch(`/api/content/${id}/approve`, { method: "POST" });
       const data = await res.json();
       if (!data.ok) { toast(data.error ?? "Publish failed.", "error"); return; }
-      act(`"It's live."`, "Mr Lxwa");
+      act(`"It's live."`, "MenCra");
       report(`Published after your approval: "${title}"`);
       toast(data.url ? `Published! ${data.url}` : "Published!");
       router.push("/app/approvals");

@@ -182,7 +182,7 @@ export default function OnboardingWizard() {
       ...(topics ? [{ k: "Content topics", v: topics }] : []),
       { k: "Goals", v: GOALS.find((g) => g.key === goal)?.memory ?? "More organic traffic, consistent publishing, and inbound leads" },
     ]);
-    act(noSite ? "built the team memory from your answers." : `finished studying <b>${site}</b> and built the team memory.`, "Mr Lxwa");
+    act(noSite ? "built the team memory from your answers." : `finished studying <b>${site}</b> and built the team memory.`, "MenCra");
     router.push("/dashboard");
   };
 
@@ -281,8 +281,8 @@ export default function OnboardingWizard() {
             <div className="ob-brand">
               <BrandMark size={30} />
               <div>
-                <b className="ob-brand-t">MrLxwa</b>
-                <small className="ob-brand-s">GrowthTeam AI</small>
+                <b className="ob-brand-t">MenCra</b>
+                <small className="ob-brand-s">AI marketing team</small>
               </div>
             </div>
             {step < 3 && (
@@ -357,7 +357,7 @@ export default function OnboardingWizard() {
           {step === 3 && revealedSecret && (
             <>
               <h2 className="ob-h1">Your webhook secret</h2>
-              <p className="ob-sub">Shown once. Put it in your site&apos;s <code>.env</code> as <code>MRLXWA_WEBHOOK_SECRET</code> — it verifies our signature on each article. Setup guide: <a href="/connect/nextjs" target="_blank" rel="noopener" className="ob-link">/connect/nextjs</a></p>
+              <p className="ob-sub">Shown once. Put it in your site&apos;s <code>.env</code> as <code>MENCRA_WEBHOOK_SECRET</code> — it verifies our signature on each article. Setup guide: <a href="/connect/nextjs" target="_blank" rel="noopener" className="ob-link">/connect/nextjs</a></p>
               <div className="ob-secret">
                 <span>{revealedSecret}</span>
                 <button className="ob-btn" onClick={copySecret}>{copied ? "Copied" : "Copy"}</button>
@@ -405,7 +405,7 @@ export default function OnboardingWizard() {
             <>
               <h2 className="ob-h1">Connect your webhook</h2>
               <p className="ob-sub">An API route on your site — we post each approved article there and give you a secret to verify it. <a href="/connect/nextjs" target="_blank" rel="noopener" className="ob-link">Setup guide</a></p>
-              <div className="ob-field"><label className="ob-label">Your API route URL</label><input className="ob-input" placeholder="https://yoursite.com/api/mrlxwa-content" value={webhookUrl} onChange={(e) => setWebhookUrl(e.target.value)} onKeyDown={(e) => e.key === "Enter" && connect()} /></div>
+              <div className="ob-field"><label className="ob-label">Your API route URL</label><input className="ob-input" placeholder="https://yoursite.com/api/mencra-content" value={webhookUrl} onChange={(e) => setWebhookUrl(e.target.value)} onKeyDown={(e) => e.key === "Enter" && connect()} /></div>
               {connectError && <p className="ob-error">{connectError}</p>}
               <div className="ob-actions">
                 <button className="ob-btn" onClick={() => { setMethod(null); setConnectError(null); }}><ArrowLeft size={14} /> Back</button>
@@ -417,7 +417,7 @@ export default function OnboardingWizard() {
 
           {step === 4 && !showDone && (
             <>
-              <h2 className="ob-h1">MrLxwa is learning your business</h2>
+              <h2 className="ob-h1">MenCra is learning your business</h2>
               <p className="ob-sub">{noSite ? "Building the team's memory from your answers." : "This finishes on its own — you don't need to keep this tab open."}</p>
               <div className="ob-prog">
                 <div className="ob-prog-h">

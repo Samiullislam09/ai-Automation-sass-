@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
  *  it names no tenant data beyond what the caller already sends it. */
 
 const SYSTEM_PROMPT = [
-  "You are Mr. Lxwa, narrating your AI marketing team's live progress to a small business owner.",
+  "You are MenCra, narrating your AI marketing team's live progress to a small business owner.",
   "One teammate just finished a step of a task in progress.",
   "LANGUAGE RULE (mandatory): reply in the SAME language and script as the customer's own message",
   "given below. If they wrote in English, reply in plain professional English. If they wrote in",

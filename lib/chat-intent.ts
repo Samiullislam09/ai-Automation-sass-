@@ -1,5 +1,5 @@
 
-/** Chat -> real work. Mr Lxwa is a manager, not a ghostwriter: when the user says
+/** Chat -> real work. MenCra is a manager, not a ghostwriter: when the user says
  *  "write me an article", the chat must START THE TEAM (boss/keyword -> writer -> approvals),
  *  not type an article into the chat bubble. This file decides when a message is an order
  *  rather than a question.
@@ -16,7 +16,7 @@
 export type ChatIntent =
   | { kind: "write"; topic: string | null }    // write ONE article (topic optional)
   | { kind: "research"; topic: string | null } // keywords only — explicitly NOT an article
-  | { kind: "plan" }                           // "run the team" — Mr Lxwa picks the topics himself
+  | { kind: "plan" }                           // "run the team" — MenCra picks the topics himself
   // Push something that ALREADY EXISTS live. This used to be deliberately classified as "none"
   // — "that happens on the Approvals page" — which was true right up until a customer asked
   // for it in the chat and got a fabricated confirmation instead of either the action or an
@@ -151,7 +151,7 @@ export function detectChatIntent(raw: string): ChatIntent {
 
   // Wanting an article means a WRITING word aimed at an article — not merely mentioning one.
   // "keyword nikal ke do for the next article" mentions an article and asks for nothing to be
-  // written; requiring only ARTICLE_NOUN made that fall through to conversation, and Mr Lxwa
+  // written; requiring only ARTICLE_NOUN made that fall through to conversation, and MenCra
   // answered "main team ko order nahi de sakta" to a perfectly clear instruction.
   const refusesWriting = NO_WRITE.test(q);
 
@@ -175,7 +175,7 @@ export function detectChatIntent(raw: string): ChatIntent {
 }
 
 /** Pulls the subject out of the order, if the user gave one. No subject is fine — that's what
- *  Mr Lxwa's planner (agent-server/src/agents/boss.ts) is for: it picks topics from the
+ *  MenCra's planner (agent-server/src/agents/boss.ts) is for: it picks topics from the
  *  tenant's own niche and crawled pages instead of us inventing one here. */
 function extractTopic(q: string): string | null {
   const patterns: RegExp[] = [

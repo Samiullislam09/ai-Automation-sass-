@@ -54,7 +54,7 @@ export function Workflow() {
       <div className="lv-panel mx-auto max-w-[1360px] px-20 py-[calc(100px*var(--mk-scale))] max-lg:flex max-lg:flex-col max-lg:items-center max-lg:gap-[30px] max-lg:px-4">
         <div className="relative mx-auto flex w-full max-w-[1200px] flex-col items-center gap-[calc(40px*var(--mk-scale))] max-xl:w-auto max-xl:max-w-[1200px] max-xl:px-2 max-lg:w-full max-lg:max-w-none max-lg:gap-[30px] max-lg:px-0">
           <div className="flex w-full min-w-0 max-w-full flex-col items-center gap-0">
-            <h2 className="lv-h2 text-center lg:whitespace-nowrap max-lg:max-w-[19ch] max-lg:text-balance">10x the output. <br className="md:hidden" />Without 10 different tools.</h2>
+            <h2 className="lv-h2 text-center lg:whitespace-nowrap max-lg:max-w-[19ch] max-lg:text-balance">Research, write and publish <br className="md:hidden" />from one place.</h2>
             <p className="lv-sub mt-[calc(16px*var(--mk-scale))] max-w-[760px] text-center !text-[#6e736f] max-lg:mt-4">From everyday tasks to bigger goals, <br className="hidden max-md:inline" />here&apos;s what you can get done.</p>
             <div className="lv-noscroll relative mt-[calc(40px*var(--mk-scale))] max-w-full max-lg:w-full max-lg:overflow-x-auto">
               <div role="tablist" aria-label="Choose who you are" className="relative inline-flex gap-[2px] rounded-full border border-[#e4e7e3] bg-white p-[5px] max-lg:mx-auto max-lg:flex max-lg:w-max max-lg:p-1">
@@ -76,9 +76,9 @@ export function Workflow() {
                     <button type="button" aria-expanded={on} onClick={() => setOpen(k)}
                       className={`relative flex w-full items-start gap-4 px-[34px] py-[30px] text-left transition-[background] duration-300 max-lg:px-5 max-lg:py-5 ${on ? "bg-white lg:min-h-[285px] xl:h-[285px]" : "bg-[#fbfcfb] lg:h-[88px]"}`}>
                       {on && <span aria-hidden className="absolute left-0 top-0 h-full w-[3px] bg-[linear-gradient(-88.8deg,#a78bfa_4%,#6a5af0_50%,#3b82f6_96%)]" />}
-                      <span className={`flex h-[28px] w-[22px] shrink-0 items-center justify-center ${on ? "text-[#17171a]" : "text-[#9da39e]"}`}><s.icon size={22} /></span>
+                      <span className={`flex h-[28px] w-[22px] shrink-0 items-center justify-center ${on ? "text-[#17171a]" : "text-[#5f6661]"}`}><s.icon size={22} /></span>
                       <span className={`flex min-w-0 flex-1 flex-col transition-[gap] duration-300 ${on ? "gap-2" : "gap-0"}`}>
-                        <span className={`text-[20px] leading-[28px] tracking-[-0.3px] max-md:text-[18px] ${on ? "font-semibold text-[#17171a]" : "font-medium text-[#9da39e]"}`}>{s.title}</span>
+                        <span className={`text-[20px] leading-[28px] tracking-[-0.3px] max-md:text-[18px] ${on ? "font-semibold text-[#17171a]" : "font-medium text-[#5f6661]"}`}>{s.title}</span>
                         <span className={`grid overflow-hidden transition-[grid-template-rows,opacity] duration-300 ${on ? "opacity-100 [grid-template-rows:1fr]" : "opacity-0 [grid-template-rows:0fr]"}`}>
                           <span className="block min-h-0 overflow-hidden text-[16px] font-normal leading-[27px] tracking-[-0.08px] text-[#6e726f] max-md:text-[15px] max-md:leading-[24px]">
                             <strong className="mb-1 mt-[10px] block font-medium text-[#17171a]">{s.lead}</strong>

@@ -30,7 +30,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-/** /api/chat — Mr Lxwa's reply.
+/** /api/chat — MenCra's reply.
  *
  *  WHY THIS WAS REWRITTEN. A 1700-word article took ninety seconds and felt fine; "hi hello"
  *  took six or seven and felt broken. Nothing about answering a greeting is hard — the time
@@ -64,8 +64,8 @@ function systemPrompt(ctx: any, business: string | null, awaiting: number | null
   // `awaiting` is counted server-side, not taken from ctx. The client sends
   // store.s.content.filter(status === "awaiting").length, and store.s.content is only ever
   // written by a demo generator nobody calls any more — so that number was reliably zero
-  // while six real articles sat in the approvals queue, and Mr Lxwa read it out as fact.
-  return `You are Mr Lxwa, running a small AI marketing team (Mr. Keyword, Mr. Writer, Mr. QA, Mr. Publish) inside the MrLxwa dashboard.
+  // while six real articles sat in the approvals queue, and MenCra read it out as fact.
+  return `You are MenCra, running a small AI marketing team (Mr. Keyword, Mr. Writer, Mr. QA, Mr. Publish) inside the MenCra dashboard.
 
 Subscription plan: ${ctx.plan ?? "free"} · ${ctx.tokens ?? "?"} of ${ctx.tokensMax ?? "?"} tokens left
 Waiting for your approval right now: ${awaiting ?? "unknown"}
@@ -77,7 +77,7 @@ You are the MANAGER, not the writer. Never write an article, blog post or social
 
 IMPORTANT — you are also shown here whenever something upstream failed to recognize the customer's message as a real order, even when it plainly was one (e.g. they already wrote "write an article about X" and it still reached you). In that case their message ALREADY was a proper order in their own words — telling them to "ask in your own words" is nonsense, since they just did, and claiming outright that you "cannot write the article" is FALSE: writing articles, finding keywords, auditing the site, drafting social posts, finding leads and publishing are all real, working things this team does every day. Never say or imply you cannot do something that is one of this team's real capabilities. If a message clearly names a real action and a real subject and still reached you, do not refuse it and do not ask them to rephrase — say plainly that you didn't catch that correctly and ask them to send the exact same request again, so it can route properly this time.
 
-NEVER ASK THE CUSTOMER WHICH TOPIC TO WRITE ABOUT. This is an automation, not a questionnaire. If they say "write an article" with no subject, that is a complete order: Mr Lxwa reads their Site Brain, their crawled pages and their Search Console numbers and PICKS the topic himself — the one most likely to rank and bring buyers. So never reply "which topic?", "please tell me the topic", "what subject?" or anything like it. The topic they did not give is the team's job to choose, not a gap for the customer to fill.
+NEVER ASK THE CUSTOMER WHICH TOPIC TO WRITE ABOUT. This is an automation, not a questionnaire. If they say "write an article" with no subject, that is a complete order: MenCra reads their Site Brain, their crawled pages and their Search Console numbers and PICKS the topic himself — the one most likely to rank and bring buyers. So never reply "which topic?", "please tell me the topic", "what subject?" or anything like it. The topic they did not give is the team's job to choose, not a gap for the customer to fill.
 
 YOU CANNOT START, SCHEDULE OR PUBLISH ANYTHING FROM THIS REPLY. Real orders are carried out before you are ever asked, and answered without you. So if you are writing, nothing was queued, nothing was scheduled, and nothing was published — saying otherwise is telling the customer their website will change when it will not.
 · Never write "queued", "scheduled for", "I've started it", "Mr. Writer is on it", "it will go live".
@@ -456,8 +456,8 @@ async function openLightningStream(model: string, messages: any[], signal: Abort
   return res.body;
 }
 
-const INTRO = /^\s*(?:main|mai|m[ae]in)\s+(?:mr\.?\s*)?lxwa\s+(?:hoon|hun|hu)|^\s*(?:i'?m|i am)\s+(?:mr\.?\s*)?lxwa/i;
-const ECHO = /reply\s+\d\s*-\s*\d\s+short|short lines mein|warm aur confident|warm and confident|bold kar sakta|you are mr lxwa|two sentences maximum/i;
+const INTRO = /^\s*(?:main|mai|m[ae]in)\s+(?:mr\.?\s*)?(?:lxwa|mencra)\s+(?:hoon|hun|hu)|^\s*(?:i'?m|i am)\s+(?:mr\.?\s*)?(?:lxwa|mencra)/i;
+const ECHO = /reply\s+\d\s*-\s*\d\s+short|short lines mein|warm aur confident|warm and confident|bold kar sakta|you are mr lxwa|you are mencra|two sentences maximum/i;
 
 /** Relays the model's tokens to the browser, dropping the two things this model does no
  *  matter what the prompt says: introducing itself every single time, and reciting its own
@@ -467,7 +467,7 @@ const ECHO = /reply\s+\d\s*-\s*\d\s+short|short lines mein|warm aur confident|wa
  *  where it is actually needed: both pathologies are OPENING-line behaviour. The first HOLD
  *  characters are held back and judged; once a real answer has started, tokens go straight
  *  through as they arrive. Sixty-four characters is roughly one clause — long enough to
- *  recognise "main Mr Lxwa hoon" or a recited rule, short enough that nobody sees a pause. */
+ *  recognise "main MenCra hoon" or a recited rule, short enough that nobody sees a pause. */
 const HOLD = 64;
 
 /** A ✓ or ✕ at the start of a line means "the system saw this happen".
@@ -492,7 +492,7 @@ const IMPERSONATES_SYSTEM = /^\s*[✓✔✅✕✖❌]\s*/;
 const FABRICATED_ORDER = new RegExp(
   [
     // "Mr. Publish — queued ...", "Mr. Writer is writing ..."
-    "^mr\\.?\\s*(?:lxwa|keyword|writer|qa|publish)\\b[^.!?\\n]{0,48}?\\b(?:queued|scheduled|started|starting|writing|publishing|will publish|will write|is on it)",
+    "^mr\\.?\\s*(?:lxwa|mencra|keyword|writer|qa|publish)\\b[^.!?\\n]{0,48}?\\b(?:queued|scheduled|started|starting|writing|publishing|will publish|will write|is on it)",
     // "I've queued it", "main ne schedule kar diya"
     "^i(?:'ve| have)\\s+(?:queued|scheduled|started|published|set (?:that|it) up)",
     "^(?:main|maine|mainne)\\b[^.!?\\n]{0,40}?\\b(?:queue|schedule|shuru|start)\\w*\\s*(?:kar\\s*)?(?:diya|di|dia)",
@@ -732,7 +732,7 @@ async function startWork(
   }
 
   // The room that has the work right now: a topic goes straight to Mr. Keyword, everything
-  // else starts with Mr Lxwa choosing what to work on.
+  // else starts with MenCra choosing what to work on.
   const agentId = topic ? "kw" : "boss";
   const accepted = (text: string, label: string): OrderResult => ({ text, agentId, jobId: res.jobId ?? null, label });
 
@@ -1288,7 +1288,7 @@ export async function POST(req: NextRequest) {
     if (isWriteTool(turn.action)) {
       const result = await runWriteTool(turn.action as string, turn.lookupArgs ?? {}, supabase, tenantId);
       toolResult = writeResultBlock(result);
-      // The cached copies are now wrong, and Mr Lxwa reads them to answer "kab chalta hai".
+      // The cached copies are now wrong, and MenCra reads them to answer "kab chalta hai".
       // Answering the very next message with the old timetable is how a change that worked gets
       // reported as a change that did not. Invalidated on failure too: a partial write is
       // exactly when a stale read is most convincing.

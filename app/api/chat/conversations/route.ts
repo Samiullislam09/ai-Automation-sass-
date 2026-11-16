@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
 import { loadChatHistory } from "@/lib/chat-history";
 
-/** The chat sidebar's list — every conversation this workspace has had with Mr Lxwa,
+/** The chat sidebar's list — every conversation this workspace has had with MenCra,
  *  newest activity first, with a preview so the list is scannable without opening each one.
  *
  *  Also carries the most recent conversation's own `messages` (owner, 2026-09-10: "har baar

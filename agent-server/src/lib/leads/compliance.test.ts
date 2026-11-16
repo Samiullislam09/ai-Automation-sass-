@@ -36,12 +36,12 @@ type Proof = import("../siteProfile.js").Proof;
 
 const IDENTITY: SenderIdentity = {
   personName: "Sam",
-  businessName: "MrLxwa",
-  website: "https://mrlxwa.com",
-  replyTo: "sam@mrlxwa.com",
+  businessName: "MenCra",
+  website: "https://mencra.com",
+  replyTo: "sam@mencra.com",
 };
 
-const PROOF: Proof[] = [{ claim: "ISO 9001 certified", quote: "We are ISO 9001 certified", url: "https://mrlxwa.com/about" }];
+const PROOF: Proof[] = [{ claim: "ISO 9001 certified", quote: "We are ISO 9001 certified", url: "https://mencra.com/about" }];
 
 // ── rule 1 · no personal-email scraping ─────────────────────────────────────────────────────
 
@@ -136,10 +136,10 @@ test("VIOLATION: the do-not-contact list is matched on domain, email and phone",
 
 test("the signature identifies the sender and carries a working opt-out", () => {
   const sig = buildSignature(IDENTITY);
-  assert.match(sig, /Sam, MrLxwa/);
-  assert.match(sig, /https:\/\/mrlxwa\.com/);
+  assert.match(sig, /Sam, MenCra/);
+  assert.match(sig, /https:\/\/mencra\.com/);
   assert.match(sig, new RegExp(OPT_OUT_PHRASE, "i"));
-  assert.match(sig, /sam@mrlxwa\.com/);
+  assert.match(sig, /sam@mencra.com/);
   assert.equal(checkIdentification(sig, IDENTITY), null);
   assert.equal(checkOptOut(sig, IDENTITY), null);
 });
@@ -151,7 +151,7 @@ test("VIOLATION: a message that never names the sender's business", () => {
 });
 
 test("VIOLATION: no opt-out, and an opt-out with nothing to act on", () => {
-  assert.equal(checkOptOut("Hi from Sam at MrLxwa. Bye.", IDENTITY)?.rule, "opt-out");
+  assert.equal(checkOptOut("Hi from Sam at MenCra. Bye.", IDENTITY)?.rule, "opt-out");
   // The phrase is there, the address is not: a reader told to reply somewhere unnamed.
   const noAddress = `Fine. If you would rather not hear from me, ${OPT_OUT_PHRASE} and I will not write again.`;
   assert.equal(checkOptOut(noAddress, IDENTITY)?.rule, "opt-out");

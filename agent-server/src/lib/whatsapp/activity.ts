@@ -9,7 +9,7 @@
  *    · the first messages that were skipped (not on WhatsApp, toll-free, ...) and why;
  *    · messages per hour for the last 24 hours, for the graph.
  *
- *  Both the Activity panel and Mr Lxwa (the chat assistant's lookup tool) read this same object, so the
+ *  Both the Activity panel and MenCra (the chat assistant's lookup tool) read this same object, so the
  *  page and the assistant can never disagree.
  *
  *  The rules mirrored here are the SAME ones the senders enforce (autoReply.ts, outbound.ts, followup.ts);

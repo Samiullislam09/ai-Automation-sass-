@@ -20,7 +20,7 @@ export const dynamic = "force-dynamic";
 
 const EDITABLE = ["draft", "awaiting_approval", "failed", "rejected"];
 
-export const metadata: Metadata = { title: "Review — MrLxwa" };
+export const metadata: Metadata = { title: "Review — MenCra" };
 
 export default async function DashboardContentDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

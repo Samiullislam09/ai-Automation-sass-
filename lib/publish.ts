@@ -124,7 +124,7 @@ async function deliverWebhook(
     const payload = JSON.stringify({ id: item.id, type: item.type, title: item.title, body: item.body, action });
     const res = await fetch(creds.url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-MrLxwa-Signature": signPayload(secret, payload) },
+      headers: { "Content-Type": "application/json", "X-MenCra-Signature": signPayload(secret, payload), "X-MrLxwa-Signature": signPayload(secret, payload) },
       body: payload,
     });
     if (!res.ok) return { ok: false, error: `Webhook delivery failed (${res.status}): ${(await res.text().catch(() => "")).slice(0, 300)}` };

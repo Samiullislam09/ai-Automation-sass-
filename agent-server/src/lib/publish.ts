@@ -195,7 +195,7 @@ async function deliverWebhook(
     const payload = JSON.stringify({ id: item.id, type: item.type, title: item.title, body: item.body, images });
     const res = await fetch(creds.url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-MrLxwa-Signature": signPayload(secret, payload) },
+      headers: { "Content-Type": "application/json", "X-MenCra-Signature": signPayload(secret, payload), "X-MrLxwa-Signature": signPayload(secret, payload) },
       body: payload,
       signal: AbortSignal.timeout(30_000),
     });

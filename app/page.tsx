@@ -1,6 +1,16 @@
+import type { Metadata } from "next";
 import Landing from "@/components/landing-v2/Landing";
+import { homeStructuredData } from "@/lib/structured-data";
+
+// The canonical is the real domain: a copy served from another address (a *.vercel.app preview) is not indexed as a duplicate.
+export const metadata: Metadata = { alternates: { canonical: "/" } };
 
 /** Home page. The previous pixel-art landing (components/landing-pixel) is kept in git history. */
 export default function Home() {
-  return <Landing />;
+  return (
+    <>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(homeStructuredData()).replace(/</g, "\u003c") }} />
+      <Landing />
+    </>
+  );
 }

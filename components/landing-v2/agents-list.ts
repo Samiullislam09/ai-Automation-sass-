@@ -27,7 +27,7 @@ export type AgentCard = {
 };
 
 export const AGENTS_LIST: AgentCard[] = [
-  { id: "boss", name: "Mr Lxwa", job: "Your manager. Tell it what you need in plain words and it starts the right agent.", gets: "A plan, and live status updates", status: "live", icon: Bot, color: "#6a5af0", tint: "#efecff", main: true },
+  { id: "boss", name: "MenCra", job: "Your manager. Tell it what you need in plain words and it starts the right agent.", gets: "A plan, and live status updates", status: "live", icon: Bot, color: "#6a5af0", tint: "#efecff", main: true },
   { id: "crawler", name: "Site Crawler", job: "Reads your website page by page.", gets: "A map of all your pages", status: "live", icon: Globe, color: "#2563eb", tint: "#e8f0ff" },
   { id: "analyst", name: "Mr. Analyst", job: "Works out what your business does, who it is for and how it sounds.", gets: "Your Site Brain profile", status: "live", icon: Brain, color: "#7c3aed", tint: "#f1eaff" },
   { id: "keyword", name: "Mr. Keyword", job: "Finds what people search for, using real search data.", gets: "Ranked keywords, with measured and suggested clearly labelled", status: "live", icon: Search, color: "#d97706", tint: "#fdf1e0", main: true },

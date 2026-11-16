@@ -8,7 +8,7 @@ import { nextRunAt } from "@/lib/schedule-time";
 
 /** /dashboard/schedule — rebuilt 2026-10-21 to match the owner-supplied reference
  *  (Downloads/Schedule.html): a Google-Material panel with a status pill, a four-tile stat
- *  strip, four tabs (Automation / Upcoming / Tasks from Mr Lxwa / History) and a modal editor
+ *  strip, four tabs (Automation / Upcoming / Tasks from MenCra / History) and a modal editor
  *  per automation. Design ported 1:1 from that file; the palette is pinned to the reference's
  *  DARK tokens because this panel always lives inside the dark dashboard shell.
  *
@@ -249,7 +249,7 @@ export default function ScheduleSection() {
   };
 
   const cancelOrder = async (id: string) => {
-    const ok = await confirmAction({ title: "Cancel this task?", body: "It will not run. You can ask Mr Lxwa again in the chat.", confirmLabel: "Cancel task", danger: true });
+    const ok = await confirmAction({ title: "Cancel this task?", body: "It will not run. You can ask MenCra again in the chat.", confirmLabel: "Cancel task", danger: true });
     if (!ok) return;
     setCancelling(id);
     try {
@@ -346,7 +346,7 @@ export default function ScheduleSection() {
             <button className="st c" onClick={() => setTab("up")} title="See what is booked">
               <span className="sbox"><Ic n="hourglass" /></span><div>
                 <div className="sv">{orders === null ? "…" : pendingOrders.length}</div>
-                <div className="sl">Tasks from Mr Lxwa</div>
+                <div className="sl">Tasks from MenCra</div>
                 <div className="sl">{pendingOrders.length ? "waiting to run" : "nothing booked"}</div>
               </div>
             </button>
@@ -408,9 +408,9 @@ export default function ScheduleSection() {
             {tab === "hist" && (
               <>
                 <HistoryTab runs={runs} error={historyError} now={now} tz={tz} hf={hf} setHf={setHf} q={qHist} setQ={setQHist} />
-                {/* what Mr Lxwa was asked to do in chat, finished or not: it lives next to the other
+                {/* what MenCra was asked to do in chat, finished or not: it lives next to the other
                     history instead of on a tab of its own */}
-                <h3 className="sec-h">Tasks you gave Mr Lxwa</h3>
+                <h3 className="sec-h">Tasks you gave MenCra</h3>
                 <Tasks orders={orders} now={now} tz={tz} tf={tf} setTf={setTf} q={qTasks} setQ={setQTasks} onCancel={cancelOrder} cancelling={cancelling} />
               </>
             )}
@@ -542,13 +542,13 @@ function Upcoming({ scheds, orders, pendingOrders, now, tz, uf, setUf, ud, setUd
       }
     });
     (pendingOrders ?? []).forEach((o: any) => out.push({
-      at: new Date(o.run_at), icon: orderIcon(o), kind: "chat", id: o.id, tag: "Mr Lxwa", title: orderWhat(o), sub: orderType(o),
+      at: new Date(o.run_at), icon: orderIcon(o), kind: "chat", id: o.id, tag: "MenCra", title: orderWhat(o), sub: orderType(o),
     }));
     out.sort((a, b) => a.at.getTime() - b.at.getTime());
     return out;
   }, [scheds, pendingOrders, now, tz, skip, orders]);
 
-  if (!items.length) return <Empty icon="event" title="Nothing coming up" desc="Turn on an automation, or ask Mr Lxwa in Chat." />;
+  if (!items.length) return <Empty icon="event" title="Nothing coming up" desc="Turn on an automation, or ask MenCra in Chat." />;
 
   const inRange: Record<string, (x: any) => boolean> = {
     today: (x) => dayOffset(x.at, tz, now) === 0,
@@ -627,7 +627,7 @@ function Upcoming({ scheds, orders, pendingOrders, now, tz, uf, setUf, ud, setUd
   );
 }
 
-/* ───────────────────────── Tasks from Mr Lxwa tab ───────────────────────── */
+/* ───────────────────────── Tasks from MenCra tab ───────────────────────── */
 function Tasks({ orders, now, tz, tf, setTf, q, setQ, onCancel, cancelling }: any) {
   if (orders === null) return <div className="box">Loading…</div>;
   const mapStatus = (s: string) => s === "done" ? "Done" : s === "failed" ? "Failed" : s === "cancelled" ? "Cancelled" : s === "running" ? "Running" : "Pending";
@@ -659,9 +659,9 @@ function Tasks({ orders, now, tz, tf, setTf, q, setQ, onCancel, cancelling }: an
               <div className="c end">{o.S === "Pending" ? <button className="lnk" disabled={cancelling === o.id} onClick={() => onCancel(o.id)}>Cancel</button> : null}{o.error ? <small className="bad">{o.error}</small> : null}</div>
             </div>
           );
-        }) : <Empty icon="robot" title="No tasks found" desc="Try another filter, or ask Mr Lxwa in Chat." />}
+        }) : <Empty icon="robot" title="No tasks found" desc="Try another filter, or ask MenCra in Chat." />}
       </div>
-      <div className="tip"><Ic n="robot" z={22} /><div><b>Need something done later?</b><small>Tell Mr Lxwa in Chat, e.g. “30 min baad ye article publish kar do” or “kal 9 baje isko publish karna”.</small></div></div>
+      <div className="tip"><Ic n="robot" z={22} /><div><b>Need something done later?</b><small>Tell MenCra in Chat, e.g. “30 min baad ye article publish kar do” or “kal 9 baje isko publish karna”.</small></div></div>
     </>
   );
 }

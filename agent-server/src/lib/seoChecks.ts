@@ -1122,7 +1122,7 @@ export async function fetchSerpSnapshot(keyword: string, depth = 10): Promise<Se
 async function readCompetitorPage(url: string): Promise<{ wordCount: number | null; h2s: string[] }> {
   try {
     const res = await fetch(url, {
-      headers: { "User-Agent": "MrLxwaBot/1.0 (+https://mrlxwa.com; comparing a draft against public search results)" },
+      headers: { "User-Agent": "MenCraBot/1.0 (+https://mencra.com; comparing a draft against public search results)" },
       signal: AbortSignal.timeout(12_000),
       redirect: "follow",
     });

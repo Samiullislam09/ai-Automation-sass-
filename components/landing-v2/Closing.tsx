@@ -1,4 +1,3 @@
-import { AuthLink } from "./AuthLink";
 import { Check, FileText, Search, Send, ShieldCheck } from "lucide-react";
 import { BRAND } from "@/lib/brand";
 
@@ -33,7 +32,7 @@ export function Closing() {
                 ))}
               </div>
             </div>
-            <AuthLink guestHref="/signup" guestLabel="Get started" authedLabel="Go to dashboard" className="inline-flex h-[58px] w-[403px] min-w-[403px] max-w-[403px] items-center justify-center rounded-full bg-[linear-gradient(90deg,#6a5af0_0%,#a78bfa_100%)] text-[20px] font-medium text-white min-[768px]:max-[901px]:w-[min(403px,100%)] max-[901px]:min-w-0 max-[767px]:mx-auto max-[767px]:w-full max-[767px]:max-w-none max-[601px]:h-12 max-[601px]:text-[16px]" />
+            <a href={`mailto:${BRAND.supportEmail}?subject=${encodeURIComponent("Agency plan")}`} className="inline-flex h-[58px] w-[403px] min-w-[403px] max-w-[403px] items-center justify-center rounded-full bg-[linear-gradient(90deg,#6a5af0_0%,#a78bfa_100%)] text-[20px] font-medium text-white min-[768px]:max-[901px]:w-[min(403px,100%)] max-[901px]:min-w-0 max-[767px]:mx-auto max-[767px]:w-full max-[767px]:max-w-none max-[601px]:h-12 max-[601px]:text-[16px]">Talk to us about an agency plan</a>
           </div>
 
           {/* product preview */}

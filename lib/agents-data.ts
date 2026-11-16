@@ -14,7 +14,7 @@
  * an agent-server implementation and a queue.
  */
 export const AGENTS = [
-  { id: "boss",    name: "Mr Lxwa",     role: "Orchestrator",      ico: "🧠", c: "#7c5cff", live: true },
+  { id: "boss",    name: "MenCra",     role: "Orchestrator",      ico: "🧠", c: "#7c5cff", live: true },
   { id: "kw",      name: "Mr. Keyword", role: "Keyword Research",  ico: "🔎", c: "#6ea8ff", live: true },
   { id: "writer",  name: "Mr. Writer",  role: "Article Writer",    ico: "✍️", c: "#b48bff", live: true },
   { id: "qa",      name: "Mr. QA",      role: "Quality Review",    ico: "🔍", c: "#e08a3c", live: true }, // the real quality gate (Step 12)

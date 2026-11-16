@@ -5,7 +5,7 @@ import { getCurrentTenantId } from "@/lib/supabase/tenant";
 /** What the team actually knows about this site's performance, for the Memory page.
  *
  *  Same shaping the agents use (agent-server/src/lib/insights.ts) — deliberately kept in
- *  step so the page shows the very rows Mr Lxwa plans from, not a prettier parallel view.
+ *  step so the page shows the very rows MenCra plans from, not a prettier parallel view.
  *  Read-only, and it never fills a gap with an estimate: no Google connection means empty
  *  arrays and `connected: false`, which the page states plainly. */
 export async function GET() {

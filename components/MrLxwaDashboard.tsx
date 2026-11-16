@@ -37,6 +37,7 @@
  */
 
 import React, { useEffect, useRef, useState } from "react";
+import { LogoMark } from "@/components/brand/MenCraLogo";
 import { renderMarkdown } from "@/lib/md";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -215,23 +216,6 @@ const TABS = ["Live Activity", "Research", "Writing", "References", "Output Prev
 /* ========================================================================== */
 /*  SMALL PIECES                                                              */
 /* ========================================================================== */
-
-/** Lime starburst logo mark ([ASSET] swap point). */
-const LogoMark = ({ size = 28 }: { size?: number }) => (
-  <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden>
-    <defs>
-      <linearGradient id="lxLime" x1="0" y1="0" x2="32" y2="32">
-        <stop offset="0" stopColor="#d9f99d" />
-        <stop offset="1" stopColor="#4ade80" />
-      </linearGradient>
-    </defs>
-    {[0, 30, 60, 90, 120, 150].map((r) => (
-      <rect key={r} x={14.4} y={2} width={3.2} height={28} rx={1.6} fill="url(#lxLime)" transform={`rotate(${r} 16 16)`} />
-    ))}
-    <circle cx={16} cy={16} r={3.4} fill="#06060b" />
-    <circle cx={16} cy={16} r={2} fill="url(#lxLime)" />
-  </svg>
-);
 
 /** CSS robot avatar ([ASSET] swap point for the robot photos). */
 const Robo = ({ size = 40 }: { size?: number }) => (
@@ -1715,7 +1699,7 @@ const SiteBrainScreen = ({ items, running, color, label }: { items: CanvasItem[]
   );
 };
 
-/** Mr. Lxwa's (the boss/brain) own live screen — owner, 2026-09-12: "mr lxwa yani boss ai ka koi
+/** MenCra's (the boss/brain) own live screen — owner, 2026-09-12: "mr lxwa yani boss ai ka koi
  *  bhi animation nahi ha". Before this it fell into the generic fallback list, which draws a
  *  Working… shimmer only when `producedItems` is truly empty — the boss's own real output,
  *  `ctx.data("topic_picked", {topic, why})`, made that check pass the instant it landed, so the
@@ -1729,7 +1713,7 @@ const BossScreen = ({ items, running, color, label }: { items: CanvasItem[]; run
   if (!pick) {
     // Owner (2026-09-12, screenshot): a thin one-line bar-and-text row was floating alone in
     // an otherwise empty card — "animation pasand nahi aya, aisa karo real jaisa kuch, full
-    // section pe ho, normal abhi jaisa animation nahi". Mr. Lxwa is the one agent whose whole
+    // section pe ho, normal abhi jaisa animation nahi". MenCra is the one agent whose whole
     // job here IS a decision, not a document or a grid — so its "still thinking" moment fills
     // the same canvas height every other screen's finished output would, built around the real
     // brain icon rather than a bare sentence, and pulses instead of sitting static.
@@ -2477,7 +2461,7 @@ const AgentNetwork = ({
       {workingAgent && (
         <div className="lx-card2 mt-3 flex items-center gap-2.5 px-3 py-2">
           <span className="h-2 w-2 shrink-0 rounded-full lx-pulse" style={{ background: "#22c55e", boxShadow: "0 0 8px #22c55e" }} />
-          <span className="lx-11 font-semibold">{workingAgent.id === "boss" ? "Mr Lxwa is working" : "Planning & Orchestrating"}</span>
+          <span className="lx-11 font-semibold">{workingAgent.id === "boss" ? "MenCra is working" : "Planning & Orchestrating"}</span>
           <span className="lx-10 lx-mut">{workingAgent.id === "boss" ? "— choosing the best topic from your site" : `— delegated to ${workingAgent.name}`}</span>
         </div>
       )}
@@ -2492,18 +2476,18 @@ const AgentNetwork = ({
             <NetCard key={a.id} a={a} area={`l${i + 1}`} onClick={() => onOpen(a)} />
           ))}
 
-          {/* [ASSET] Mr. Lxwa — "command center" brain card, matching the reference
+          {/* [ASSET] MenCra — "command center" brain card, matching the reference
               (jhhhhhhhh.png). The brain is the reference's own 3D render, cropped out of that
               image into public/brand/brain-boss.png — a raster render can't be rebuilt in
               CSS/SVG, and the request was to use exactly that artwork.
               Status is real (bossAgent.status, same statusForAgent() every other card uses) —
-              was a hardcoded "Online" regardless of whether Mr Lxwa's own step (boss.pick_topic,
+              was a hardcoded "Online" regardless of whether MenCra's own step (boss.pick_topic,
               2026-08-31) was genuinely running. "Online" stays the resting-state word (he is
               always reachable); "Working" only shows while he is actually mid-step. */}
           <button
             type="button"
             onClick={() => onOpen(bossAgent)}
-            title="See what Mr Lxwa is doing"
+            title="See what MenCra is doing"
             className={`lx-hex lx-net-brain ${bossAgent.status === "Working" ? "lx-net-card-working" : ""}`}
             data-net="b"
             data-agent-id="boss"
@@ -2511,7 +2495,7 @@ const AgentNetwork = ({
           >
             {/* eslint-disable-next-line @next/next/no-img-element -- static brand asset, fixed size */}
             <img src="/brand/brain-boss.png" alt="" width={156} height={124} />
-            <div className="lx-13 font-bold mt-1">Mr. Lxwa</div>
+            <div className="lx-13 font-bold mt-1">MenCra</div>
             <div className="lx-10 lx-mut">Command Center</div>
             <div className="lx-10 lx-mut">Plan · Coordinate · Execute</div>
             <div className="mt-1.5 flex items-center gap-1.5 lx-10 font-semibold" style={{ color: bossAgent.status === "Working" ? "#60a5fa" : "#22c55e" }}>
@@ -2568,7 +2552,7 @@ const ElapsedTimer = ({ paused = false }: { paused?: boolean }) => {
 const nowTime = () =>
   new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }).toUpperCase();
 
-/** Mr. Lxwa's real replies use markdown bold (`**word**`) — this renders just that, nothing
+/** MenCra's real replies use markdown bold (`**word**`) — this renders just that, nothing
  *  fancier, matching components/kit.tsx's own `inline()` helper. */
 const boldText = (text: string, key: string): React.ReactNode[] => {
   const out: React.ReactNode[] = [];
@@ -2717,14 +2701,14 @@ export default function MrLxwaDashboard({
   };
   const agentsLeft: Agent[] = AGENT_META_LEFT.map((m) => ({ ...m, status: statusForAgent(m) }));
   const agentsRight: Agent[] = AGENT_META_RIGHT.map((m) => ({ ...m, status: statusForAgent(m) }));
-  // Mr Lxwa himself — real now that boss.pick_topic (2026-08-31) means the brain can genuinely
+  // MenCra himself — real now that boss.pick_topic (2026-08-31) means the brain can genuinely
   // be the one running: reads the same task_steps as every other agent (agent_id === "boss"),
   // just kept OUT of allAgents/realAgents below rather than added as a 10th NetCard — the brain
   // gets its own dedicated hex card (§25's reference mockup), it isn't a peer in the grid, and
   // the header pill's "+1" already counts it once. It still has to feed `workingAgent` below,
   // though — without that, Boss picking a topic would run for real with nothing on screen ever
   // showing it, and the Live Visual panel would never auto-open for it (found live 2026-08-31).
-  const bossMeta: AgentMeta = { id: "boss", name: "Mr. Lxwa", role: "Command Center", icon: BrainCircuit, color: "#a78bfa" };
+  const bossMeta: AgentMeta = { id: "boss", name: "MenCra", role: "Command Center", icon: BrainCircuit, color: "#a78bfa" };
   const bossAgent: Agent = { ...bossMeta, status: statusForAgent(bossMeta) };
   // Mr. Publish — same treatment as the boss card above, and for the same reason: this file's
   // own comment already said Mr. Publish is "hidden from this diagram only, not because it
@@ -2881,7 +2865,7 @@ export default function MrLxwaDashboard({
     try { pref = localStorage.getItem("lx-assistant"); } catch { /* fine */ }
     // Your own choice wins; with none, it is open on the Dashboard and tucked away elsewhere.
     // Only the Dashboard shows the chat by default (and honours "closed"). Every other page starts
-    // with it tucked away, so it never covers the page you came for; the "Ask Mr. Lxwa" tab opens
+    // with it tucked away, so it never covers the page you came for; the "Ask MenCra" tab opens
     // it for that visit.
     setDesktopAssistantOpen(pathname === "/dashboard" && pref !== "closed");
   }, [pathname]);
@@ -2932,7 +2916,7 @@ export default function MrLxwaDashboard({
   // live work — it only makes sense while an agent is actually working. `workingAgent` is
   // that fact; `showPanel` is the user's own choice to look at it or step back to the whole
   // team (the "Back to Workflow" button), independent of whether anyone is still working.
-  // Mr Lxwa checked first: when a plan starts with his own pick_topic step, he is the one
+  // MenCra checked first: when a plan starts with his own pick_topic step, he is the one
   // actually running before anyone else even has a step to run — the panel should open on him,
   // not sit closed until Mr. Keyword picks up afterward.
   // FOLLOW THE NEWEST WORK, NOT THE ROSTER ORDER. This used to be `allAgents.find(a => a.status
@@ -3193,7 +3177,7 @@ export default function MrLxwaDashboard({
         const partial = full.trim();
         next[next.length - 1] = partial
           ? { ...next[next.length - 1], text: partial, live: false, failed: true }
-          : { who: "ai", text: "Couldn't reach Mr. Lxwa — check you're signed in and try again.", time: nowTime(), failed: true };
+          : { who: "ai", text: "Couldn't reach MenCra — check you're signed in and try again.", time: nowTime(), failed: true };
         return next;
       });
     } finally {
@@ -3314,14 +3298,14 @@ export default function MrLxwaDashboard({
           const id = r.conversations[0].id;
           // The list response already carries this one's messages (app/api/chat/
           // conversations/route.ts) — use them directly instead of a second round trip
-          // through openConversation, which is what used to leave "Connecting to Mr. Lxwa…"
+          // through openConversation, which is what used to leave "Connecting to MenCra…"
           // on screen for two serial network hops on every single page load.
           const thread = r.latestMessages?.id === id ? messagesToThread(r.latestMessages.messages) : null;
           if (thread) {
             // A most-recent conversation row with zero messages is a real, if rare, case — a
             // `newChat()`/POST created it but nothing was ever sent into it before the tab was
             // closed. Found live 2026-09-10: the dashboard then resumed that same empty row on
-            // every reload forever, set an empty thread, and sat on "Connecting to Mr. Lxwa…"
+            // every reload forever, set an empty thread, and sat on "Connecting to MenCra…"
             // with nothing left to do about it — no message ever arrives for an empty thread to
             // wait for. Same rule as "no history at all": greet fresh.
             if (thread.length === 0) {
@@ -3570,8 +3554,8 @@ export default function MrLxwaDashboard({
       <div className={`flex items-center gap-3 pt-5 pb-4 ${mini ? "px-3 lg:justify-center" : "px-4"}`}>
         <LogoMark size={30} />
         <div className={`min-w-0 ${mini ? "lg:hidden" : ""}`}>
-          <div className="text-sm font-bold leading-tight">Mr. Lxwa</div>
-          <div className="lx-10 lx-mut leading-tight">AI Automation System</div>
+          <div className="text-sm font-bold leading-tight">MenCra</div>
+          <div className="lx-10 lx-mut leading-tight">AI marketing team</div>
         </div>
         {/* rendered conditionally, not class-toggled: "hidden lg:inline-flex lg:hidden" is two
             lg display utilities fighting, and inline-flex wins in Tailwind's output order */}
@@ -3782,7 +3766,7 @@ export default function MrLxwaDashboard({
   // Only a working agent is ever clickable — the panel shows real live activity for it, and
   // there is no fake content to show for one that's idle. Clicking any of the other 9 icons
   // does nothing, same as they'd be inert in the real dashboard until they actually start.
-  // EVERY card opens its own agent's live view — including Mr Lxwa's brain card, and including
+  // EVERY card opens its own agent's live view — including MenCra's brain card, and including
   // agents that are idle or already finished. It used to open only for an agent whose status
   // was exactly "Working", so nine of the ten cards were inert clicks and the user could never
   // ask "what did Mr. Keyword actually do?" after it finished (owner's ask, 2026-08-31).
@@ -4065,7 +4049,7 @@ export default function MrLxwaDashboard({
     if (it.kind === "section") return `Section written: "${it.payload?.h2 ?? "untitled"}" (${it.payload?.words ?? "?"} words)`;
     if (it.kind === "research") return it.payload?.used ? `Research used — ${it.payload?.sources ?? "?"} sources` : "No research needed for this topic";
     if (it.kind === "score") return `Quality score: ${it.payload?.quality ?? "?"}/100 ${it.payload?.passed ? "— passed" : "— needs another pass"}`;
-    // Mr Lxwa's own pick (agents/boss.ts's ctx.data("topic_picked", …)) — it was rendering as
+    // MenCra's own pick (agents/boss.ts's ctx.data("topic_picked", …)) — it was rendering as
     // the bare word "topic_picked" because this fell through to `it.kind`, hiding the one thing
     // the brain's step actually produced and the reason it chose it.
     if (it.kind === "topic_picked") {
@@ -4261,7 +4245,7 @@ export default function MrLxwaDashboard({
                 ) : (
                   <ul className="space-y-2">
                     {producedItems.map((it) =>
-                      // Mr Lxwa's own pick gets a proper card — a bold headline plus the reason
+                      // MenCra's own pick gets a proper card — a bold headline plus the reason
                       // underneath — instead of the one run-on sentence itemLabel() gives every
                       // other kind ("Chose "X" — Y" was unreadable at a glance).
                       it.kind === "topic_picked" ? (
@@ -4332,10 +4316,10 @@ export default function MrLxwaDashboard({
             <div className="lx-11 lx-mut mt-1.5">Step {stepNo} of {totalSteps}</div>
           )}
 
-          {/* Mr Lxwa's plan — task.outline, built by the real planner (agent-server's
+          {/* MenCra's plan — task.outline, built by the real planner (agent-server's
               planner.ts) the instant the order was accepted, over the actual manifest graph for
               this order (not a canned list — a "publish karo" order gets a different plan than
-              a draft, and one where a topic had to be picked shows Mr Lxwa's own pick_topic step
+              a draft, and one where a topic had to be picked shows MenCra's own pick_topic step
               first). Was computed all along and shown only on the Office page; the owner asked
               for it here too, 2026-08-31 ("boss ne jo plan bana ye ha wo b dikhna chaaya"). */}
           {/* Drawn as the live checklist it actually is, not a paragraph of planner output
@@ -4348,7 +4332,7 @@ export default function MrLxwaDashboard({
           {task && task.outline.length > 0 && (
             <div className="lx-card2 mt-3 p-3">
               <div className="flex items-center gap-1.5 lx-11 font-semibold" style={{ color: "var(--lx-violet)" }}>
-                <BrainCircuit size={13} /> Mr Lxwa&apos;s Plan
+                <BrainCircuit size={13} /> MenCra&apos;s Plan
               </div>
               <ol className="mt-2 space-y-1.5">
                 {task.outline.map((line, i) => {
@@ -4550,7 +4534,7 @@ export default function MrLxwaDashboard({
       <div className="lx-card2 mx-3 mt-2 flex items-center gap-2 px-3 py-2">
         <Robo size={26} />
         <div className="min-w-0 flex-1 flex items-baseline gap-1.5">
-          <span className="lx-12 font-bold leading-tight">Mr. Lxwa</span>
+          <span className="lx-12 font-bold leading-tight">MenCra</span>
           <span className="lx-10 lx-mut">·</span>
           <span className="flex items-center gap-1 lx-10" style={{ color: "#4ade80" }}>
             <span className="h-1.5 w-1.5 rounded-full" style={{ background: "#22c55e", boxShadow: "0 0 6px #22c55e" }} /> Online
@@ -4575,12 +4559,12 @@ export default function MrLxwaDashboard({
               </div>
             ) : (
               <div key={i}>
-                {/* The very first reply is already introduced by the "Mr. Lxwa · Online" card
+                {/* The very first reply is already introduced by the "MenCra · Online" card
                     above it, so repeating the name row there showed him twice. Later replies,
                     and any reply still working, keep their name row. */}
                 <div className="flex items-center gap-2" style={i === 0 && !(m.live && m.taskId) ? { display: "none" } : undefined}>
                   <Robo size={24} />
-                  <span className="lx-11 font-semibold">Mr. Lxwa</span>
+                  <span className="lx-11 font-semibold">MenCra</span>
                   {/* Genuinely means the order this bubble belongs to is still running — stream()
                       tags the bubble with the real taskId the instant the order is accepted, so
                       this now stays lit for exactly as long as the task itself does. */}
@@ -4648,7 +4632,7 @@ export default function MrLxwaDashboard({
                       // has real text, and a label would only talk over it.
                       <span className="lx-thinking">thinking…</span>
                     ) : (
-                      <span className="lx-typing" aria-label="Mr. Lxwa is typing">
+                      <span className="lx-typing" aria-label="MenCra is typing">
                         <span /><span /><span />
                       </span>
                     )
@@ -4690,7 +4674,7 @@ export default function MrLxwaDashboard({
         <div className="flex flex-1 flex-col items-center justify-center gap-4 px-4">
           <Robo size={72} />
           <div className="text-center">
-            <div className="text-base font-bold">Mr. Lxwa</div>
+            <div className="text-base font-bold">MenCra</div>
             <div className="lx-11 lx-mut">Voice mode — talk to your AI Brain</div>
           </div>
           {VoiceDock}
@@ -4804,7 +4788,7 @@ export default function MrLxwaDashboard({
             <div className="pt-2">
               <div className="lx-10 lx-mut truncate">{pendingOrder || !task ? "Sending it to the team…" : taskTitle(task)}</div>
 
-              {/* THE PLAN, TICKING. Mr Lxwa's real steps (task_steps, in plan order), each row
+              {/* THE PLAN, TICKING. MenCra's real steps (task_steps, in plan order), each row
                   animating in as the plan lands and then flipping to done as its agent
                   finishes. Built from the real rows, so it can never show a step that is not in
                   the plan or tick one that has not finished. */}
@@ -4996,7 +4980,7 @@ export default function MrLxwaDashboard({
             <Menu size={16} />
           </button>
           <LogoMark size={22} />
-          <span className="lx-13 font-bold">Mr. Lxwa</span>
+          <span className="lx-13 font-bold">MenCra</span>
           <button className="lx-icobtn ml-auto" onClick={() => setBotOpen(true)} aria-label="Open AI assistant">
             <Bot size={16} />
           </button>
@@ -5046,10 +5030,10 @@ export default function MrLxwaDashboard({
           className="lx-assistant-tab hidden lg:flex"
           onClick={openAssistant}
           aria-label="Open AI assistant"
-          title="Open the assistant (Mr. Lxwa)"
+          title="Open the assistant (MenCra)"
         >
           <Bot size={18} />
-          <span>Ask Mr. Lxwa</span>
+          <span>Ask MenCra</span>
         </button>
       )}
     </div>

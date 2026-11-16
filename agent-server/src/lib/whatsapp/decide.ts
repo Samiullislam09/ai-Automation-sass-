@@ -3,7 +3,7 @@
  *
  *      MESSAGE → CONTEXT → INTENT → CONFIDENCE → ACTION → RESPONSE
  *
- *  This is what stops Mr Lxwa replying to every message blindly. A bare "ok" or "hmm" gets
+ *  This is what stops MenCra replying to every message blindly. A bare "ok" or "hmm" gets
  *  action="ignore" (nothing sent); a half-typed line gets "wait"; a real question gets "reply"
  *  with a short, context-aware answer. The old suggestReply (manual "Suggest" button) still exists
  *  and still just drafts — this is the autonomous path.

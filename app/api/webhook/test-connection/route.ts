@@ -16,7 +16,7 @@ export async function POST(request: Request) {
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-MrLxwa-Signature": signature },
+      headers: { "Content-Type": "application/json", "X-MenCra-Signature": signature, "X-MrLxwa-Signature": signature },
       body,
       cache: "no-store",
     });

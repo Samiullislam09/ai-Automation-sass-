@@ -79,7 +79,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <Link href="/" className="s-brand">
             <span className="s-mark">⚡</span>
             <div className="s-brand-t">
-              <div className="t">GrowthTeam<br />AI</div>
+              <div className="t">MenCra</div>
               <div className="st">Operate. Automate. Grow.</div>
             </div>
           </Link>

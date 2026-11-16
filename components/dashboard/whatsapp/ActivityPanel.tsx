@@ -4,7 +4,7 @@ import LiveLog from "./LiveLog";
 
 /** Mr. WhatsApp · Activity — what the AI is doing on WhatsApp, in plain words.
  *
- *  Everything here comes from ONE object (GET /api/whatsapp/activity), the same one Mr Lxwa answers
+ *  Everything here comes from ONE object (GET /api/whatsapp/activity), the same one MenCra answers
  *  questions from, so the page and the assistant can never disagree. Top to bottom: is the AI working (and if
  *  not, why), the rules in force, the numbers that matter, one chart that joins the last 24 hours to what is
  *  scheduled next, then the lists: replies (answering soon / held back and why), first messages queued,

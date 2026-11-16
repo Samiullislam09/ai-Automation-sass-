@@ -2,7 +2,7 @@ import "@/lib/dns-fix";
 import { nvidiaKey } from "@/lib/ai/nvidiaKeys";
 
 /** Provider-agnostic LLM adapter (Build Guide Step 5 niche-summary, and reused for
- *  Mr Lxwa in Step 7 — see the fetch call already documented in app/api/chat/route.ts).
+ *  MenCra in Step 7 — see the fetch call already documented in app/api/chat/route.ts).
  *  Default: NVIDIA NIM `nemotron-3-ultra-550b-a55b` since 2026-09-18 — the same model the brain
  *  and every agent now run on, on the same account/key as the embeddings adapter.
  *  Swap providers by changing LLM_PROVIDER in .env — call sites never change. */

@@ -3,7 +3,7 @@ import ApprovalsSection from "@/components/dashboard/ApprovalsSection";
 import { getRequestContext } from "@/lib/supabase/request";
 import { listContentItems } from "@/lib/content-list";
 
-export const metadata: Metadata = { title: "Approvals — MrLxwa" };
+export const metadata: Metadata = { title: "Approvals — MenCra" };
 
 export default async function DashboardApprovalsPage() {
   const { supabase, tenantId } = await getRequestContext();

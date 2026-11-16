@@ -19,7 +19,7 @@ const footerLinks: Record<string, { label: string; href: string }[]> = {
   Company: [
     { label: "How it works", href: "#office" },
     { label: "Help", href: "/help/agents" },
-    { label: "Contact", href: "mailto:hello@growthteam.ai" },
+    { label: "Contact", href: "mailto:support@mencra.com" },
   ],
   Legal: [
     { label: "Terms", href: "/" },
@@ -45,7 +45,7 @@ export function Footer() {
               <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground text-sm font-bold">
                 ⚡
               </div>
-              <span className="font-semibold text-foreground">GrowthTeam AI</span>
+              <span className="font-semibold text-foreground">MenCra</span>
             </Link>
             <p className="text-sm text-muted-foreground mb-4">Your AI marketing team — human-approved, always.</p>
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-card border border-border">
@@ -77,7 +77,7 @@ export function Footer() {
           className="mt-16 pt-8 border-t border-border text-center"
         >
           <p className="text-sm text-muted-foreground">
-            &copy; {new Date().getFullYear()} GrowthTeam AI · Human-approved, always
+            &copy; {new Date().getFullYear()} MenCra · Human-approved, always
           </p>
         </motion.div>
       </div>

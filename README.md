@@ -1,4 +1,4 @@
-# MrLxwa (GrowthTeam AI)
+# MenCra
 
 An AI marketing team for small businesses. The customer connects their website; a team of
 agents reads the site, decides what to publish next from real search data, researches the
@@ -95,7 +95,7 @@ boss ──► keyword ──► [optional human keyword choice] ──► write
 | `social` | Multi-platform posting | ⛔ Stub |
 | `seo` | Site audits, uptime, decay detection | ⛔ Stub |
 | `leads` | ICP discovery, enrichment, scoring | ⛔ Stub |
-| Mr Lxwa chat | Manager that starts real jobs from natural language (EN / Hinglish / Roman Urdu) | ✅ Real |
+| MenCra chat | Manager that starts real jobs from natural language (EN / Hinglish / Roman Urdu) | ✅ Real |
 
 Plus a minute-tick **scheduler** that starts the chain at the customer's local wall-clock time,
 with opt-in auto-publish per schedule.

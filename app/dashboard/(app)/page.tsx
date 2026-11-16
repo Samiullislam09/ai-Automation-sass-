@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-export const metadata: Metadata = { title: "Dashboard — MrLxwa" };
+export const metadata: Metadata = { title: "Dashboard — MenCra" };
 
 /** The real dashboard, approved 2026-08-29 to replace /app (app/app/page.tsx, renamed to
  *  page.tsx.outdated — unrouted, kept for reference, not deleted). Deliberately a top-level

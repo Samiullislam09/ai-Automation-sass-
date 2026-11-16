@@ -7,7 +7,7 @@
  *
  *  The intents are the brain's manifest actions (docs/MASTER_PLAN.html §5.1) plus the three
  *  things that are not actions but the router still has to tell apart: a question, small talk,
- *  and a follow-up to something Mr Lxwa just asked.
+ *  and a follow-up to something MenCra just asked.
  */
 
 export const INTENTS = [
@@ -22,7 +22,7 @@ export const INTENTS = [
   "connect",         // connect / change the website, WordPress, Google, integrations
   "question",        // a question about the product, SEO, pricing, how things work
   "chitchat",        // greeting, thanks, small talk, testing the box
-  "followup",        // ONLY the answer to Mr Lxwa's previous question ("haan", "mat karna", "pehla wala")
+  "followup",        // ONLY the answer to MenCra's previous question ("haan", "mat karna", "pehla wala")
   "other",           // in scope of nothing above and not chitchat (a pasted URL, gibberish, a rant)
 ] as const;
 

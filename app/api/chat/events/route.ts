@@ -7,7 +7,7 @@ import { getCurrentTenantId } from "@/lib/supabase/tenant";
  *  These used to live only in React state, so the keyword table — the one thing worth
  *  scrolling back to — disappeared on refresh. They are stored as `kind: 'event'` rather than
  *  as assistant messages: nobody said them in conversation, and disguising them as something
- *  Mr Lxwa said would put them in the model's history as words it had supposedly written.
+ *  MenCra said would put them in the model's history as words it had supposedly written.
  *
  *  Idempotent by (conversation, text): the dashboard polls every few seconds and a duplicate
  *  green line for the same finished job is worse than none.

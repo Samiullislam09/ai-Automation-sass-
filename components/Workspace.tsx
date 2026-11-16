@@ -59,7 +59,7 @@ import {
 /** Straight from `agent-server/src/brain/manifests.ts`. A name is not a statement about what
  *  the agent is doing; when we do not have one, the id itself is shown rather than guessed at. */
 const AGENT_LABEL: Record<string, string> = {
-  boss: "Mr Lxwa",
+  boss: "MenCra",
   crawler: "Mr. Crawler",
   analyst: "Mr. Analyst",
   keyword: "Mr. Keyword",

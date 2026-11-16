@@ -46,7 +46,7 @@ const isBusy = (e: any) => /rate limit|key pool/i.test(String(e?.message ?? ""))
  *  "wait"s can never loop forever. */
 const WAIT_REQUEUE_S = 8;
 
-/** How long a message waits before Mr Lxwa answers is decided in timing.ts: 1–5 minutes for the first message of
+/** How long a message waits before MenCra answers is decided in timing.ts: 1–5 minutes for the first message of
  *  an exchange, 2–6 seconds while the conversation is live. */
 
 /** The customer must have been quiet this long before we answer, so a burst of short messages gets
@@ -398,7 +398,7 @@ async function handleAutoReplyLocked(job: AutoReplyJob): Promise<void> {
       return;
     }
 
-    // Record what we understood on the lead — so the Leads page / Mr Lxwa can show "kahaan tak baat
+    // Record what we understood on the lead — so the Leads page / MenCra can show "kahaan tak baat
     // hui" and flag the ones a human should look at — regardless of whether we send now.
     await supabase
       .from("leads")

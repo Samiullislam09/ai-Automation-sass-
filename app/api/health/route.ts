@@ -2,12 +2,18 @@ import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
-/** Deployment self-check. Deliberately public and deliberately boring: it reports only
- *  BOOLEANS (is this env var present?) plus the commit the running build came from — never a
- *  value, never a key. Reason it exists: "Agent server not configured." on a deployed site is
- *  indistinguishable from "the var was added but the deployment was never rebuilt", and
- *  guessing at that from screenshots wasted a whole round trip. Hit /api/health and you know. */
-export async function GET() {
+/** Deployment self-check.
+ *
+ *  PUBLIC: only `{ "ok": true }` — enough for an uptime monitor, nothing an attacker can aim at.
+ *  DETAILED: the same booleans as before (which env vars are present, whether the agent server answers, the deployed commit) are returned
+ *  only when the request carries the shared secret in the `x-agent-token` header (AGENT_SERVER_TOKEN). Never a value, never a key.
+ *  Why it exists: "Agent server not configured." on a deployed site is indistinguishable from "the var was added but the deployment was
+ *  never rebuilt"; hit /api/health with the header and you know. (Website audit, 2026-11-16: the detailed answer was public.) */
+export async function GET(req: Request) {
+  const secret = process.env.AGENT_SERVER_TOKEN;
+  const trusted = !!secret && req.headers.get("x-agent-token") === secret;
+  if (!trusted) return NextResponse.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
+
   const agentServerUrl = process.env.AGENT_SERVER_URL;
 
   let agentServer: { configured: boolean; reachable: boolean; error: string | null } = {
@@ -29,16 +35,19 @@ export async function GET() {
     }
   }
 
-  return NextResponse.json({
-    ok: true,
-    commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local",
-    env: {
-      supabaseUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
-      supabaseAnonKey: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-      supabaseServiceRole: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
-      nvidiaApiKey: !!process.env.NVIDIA_API_KEY,
-      agentServerUrl: !!agentServerUrl,
+  return NextResponse.json(
+    {
+      ok: true,
+      commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local",
+      env: {
+        supabaseUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
+        supabaseAnonKey: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+        supabaseServiceRole: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+        nvidiaApiKey: !!process.env.NVIDIA_API_KEY,
+        agentServerUrl: !!agentServerUrl,
+      },
+      agentServer,
     },
-    agentServer,
-  });
+    { headers: { "Cache-Control": "no-store" } },
+  );
 }

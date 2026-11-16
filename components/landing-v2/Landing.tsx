@@ -5,7 +5,6 @@ import { Integrations } from "./Integrations";
 import { Workflow } from "./Workflow";
 import { Pricing } from "./Pricing";
 import { Plans } from "./Plans";
-import { Testimonials } from "./Testimonials";
 import { StickyCta } from "./StickyCta";
 import { Features } from "./Features";
 import { Faq } from "./Faq";
@@ -19,14 +18,14 @@ export default function Landing() {
       <link rel="preconnect" href="https://fonts.googleapis.com" />
       <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
       <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@300..800&display=swap" />
+      <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-lg focus:bg-white focus:px-4 focus:py-2 focus:text-[14px] focus:font-semibold focus:text-[#0a0a0a] focus:shadow-lg">Skip to content</a>
       <Nav />
-      <main>
+      <main id="main">
         <Hero />
         <Integrations />
         <Workflow />
         <Pricing />
         <Plans />
-        <Testimonials />
         <Features />
         <Faq />
         <Closing />

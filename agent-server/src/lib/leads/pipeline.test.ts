@@ -27,9 +27,9 @@ const NOW = new Date("2026-08-27T10:00:00Z");
 
 const IDENTITY: SenderIdentity = {
   personName: "Sam",
-  businessName: "MrLxwa",
-  website: "https://mrlxwa.com",
-  replyTo: "sam@mrlxwa.com",
+  businessName: "MenCra",
+  website: "https://mencra.com",
+  replyTo: "sam@mencra.com",
 };
 
 // ── fixtures ────────────────────────────────────────────────────────────────────────────────
@@ -39,10 +39,10 @@ const ICP = (() => {
     query: "restaurants in Dubai",
     profile: {
       what_they_do: "We write monthly SEO articles for restaurants.",
-      offerings: [{ name: "Monthly article plan", url: "https://mrlxwa.com/plans", kind: "service" }],
+      offerings: [{ name: "Monthly article plan", url: "https://mencra.com/plans", kind: "service" }],
       audience: "independent restaurants",
       buyer_intent: [],
-      proof: [{ claim: "ISO 9001 certified", quote: "We are ISO 9001 certified", url: "https://mrlxwa.com/about" }],
+      proof: [{ claim: "ISO 9001 certified", quote: "We are ISO 9001 certified", url: "https://mencra.com/about" }],
       topic_clusters: [],
       content_gaps: [],
       voice: null,
@@ -350,9 +350,9 @@ test("draft signs the message and carries a working opt-out, whatever the model 
   if (!result.ok) return;
   assert.equal(result.draft.status, "draft");
   assert.equal(result.draft.sent, false);
-  assert.match(result.draft.text, /Sam, MrLxwa/);
+  assert.match(result.draft.text, /Sam, MenCra/);
   assert.match(result.draft.text, /reply with the word STOP/i);
-  assert.match(result.draft.text, /sam@mrlxwa\.com/);
+  assert.match(result.draft.text, /sam@mencra.com/);
   assert.deepEqual([...result.draft.violations], []);
 });
 

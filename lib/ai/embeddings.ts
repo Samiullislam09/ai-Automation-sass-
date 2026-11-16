@@ -3,7 +3,7 @@ import { nvidiaKey } from "@/lib/ai/nvidiaKeys";
 
 /** Provider-agnostic embeddings adapter (Build Guide Step 5).
  *  Default: NVIDIA NIM `nemotron-3-embed-1b` — same free build.nvidia.com account/key the
- *  guide already has you create in Step 0 (and reuses for Lightning/Mr Lxwa in Step 7),
+ *  guide already has you create in Step 0 (and reuses for Lightning/MenCra in Step 7),
  *  so there's no second AI account to sign up for. Its 2048 dimensions must match the
  *  `vector(2048)` column on `site_pages` — see supabase/migrations/022_embedding_dim_2048.sql.
  *  (The original `nv-embedqa-e5-v5`, 1024-dim, reached end-of-life 2026-08-25 — HTTP 410 with

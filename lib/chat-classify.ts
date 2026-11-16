@@ -74,7 +74,7 @@ export async function classifyIntent(message: string, history: { role: string; c
 
   // One prior turn, for messages that lean on it ("haan wahi likh do"). More than that and
   // an old order starts pulling the classification towards itself.
-  const prior = history.slice(-2).map((t) => `${t.role === "user" ? "User" : "Mr Lxwa"}: ${t.content.slice(0, 200)}`).join("\n");
+  const prior = history.slice(-2).map((t) => `${t.role === "user" ? "User" : "MenCra"}: ${t.content.slice(0, 200)}`).join("\n");
 
   const prompt = [
     "Classify what the user is asking their AI marketing team to do.",

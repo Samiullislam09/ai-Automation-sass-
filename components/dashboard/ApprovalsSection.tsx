@@ -63,7 +63,7 @@ const LIST_CACHE_KEY = "ap:list:v1";
 /** The whole team, so the Agent filter is a real roster and not "whoever happens to have a row
  *  today". Only the content agents leave rows here; the rest show 0, which is honest. */
 const ALL_AGENTS = [
-  "Mr. Lxwa", "Mr. Crawler", "Mr. Analyst", "Mr. Keyword", "Mr. Writer", "Mr. Image",
+  "MenCra", "Mr. Crawler", "Mr. Analyst", "Mr. Keyword", "Mr. Writer", "Mr. Image",
   "Mr. SEO", "Mr. Story", "Mr. Audit", "Miss Social", "Mr. Leads", "Mr. Publish",
 ];
 
@@ -258,7 +258,7 @@ export default function ApprovalsSection({
           toast("Marked ready — copy the text and post it yourself.");
           patchItem(c.id, { status: "approved" });
         } else {
-          act(`"It's live. Prepare distribution."`, "Mr Lxwa", "Miss Social");
+          act(`"It's live. Prepare distribution."`, "MenCra", "Miss Social");
           report(`Published after your approval: "${c.title}"`);
           toast(data.url ? `Published! ${data.url}` : "Published!");
           patchItem(c.id, { status: "published", meta: { ...(c.meta ?? {}), publishedUrl: data.url ?? null } });
@@ -314,7 +314,7 @@ export default function ApprovalsSection({
         const data = await res.json();
         if (data.ok) {
           settleKids(data.children, "rejected");
-          act(`"Understood. We'll adjust and learn from this."`, "Mr Lxwa");
+          act(`"Understood. We'll adjust and learn from this."`, "MenCra");
           report(`Rejected by you (team will adjust): "${c.title}"`);
         } else {
           restore();

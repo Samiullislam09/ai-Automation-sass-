@@ -207,7 +207,7 @@ async function pingEndpoint(url: string, secret: string): Promise<{ ok: boolean;
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-MrLxwa-Signature": signPayload(secret, payload) },
+      headers: { "Content-Type": "application/json", "X-MenCra-Signature": signPayload(secret, payload), "X-MrLxwa-Signature": signPayload(secret, payload) },
       body: payload,
       cache: "no-store",
       signal: AbortSignal.timeout(12000),

@@ -1,4 +1,5 @@
 "use client";
+import { LogoMark } from "@/components/brand/MenCraLogo";
 import type { ElementType } from "react";
 import { BarChart3, PenLine, Search, Send, ShieldCheck } from "lucide-react";
 
@@ -24,11 +25,7 @@ export const PALETTE = [
 
 /** The brand mark used in both columns — the mockup's three rising bars. */
 export function BrandMark({ size = 30 }: { size?: number }) {
-  return (
-    <span className="ob-logo" style={{ width: size, height: size }}>
-      <BarChart3 size={Math.round(size * 0.58)} />
-    </span>
-  );
+  return <LogoMark size={size} />;
 }
 
 /** The left column: the same on every step, straight from the mockup's first screen. */
@@ -44,12 +41,12 @@ export function LeftPanel({ step, total }: { step: number; total: number }) {
       <div className="ob-brand">
         <BrandMark size={44} />
         <div>
-          <b className="ob-brand-t">MrLxwa</b>
-          <small className="ob-brand-s">GrowthTeam AI</small>
+          <b className="ob-brand-t">MenCra</b>
+          <small className="ob-brand-s">AI marketing team</small>
         </div>
       </div>
 
-      <span className="ob-pillbadge">Welcome to MrLxwa 👋</span>
+      <span className="ob-pillbadge">Welcome to MenCra 👋</span>
       <h1 className="ob-hero">
         Your AI Marketing<br />Team for <span className="ob-grad">Real Growth</span>
       </h1>

@@ -1,4 +1,4 @@
-/** lib/chat-schedule-tools.ts — the tools Mr Lxwa calls to CHANGE THE TIMETABLE.
+/** lib/chat-schedule-tools.ts — the tools MenCra calls to CHANGE THE TIMETABLE.
  *
  *  WHY THIS EXISTS. Reported live 2026-09-28. The customer wrote:
  *

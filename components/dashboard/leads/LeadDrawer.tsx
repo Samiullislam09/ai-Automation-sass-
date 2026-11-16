@@ -101,7 +101,7 @@ export default function LeadDrawer({ lead, onClose, setStage, busy, waLink, load
               {lead.needs_attention && <span className="inline-flex items-center gap-1 font-medium" style={{ color: C.amber }}><TriangleAlert size={13} />Needs you</span>}
             </div>
             {lead.needs_attention && lead.needs_attention_reason && (
-              <p className="mt-2 text-[13px]" style={{ color: C.amber }}>Mr Lxwa replied but flagged this for you: {lead.needs_attention_reason}</p>
+              <p className="mt-2 text-[13px]" style={{ color: C.amber }}>MenCra replied but flagged this for you: {lead.needs_attention_reason}</p>
             )}
           </Section>
 

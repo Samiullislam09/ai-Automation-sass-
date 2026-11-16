@@ -46,7 +46,7 @@ import { domainOf } from "./compliance.js";
 
 /** Same shape as the crawler's UA (lib/crawl.ts): a name, a URL, and a sentence saying why.
  *  A site owner who looks in their log can tell what we are and block us if they want to. */
-export const LEADS_UA = "MrLxwaLeadBot/1.0 (+https://mrlxwa.com/bot; researching a business before writing to it)";
+export const LEADS_UA = "MenCraLeadBot/1.0 (+https://mencra.com/bot; researching a business before writing to it)";
 
 export const OSM_ATTRIBUTION = "© OpenStreetMap contributors (ODbL)";
 
@@ -203,7 +203,7 @@ export async function loadRobots(origin: string, fetchImpl: typeof fetch = fetch
   return rules;
 }
 
-export function parseRobots(txt: string, agentToken = "mrlxwaleadbot"): RobotsRules {
+export function parseRobots(txt: string, agentToken = "mencraleadbot"): RobotsRules {
   const lines = String(txt ?? "").split(/\r?\n/);
   const groups: { agents: string[]; allow: string[]; disallow: string[]; delay: number }[] = [];
   let current: (typeof groups)[number] | null = null;

@@ -31,11 +31,12 @@ export function AuthCard({ mode }: { mode: "login" | "signup" }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
   const [showPw, setShowPw] = useState(false);
-  const [showPw2, setShowPw2] = useState(false);
   const [remember, setRemember] = useState(true);
-  const [agree, setAgree] = useState(true);
+  // Not pre-ticked: agreeing to the Terms and Privacy Policy has to be a visible choice.
+  const [agree, setAgree] = useState(false);
+  // What is wrong, shown under the field it belongs to. The buttons stay clickable: a disabled button never said what was missing.
+  const [fieldErr, setFieldErr] = useState<{ email?: string; password?: string; agree?: string }>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -62,12 +63,17 @@ export function AuthCard({ mode }: { mode: "login" | "signup" }) {
   };
 
   const go = async () => {
-    if (!email.trim() || !password) { setError("Email and password are both required."); return; }
-    if (mode === "signup") {
-      if (!name.trim()) { setError("Please enter your full name."); return; }
-      if (password.length < 8) { setError("Use at least 8 characters for your password."); return; }
-      if (password !== confirm) { setError("The two passwords don't match."); return; }
-      if (!agree) { setError("Please agree to the Terms of Service and Privacy Policy."); return; }
+    const fe: { email?: string; password?: string; agree?: string } = {};
+    if (!email.trim()) fe.email = "Enter your email address.";
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim())) fe.email = "That does not look like an email address. Check for typos.";
+    if (!password) fe.password = mode === "signup" ? "Choose a password of at least 8 characters." : "Enter your password.";
+    else if (mode === "signup" && password.length < 8) fe.password = "Use at least 8 characters. Right now it is " + password.length + ".";
+    if (mode === "signup" && !agree) fe.agree = "Please tick the box to agree to the Terms and the Privacy Policy.";
+    setFieldErr(fe);
+    if (fe.email || fe.password || fe.agree) {
+      const first = fe.email ? "lg-email" : fe.password ? "lg-pw" : "lg-agree";
+      document.getElementById(first)?.focus();
+      return;
     }
     setError("");
     setLoading(true);
@@ -94,9 +100,6 @@ export function AuthCard({ mode }: { mode: "login" | "signup" }) {
   };
 
   const login = mode === "login";
-  const ready = login
-    ? !!email.trim() && !!password
-    : !!name.trim() && !!email.trim() && !!password && !!confirm && agree;
 
   return (
     <div className="lg-page">
@@ -125,39 +128,31 @@ export function AuthCard({ mode }: { mode: "login" | "signup" }) {
 
             {!login && (
               <div className="lg-field">
-                <label htmlFor="lg-name">Full Name</label>
+                <label htmlFor="lg-name">Full name <span className="lg-opt">(optional)</span></label>
                 <input id="lg-name" placeholder="Enter your full name" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" />
               </div>
             )}
 
             <div className="lg-field">
               <label htmlFor="lg-email">Email Address</label>
-              <input id="lg-email" type="email" placeholder="Enter your email address" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
+              <input id="lg-email" type="email" placeholder="Enter your email address" value={email} onChange={(e) => { setEmail(e.target.value); if (fieldErr.email) setFieldErr((f) => ({ ...f, email: undefined })); }} autoComplete="email"
+                aria-invalid={!!fieldErr.email} aria-describedby={fieldErr.email ? "lg-email-err" : undefined} />
+              {fieldErr.email && <p id="lg-email-err" className="lg-ferr" role="alert">{fieldErr.email}</p>}
             </div>
 
             <div className="lg-field">
               <label htmlFor="lg-pw">Password</label>
               <div className="lg-pwwrap">
                 <input id="lg-pw" type={showPw ? "text" : "password"} placeholder={login ? "Enter your password" : "Create a strong password"} value={password}
-                  onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && go()} autoComplete={login ? "current-password" : "new-password"} />
+                  onChange={(e) => { setPassword(e.target.value); if (fieldErr.password) setFieldErr((f) => ({ ...f, password: undefined })); }} onKeyDown={(e) => e.key === "Enter" && go()} autoComplete={login ? "current-password" : "new-password"}
+                  aria-invalid={!!fieldErr.password} aria-describedby={fieldErr.password ? "lg-pw-err" : !login ? "lg-pw-hint" : undefined} />
                 <button type="button" className="lg-eye" onClick={() => setShowPw((v) => !v)} aria-label={showPw ? "Hide password" : "Show password"}>
                   {showPw ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
               </div>
+              {fieldErr.password && <p id="lg-pw-err" className="lg-ferr" role="alert">{fieldErr.password}</p>}
+              {!login && !fieldErr.password && <p id="lg-pw-hint" className="lg-hint">At least 8 characters. Use the eye icon to check what you typed.</p>}
             </div>
-
-            {!login && (
-              <div className="lg-field">
-                <label htmlFor="lg-pw2">Confirm Password</label>
-                <div className="lg-pwwrap">
-                  <input id="lg-pw2" type={showPw2 ? "text" : "password"} placeholder="Confirm your password" value={confirm}
-                    onChange={(e) => setConfirm(e.target.value)} onKeyDown={(e) => e.key === "Enter" && go()} autoComplete="new-password" />
-                  <button type="button" className="lg-eye" onClick={() => setShowPw2((v) => !v)} aria-label={showPw2 ? "Hide password" : "Show password"}>
-                    {showPw2 ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
-                </div>
-              </div>
-            )}
 
             {login ? (
               <div className="lg-row">
@@ -166,15 +161,16 @@ export function AuthCard({ mode }: { mode: "login" | "signup" }) {
               </div>
             ) : (
               <label className="lg-check lg-terms">
-                <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} /><span />
-                <em>By continuing, you agree to our <a href="/terms" className="lg-link">Terms of Service</a> and <a href="/privacy" className="lg-link">Privacy Policy</a>.</em>
+                <input id="lg-agree" type="checkbox" checked={agree} onChange={(e) => { setAgree(e.target.checked); if (fieldErr.agree) setFieldErr((f) => ({ ...f, agree: undefined })); }} aria-invalid={!!fieldErr.agree} /><span />
+                <em>I agree to the <a href="/terms" className="lg-link">Terms &amp; Conditions</a> and the <a href="/privacy" className="lg-link">Privacy Policy</a>.</em>
               </label>
             )}
 
-            {error && <p className="lg-error">{error}</p>}
+            {fieldErr.agree && <p className="lg-ferr" role="alert">{fieldErr.agree}</p>}
+            {error && <p className="lg-error" role="alert">{error}</p>}
             {notice && <p className="lg-notice">{notice}</p>}
 
-            <button type="button" className="lg-primary" disabled={loading || !ready} onClick={go}>
+            <button type="button" className="lg-primary" disabled={loading} onClick={go}>
               {loading ? "One moment…" : login ? "Sign in" : "Create account"}
             </button>
 
@@ -208,7 +204,7 @@ const CSS = `
 .lg-google:hover,.lg-primary:hover:not(:disabled){background:#363c42}
 .lg-primary{margin-top:8px}
 .lg-primary:disabled{background:#d8d8df;color:#8b8d98;cursor:not-allowed}
-.lg-or{display:flex;align-items:center;gap:14px;margin:30px 0 24px;font-size:10px;letter-spacing:.06em;color:#8b8d98;white-space:nowrap}
+.lg-or{display:flex;align-items:center;gap:14px;margin:30px 0 24px;font-size:12px;letter-spacing:.06em;color:#5f6368;white-space:nowrap}
 .lg-or span{flex:1;height:1px;background:#e5e5e5}
 .lg-field{margin-bottom:18px}
 .lg-field label{display:block;margin-bottom:8px;font-size:16px;font-weight:600;color:#1d2125}
@@ -217,7 +213,7 @@ const CSS = `
 .lg-field input:focus{border-color:#6a5af0;box-shadow:0 0 0 3px rgba(106,90,240,.15)}
 .lg-pwwrap{position:relative}
 .lg-pwwrap input{padding-right:52px}
-.lg-eye{position:absolute;right:14px;top:50%;transform:translateY(-50%);display:flex;width:28px;height:28px;align-items:center;justify-content:center;border:none;background:none;color:#8b8d98;cursor:pointer}
+.lg-eye{position:absolute;right:10px;top:50%;transform:translateY(-50%);display:flex;width:36px;height:36px;align-items:center;justify-content:center;border:none;background:none;color:#8b8d98;cursor:pointer}
 .lg-eye:hover{color:#1d2125}
 .lg-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:4px 0 12px;font-size:15px;color:#737373}
 .lg-check{display:inline-flex;align-items:flex-start;gap:10px;cursor:pointer;font-size:15px;line-height:1.5;color:#737373}
@@ -233,6 +229,10 @@ const CSS = `
 .lg-error{margin:0 0 8px;font-size:14px;color:#dc2626}
 .lg-notice{margin:0 0 8px;font-size:14px;color:#5242d8}
 .lg-switch{margin:20px 0 0;text-align:center;font-size:15px;color:#737373}
-.lg-legal{margin:14px 0 0;text-align:center;font-size:13px;line-height:1.5;color:#8b8d98}
+.lg-legal{margin:14px 0 0;text-align:center;font-size:13px;line-height:1.5;color:#5f6368}
+.lg-ferr{margin:6px 4px 0;font-size:13.5px;line-height:1.4;color:#c81e1e}
+.lg-hint{margin:6px 4px 0;font-size:13px;line-height:1.4;color:#5f6368}
+.lg-opt{font-weight:400;color:#5f6368;font-size:14px}
+.lg-field input[aria-invalid=true]{border-color:#c81e1e}
 @media (max-width:480px){.lg-page{padding-top:32px}.lg-h1{font-size:26px}}
 `;

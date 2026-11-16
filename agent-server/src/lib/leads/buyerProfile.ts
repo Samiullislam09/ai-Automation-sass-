@@ -1,4 +1,4 @@
-/** Mr. Lxwa's buyer-profile drafter (high-quality-leads plan, Phase 1).
+/** MenCra's buyer-profile drafter (high-quality-leads plan, Phase 1).
  *
  *  THE PROBLEM THIS SOLVES. Lead generation used to build its ICP from "what the client IS" —
  *  the Site Brain's own what_they_do. For an ISO consultancy that yields "ISO consultancy", so

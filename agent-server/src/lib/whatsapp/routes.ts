@@ -70,7 +70,7 @@ export function mountWhatsapp(app: Express): void {
   });
 
   /** What the AI is doing on WhatsApp right now: who it answers next, who is held and why, the queue,
-   *  follow-ups, skips and the hourly timeline. One object for the Activity panel and for Mr Lxwa. */
+   *  follow-ups, skips and the hourly timeline. One object for the Activity panel and for MenCra. */
   app.get("/whatsapp/:tenantId/activity", async (req, res) => {
     if (!authed(req, res)) return;
     try {

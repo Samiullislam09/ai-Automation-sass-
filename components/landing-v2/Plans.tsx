@@ -17,7 +17,7 @@ const ORDER = ["free", "starter", "growth"] as const;
 
 export function Plans() {
   const { signedIn, plan } = usePlan();
-  const [picked, setPicked] = useState<string>("starter");
+  const [picked, setPicked] = useState<string>("growth");
   const current = signedIn && plan ? plan : undefined;
   const selected = current ?? picked;
 
@@ -35,8 +35,8 @@ export function Plans() {
           const isCurrent = current === id;
           // What the plan gets you, derived from the real token costs (an article costs TOKEN_COST.article).
           const articles = Math.floor(p.tokens / TOKEN_COST.article);
-          const extra = id === "free" ? "No card needed" : id === "starter" ? "Stories and posts too" : "Premium writing model + lead generation";
-          const bullets = [`About ${articles} article${articles === 1 ? "" : "s"} a month (${p.tokens} tokens)`, "Every live agent included", extra, "Human approval on every action"];
+          const extra = id === "free" ? "No card needed" : id === "starter" ? "Stories and social posts (coming soon)" : "Premium writing model + lead generation";
+          const bullets = [`About ${articles} article${articles === 1 ? "" : "s"} a month`, "Every live agent included", extra, "Human approval on every action"];
           const higher = current ? p.price > PLANS[current].price : false;
           return (
             <div key={id} role="radio" aria-checked={on} tabIndex={0}
@@ -44,7 +44,7 @@ export function Plans() {
               onKeyDown={e => { if (!current && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); setPicked(id); } }}
               className={`relative flex flex-col rounded-[28px] border bg-white p-6 shadow-[0_1px_2px_rgba(13,15,13,.04),0_18px_44px_rgba(13,15,13,.05)] transition-all duration-200 max-md:p-5 ${on ? "border-transparent shadow-[0_10px_30px_-6px_rgba(15,15,26,0.12)]" : "cursor-pointer border-[#e5e5e5] hover:-translate-y-0.5"}`}>
               {on && <span aria-hidden className="lv-ring" />}
-              {(isCurrent || (!current && id === "starter")) && (
+              {(isCurrent || (!current && id === "growth")) && (
                 <span className="absolute left-1/2 top-0 z-[2] -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full bg-[#0a0a0a] px-3 py-[3px] text-[12px] font-medium text-white shadow-[0_2px_6px_rgba(15,15,26,0.18)]">{isCurrent ? "Your plan" : "Best value"}</span>
               )}
               <div className="flex items-center justify-between gap-2">
@@ -65,7 +65,7 @@ export function Plans() {
               ) : (
                 <Link href={current ? "/dashboard/account#plans" : "/signup"}
                   className="mt-6 flex h-11 w-full items-center justify-center rounded-full bg-[linear-gradient(180deg,#383840_0%,#0a0a0d_100%)] text-[14px] font-medium tracking-[-0.084px] text-white shadow-[0_4px_12px_-3px_rgba(13,13,26,0.22)] transition hover:-translate-y-px hover:shadow-[0_10px_22px_-8px_rgba(13,13,26,0.28)] active:translate-y-0 active:scale-[0.99]">
-                  {!current ? (id === "free" ? "Start free" : "Get started") : `${higher ? "Upgrade" : "Switch"} to ${p.name}`}
+                  {!current ? (id === "free" ? "Start free" : `Choose ${p.name}`) : `${higher ? "Upgrade" : "Switch"} to ${p.name}`}
                 </Link>
               )}
             </div>

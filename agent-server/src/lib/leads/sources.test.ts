@@ -67,7 +67,7 @@ test("parseRobots reads the group that applies to us, and the star group otherwi
 });
 
 test("a group naming us wins over the star group", () => {
-  const txt = ["User-agent: *", "Disallow:", "", "User-agent: MrLxwaLeadBot", "Disallow: /"].join("\n");
+  const txt = ["User-agent: *", "Disallow:", "", "User-agent: MenCraLeadBot", "Disallow: /"].join("\n");
   const rules = parseRobots(txt);
   assert.deepEqual(rules.disallow, ["/"]);
   assert.equal(robotsAllows(rules, "/about"), false);

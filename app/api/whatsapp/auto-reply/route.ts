@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
 import { callWhatsapp } from "@/lib/whatsapp-proxy";
 
-/** Turn WhatsApp auto-reply on/off. When ON, Mr Lxwa drafts and SENDS a reply to each incoming
+/** Turn WhatsApp auto-reply on/off. When ON, MenCra drafts and SENDS a reply to each incoming
  *  message by itself (reactive only — it never cold-messages). POST { on: boolean }. */
 export async function POST(req: NextRequest) {
   const supabase = await createClient();

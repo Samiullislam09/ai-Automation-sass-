@@ -125,7 +125,7 @@ export default function WhatsAppSection() {
     try {
       const r = await fetch("/api/whatsapp/auto-reply", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on: next }) }).then((x) => x.json());
       if (!r.ok) { setAutoReply(!next); toast(r.error ?? "Could not update auto-reply.", "error"); }
-      else toast(next ? "Auto-reply ON — Mr Lxwa will answer incoming messages." : "Auto-reply OFF.");
+      else toast(next ? "Auto-reply ON — MenCra will answer incoming messages." : "Auto-reply OFF.");
     } catch (e: any) { setAutoReply(!next); toast(e?.message ?? "Network error.", "error"); }
     finally { setTogglingAuto(false); }
   };
@@ -208,7 +208,7 @@ export default function WhatsAppSection() {
             {/* Auto replies toggle */}
             <button onClick={toggleAuto} disabled={togglingAuto} className="inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[12.5px] font-semibold disabled:opacity-60"
               style={{ background: autoReply ? "#e7f6ec" : WA.listHover, border: `1px solid ${autoReply ? "#9ae6b4" : WA.divider}`, color: autoReply ? "#067647" : WA.sub }}
-              title="When on, Mr Lxwa drafts and sends a reply to each incoming message by itself">
+              title="When on, MenCra drafts and sends a reply to each incoming message by itself">
               <span className="h-2 w-2 rounded-full" style={{ background: autoReply ? "#17c964" : "#98a2b3" }} />
               Auto replies <b>{autoReply ? "ON" : "OFF"}</b>
             </button>
@@ -227,7 +227,7 @@ export default function WhatsAppSection() {
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.4" stroke="#fff" strokeWidth="1.8" /><path d="M5 20a7 7 0 0114 0" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" /></svg>
                 </span>
                 <span className="hidden text-left leading-tight sm:block">
-                  <span className="block text-[12.5px] font-bold" style={{ color: WA.text }}>Mr. Lxwa</span>
+                  <span className="block text-[12.5px] font-bold" style={{ color: WA.text }}>MenCra</span>
                   <span className="block text-[10.5px]" style={{ color: WA.sub }}>Admin</span>
                 </span>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ transform: adminOpen ? "rotate(180deg)" : undefined }}><path d="M6 9l6 6 6-6" stroke={WA.sub} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
@@ -685,7 +685,7 @@ function ConnectCta({ status, onConnect }: { status: string; onConnect: () => vo
   const steps = [
     { n: "1", t: "Scan once, like WhatsApp Web", d: "Open WhatsApp → Linked devices → scan the QR. Your number stays yours." },
     { n: "2", t: "Every lead becomes a chat", d: "Approved leads land here as conversations — with the full context behind each one." },
-    { n: "3", t: "Reply, or let Mr Lxwa", d: "Answer yourself, use an AI-drafted reply, or switch Auto-replies on." },
+    { n: "3", t: "Reply, or let MenCra", d: "Answer yourself, use an AI-drafted reply, or switch Auto-replies on." },
   ];
   return (
     <div className="relative flex-1 overflow-hidden rounded-3xl" style={{ background: WA.panel, color: WA.text, border: `1px solid ${WA.divider}` }}>
@@ -703,7 +703,7 @@ function ConnectCta({ status, onConnect }: { status: string; onConnect: () => vo
             </h2>
             <p className="mt-3 max-w-md text-[14px] leading-relaxed" style={{ color: WA.sub }}>
               Link your business number once — like WhatsApp Web — and your approved leads become real chats you can
-              reply to here, with Mr Lxwa drafting the first message and the replies.
+              reply to here, with MenCra drafting the first message and the replies.
             </p>
             <div className="mt-6 flex flex-wrap items-center gap-3">
               <button className="inline-flex items-center gap-2 rounded-full px-6 py-3 text-[14px] font-bold text-white shadow-sm" style={{ background: WA.green }} onClick={onConnect}>
@@ -1297,9 +1297,9 @@ function Chat({ lead, online, knownWa, onSent, onBack, onDeleted, toast }: { lea
           style={{ background: "#fff", color: WA.green, border: `1px solid ${WA.divider}` }}
           onClick={suggest}
           disabled={suggesting}
-          title="Let Mr. Lxwa draft a reply — you can edit it before sending"
+          title="Let MenCra draft a reply — you can edit it before sending"
         >
-          {suggesting ? "…" : "✨ Mr Lxwa"}
+          {suggesting ? "…" : "✨ MenCra"}
         </button>
         <button
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full disabled:opacity-50"

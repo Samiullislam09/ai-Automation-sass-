@@ -117,7 +117,7 @@ export async function handleMeetingReply(tenantId: string, leadId: string, phone
   const s = await getWhatsappSettings(tenantId);
   const slot = slots[choice];
   const who = await leadName(tenantId, leadId, phone);
-  const book = await calendarBook(tenantId, { startIso: slot.start, endIso: slot.end, tzOffset: s.tz_offset, summary: `Call with ${who}`, description: "Booked via Mr Lxwa (WhatsApp)." });
+  const book = await calendarBook(tenantId, { startIso: slot.start, endIso: slot.end, tzOffset: s.tz_offset, summary: `Call with ${who}`, description: "Booked via MenCra (WhatsApp)." });
 
   if (book.ok && book.eventId) {
     await supabase.from("lead_meetings").update({ status: "scheduled", start_at: slot.start, end_at: slot.end, calendar_event_id: book.eventId, meet_link: book.meetLink ?? null, updated_at: new Date().toISOString() }).eq("id", (m as any).id);

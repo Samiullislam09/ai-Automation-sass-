@@ -34,7 +34,7 @@ export function Navbar() {
           <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground text-sm font-bold">
             ⚡
           </div>
-          <span className="font-semibold text-foreground hidden sm:block">GrowthTeam AI</span>
+          <span className="font-semibold text-foreground hidden sm:block">MenCra</span>
         </Link>
 
         <div className="hidden md:flex items-center gap-1 relative">

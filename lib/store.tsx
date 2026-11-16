@@ -12,12 +12,8 @@ import { CheckCircle2, Info, X, XCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { AGENTS } from "@/lib/agents-data";
 
-export const TOKEN_COST: Record<string, number> = { article: 10, story: 4, social: 1 };
-export const PLANS: Record<string, { name: string; price: number; tokens: number; tagline: string }> = {
-  free:    { name: "Free",    price: 0,  tokens: 10,  tagline: "1 article/month — try the full experience" },
-  starter: { name: "Pro", price: 5,  tokens: 120, tagline: "~10 articles + stories & posts every month" },
-  growth:  { name: "Max",     price: 15, tokens: 400, tagline: "Serious volume + priority writing model" },
-};
+import { TOKEN_COST, PLANS } from "./plans";
+export { TOKEN_COST, PLANS };
 // "live" agents have real backend wiring (agent-server queue jobs, see agent-server/src/agents/).
 // The rest are visual roster slots for now (roadmap placeholders) — shown in the office same as
 // the reference "AI Command Center" layout, but their status stays "idle"/decorative until a real
@@ -85,7 +81,7 @@ type State = {
   /** The site crawl while it runs. It has no room in the office and takes ~10 minutes, so
    *  without this there is nowhere to see that anything is happening at all. */
   crawl: { phase: string; done: number; total: number; current: string | null; label: string | null; startedAt: string } | null;
-  /** Finished-job announcements for the chat. Mr Lxwa confirms the work in the conversation
+  /** Finished-job announcements for the chat. MenCra confirms the work in the conversation
    *  itself — a toast that has already faded is not an answer to "did it happen?". */
   chatNotices: { id: string; text: string; tone: "done" | "error"; agentId?: string }[];
   /** The keyword table waiting on the user, counting down (components/KeywordChoice.tsx). */
@@ -292,15 +288,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const title = TOPICS[Math.floor(Math.random() * TOPICS.length)];
     patch({ busy: true }); // unlimited/free for now — no token deduction
     const stages: [number, () => void][] = type === "article" ? [
-      [500,  () => { setAgent("kw", "w", "Validating keyword…"); act(`"Validate <b>${title}</b> and pull related queries, please."`, "Mr Lxwa", "Mr. Keyword"); onStage?.(0); }],
-      [2100, () => { setAgent("kw", "i", "Idle"); setAgent("seo", "w", "Analyzing top 10…"); act(`"Topic is strong — 8 related queries found."`, "Mr. Keyword", "Mr Lxwa"); onStage?.(1); }],
-      [3700, () => { setAgent("seo", "i", "Idle"); act(`"Blueprint ready — 3 titles, 9 sections, target 1,850 words."`, "Mr Lxwa"); onStage?.(2); }],
-      [5300, () => { setAgent("writer", "w", "Writing section 4 of 9…"); act(`"Blueprint attached. Begin."`, "Mr Lxwa", "Mr. Writer"); onStage?.(3); }],
-      [6900, () => { setAgent("writer", "i", "Idle"); setAgent("boss", "w", "Quality gate…"); act(`"Draft complete — 1,920 words. Over to you."`, "Mr. Writer", "Mr Lxwa"); onStage?.(4); }],
-      [8300, () => { setAgent("boss", "i", "Monitoring team"); act(`"Quality gate passed ✓ — <b>${title}</b> is in your approval queue."`, "Mr Lxwa"); finish(); }],
+      [500,  () => { setAgent("kw", "w", "Validating keyword…"); act(`"Validate <b>${title}</b> and pull related queries, please."`, "MenCra", "Mr. Keyword"); onStage?.(0); }],
+      [2100, () => { setAgent("kw", "i", "Idle"); setAgent("seo", "w", "Analyzing top 10…"); act(`"Topic is strong — 8 related queries found."`, "Mr. Keyword", "MenCra"); onStage?.(1); }],
+      [3700, () => { setAgent("seo", "i", "Idle"); act(`"Blueprint ready — 3 titles, 9 sections, target 1,850 words."`, "MenCra"); onStage?.(2); }],
+      [5300, () => { setAgent("writer", "w", "Writing section 4 of 9…"); act(`"Blueprint attached. Begin."`, "MenCra", "Mr. Writer"); onStage?.(3); }],
+      [6900, () => { setAgent("writer", "i", "Idle"); setAgent("boss", "w", "Quality gate…"); act(`"Draft complete — 1,920 words. Over to you."`, "Mr. Writer", "MenCra"); onStage?.(4); }],
+      [8300, () => { setAgent("boss", "i", "Monitoring team"); act(`"Quality gate passed ✓ — <b>${title}</b> is in your approval queue."`, "MenCra"); finish(); }],
     ] : [
-      [400,  () => { const ag = type === "story" ? "story" : "social"; setAgent(ag, "w", type === "story" ? "Designing frames…" : "Writing copy…"); act(`"New ${type} for <b>${title}</b> — please begin."`, "Mr Lxwa", ag === "story" ? "Mr. Story" : "Miss Social"); }],
-      [3000, () => { const ag = type === "story" ? "story" : "social"; setAgent(ag, "i", "Idle"); act(`"Done — sending for your review."`, ag === "story" ? "Mr. Story" : "Miss Social", "Mr Lxwa"); finish(); }],
+      [400,  () => { const ag = type === "story" ? "story" : "social"; setAgent(ag, "w", type === "story" ? "Designing frames…" : "Writing copy…"); act(`"New ${type} for <b>${title}</b> — please begin."`, "MenCra", ag === "story" ? "Mr. Story" : "Miss Social"); }],
+      [3000, () => { const ag = type === "story" ? "story" : "social"; setAgent(ag, "i", "Idle"); act(`"Done — sending for your review."`, ag === "story" ? "Mr. Story" : "Miss Social", "MenCra"); finish(); }],
     ];
     function finish() {
       patch(prev => ({ busy: false, content: [{ id: Date.now(), type, title, status: "awaiting", time: nowT(), tokens: cost }, ...prev.content] }));
@@ -314,14 +310,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const approve = (id: number) => patch(prev => {
     const c = prev.content.find(x => x.id === id); if (!c) return {};
-    act(`"It's live. Prepare distribution."`, "Mr Lxwa", "Miss Social");
+    act(`"It's live. Prepare distribution."`, "MenCra", "Miss Social");
     setTimeout(() => report(`Published after your approval: "${c.title}"`), 0);
     toast("Published! Your team is distributing it.");
     return { content: prev.content.map(x => x.id === id ? { ...x, status: "published" } : x) };
   });
   const reject = (id: number) => patch(prev => {
     const c = prev.content.find(x => x.id === id); if (!c) return {};
-    act(`"Understood. We'll adjust and learn from this."`, "Mr Lxwa");
+    act(`"Understood. We'll adjust and learn from this."`, "MenCra");
     setTimeout(() => report(`Rejected by you (team will adjust): "${c.title}"`), 0);
     return { content: prev.content.map(x => x.id === id ? { ...x, status: "rejected" } : x) };
   });
@@ -365,7 +361,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       .catch((e) => console.error("[store] plan not saved server-side:", e?.message));
 
     patch({ plan, tokensMax: PLANS[plan].tokens, tokens: PLANS[plan].tokens });
-    act(`"We're on the <b>${PLANS[plan].name}</b> plan now — capacity increased. Let's grow. 🚀"`, "Mr Lxwa");
+    act(`"We're on the <b>${PLANS[plan].name}</b> plan now — capacity increased. Let's grow. 🚀"`, "MenCra");
     report(`Plan changed to ${PLANS[plan].name} — token allowance now ${PLANS[plan].tokens}/month`);
     toast(PLANS[plan].name + " activated!");
   };

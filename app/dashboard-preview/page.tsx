@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import MrLxwaDashboard from "@/components/MrLxwaDashboard";
 
-export const metadata: Metadata = { title: "Dashboard Preview — MrLxwa" };
+export const metadata: Metadata = { title: "Dashboard Preview — MenCra" };
 
 // Never statically prerender this page at build time. Its component tree reaches a Supabase
 // client, and a build environment without the Supabase env vars (e.g. a Vercel Preview whose

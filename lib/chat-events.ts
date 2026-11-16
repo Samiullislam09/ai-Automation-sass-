@@ -288,7 +288,7 @@ export function cardFromStoredEvent(
 
 /** The reply itself never arrived (commit 9bb2055's try/catch/finally).
  *
- *  "The connection dropped" is a system fact about this app, not something Mr Lxwa should be
+ *  "The connection dropped" is a system fact about this app, not something MenCra should be
  *  made to say in the first person — and the Retry belongs next to the reason. The payload is
  *  the exact text to re-send, so the retry path stays "send that message again". */
 export function cardFromStreamFailure(reason: string, retryOf: string, at = Date.now()): SystemCard {

@@ -1,6 +1,6 @@
 import React from "react";
 
-/** The "Mr. Lxwa" dark theme's CSS (every .lx-* class, color token, and keyframe) — shared by
+/** The "MenCra" dark theme's CSS (every .lx-* class, color token, and keyframe) — shared by
  *  MrLxwaDashboard.tsx (the sidebar'd dashboard shell) and any full-page view that wants the
  *  same look WITHOUT that shell (e.g. components/dashboard/ArticleApprovalSection.tsx, which
  *  the owner asked to open as its own full-screen page, no sidebar — 2026-08-29).
@@ -400,7 +400,7 @@ export const LX_CSS = `
   animation:lxShimmer 1.6s linear infinite}
 @keyframes lxShimmer{from{background-position:200% 0}to{background-position:-200% 0}}
 
-/* Mr. Lxwa (the boss) "still deciding" — a pulsing halo behind the real brain icon, filling the
+/* MenCra (the boss) "still deciding" — a pulsing halo behind the real brain icon, filling the
    canvas instead of one thin row floating in an empty card (owner, 2026-09-12: "full section pe
    ho, normal abhi jaisa animation nahi"). */
 .lx-boss-think{position:relative;display:flex;align-items:center;justify-content:center;

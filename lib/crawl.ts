@@ -33,7 +33,7 @@ import * as cheerio from "cheerio";
  *  (app/api/onboarding/crawl/route.ts) so it fits inside a Vercel request. The deep crawl
  *  is the background CrawlerAgent, which uses the agent-server copy.
  */
-const UA = "MrLxwaBot/1.0 (+https://mrlxwa.com; learning your site to write about it)";
+const UA = "MenCraBot/1.0 (+https://mencra.com; learning your site to write about it)";
 
 /** How far from the homepage to walk when following links. 2 reaches /iso → /iso/iso-9001,
  *  which is the depth the live site needed and never got. */

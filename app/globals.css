@@ -378,7 +378,7 @@ code{overflow-wrap:anywhere;word-break:break-word}
 
 /* ── The chat's SYSTEM channel (components/kit.tsx SystemCardView) ────────────────────────
    Deliberately unlike a chat bubble: this is the system reporting a fact it has evidence for,
-   not Mr Lxwa talking. Full width, a status-coloured left rail, an icon and an agent chip —
+   not MenCra talking. Full width, a status-coloured left rail, an icon and an agent chip —
    so nobody has to work out whether a line is true or generated (MASTER_PLAN §10 rule 1).
    Every card is drawn from a SystemCard value (lib/chat-events.ts); no text is ever parsed
    into one. Lives here rather than in styled-jsx because that transform panics on kit.tsx. */

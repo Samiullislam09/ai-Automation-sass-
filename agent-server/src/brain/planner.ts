@@ -103,8 +103,8 @@ const NOUN: Record<string, string> = {
 };
 
 /** What a step is doing, in the outline. English on purpose: the plan card is dashboard
- *  chrome, not conversation — only Mr. Lxwa's replies follow the customer's language
- *  (owner, 2026-09-10: "Mr Lxwa's Plan ... professional english karo"). */
+ *  chrome, not conversation — only MenCra's replies follow the customer's language
+ *  (owner, 2026-09-10: "MenCra's Plan ... professional english karo"). */
 const VERB: Record<string, string> = {
   keywords: "finds the keywords",
   article: "writes the article",

@@ -21,7 +21,7 @@ export type PipelineStage = {
 export const PIPELINE: PipelineStage[] = [
   {
     id: "boss",
-    name: "Mr Lxwa plans",
+    name: "MenCra plans",
     what: "Picks the next topics your business should publish, and refuses to invent any if there's nothing to go on.",
     from: "Your niche, the pages the crawler read on your site, and everything already written (so nothing repeats).",
   },

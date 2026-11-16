@@ -29,7 +29,7 @@ import * as cheerio from "cheerio";
  *  This file is duplicated at ../../lib/crawl.ts in the Next.js app (separate package, no
  *  shared module). Both copies must change together; the app's copy carries the same header.
  */
-const UA = "MrLxwaBot/1.0 (+https://mrlxwa.com; learning your site to write about it)";
+const UA = "MenCraBot/1.0 (+https://mencra.com; learning your site to write about it)";
 
 /** How far from the homepage to walk when following links. 2 reaches /iso → /iso/iso-9001,
  *  which is the depth the live site needed and never got. */

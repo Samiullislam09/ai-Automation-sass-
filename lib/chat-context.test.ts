@@ -1,6 +1,6 @@
 /** Run: npx tsx --test lib/chat-context.test.ts
  *
- *  The two readers added on 2026-09-18 so Mr Lxwa can see what is happening NOW and what is
+ *  The two readers added on 2026-09-18 so MenCra can see what is happening NOW and what is
  *  actually wrong with the site. Both were previously invisible to the chat even though the
  *  database held them.
  *

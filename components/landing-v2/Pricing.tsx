@@ -4,9 +4,9 @@ import { AuthLink } from "./AuthLink";
 import { useState } from "react";
 import { Check, ShieldCheck, PenLine, Search, Share2, KeyRound, CalendarClock, Palette, Mail, BarChart3, UserRound, Building2, Megaphone, TriangleAlert, CircleCheck, Image as ImageIcon, LayoutTemplate, Link2, Users, type LucideIcon } from "lucide-react";
 
-import { PLAN } from "./plan";
-/* ===== PLACEHOLDERS: prices live in ./plan.ts, tool costs below. ===== */
-/* Illustrative monthly costs of doing it the usual way. NOT measured data. */
+import { PLANS, TOKEN_COST } from "@/lib/store";
+/* Prices come from the app's real plan list (lib/store.tsx PLANS) — the same one Plans.tsx and billing use. The costs below are typical
+   market prices of doing it the usual way, shown for comparison; they are estimates and are labelled as such on the page. */
 const TOOLS: { id: string; label: string; cost: number; icon: LucideIcon; color: string }[] = [
   { id: "writer", label: "Freelance writer", cost: 400, icon: PenLine, color: "#7c5cff" },
   { id: "seo", label: "SEO specialist", cost: 300, icon: Search, color: "#2563eb" },
@@ -35,11 +35,10 @@ const INCLUDED: [string, string][] = [
 
 export function Pricing() {
   const [sel, setSel] = useState<string[]>(["writer", "seo", "kw"]);
-  const [yearly, setYearly] = useState(true);
+  const [pick, setPick] = useState<"starter" | "growth">("starter");
   const chosen = TOOLS.filter(t => sel.includes(t.id));
   const total = chosen.reduce((s, t) => s + t.cost, 0);
   const n = chosen.length;
-  const yearlyPerYear = PLAN.yearly, monthlyPerYear = PLAN.monthly * 12;
   const toggle = (id: string) => setSel(s => (s.includes(id) ? s.filter(x => x !== id) : [...s, id]));
 
   return (
@@ -50,7 +49,7 @@ export function Pricing() {
 
       <div className="relative z-[2] mx-auto w-[1200px] max-w-[calc(100%-48px)] pb-[100px] pt-[100px] max-lg:w-full max-lg:max-w-none max-lg:pb-7 max-lg:pt-8">
         <div className="mx-auto flex w-[773px] max-w-full flex-col items-center gap-[14px] text-center max-lg:w-[min(440px,calc(100%-32px))] max-lg:gap-3">
-          <h2 className="text-[48px] font-medium leading-[1.06] tracking-[-0.96px] max-lg:text-[28px] max-lg:leading-[1.18]">The best value in marketing</h2>
+          <h2 className="text-[48px] font-medium leading-[1.06] tracking-[-0.96px] max-lg:text-[28px] max-lg:leading-[1.18]">One plan instead of ten tools</h2>
           <p className="w-[773px] max-w-full text-[20px] font-normal leading-[normal] max-lg:w-full max-lg:max-w-[370px] max-lg:text-[15px] max-lg:leading-[1.5]">One subscription replaces the freelancers and tools you pay for today.</p>
         </div>
 
@@ -59,7 +58,7 @@ export function Pricing() {
           <div className="flex w-[424px] flex-[0_0_424px] flex-col rounded-[24px] border-[1.2px] border-[#f0e3db] bg-white p-4 shadow-[0_20px_44px_-10px_rgba(209,77,51,0.09),0_4px_12px_rgba(77,51,38,0.05)] max-lg:w-full max-lg:flex-none">
             <div className="flex items-center justify-between">
               <span className="inline-flex h-[34px] items-center gap-2 rounded-full border border-[#ffd3d3] bg-white py-2 pl-[14px] pr-4 text-[12px] font-semibold uppercase tracking-[0] text-[#ce3b27]"><TriangleAlert size={15} />What you pay today</span>
-              <span className="text-[11px] font-medium uppercase tracking-[1.2px] text-[#a98a7c]"><strong className="font-semibold text-[#3a2a24]">{n}</strong> {n === 1 ? "tool" : "tools"}</span>
+              <span className="text-[12px] font-medium uppercase tracking-[1.2px] text-[#7d5f52]">Typical prices</span>
             </div>
             <p className="mt-3 text-[15px] font-medium text-[#3a2a24]">What do you pay for today?</p>
             <div className="mt-7 flex flex-wrap justify-center gap-[9px]">
@@ -88,7 +87,7 @@ export function Pricing() {
             <div className="mt-5 flex min-h-[85px] items-center justify-between gap-3 rounded-[18px] border border-[#ffd3d3] bg-transparent p-5">
               <div className="flex min-w-0 flex-col gap-[2px]">
                 <span className="text-[17px] font-semibold text-[#3a2a24]">Total</span>
-                <small className="text-[12.5px] text-[#a98a7c]">{n} separate {n === 1 ? "tool" : "tools"} · {n} {n === 1 ? "bill" : "bills"} to track</small>
+                <small className="text-[13px] text-[#7d5f52]">What these add up to each month</small>
               </div>
               <strong className="shrink-0 whitespace-nowrap text-[34px] font-semibold tracking-[-0.6px] text-[#d6402e]">${total}<small className="text-[14px] font-medium text-[rgba(214,64,46,0.7)]">/month</small></strong>
             </div>
@@ -99,28 +98,29 @@ export function Pricing() {
           {/* RIGHT: the plan */}
           <article className="group relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-[24px] bg-white p-[9px] shadow-[0_10px_30px_-6px_rgba(15,15,26,0.1),0_2px_6px_rgba(15,15,26,0.05)]">
             <span aria-hidden className="lv-ring z-[1]" />
-            <div role="radiogroup" aria-label="Choose how to pay" className="grid grid-cols-2 items-stretch gap-3 p-1 pt-[12px] max-[1279px]:gap-2">
-              {[false, true].map(y => {
-                const on = yearly === y;
+            <div role="radiogroup" aria-label="Choose a plan" className="grid grid-cols-2 items-stretch gap-3 p-1 pt-[12px] max-[1279px]:gap-2">
+              {(["starter", "growth"] as const).map(id => {
+                const on = pick === id;
+                const p = PLANS[id];
+                const arts = Math.floor(p.tokens / TOKEN_COST.article);
                 return (
-                  <button key={String(y)} type="button" role="radio" aria-checked={on} onClick={() => setYearly(y)}
+                  <button key={id} type="button" role="radio" aria-checked={on} onClick={() => setPick(id)}
                     className={`relative flex min-w-0 cursor-pointer flex-col rounded-[18px] border-2 border-transparent p-4 text-left transition-colors duration-200 max-[1279px]:p-3 ${on ? "bg-[#f1eeff]" : "bg-[#efeff1] hover:bg-[#e8e8eb]"}`}>
                     {on && <span aria-hidden className="pointer-events-none absolute -inset-[2px] rounded-[18px] p-[2px] lv-ring" />}
-                    {y && <span className="absolute left-1/2 top-0 z-[2] -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full bg-[#0a0a0a] px-3 py-[3px] text-[12px] font-medium text-white shadow-[0_2px_6px_rgba(15,15,26,0.18)]">Save ${monthlyPerYear - yearlyPerYear}</span>}
                     <div className="flex items-center justify-between gap-2">
-                      <h3 className="text-[16px] font-semibold leading-[1.5] tracking-[-0.096px] text-[#111114]">{y ? "Pay once a year" : "Pay monthly"}</h3>
+                      <h3 className="text-[16px] font-semibold leading-[1.5] tracking-[-0.096px] text-[#111114]">{p.name}</h3>
                       <span aria-hidden className={`flex h-[20px] w-[20px] shrink-0 items-center justify-center rounded-full ${on ? "bg-[#6a5af0]" : "border-[1.5px] border-[#b8b8be] bg-white"}`}>{on && <span className="h-[7px] w-[7px] rounded-full bg-white" />}</span>
                     </div>
                     <div className="mt-3 flex flex-wrap items-baseline gap-x-[6px] text-[#111114]">
-                      <strong className="text-[40px] font-semibold leading-[1.05] tracking-[-1.28px] max-[1279px]:text-[32px] max-[1279px]:tracking-[-1.02px]">${y ? PLAN.yearly : PLAN.monthly}</strong>
-                      <span className="text-[14px] leading-[1.5] text-[#3c3c44]">{y ? "/year" : "/month"}</span>
-                      {y && <s className="text-[15px] leading-[1.5] text-[#8a8a92]">${monthlyPerYear}</s>}
+                      <strong className="text-[40px] font-semibold leading-[1.05] tracking-[-1.28px] max-[1279px]:text-[32px] max-[1279px]:tracking-[-1.02px]">${p.price}</strong>
+                      <span className="text-[14px] leading-[1.5] text-[#3c3c44]">/month</span>
                     </div>
-                    <p className="mt-2 text-[14px] leading-[1.5] tracking-[-0.07px] text-[#3c3c44]">{y ? `Just $${Math.round(PLAN.yearly / 12)}/month, billed yearly` : `That's $${monthlyPerYear} a year`}</p>
+                    <p className="mt-2 text-[14px] leading-[1.5] tracking-[-0.07px] text-[#3c3c44]">About {arts} articles a month</p>
                   </button>
                 );
               })}
             </div>
+            <p className="px-5 pt-2 text-[13px] leading-[1.5] text-[#3c3c44]">Or start on the Free plan: no card needed.</p>
 
             <div className="px-1">
               <div className="mt-3 flex items-center gap-[12px] rounded-[16px] bg-[#efecff] px-[16px] py-[14px]">
@@ -146,7 +146,7 @@ export function Pricing() {
                   </div>
                 </div>
               ))}
-              <AuthLink guestHref="/signup" guestLabel="Get started" authedLabel="Go to dashboard" className="mt-4 flex h-10 w-full items-center justify-center rounded-full bg-[linear-gradient(180deg,#383840_0%,#0a0a0d_100%)] text-[14px] font-medium tracking-[-0.084px] text-white shadow-[0_4px_12px_-3px_rgba(13,13,26,0.22)] transition hover:-translate-y-px hover:shadow-[0_10px_22px_-8px_rgba(13,13,26,0.28)] active:translate-y-0 active:scale-[0.99]" />
+              <AuthLink guestHref="/signup" guestLabel="Start free" authedLabel="Go to dashboard" className="mt-4 flex h-11 w-full items-center justify-center rounded-full bg-[linear-gradient(180deg,#383840_0%,#0a0a0d_100%)] text-[14px] font-medium tracking-[-0.084px] text-white shadow-[0_4px_12px_-3px_rgba(13,13,26,0.22)] transition hover:-translate-y-px hover:shadow-[0_10px_22px_-8px_rgba(13,13,26,0.28)] active:translate-y-0 active:scale-[0.99]" />
             </div>
           </article>
         </div>
@@ -154,7 +154,7 @@ export function Pricing() {
         <div className="mx-auto mt-6 flex w-[1200px] max-w-full items-stretch gap-3 max-lg:mt-4 max-lg:px-4">
           <div className="w-[424px] flex-[0_0_424px] max-lg:hidden" aria-hidden />
           <div className="h-[38px] w-[38px] flex-[0_0_38px] max-lg:hidden" aria-hidden />
-          <p className="min-w-0 flex-1 self-center text-center text-[13px] font-normal leading-[1.5] text-[#737373]">Prices shown are placeholders. Costs on the left are typical estimates, not measured data.</p>
+          <p className="min-w-0 flex-1 self-center text-center text-[13px] font-normal leading-[1.5] text-[#737373]">Costs on the left are typical market prices, shown for comparison. Your own costs will vary.</p>
         </div>
       </div>
     </section>

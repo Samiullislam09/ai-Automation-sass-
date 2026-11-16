@@ -8,7 +8,7 @@ import type { AgentJobRow } from "@/lib/dashboard-data";
  *  THE COMPLAINT THIS ANSWERS. The office animated on a timer: rooms lit up, a character
  *  bobbed, a chai-walla walked about — none of it connected to a job. Asked for an article you
  *  saw motion immediately and had no idea whether anything had actually started. What was
- *  wanted instead was a log along the bottom reading "Mr Lxwa planning… assigned to Mr.
+ *  wanted instead was a log along the bottom reading "MenCra planning… assigned to Mr.
  *  Writer… Mr. Writer accepted…", with the animation following the real work rather than
  *  leading it.
  *
@@ -18,7 +18,7 @@ import type { AgentJobRow } from "@/lib/dashboard-data";
  *
  *  THE ONE THING THAT IS NOT READ OFF A ROW is the arrow between two rooms, and it is not a
  *  guess either: agents/boss.ts enqueues the keyword job and agents/keyword.ts enqueues the
- *  writer job, so "Mr Lxwa → Mr. Keyword" is the pipeline as written in code (HANDOFF_FROM in
+ *  writer job, so "MenCra → Mr. Keyword" is the pipeline as written in code (HANDOFF_FROM in
  *  lib/agents-data.ts). It is only drawn when the predecessor genuinely ran in the same
  *  window — an arrow from a room that did nothing would be exactly the fiction this replaces.
  *

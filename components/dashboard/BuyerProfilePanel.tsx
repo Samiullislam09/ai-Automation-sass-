@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from "react";
  *
  *  Site Brain says what the business IS. This screen is where the client confirms who BUYS from
  *  them — the segments Mr. Lead will actually go looking for — and, just as important, who merely
- *  looks like them (competitors) so those get screened out. Mr. Lxwa drafts it from the Site
+ *  looks like them (competitors) so those get screened out. MenCra drafts it from the Site
  *  Brain; the client edits and CONFIRMS; only then will an Auto lead run search. Nothing here is
  *  hardcoded to any industry — every word comes from the tenant's own profile via the drafter.
  *

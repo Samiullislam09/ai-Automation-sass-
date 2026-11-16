@@ -7,7 +7,7 @@ export { DAYS, agoPhrase, humanTime, localParts, nextRunAt, untilPhrase };
 
 /** Everything the chat needs to know before it can answer, gathered in PARALLEL.
  *
- *  This file exists because of a stopwatch. Asking Mr Lxwa "hi hello" took 6-7 seconds, and
+ *  This file exists because of a stopwatch. Asking MenCra "hi hello" took 6-7 seconds, and
  *  almost none of that was the model: the route made seven Supabase round trips one after the
  *  other — auth.getUser, memberships, tenants, site_pages, the conversation row, the message
  *  history, the job log — and only then started thinking. Each hop is a few hundred
@@ -152,7 +152,7 @@ export async function loadBusiness(supabase: SupabaseClient, tenantId: string | 
   }
 }
 
-/** The last few real jobs, one line each. Without this Mr Lxwa could only invent an answer to
+/** The last few real jobs, one line each. Without this MenCra could only invent an answer to
  *  "what did the team do?" — and invention is the one thing he must not do. */
 export async function loadRecentWork(supabase: SupabaseClient, tenantId: string | null): Promise<string | null> {
   if (!tenantId) return null;
@@ -230,7 +230,7 @@ export function resultOf(detail: unknown): string {
   return bits.length ? ` — ${bits.join(", ")}` : "";
 }
 
-/** What the team is doing RIGHT NOW — the one thing Mr Lxwa could never see.
+/** What the team is doing RIGHT NOW — the one thing MenCra could never see.
  *
  *  `loadRecentWork` above reads `jobs_log`, and a row only lands there once a job has finished.
  *  So every "kya chal raha hai" was answered from history, and the FACTS block had to carry an
@@ -241,7 +241,7 @@ export function resultOf(detail: unknown): string {
  *  Non-terminal statuses only, and TERMINAL_TASK in lib/live.ts is the definition of terminal —
  *  including `awaiting_approval`, which reads like "not finished" but is that file's own success
  *  state (the work is done, a human just has not looked yet). Getting that wrong in the other
- *  direction would have Mr Lxwa reporting 50 finished articles as still being written. */
+ *  direction would have MenCra reporting 50 finished articles as still being written. */
 const LIVE_TASK_LIMIT = 8;
 
 export async function loadLiveWork(supabase: SupabaseClient, tenantId: string | null): Promise<string | null> {
@@ -345,14 +345,14 @@ export async function loadSiteIssues(supabase: SupabaseClient, tenantId: string 
 
 /** The automation calendar, in the same words the Schedule page uses.
  *
- *  Mr Lxwa used to be blind to this: asked "kaunsa task schedule pe hai aur kitne baje?" he
+ *  MenCra used to be blind to this: asked "kaunsa task schedule pe hai aur kitne baje?" he
  *  had nothing to read, so he changed the subject. The schedules table was right there. */
 export async function loadSchedule(supabase: SupabaseClient, tenantId: string | null): Promise<string | null> {
   if (!tenantId) return null;
   try {
     // select("*") on purpose: auto_publish arrives with migration 014, and naming it in the
     // column list would make this whole block fail on a database that hasn't run it yet —
-    // costing Mr Lxwa every other schedule fact over one missing column.
+    // costing MenCra every other schedule fact over one missing column.
     // Both halves, read together. The recurring timetable and the one-off orders placed in the
     // chat live in two different tables, and answering from only one of them is how "kya
     // schedule pe hai" came back missing the thing the customer had booked ninety seconds ago.
@@ -398,7 +398,7 @@ export async function loadSchedule(supabase: SupabaseClient, tenantId: string | 
  *
  *  Read from the ROW, never from the sentence that created it. The row is what the scheduler
  *  will act on, so if the two ever disagree the row is the one that is true — and this is the
- *  reference Mr Lxwa answers "kya schedule pe hai" from.
+ *  reference MenCra answers "kya schedule pe hai" from.
  *
  *  Returns null rather than throwing when migration 015 has not been run, so the rest of the
  *  schedule answer survives a database that is one file behind. */

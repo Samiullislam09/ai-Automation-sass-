@@ -77,7 +77,7 @@ export default function MemorySection() {
 
   const save = (i: number) => {
     saveMemory(s.memory.map((m: any, j: number) => (j === i ? { ...m, v: val } : m)));
-    act(`"Noted. All agents realigned."`, "Mr Lxwa");
+    act(`"Noted. All agents realigned."`, "MenCra");
     toast("Memory updated — team adjusted.");
     setEdit(null);
   };
@@ -90,14 +90,14 @@ export default function MemorySection() {
       danger: true,
     });
     if (!ok) return;
-    act(`"Forgotten."`, "Mr Lxwa");
+    act(`"Forgotten."`, "MenCra");
     saveMemory(s.memory.filter((_: any, j: number) => j !== i));
     toast("Removed.");
   };
   const add = () => {
     if (!nk.trim() || !nv.trim()) return toast("Both fields needed", "info");
     saveMemory([...s.memory, { k: nk.trim(), v: nv.trim() }]);
-    act(`learned something new from you: <b>${nk.trim()}</b>.`, "Mr Lxwa");
+    act(`learned something new from you: <b>${nk.trim()}</b>.`, "MenCra");
     toast("Team memory updated.");
     setAdding(false);
     setNk("");
@@ -224,7 +224,7 @@ export default function MemorySection() {
 
           <Link href="/dashboard/site-brain" className="mm-note">
             <Brain size={15} className="mm-line-i" />
-            <span>Read Mr Lxwa&apos;s full understanding of your business</span>
+            <span>Read MenCra&apos;s full understanding of your business</span>
           </Link>
         </div>
       </section>

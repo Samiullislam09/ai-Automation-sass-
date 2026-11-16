@@ -103,7 +103,7 @@ app.post("/jobs/:type", async (req, res) => {
   if (!tenantId) return res.status(400).json({ error: "tenantId is required" });
 
   // Refuse here rather than accepting the job and dropping it in the worker. Handing back a
-  // job id for work that will never run is how "Mr Lxwa says On it, then nothing happens,
+  // job id for work that will never run is how "MenCra says On it, then nothing happens,
   // and there is no error anywhere" happened: the caller has to be able to tell the user.
   try {
     const usage = await dailyUsage(tenantId, type);

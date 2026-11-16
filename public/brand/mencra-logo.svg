@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="160" viewBox="0 0 160 40" fill="none">
+  <title>MenCra</title>
+  <defs>
+    <linearGradient id="g" x1="2" y1="2" x2="30" y2="30" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#a78bfa"/>
+      <stop offset="0.55" stop-color="#6a5af0"/>
+      <stop offset="1" stop-color="#3b82f6"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(4 4)">
+    <rect width="32" height="32" rx="9" fill="url(#g)"/>
+    <path d="M8.5 23.5V11.5L16 19l7.5-7.5v12" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M26 2.8Q26 5.8 29 5.8Q26 5.8 26 8.8Q26 5.8 23 5.8Q26 5.8 26 2.8Z" fill="#fff"/>
+  </g>
+  <text x="44" y="27" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="22" font-weight="600" letter-spacing="-0.6" fill="#0a0a0a">Men<tspan fill="#5242d8">Cra</tspan></text>
+</svg>
