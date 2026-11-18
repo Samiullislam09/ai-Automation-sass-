@@ -16,13 +16,14 @@ import { placeOrder, findPublishable, findLatestPublished, listPending, cancelOr
 import { approveAndPublish, unpublishContent } from "@/lib/publish";
 import { classifyIntent, mightBeAnOrder } from "@/lib/chat-classify";
 import { enqueueAgentJob } from "@/lib/agent-jobs";
-import { loadBusiness, loadCounts, loadGreetingFacts, loadLiveWork, loadRecentWork, loadSchedule, loadSiteIssues, type Counts, type GreetingFacts, type Turn } from "@/lib/chat-context";
+import { loadBusiness, loadCounts, loadGreetingFacts, type Counts, type GreetingFacts, type Turn } from "@/lib/chat-context";
 import type { SystemEventPayload } from "@/lib/chat-events";
 import * as brain from "@/lib/brain";
-import { brainTurn, legacyJobOf, type BrainTurn, type BrainTurnDeps, type OrderResult } from "@/lib/chat-brain";
+import { brainTurn, type BrainTurn, type BrainTurnDeps, type OrderResult } from "@/lib/chat-brain";
 import { extractIntent } from "@/lib/chat-brain-intent";
-import { clearState, loadState, savePending } from "@/lib/chat-conversation";
-import { answerWhatWeCannotKnow, loadDataSources, looksLikeMetricQuestion } from "@/lib/chat-no-data";
+import { clearState, loadState, savePending, resolveFollowUpSmart, readAnswer } from "@/lib/chat-conversation";
+import { chatJson } from "@/lib/chat-llm";
+import { localizeOrder } from "@/lib/chat-localize";
 import { isReadTool, runReadTool, toolResultBlock } from "@/lib/chat-data-tools";
 import { isWriteTool, runWriteTool, writeResultBlock } from "@/lib/chat-schedule-tools";
 import { lastSuccessfulRun } from "@/lib/reuse";
@@ -181,141 +182,36 @@ async function loadHistoryFromDb(supabase: SupabaseClient, tenantId: string, con
 
 /* ── The model call, streamed ─────────────────────────────────────────────────────────── */
 
-/* Which reference material this question actually needs.
+/** The messages for the answer. The system prompt carries who MenCra is, the platform knowledge and the customer's business line; the FACTS message after
+ *  the conversation carries only what THIS turn fetched — the tool result, or (when nothing was looked up) what the team can do.
  *
- *  Everything used to be attached to every message, and a 30B model with reasoning off could
- *  not hold it: "hi hello" came back as a recital of the job log, and a question about the
- *  timetable was answered "schedule set nahi hai" while the schedule sat three lines above it
- *  in the same prompt. Handing it one relevant section instead of three irrelevant ones fixed
- *  both, and made the prompt shorter into the bargain.
- *
- *  Note what is and isn't being decided here. This picks what the model gets to READ. It
- *  never decides an action, never spends anything, and a miss costs one clarifying reply —
- *  which is why a pattern is acceptable here and was not acceptable for orders. */
-const ASKS_ABOUT_WORK =
-  /\b(update|updates|progress|status|report|kya hua|kyahua|hua|kaam|job|jobs|task|article|artical|blog|likh\w*|bana\w*|likha|ban gaya|written|what happened|fail\w*|error|theek|sahi|chal raha|chalra|done|kitne)\b/i;
-// "How many" is its own question. Handed the totals alongside the job rows for every status
-// question, the model reported both — four sentences where two were asked for.
-const ASKS_HOW_MANY = /\b(kitne|kitna|kitni|how many|how much|count|total|sab milakar|overall)\b/i;
-const ASKS_ABOUT_SCHEDULE =
-  /\b(schedule|scheduled|schudule|automation|automatic|auto|kab|kitne baje|kitnebaje|timing|time|daily|roz|routine|next run|nextrun|cron|publish\w*)\b/i;
-/** "kya tum Instagram pe post kar sakte ho?" — a question about the TEAM, not about the work.
- *  It is answered from the registry (plan §5.2 / §14), which is the only place that knows what
- *  is wired up today, so the model gets that list and the instruction not to improve on it. */
-/** "mere site pe kya issue hai" / "seo kaisa hai" — the site's actual problems, from the last
- *  audit. One of the most common questions in the real chat history, and until 2026-09-18 it was
- *  answered from the Site Brain profile, which describes what the site IS and knows nothing
- *  about what is wrong with it. `site_audits` had the answer all along. */
-const ASKS_ABOUT_ISSUES =
-  /\b(issue|issues|isue|problem|problems|error|errors|kya\s*(?:kharab|galat)|kharab|galat|audit|seo|health|optimi[sz]e|optimiza|broken|fix|fixes|score|masla|dikkat|thik\s*nahi|theek\s*nahi)\b/i;
-
-const ASKS_WHAT_YOU_CAN_DO =
-  /\b(kar sakte|kar sakta|kar sakti|kar paoge|kar paoge|karoge|kya kya|can you|could you|are you able|able to|do you support|is it possible|possible hai|ho sakta hai|ho payega)\b/i;
-
+ *  THE KEYWORD GATES ARE GONE (Phase 2, 2026-11-18). This function used to decide, with regexes (ASKS_ABOUT_WORK, ASKS_HOW_MANY, ASKS_ABOUT_SCHEDULE,
+ *  ASKS_ABOUT_ISSUES, ASKS_WHAT_YOU_CAN_DO), which of five reference blocks the model got to read. They were wrong in both directions, only knew English and
+ *  Hinglish, and every new phrasing needed a new pattern. Now the MODEL says what it needs by calling a lookup tool (it understands the question in any
+ *  language), the server runs that one read, and the result arrives here as `toolResult`. A question that needs no data gets none. */
 function buildMessages(
   q: string,
   ctx: any,
-  c: { business: string | null; recentWork: string | null; schedule: string | null; counts: Counts | null; capabilities?: string; liveWork: string | null; siteIssues: string | null; toolResult?: string | null },
+  c: { business: string | null; counts: Counts | null; capabilities?: string; toolResult?: string | null },
   history: Turn[]
 ) {
-  // A LOOKUP RESULT REPLACES THE GUESSING BLOCKS, IT DOES NOT JOIN THEM.
-  //
-  // The regex gates below (wantCounts, wantWork, wantSchedule, wantIssues) are the old way of
-  // deciding what a message needs, and they are wrong in both directions — they missed "pura
-  // details do yar" and they fired on messages that needed nothing. When the model has already
-  // said what it needed by calling a tool, that answer beats every guess here. Attaching both
-  // would also re-create the failure this file's own comment warns about: handed four
-  // reference blocks, this model answered a greeting with a status report.
   const hasTool = !!c.toolResult;
-  const wantCounts = !hasTool && ASKS_HOW_MANY.test(q);
-  const wantWork = !hasTool && !wantCounts && ASKS_ABOUT_WORK.test(q);
-  const wantSchedule = !hasTool && ASKS_ABOUT_SCHEDULE.test(q);
-  // The team's own list of what it can and cannot do. Attached when they ask about ability,
-  // and when nothing else was needed — never on top of three other sections, because handing
-  // this model four reference blocks is what made "hi hello" come back as a status report.
-  // The site's real problems. Checked before `wantTeam` so that "mere site pe kya issue hai"
-  // reaches the audit findings instead of the capabilities list, which is what it used to get.
-  const wantIssues = !hasTool && !!c.siteIssues && ASKS_ABOUT_ISSUES.test(q);
-  // Live work rides with the work gate: "kya chal raha hai" is a status question, and answering
-  // it from finished history is the exact thing the WORK section below has to warn against.
-  const wantLive = !!c.liveWork && wantWork;
-  const wantTeam =
-    !hasTool && !!c.capabilities && (ASKS_WHAT_YOU_CAN_DO.test(q) || (!wantWork && !wantCounts && !wantSchedule && !wantIssues));
-  lastSections =
-    [hasTool && "tool", wantWork && "work", wantLive && "live", wantIssues && "issues", wantCounts && "counts", wantSchedule && "schedule", wantTeam && "team"]
-      .filter(Boolean)
-      .join("+") || "none";
+  lastSections = hasTool ? "tool" : c.capabilities ? "team" : "none";
   return [
     { role: "system" as const, content: systemPrompt(ctx, c.business, c.counts?.awaiting ?? null) },
     ...history,
-    // The facts go AFTER the conversation, because these models weight recent text over the
-    // system prompt: one kept reporting a limit error from twenty minutes ago as the current
-    // state while a finished article sat in jobs_log.
-    //
-    // But "freshest" was read as "most important", and a plain "hi hello" came back as a
-    // recital of the job log. So this is now framed as a lookup table with the not-unless-
-    // asked rule attached to it, rather than as a status report the model has been handed.
+    // The facts go AFTER the conversation, because these models weight recent text over the system prompt.
     {
       role: "system" as const,
       content: [
         `FACTS for this question, read from the database at ${new Date().toISOString()}.`,
         ``,
-        ...(wantWork
-          ? [
-              `WORK THE TEAM HAS ACTUALLY DONE (newest first). This is the only work that exists:`,
-              c.recentWork ?? "Nothing has run on this account yet.",
-              `Answer in AT MOST TWO SENTENCES. Do not add totals, counts or anything else that was not asked for.`,
-              `Every row above is FINISHED HISTORY. Never say something is "now", "currently" or "in progress" unless a row literally ends in "running" — the model that wrote "the writer is now drafting the article" from a finished keyword row invented that, and inventing it is the one thing forbidden here.`,
-              `Answer about progress from these rows and nothing else. Say what the newest one or two show, IN YOUR OWN WORDS — never paste the rows, never list them all. If a row FAILED, lead with that and its reason in plain words.`,
-              `A row that says "done" WITH NUMBERS is finished work and those numbers are the result. "done — found 0, saved 0" means it RAN and produced nothing; it does NOT mean it never ran. Report the zero plainly, and if the row names what it searched for, say that too — that is usually the explanation.`,
-              `NEVER INVENT A REASON WHY SOMETHING DID NOT HAPPEN. Asked "why didn't X run" or "why are there none", answer only from what these rows actually say. If they do not say why, reply that you can see it ran and what it returned but not the reason — and stop there. A made-up cause ("there is no queued record", "the pipeline has nothing pending") is worse than admitting you cannot see it: it sounds exactly like a real answer, and the customer has no way to tell the difference.`,
-              ``,
-            ]
-          : []),
-        ...(wantLive
-          ? [
-              `WHAT THE TEAM IS DOING RIGHT NOW. These are live, unfinished tasks — the only work that is genuinely in progress:`,
-              c.liveWork as string,
-              `If the customer asks what is happening or what is running, answer from THIS section, not from the finished history above. A task marked "waiting for the customer to say yes" has NOT started.`,
-              ``,
-            ]
-          : []),
-        ...(wantIssues
-          ? [
-              `WHAT IS ACTUALLY WRONG WITH THEIR SITE, from the last audit Mr. Audit ran. Every line already carries the fix:`,
-              c.siteIssues as string,
-              `Answer anything about issues, errors, SEO health or the score from this and nothing else. Name the specific problems — never reply that you would need to run an audit when one has already run. If the score is 0 or the page count is 1, say plainly that the audit could not read the site properly rather than reporting 0/100 as if it were a verdict on their content.`,
-              ``,
-            ]
-          : []),
-        ...(wantCounts && c.counts
-          ? [
-              `TOTALS, counted from the database. Read the number off the matching line and repeat it EXACTLY. Do not add, subtract or combine lines:`,
-              c.counts.lines,
-              ``,
-            ]
-          : []),
-        ...(wantSchedule
-          ? [
-              `THE AUTOMATION TIMETABLE. Times are ISO instants; give them back in the timezone named on the same line:`,
-              c.schedule ?? "No automatic schedule has been set up yet.",
-              `Answer anything about timing, automation or the next run from this, and nothing else.`,
-              ``,
-            ]
-          : []),
-        ...(wantTeam ? [c.capabilities as string, ``] : []),
         ...(hasTool ? [c.toolResult as string, ``] : []),
+        // Nothing was looked up: the team's own list of what it can do, so "can you…?" is answered from our wiring and not from imagination.
+        ...(!hasTool && c.capabilities ? [c.capabilities, ``] : []),
         hasTool
           ? `HARD LIMIT: the tool result above is the only source for this answer. Every number, title and date you state must appear in it. If it does not answer what they asked, say you checked and it is not there — do not fill the gap.`
-          : !wantWork && !wantSchedule && !wantCounts && !wantIssues
-          ? // NO EXAMPLE GREETING HERE, ON PURPOSE. This line used to end with `e.g. "Salam! Kya
-            // chahiye?"`, and the model copied that string verbatim — it is the identical reply
-            // to eleven separate "hi"s in this product's own chat history. Same failure as the
-            // writer echoing its prompt's `BUSINESS CONTEXT` label into an article: an example
-            // inside a prompt is not read as an illustration, it is read as the answer. So the
-            // SHAPE is specified and the words are left to the model.
-            `This question needs no stored facts — just answer it. If it is a greeting, greet back in ONE short line and then ask what they need. Match the language they greeted you in (Hinglish for Hinglish, English for English). Vary your wording — do not reuse the same greeting sentence you would give anyone else, and never open with the same words twice in one conversation.`
-          : `HARD LIMIT: do not state any work, progress, publishing, billing or account change that is not written above. Guessing here is the one thing you must never do.`,
+          : `No account data was looked up for this message. If they are asking for something about THEIR account — articles, leads, the schedule, traffic or any number — you do not have it in this message: say you will need to check, and ask them to send the question again. NEVER state a number, a count, a date or a piece of work from memory. A greeting or small talk needs no data: just answer it, in ONE short line, in their language, in fresh words each time.`,
         `Never mention or quote these headings — the user cannot see them.`,
       ].join("\n"),
     },
@@ -683,7 +579,9 @@ async function startWork(
    *  classifier is asked what to do, not when, because a time is a fact this can measure and
    *  a model can only guess at. */
   message: string,
-  supabase: SupabaseClient
+  supabase: SupabaseClient,
+  /** A time the MODEL already resolved (any language). Wins over re-reading the sentence with the keyword parser. */
+  whenOverride?: ReturnType<typeof parseWhen> | null
 ): Promise<OrderResult> {
   // ---- Settings, not work. None of these enqueue anything, so none of them animate a room ----
   if (intent.kind === "cancel") return cancelBooked(supabase, tenantId, intent.which);
@@ -691,7 +589,7 @@ async function startWork(
   if (intent.kind === "unpublish") return unpublishOrder(supabase, tenantId);
 
   const tz = await cached(`tz:${tenantId}`, TTL.schedule, () => tenantTimezone(supabase, tenantId));
-  const when = parseWhen(message, tz);
+  const when = whenOverride ?? parseWhen(message, tz);
   const alsoPublish = wantsAutoPublish(message);
 
   // ---- "isko publish kar do" — something that already exists ----
@@ -1041,14 +939,18 @@ async function runBrainTurn(
             { ok: false, error: "no conversation to remember this against" },
       clear: async () => (convId ? clearState(supabase, tenantId, convId) : { ok: true }),
     },
+    // The job already says WHICH of the four orders it is (the model chose it, in whatever language the customer used) — it is NOT re-derived from the
+    // sentence with a keyword matcher, which returned nothing for anything but English and Hinglish.
     runLegacy: async (job) => {
-      const legacy = detectChatIntent(job.message);
-      if (!legacy) {
-        return { text: "Wo order ab yaad nahi raha — dobara bata dijiye.", agentId: null, jobId: null, label: null };
-      }
-      return startWork(legacy, tenantId, userId, job.message, supabase);
+      const intent: NonNullable<ReturnType<typeof detectChatIntent>> =
+        job.kind === "cancel" ? { kind: "cancel", which: job.which === "all" ? "all" : "next" } : { kind: job.kind };
+      const at = job.whenAt ? new Date(job.whenAt) : null;
+      const whenOverride = at && !isNaN(at.getTime()) ? { at, kind: "absolute" as const, matched: job.message } : null;
+      return startWork(intent, tenantId, userId, job.message, supabase, whenOverride as any);
     },
-    legacyKind: (message) => legacyJobOf(message, tz),
+    // Model-backed reading of a yes / no / value in ANY language (keywords stay as the backup inside resolveFollowUpSmart).
+    readFollowUp: (message, state, now) =>
+      resolveFollowUpSmart(message, state, now, (m, pending, slot) => readAnswer(m, pending, slot, chatJson)),
     lastSuccessfulRun: (forTenantId, agent) => lastSuccessfulRun(supabase, forTenantId, agent),
   };
 
@@ -1078,8 +980,6 @@ async function warm() {
   if (!who?.tenantId) return;
   await Promise.all([
     cached(`biz:${who.tenantId}`, TTL.business, () => loadBusiness(supabase, who.tenantId)),
-    cached(`sched:${who.tenantId}`, TTL.schedule, () => loadSchedule(supabase, who.tenantId)),
-    cached(`work:${who.tenantId}`, TTL.work, () => loadRecentWork(supabase, who.tenantId)),
     cached(`counts:${who.tenantId}`, TTL.work, () => loadCounts(supabase, who.tenantId)),
   ]);
 }
@@ -1133,21 +1033,12 @@ export async function POST(req: NextRequest) {
 
   // Everything below starts NOW and is awaited later — the reads do not depend on each other,
   // and each one is skipped entirely while its cache entry is still good.
+  // Only what EVERY answer needs: the business line (their Site Brain) and the number waiting for approval. Everything else — articles, schedule,
+  // audit, traffic, leads, keywords — is a lookup TOOL the model calls when the question needs it (lib/chat-data-tools.ts, lib/chat-lead-tools.ts).
+  // It used to be six more reads on every message, attached or withheld by keyword lists (ASKS_*): fast to write, English and Hinglish only, and wrong
+  // in both directions — it missed "pura details do yar" and fired on messages that needed nothing.
   const businessP = cached(`biz:${tenantId}`, TTL.business, () => loadBusiness(supabase, tenantId));
-  const workP = cached(`work:${tenantId}`, TTL.work, () => loadRecentWork(supabase, tenantId));
   const countsP = cached(`counts:${tenantId}`, TTL.work, () => loadCounts(supabase, tenantId));
-  let scheduleP = cached(`sched:${tenantId}`, TTL.schedule, () => loadSchedule(supabase, tenantId));
-  // What is running NOW, and what the last audit found. Both existed in the database and
-  // neither had a reader on this path — see loadLiveWork/loadSiteIssues in lib/chat-context.ts.
-  // Live work uses the SHORT ttl: a status that is a minute stale is the one fact here where
-  // being slightly out of date reads as being wrong.
-  const liveP = cached(`live:${tenantId}`, TTL.work, () => loadLiveWork(supabase, tenantId));
-  const issuesP = cached(`issues:${tenantId}`, TTL.business, () => loadSiteIssues(supabase, tenantId));
-  // Only for a message that asks for a measurement. The pre-filter is a regex, so an ordinary
-  // message never pays for this read at all — see lib/chat-no-data.ts.
-  const sourcesP = looksLikeMetricQuestion(q)
-    ? cached(`sources:${tenantId}`, TTL.business, () => loadDataSources(supabase, tenantId))
-    : null;
 
   const convP = tenantId
     ? cached(`conv:${tenantId}:${askedFor ?? "new"}`, askedFor ? TTL.conversation : 0, () =>
@@ -1162,28 +1053,8 @@ export async function POST(req: NextRequest) {
       ? Promise.resolve([] as Turn[])
       : loadHistoryFromDb(supabase, tenantId, askedFor);
 
-  // ---- A NUMBER WE CANNOT SEE IS REFUSED HERE, BEFORE ANYTHING ELSE RUNS ----
-  //
-  // Ahead of intent, the brain and the model on purpose. Asked "site pe kitne user active hain"
-  // with no Google connection, a model does not answer "I can't see that" — it answers with a
-  // number, and the customer has no way to tell that number from a real one. Nothing downstream
-  // can undo that, so nothing downstream gets the chance: no job is enqueued and no model call
-  // is made. lib/chat-no-data.ts documents which sources are live and which are not.
-  if (sourcesP) {
-    const noData = answerWhatWeCannotKnow(q, await sourcesP);
-    if (noData) {
-      const convId = await convP;
-      if (tenantId && convId) await saveTurn(tenantId, convId, q, noData.answer);
-      console.log(`[chat] refused a metric we have no source for: missing=${noData.missing} ms=${Date.now() - t0}`);
-      return new Response(once(noData.answer), {
-        headers: {
-          "Content-Type": "text/plain; charset=utf-8",
-          "X-Chat-Ms": String(Date.now() - t0),
-          ...(convId ? { "X-Conversation-Id": convId } : {}),
-        },
-      });
-    }
-  }
+  // (A number we cannot see used to be refused HERE, before the model, by keyword lists. That is the `lookup_data_sources` tool now — lib/data-sources.ts —
+  //  so it works in any language and never misfires on "kitne log" about leads.)
 
   // Which system decides what this message means. `legacyJobOf` in lib/chat-brain.ts lists
   // what the brain still cannot do, and lib/brain.ts `brainEnabled()` carries the flag's
@@ -1259,7 +1130,12 @@ export async function POST(req: NextRequest) {
     lap("brain");
     if (turn.handled && turn.order) {
       console.log(`[chat] timing ${JSON.stringify(mark)} brain=${turn.action}`);
-      return reply(turn.order.text, turn.order);
+      // The product's own fixed sentences (Hinglish) reach the customer in THEIR language. Only the parts marked canned are rewritten; a sentence the
+      // model wrote for this customer is left alone. A failed rewrite sends the original: a Hinglish sentence is better than none.
+      const o = turn.order;
+      const said = o.cannedText || o.cannedEvent ? await localizeOrder(o, q, { text: !!o.cannedText, event: !!o.cannedEvent }) : o;
+      lap("localize");
+      return reply(said.text, said);
     }
     capabilities = turn.capabilities ?? "";
 
@@ -1297,22 +1173,16 @@ export async function POST(req: NextRequest) {
       // exactly when a stale read is most convincing.
       invalidate(`sched:${tenantId}`);
       invalidate(`tz:${tenantId}`);
-      // AND RE-READ IT. Invalidating the cache is not enough on its own: `scheduleP` was started
-      // near the top of this handler, long before the model decided to change anything, so the
-      // promise already in flight resolves to the timetable as it was. Left alone, the prompt
-      // built below would carry a context block saying "runs every Monday" next to a tool result
-      // saying "Monday -> daily" — and the model would have to guess which of the two to believe.
-      scheduleP = cached(`sched:${tenantId}`, TTL.schedule, () => loadSchedule(supabase, tenantId));
       console.log(`[chat] write ${turn.action} ok=${result.ok}`);
       lap("write");
     }
   }
 
-  const [business, recentWork, schedule, counts, storedHistory, liveWork, siteIssues] = await Promise.all([businessP, workP, scheduleP, countsP, historyP, liveP, issuesP]);
+  const [business, counts, storedHistory] = await Promise.all([businessP, countsP, historyP]);
   lap("context");
   // The stored history only counts if the conversation it came from is the one we ended up in.
   const history = convId && convId === askedFor && storedHistory.length ? storedHistory : clientHistory;
-  const messages = buildMessages(q, ctx || {}, { business, recentWork, schedule, counts, capabilities, liveWork, siteIssues, toolResult }, history);
+  const messages = buildMessages(q, ctx || {}, { business, counts, capabilities, toolResult }, history);
 
   // Primary model, then the fallback model — but only at OPENING the stream. Once tokens are
   // flowing a retry would mean re-writing text the reader has already seen, so a mid-stream

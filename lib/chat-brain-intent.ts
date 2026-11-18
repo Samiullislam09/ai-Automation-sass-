@@ -59,6 +59,7 @@ import {
   enabledActions,
   missingSlots,
   toolsFromRegistry,
+  isOrderTool,
   type EnabledAction,
 } from "@/lib/chat-tools";
 import { isReadTool } from "@/lib/chat-data-tools";
@@ -316,6 +317,20 @@ export function planFromToolCall(
   // collapsed into nothingOrdered() and was then answered from a pre-baked blob, which is the
   // failure lib/chat-data-tools.ts documents.
   if (isReadTool(name)) return { ...nothingOrdered(), action: String(name), params: { ...(args ?? {}) } };
+
+  // An order about content that already exists (reject / publish-now / unpublish / cancel a booking). Not a registry action, so it travels like a
+  // lookup: the name and arguments survive to lib/chat-brain.ts, which runs it with the same confirmation rules the old keyword path had.
+  if (isOrderTool(name)) {
+    const raw = (args ?? {})[CONFIDENCE_FIELD];
+    const confidence = typeof raw === "number" && Number.isFinite(raw) ? Math.max(0, Math.min(1, raw)) : ASSUMED_CONFIDENCE;
+    const when = name === "publish_existing" ? resolveWhen(ctx.message, (args ?? {})[WHEN_FIELD], ctx.tz, now) : null;
+    return {
+      ...nothingOrdered(confidence),
+      action: String(name),
+      params: { ...(args ?? {}) },
+      when: when ? { at: when.at.toISOString(), kind: when.kind, matched: when.matched, label: describeWhen(when.at, ctx.tz, now) } : null,
+    };
+  }
 
   // Not a tool, or a tool the registry does not have (a hallucinated name, or an agent that
   // went disabled between the prompt and the answer). Either way nothing is ordered.

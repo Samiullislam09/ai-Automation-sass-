@@ -26,6 +26,7 @@ const REGISTRY: any = {
 
 // [question, the tool(s) that are acceptable]
 const CASES: [string, string[]][] = [
+  // ── the client chat of 2026-11-18
   ["Kiya tum hamare leads se bat kr sakte ho ?", ["lookup_autopilot", "answer_question"]],
   ["Can you communicate with our leads?", ["lookup_autopilot", "answer_question"]],
   ["Is main se whatapp par kitne log ha", ["lookup_lead_stats"]],
@@ -39,6 +40,26 @@ const CASES: [string, string[]][] = [
   ["Hamare kitne leads hain", ["lookup_lead_stats", "lookup_outreach"]],
   ["ek image banao black friday ke liye", ["make_image"]],
   ["leads dhundo 10 hamare liye", ["find_leads"]],
+  // ── numbers we may or may not be able to see (used to be a keyword refusal before the model)
+  ["site pe kitne log aaye is hafte", ["lookup_data_sources", "lookup_analytics"]],
+  ["mere instagram pe kitne followers hain", ["lookup_data_sources"]],
+  ["how much revenue did we make this month", ["lookup_data_sources"]],
+  ["¿cuántos seguidores tengo en redes sociales?", ["lookup_data_sources"]],
+  // ── everyday questions that used to be gated by keyword lists
+  ["kitne article likhe hain abhi tak", ["lookup_content"]],
+  ["site pe kya issue hai", ["lookup_site_audit"]],
+  ["agla article kab aayega", ["lookup_schedule"]],
+  ["hamari company ke baare mein kya pata hai tumhe", ["lookup_business_profile"]],
+  ["hi", ["answer_question"]],
+  ["thanks bhai", ["answer_question"]],
+  // ── orders about content that already exists, in other languages
+  ["isko reject kar do ye draft theek nahi", ["reject_draft"]],
+  ["retira el artículo de la web por favor", ["take_down_article"]],
+  ["wo booking cancel kar do", ["cancel_booking"]],
+  ["isko publish kar do", ["publish_existing"]],
+  ["publish mat karna abhi, sirf draft rakho", ["answer_question", "write_article"]],
+  ["اكتب لي مقالا عن الشهادات", ["write_article"]],
+  ["আমার লিডদের সাথে কথা বলতে পারো?", ["lookup_autopilot", "answer_question"]],
 ];
 
 async function main() {

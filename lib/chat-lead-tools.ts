@@ -15,11 +15,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ChatTool } from "@/lib/chat-tools";
 import { callWhatsapp } from "@/lib/whatsapp-proxy";
 import { loadGoogle, SCOPE_CALENDAR } from "@/lib/google";
+import { loadDataSources, shapeDataSources } from "@/lib/data-sources";
 
 export const LOOKUP_LEAD_CONVERSATION = "lookup_lead_conversation";
 export const LOOKUP_LEAD_STATS = "lookup_lead_stats";
 export const LOOKUP_KEYWORDS = "lookup_keywords";
 export const LOOKUP_AUTOPILOT = "lookup_autopilot";
+export const LOOKUP_DATA_SOURCES = "lookup_data_sources";
 
 type ReadResult = { ok: boolean; tool: string; data?: unknown; note?: string };
 
@@ -112,6 +114,19 @@ export const LEAD_TOOLS_RAW: ChatTool[] = [
         "sit at each step, and what is missing for the chain to run end to end. " +
         'Call this for "autopilot kaisa chal raha hai", "leads se baat kaun karta hai", "kya meeting khud set hoti hai", "kya sab auto chal raha hai", ' +
         '"leads ka kaam kahan tak hua", "what is running automatically", "is lead generation on", "kya missing hai", "can you talk to my leads".',
+      parameters: { type: "object", properties: {}, required: [], additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: LOOKUP_DATA_SOURCES,
+      description:
+        "Which kinds of numbers this product can and cannot measure for the customer: website visitors and traffic, search clicks / impressions / rankings, " +
+        "social followers / likes / engagement / reach, revenue / sales / conversions — and which of those are connected. Call this whenever the customer asks for ANY " +
+        'such number in ANY language ("kitne visitor aaye", "mere followers kitne hain", "revenue kitna hua", "how many people visited", "cuántos seguidores tengo", ' +
+        '"traffic kaisa hai", "kaunsa keyword rank kar raha hai"), BEFORE answering, so you never state a number we cannot see. For leads, WhatsApp, articles and the ' +
+        "schedule use their own lookups instead.",
       parameters: { type: "object", properties: {}, required: [], additionalProperties: false },
     },
   },
@@ -375,6 +390,10 @@ export async function lookupKeywords(supabase: SupabaseClient, tenantId: string)
   const jobRows = jobs.error ? [] : ((jobs.data ?? []) as any[]);
   if (choices.error && jobs.error) throw new Error(jobs.error.message);
   return { ok: true, tool: LOOKUP_KEYWORDS, data: shapeKeywords(choiceRows, jobRows) };
+}
+
+export async function lookupDataSources(supabase: SupabaseClient, tenantId: string): Promise<ReadResult> {
+  return { ok: true, tool: LOOKUP_DATA_SOURCES, data: shapeDataSources(await loadDataSources(supabase, tenantId)) };
 }
 
 export async function lookupAutopilot(supabase: SupabaseClient, tenantId: string): Promise<ReadResult> {

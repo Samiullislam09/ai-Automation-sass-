@@ -23,6 +23,7 @@ import { join } from "node:path";
 import { BRAIN_UNREACHABLE, idempotencyKey, type BrainRegistry, type BrainResult, type BrainTaskCreated, type BrainIntent } from "@/lib/brain";
 import {
   ANSWER_QUESTION,
+  ORDER_TOOLS,
   capabilitiesPrompt,
   enabledActions,
   fieldSchema,
@@ -640,10 +641,14 @@ test("one tool per ENABLED action, then the lookups, then the question tool — 
   // and still before the catch-all, for the same reason the lookups do: "roz 9 baje audit karo"
   // has to meet a tool that can ask WHICH schedule before it meets one that answers in prose.
   const writes = WRITE_TOOLS.map((t) => t.function.name);
+  // The four orders about content that already exists (reject / publish now / take down / cancel a booking) come after the writes: the model reads the
+  // sentence in any language and picks one, instead of a keyword list doing it before the model ran (Phase 2, 2026-11-18).
+  const orders = ORDER_TOOLS.map((t) => t.function.name);
   assert.deepEqual(names, [
     "find_keywords", "write_article", "research_brief", "plan_topics", "audit_site",
     ...lookups,
     ...writes,
+    ...orders,
     ANSWER_QUESTION,
   ]);
   assert.equal(names.includes("publish_article"), false, "no worker behind it → no tool");
@@ -1135,4 +1140,42 @@ test("BRAIN_ENABLED: 1 on, 0 off, unset means on — in every environment, produ
     if (realFlag === undefined) delete process.env.BRAIN_ENABLED; else process.env.BRAIN_ENABLED = realFlag;
     (process.env as any).NODE_ENV = realEnv;
   }
+});
+
+/* ══ Phase 2 (2026-11-18) · the four orders about existing content are read by the MODEL, in any language ═════════ */
+
+test("model-chosen orders: reject runs at once; take-down, publish-now and cancel-all ask first; a scheduled publish carries the model's time", async () => {
+  // production passes no keyword matcher any more
+  const noKeywords = (s: ReturnType<typeof stub>) => { (s.deps as any).legacyKind = undefined; return s; };
+
+  const reject = noKeywords(stub({ tool: { name: "reject_draft", args: {} } }));
+  const r = await turn("esto no me gusta, descártalo", reject.deps);
+  assert.equal(r.handled, true);
+  assert.deepEqual(reject.rec.legacy.map((j) => j.kind), ["reject"], "any language: the model chose it, no keyword matched");
+
+  const down = noKeywords(stub({ tool: { name: "take_down_article", args: {} } }));
+  const d = await turn("retira el artículo de la web", down.deps);
+  assert.equal(down.rec.legacy.length, 0, "irreversible: nothing runs before a yes");
+  assert.equal(order(d).event?.kind, "needs_confirm");
+  assert.equal(down.rec.saved[0].pending.route, "legacy");
+  assert.equal(down.rec.saved[0].pending.legacy?.kind, "unpublish");
+
+  const all = noKeywords(stub({ tool: { name: "cancel_booking", args: { which: "all" } } }));
+  await turn("cancela todo", all.deps);
+  assert.equal(all.rec.legacy.length, 0);
+  assert.equal(all.rec.saved[0].pending.legacy?.which, "all");
+
+  const next = noKeywords(stub({ tool: { name: "cancel_booking", args: { which: "next" } } }));
+  await turn("cancela esa reserva", next.deps);
+  assert.deepEqual(next.rec.legacy.map((j) => [j.kind, j.which]), [["cancel", "next"]]);
+
+  const now = noKeywords(stub({ tool: { name: "publish_existing", args: {} } }));
+  await turn("publícalo", now.deps);
+  assert.equal(now.rec.legacy.length, 0, "publish NOW asks first");
+
+  const later = noKeywords(stub({ tool: { name: "publish_existing", args: { when_phrase: "in 2 hours" } } }));
+  await turn("publish it in 2 hours", later.deps);
+  assert.equal(later.rec.legacy.length, 1, "a booking is cancellable, so no echo");
+  assert.equal(later.rec.legacy[0].scheduled, true);
+  assert.ok(later.rec.legacy[0].whenAt, "the model's resolved instant travels to the executor");
 });

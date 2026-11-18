@@ -213,6 +213,82 @@ function describe(agent: BrainAgent, spec: BrainAction): string {
 /** Every enabled action as a tool, plus the one non-agent tool. Order is stable (registry
  *  order, then the question tool last) so two identical registries produce two identical
  *  prompts and the same message classifies the same way twice. */
+/* ── Orders about content that ALREADY EXISTS ──────────────────────────────────────────────
+ *
+ *  Reject a draft, publish an existing article, pull a live one off the site, call off a booking. Until 2026-11-18 these were found by keyword lists
+ *  that ran BEFORE the model (lib/chat-intent.ts detectChatIntent) — English and Hinglish only, so "retira el artículo de la web" did nothing and
+ *  every new phrasing needed a new pattern. They are tools now: the model reads the sentence, in any language, negation included ("don't publish"
+ *  is never publish_existing), and the same confirmation rules apply — publish-now, unpublish and cancel-everything still ask first. */
+export const ORDER_TOOL_KIND: Record<string, "reject" | "publish" | "unpublish" | "cancel"> = {
+  reject_draft: "reject",
+  publish_existing: "publish",
+  take_down_article: "unpublish",
+  cancel_booking: "cancel",
+};
+export const isOrderTool = (name: string | null | undefined): boolean => typeof name === "string" && Object.prototype.hasOwnProperty.call(ORDER_TOOL_KIND, name);
+
+const ORDER_COMMON = {
+  [CONFIDENCE_FIELD]: META_FIELDS[CONFIDENCE_FIELD],
+};
+
+export const ORDER_TOOLS: ChatTool[] = [
+  {
+    type: "function",
+    function: {
+      name: "reject_draft",
+      description:
+        "THROW AWAY a draft the team wrote instead of publishing it: the customer says they do not want this article / it is not good / delete it / reject it " +
+        '("isko reject kar do", "ye draft hata do", "discard this article", "no quiero este borrador"). It affects a draft that was never live. ' +
+        "NEVER for pulling a LIVE article off the site (take_down_article) and never for cancelling a booking (cancel_booking). Negations are not orders.",
+      parameters: { type: "object", properties: { ...ORDER_COMMON }, required: [], additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "publish_existing",
+      description:
+        "PUBLISH an article that ALREADY EXISTS (a draft or an item waiting in Approvals) to the customer's live website, now or at a time they name " +
+        '("isko publish kar do", "ye article kal 9 baje website pe chadha do", "publish it now", "publícalo"). It is NOT for writing a new article and NOT for ' +
+        '"do not publish" / "publish mat karna" / "sirf draft" — those are not orders at all, call answer_question or the writer with delivery approvals.',
+      parameters: {
+        type: "object",
+        properties: { ...ORDER_COMMON, [WHEN_FIELD]: META_FIELDS[WHEN_FIELD] },
+        required: [],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "take_down_article",
+      description:
+        "PULL an article that is ALREADY LIVE back off the customer's website " +
+        '("isko site se hata do", "ye article site se utaar do", "take that post down", "retira el artículo de la web"). The opposite of publish_existing. ' +
+        "Not for a draft that never went live (reject_draft).",
+      parameters: { type: "object", properties: { ...ORDER_COMMON }, required: [], additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "cancel_booking",
+      description:
+        "CALL OFF something already BOOKED to run later (a scheduled article or task): " +
+        '"wo booking cancel kar do", "kal wala schedule hata do", "cancel my booked task", "cancela la reserva". `which` is "next" for the next one / the one they ' +
+        'pointed at, and "all" ONLY if they said everything ("sab cancel karo", "cancel all"). Cancelling more than was asked for is as bad as publishing more than ' +
+        'was asked for. NOT for answering "no" to a question we just asked, and NOT for "publish mat karna".',
+      parameters: {
+        type: "object",
+        properties: { ...ORDER_COMMON, which: { type: "string", enum: ["next", "all"], description: "'all' only when they clearly said everything." } },
+        required: [],
+        additionalProperties: false,
+      },
+    },
+  },
+];
+
 export function toolsFromRegistry(registry: BrainRegistry | null | undefined): ChatTool[] {
   const tools: ChatTool[] = [];
   const extras = [WHEN_FIELD, DELIVERY_FIELD, CONFIDENCE_FIELD, REPLY_FIELD];
@@ -241,6 +317,7 @@ export function toolsFromRegistry(registry: BrainRegistry | null | undefined): C
   // meets anything that will answer in prose. Until 2026-09-28 there was no such tool at all and
   // a regex owned this — see lib/chat-schedule-tools.ts for what that cost.
   tools.push(...WRITE_TOOLS);
+  tools.push(...ORDER_TOOLS);
 
   tools.push({
     type: "function",

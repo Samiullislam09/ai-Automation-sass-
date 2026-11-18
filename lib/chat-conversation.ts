@@ -141,6 +141,68 @@ export function resolveFollowUp(
   return { kind: "lapsed", pending };
 }
 
+/* ── Reading the answer with the model (any language) ─────────────────────────────────────
+
+/** What the model made of the customer's reply to our question. */
+export type AnswerRead = { answer: "yes" | "no" | "value" | "hand_back" | "other"; value?: string | null };
+
+const READ_SYSTEM = [
+  "A product asked its customer a question and the customer has now replied. Decide what the reply means. The reply can be in ANY language, script or spelling, and may be badly typed.",
+  "Answer with ONLY JSON: {\"answer\":\"yes|no|value|hand_back|other\",\"value\":\"...\"|null}",
+  "- yes: a clear agreement to do exactly what was asked (\"yes\", \"haan kar do\", \"sí, adelante\", \"نعم\", \"ok go ahead\").",
+  "- no: refuses, cancels, or changes their mind — including a yes that comes with a condition against the action (\"yes but don't publish\", \"haan lekin publish mat karna\"). When in doubt between yes and no, answer no.",
+  "- value: the reply GIVES the missing detail that was asked for. Put just that detail in `value` (a short phrase; strip filler words such as \"about\", \"it should be\", \"ke baare mein\").",
+  "- hand_back: they leave the choice to the team (\"you choose\", \"tum chuno\", \"koi bhi\", \"your call\").",
+  "- other: it is a new, unrelated request or question, not an answer to what was asked.",
+].join(String.fromCharCode(10));
+
+/** Ask the model what the reply means. Null when the model cannot be reached or does not answer in the expected shape. */
+export async function readAnswer(
+  message: string,
+  pending: PendingIntent,
+  askedSlot: string,
+  call: <T>(system: string, user: string, opts?: { timeoutMs?: number; maxTokens?: number }) => Promise<T | null>,
+): Promise<AnswerRead | null> {
+  const asked = askedSlot === CONFIRM_SLOT
+    ? `We asked the customer to CONFIRM this: ${pending.echo || pending.action}`
+    : `We asked the customer for one missing detail: "${askedSlot.replace(/_/g, " ")}" (for: ${pending.echo || pending.action})`;
+  const out = await call<{ answer?: unknown; value?: unknown }>(READ_SYSTEM, [asked, "", "CUSTOMER'S REPLY:", String(message).slice(0, 300)].join(String.fromCharCode(10)), { timeoutMs: 5000, maxTokens: 80 });
+  const answer = out?.answer;
+  if (answer !== "yes" && answer !== "no" && answer !== "value" && answer !== "hand_back" && answer !== "other") return null;
+  return { answer, value: typeof out?.value === "string" && out.value.trim() ? out.value.trim().slice(0, 120) : null };
+}
+
+/** `resolveFollowUp`, but the YES / NO / VALUE is read by the model in whatever language the customer wrote — a keyword list only ever knew English and
+ *  Hinglish ("sí" or "نعم" never matched, and a Spanish "no" could not cancel anything). The keyword reading is kept as the BACKUP when the model
+ *  cannot be reached, and as one extra safety on a confirmation: if the keywords see a refusal, the order does not run, whatever the model said.
+ *  With nothing pending there is no model call at all. */
+export async function resolveFollowUpSmart(
+  message: string,
+  state: ConversationState | null | undefined,
+  now: Date,
+  read: (message: string, pending: PendingIntent, askedSlot: string) => Promise<AnswerRead | null>,
+): Promise<FollowUp> {
+  const base = resolveFollowUp(message, state, now);
+  const pending = state?.pending_intent;
+  if (!state || !pending || !state.asked_slot) return base;          // nothing pending
+  if (base.kind === "lapsed" && isExpired(state, now)) return base;  // expired: nothing may run
+  const q = String(message ?? "").trim();
+  if (!q) return base;
+
+  let r: AnswerRead | null = null;
+  try { r = await read(q, pending, state.asked_slot); } catch { r = null; }
+  if (!r) return base; // model unreachable: the keyword reading stands
+
+  if (r.answer === "no") return { kind: "cancel", pending };
+  if (state.asked_slot === CONFIRM_SLOT) {
+    if (r.answer === "yes") return SAYS_NO.test(q) ? { kind: "cancel", pending } : { kind: "confirm", pending };
+    return { kind: "lapsed", pending };
+  }
+  if (r.answer === "hand_back") return { kind: "slot", slot: state.asked_slot, value: null, pending };
+  if (r.answer === "value") return { kind: "slot", slot: state.asked_slot, value: r.value || q.slice(0, MAX_SLOT_ANSWER), pending };
+  return { kind: "lapsed", pending };
+}
+
 /* ── The row ─────────────────────────────────────────────────────────────────────────── */
 
 export type StateResult = { ok: boolean; error?: string; missingTable?: boolean };

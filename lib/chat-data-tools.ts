@@ -36,11 +36,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ChatTool } from "@/lib/chat-tools";
 import { callWhatsapp } from "@/lib/whatsapp-proxy";
 import {
-  LEAD_TOOLS_RAW, LOOKUP_LEAD_CONVERSATION, LOOKUP_LEAD_STATS, LOOKUP_KEYWORDS, LOOKUP_AUTOPILOT,
-  lookupLeadConversation, lookupLeadStats, lookupKeywords, lookupAutopilot, MESSAGED_STAGES, REPLIED_STAGES,
+  LEAD_TOOLS_RAW, LOOKUP_LEAD_CONVERSATION, LOOKUP_LEAD_STATS, LOOKUP_KEYWORDS, LOOKUP_AUTOPILOT, LOOKUP_DATA_SOURCES,
+  lookupLeadConversation, lookupLeadStats, lookupKeywords, lookupAutopilot, lookupDataSources, MESSAGED_STAGES, REPLIED_STAGES,
 } from "@/lib/chat-lead-tools";
 
-export { LOOKUP_LEAD_CONVERSATION, LOOKUP_LEAD_STATS, LOOKUP_KEYWORDS, LOOKUP_AUTOPILOT };
+export { LOOKUP_LEAD_CONVERSATION, LOOKUP_LEAD_STATS, LOOKUP_KEYWORDS, LOOKUP_AUTOPILOT, LOOKUP_DATA_SOURCES };
 
 /* ── The tools, as the model sees them ───────────────────────────────────────────────────── */
 
@@ -288,6 +288,7 @@ export async function runReadTool(
       case LOOKUP_LEAD_STATS: return await lookupLeadStats(supabase, tenantId);
       case LOOKUP_KEYWORDS: return await lookupKeywords(supabase, tenantId);
       case LOOKUP_AUTOPILOT: return await lookupAutopilot(supabase, tenantId);
+      case LOOKUP_DATA_SOURCES: return await lookupDataSources(supabase, tenantId);
       default: return { ok: false, tool: name, note: "No such lookup." };
     }
   } catch (e: any) {

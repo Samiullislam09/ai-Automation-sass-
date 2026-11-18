@@ -4,12 +4,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   shapeLeadStats, matchLeads, shapeLeadConversation, shapeRecentConversations, shapeKeywords, shapeAutopilot,
-  LOOKUP_LEAD_CONVERSATION, LOOKUP_LEAD_STATS, LOOKUP_KEYWORDS, LOOKUP_AUTOPILOT, LEAD_TOOLS_RAW, FUNNEL,
+  LOOKUP_LEAD_CONVERSATION, LOOKUP_LEAD_STATS, LOOKUP_KEYWORDS, LOOKUP_AUTOPILOT, LOOKUP_DATA_SOURCES, LEAD_TOOLS_RAW, FUNNEL,
 } from "./chat-lead-tools";
 import { READ_TOOLS, isReadTool, lookupOutreachShape } from "./chat-data-tools";
 import { capabilitiesPrompt } from "./chat-tools";
 import { PLATFORM_KNOWLEDGE } from "./platform-knowledge";
-import { answerWhatWeCannotKnow, looksLikeMetricQuestion } from "./chat-no-data";
+import { shapeDataSources } from "./data-sources";
 
 const LEADS = [
   { id: "1", company: "Sainiul Traders", name: "Sainiul", whatsapp: "+91 76024 68881", stage: "meeting_requested", wa_status: "yes", needs_attention: true },
@@ -22,7 +22,7 @@ const LEADS = [
 ];
 
 test("the four lead tools exist, are lookups, and need no argument from the model", () => {
-  const names = [LOOKUP_LEAD_CONVERSATION, LOOKUP_LEAD_STATS, LOOKUP_KEYWORDS, LOOKUP_AUTOPILOT];
+  const names = [LOOKUP_LEAD_CONVERSATION, LOOKUP_LEAD_STATS, LOOKUP_KEYWORDS, LOOKUP_AUTOPILOT, LOOKUP_DATA_SOURCES];
   for (const n of names) {
     assert.ok(READ_TOOLS.some((t) => t.function.name === n), `${n} is offered to the model`);
     assert.equal(isReadTool(n), true);
@@ -150,12 +150,19 @@ test("the root cause of 'I can't message your leads': the capabilities the model
   assert.match(text, /Email outreach is planned, not live yet/, "no overclaiming: email is not built");
 });
 
-test("'is mein se whatsapp par kitne log hain' is a lead question, not a Google Analytics refusal", () => {
-  const none = { ga4: false, gsc: false, social: [] } as any;
-  for (const q of ["Is main se whatapp par kitne log ha", "kitne log ne reply diya", "leads mein kitne log hain", "how many leads have whatsapp"]) {
-    assert.equal(answerWhatWeCannotKnow(q, none), null, q);
-    assert.equal(looksLikeMetricQuestion(q), false, q);
-  }
-  // the real traffic question is still refused honestly
-  assert.ok(answerWhatWeCannotKnow("site pe kitne log aaye", none));
+test("what we can measure is DATA the model reads (any language), not a keyword refusal that fires before it", () => {
+  const none = shapeDataSources({ ga4: false, gsc: false, social: [] });
+  assert.equal((none.website_visitors_traffic_sessions as any).available, false);
+  assert.match((none.website_visitors_traffic_sessions as any).reason, /Google Analytics is not connected/);
+  assert.equal((none.social_followers_likes_engagement_reach as any).available, false);
+  assert.match((none.social_followers_likes_engagement_reach as any).reason, /Do NOT point them to the Connect page/);
+  assert.equal((none.revenue_sales_conversions as any).available, false);
+  assert.equal((none.lead_and_whatsapp_numbers as any).available, true, "'kitne log' about leads/WhatsApp IS countable — it is never refused as traffic");
+  const live = shapeDataSources({ ga4: true, gsc: true, social: [] });
+  assert.equal((live.website_visitors_traffic_sessions as any).available, true);
+  assert.equal((live.search_clicks_impressions_rankings as any).available, true);
+  assert.match(String(none.rule), /never estimate/);
+  assert.ok(READ_TOOLS.some((t) => t.function.name === LOOKUP_DATA_SOURCES));
+  const desc = READ_TOOLS.find((t) => t.function.name === LOOKUP_DATA_SOURCES)!.function.description;
+  for (const w of ["kitne visitor", "cuántos seguidores", "how many people visited"]) assert.ok(desc.includes(w), w);
 });

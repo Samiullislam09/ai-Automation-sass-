@@ -20,9 +20,9 @@
 import type { SystemEventPayload } from "@/lib/chat-events";
 import type { BrainRegistry, BrainResult, BrainTaskCreated, BrainIntent } from "@/lib/brain";
 import { BRAIN_UNREACHABLE } from "@/lib/brain";
-import { ANSWER_QUESTION, capabilitiesPrompt, enabledActions } from "@/lib/chat-tools";
+import { ANSWER_QUESTION, capabilitiesPrompt, enabledActions, isOrderTool, ORDER_TOOL_KIND } from "@/lib/chat-tools";
 import { ackLine, CONFIDENCE_FLOOR, type IntentPlan } from "@/lib/chat-brain-intent";
-import { CONFIRM_SLOT, resolveFollowUp, type ConversationState, type PendingIntent, type StateResult } from "@/lib/chat-conversation";
+import { CONFIRM_SLOT, resolveFollowUp, type ConversationState, type FollowUp, type PendingIntent, type StateResult } from "@/lib/chat-conversation";
 import { describeWhen, parseWhen } from "@/lib/when";
 import { mightBeAnOrder } from "@/lib/chat-classify";
 import { detectChatIntent } from "@/lib/chat-intent";
@@ -36,6 +36,11 @@ export type OrderResult = {
   jobId: string | null;
   label: string | null;
   event?: SystemEventPayload;
+  /** The `text` is one of the product's own fixed sentences (Hinglish), not something the model wrote for this customer. The route passes it through
+   *  lib/chat-localize.ts so it reaches the customer in THEIR language. */
+  cannedText?: boolean;
+  /** Same for the card: its title, detail and button labels. */
+  cannedEvent?: boolean;
 };
 
 const nothingStarted = (text: string, event?: SystemEventPayload): OrderResult => ({
@@ -44,6 +49,8 @@ const nothingStarted = (text: string, event?: SystemEventPayload): OrderResult =
   jobId: null,
   label: null,
   event,
+  cannedText: true,
+  cannedEvent: !!event,
 });
 
 /** The five things the brain still cannot carry out, which the old code path does today.
@@ -56,6 +63,9 @@ export type LegacyJob = {
   /** A publish with a time on it is a booking, and a booking can be cancelled — so it is not
    *  irreversible and does not need an echo. Only "do it now" does. */
   scheduled?: boolean;
+  /** The instant (ISO) the model resolved for a scheduled publish, so the executor books THAT time instead of re-reading the sentence with a keyword parser
+   *  that only knows English and Hinglish — in any other language a booking would otherwise silently become "publish now". */
+  whenAt?: string | null;
 };
 
 /** Which of the four old-path orders this message is, if any.
@@ -123,12 +133,15 @@ export type BrainTurnDeps = {
   /** The old path, for the orders the brain cannot do yet. Returns the same OrderResult. */
   runLegacy(job: LegacyJob): Promise<OrderResult>;
   /** Which of those four, if any, this message is. The route passes today's matcher. */
-  legacyKind(message: string): LegacyJob | null;
+  legacyKind?(message: string): LegacyJob | null;
   /** When a reusable action last actually succeeded for this tenant, or null if never / the
    *  read failed. Backs the "already fresh, don't redo it" gate below — see lib/reuse.ts. A
    *  test stub that never resolves a date is exactly "always run it", which is today's
    *  behaviour, so existing tests do not need to know this dependency exists. */
   lastSuccessfulRun?(tenantId: string, agent: string): Promise<Date | null>;
+  /** Reads the customer's reply to a pending question in ANY language (lib/chat-conversation.ts resolveFollowUpSmart). Absent = the keyword reading
+   *  alone, which is what the unit tests use; the route passes the model-backed one. */
+  readFollowUp?(message: string, state: ConversationState | null, now: Date): Promise<FollowUp>;
 };
 
 /** Actions that read or rebuild something which stays valid for days — redoing one because a
@@ -201,13 +214,24 @@ function etaText(seconds: number | undefined): string {
 
 /* ── The turn ────────────────────────────────────────────────────────────────────────── */
 
+/** One of the four orders about content that already exists. The irreversible ones (publish-now, unpublish, cancel-everything) are echoed and wait
+ *  for a yes; the reversible ones run at once. Same rule whether a keyword matcher or the model found the order. */
+async function runLegacyOrAskFirst(legacy: LegacyJob, input: BrainTurnInput, deps: BrainTurnDeps, now: Date): Promise<BrainTurn> {
+  const irreversible =
+    (legacy.kind === "publish" && !legacy.scheduled) ||
+    legacy.kind === "unpublish" ||
+    (legacy.kind === "cancel" && legacy.which === "all");
+  if (!irreversible) return { handled: true, order: await deps.runLegacy(legacy), action: `legacy:${legacy.kind}` };
+  return { handled: true, order: await askToConfirmLegacy(legacy, input, deps, now), action: `legacy:${legacy.kind}` };
+}
+
 export async function brainTurn(input: BrainTurnInput, deps: BrainTurnDeps): Promise<BrainTurn> {
   const now = input.now ?? new Date();
   const message = String(input.message ?? "").trim();
 
   /* 1 ─ Is this the answer to something we asked? ------------------------------------- */
   const state = input.conversationId ? await deps.state.load() : null;
-  const follow = resolveFollowUp(message, state, now);
+  const follow = deps.readFollowUp ? await deps.readFollowUp(message, state, now) : resolveFollowUp(message, state, now);
 
   if (follow.kind === "confirm") {
     await deps.state.clear();
@@ -255,19 +279,9 @@ export async function brainTurn(input: BrainTurnInput, deps: BrainTurnDeps): Pro
   // Checked BEFORE the model, deliberately. These are today's matcher's own decisions, they
   // are instant and free, and they behave exactly as they did before the brain existed. The
   // two irreversible ones get the echo they were always supposed to have.
-  const legacy = follow.kind === "slot" ? null : deps.legacyKind(message);
-  if (legacy) {
-    const irreversible =
-      (legacy.kind === "publish" && !legacy.scheduled) ||
-      legacy.kind === "unpublish" ||
-      (legacy.kind === "cancel" && legacy.which === "all");
-    if (!irreversible) return { handled: true, order: await deps.runLegacy(legacy), action: `legacy:${legacy.kind}` };
-    return {
-      handled: true,
-      order: await askToConfirmLegacy(legacy, input, deps, now),
-      action: `legacy:${legacy.kind}`,
-    };
-  }
+  // A keyword matcher can still be injected (the unit tests do); production no longer passes one — these four orders are read by the model now, below.
+  const legacy = follow.kind === "slot" ? null : deps.legacyKind?.(message) ?? null;
+  if (legacy) return runLegacyOrAskFirst(legacy, input, deps, now);
 
   /* 3 ─ What can the team do right now? ----------------------------------------------- */
   const reg = await deps.getRegistry();
@@ -336,6 +350,18 @@ export async function brainTurn(input: BrainTurnInput, deps: BrainTurnDeps): Pro
   // answer, in its own words and the customer's own language, rather than one fixed sentence
   // standing in for all three.
   const routed = intent;
+
+  // The model chose one of the four orders about content that already exists (reject / publish now / unpublish / cancel a booking).
+  if (isOrderTool(routed.action)) {
+    const kind = ORDER_TOOL_KIND[routed.action];
+    const job: LegacyJob = {
+      kind,
+      message,
+      ...(kind === "cancel" ? { which: routed.params?.which === "all" ? ("all" as const) : ("next" as const) } : {}),
+      ...(kind === "publish" ? { scheduled: !!routed.when, whenAt: routed.when?.at ?? null } : {}),
+    };
+    return runLegacyOrAskFirst(job, input, deps, now);
+  }
   const known = enabledActions(registry);
   if (routed.action === ANSWER_QUESTION || !known.has(routed.action)) {
     // A lookup_* action lands here too — it is not an agent, so `known` will never hold it.
@@ -532,6 +558,7 @@ async function placeOrder(
     agentId: room,
     jobId: created.task_id,
     label: created.echo || intent.echo || null,
+    cannedEvent: true,
     event: {
       kind: "running",
       title: "Started",
@@ -562,6 +589,8 @@ async function runPending(
       agentId: null,
       jobId: pending.task_id,
       label: pending.echo || null,
+      cannedText: true,
+      cannedEvent: true,
       event: {
         kind: "running",
         title: "Started",

@@ -32,7 +32,7 @@ async function completeNvidia(prompt: string): Promise<string> {
       // reasoning) — this is the onboarding half of the same niche/topics summary, and the two
       // disagreeing about the model would mean a tenant's Site Brain differed depending on
       // whether it was built during onboarding or by a later crawl.
-      model: process.env.NVIDIA_MODEL || "nvidia/nemotron-3-super-120b-a12b", // ultra-550b went persistent-503 2026-10-17; env-driven
+      model: process.env.NVIDIA_MODEL || "nvidia/nemotron-3-ultra-550b-a55b", // super-120b is EOL (410, probed 2026-11-18); ultra answers again; env-driven
       // REQUIRED, and absent here until now: every Nemotron needs this switch, and super-120b is a
       // Nemotron. Without it the family streams its own scratchpad as the answer (see
       // lib/chat-model.ts's modelParams), which for a caller that then parses the reply as JSON
