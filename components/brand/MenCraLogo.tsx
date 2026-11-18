@@ -2,15 +2,26 @@ import { BRAND } from "@/lib/brand";
 
 /** The MenCra mark and lockup. ONE drawing, used everywhere (landing, auth, dashboard, favicon, social image).
  *
- *  The mark is a circle-shaped "M" in white on the product's violet-to-blue gradient rounded square. It is a raster (public/brand/mencra-mark-v2.png); app/icon.png, app/apple-icon.png and
- *  app/favicon.ico are made from the same drawing. */
+ *  The mark is an "M" built as two rising peaks — growth, steady and upward — with a four-point spark beside the right peak:
+ *  the AI that does the work. It sits on a rounded square in the product's violet-to-blue gradient and reads at 16 px
+ *  (the browser tab) as well as at 512 px. The same geometry is in public/brand/mencra-mark.svg and app/icon.svg. */
 export const MARK_GRADIENT = ["#a78bfa", "#6a5af0", "#3b82f6"] as const;
 
 export function LogoMark({ size = 32, className = "", title }: { size?: number; className?: string; title?: string }) {
-  // public/brand/mencra-mark-v2.png: 512x512, gradient rounded square with the white circle-M.
+  const id = `mc-g-${size}`;
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img src="/brand/mencra-mark-v2.png" alt={title ?? ""} width={size} height={size} className={className} aria-hidden={title ? undefined : true} style={{ display: "block", objectFit: "contain" }} />
+    <svg width={size} height={size} viewBox="0 0 32 32" fill="none" className={className} role={title ? "img" : undefined} aria-hidden={title ? undefined : true} aria-label={title}>
+      <defs>
+        <linearGradient id={id} x1="2" y1="2" x2="30" y2="30" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor={MARK_GRADIENT[0]} />
+          <stop offset="0.55" stopColor={MARK_GRADIENT[1]} />
+          <stop offset="1" stopColor={MARK_GRADIENT[2]} />
+        </linearGradient>
+      </defs>
+      <rect width="32" height="32" rx="9" fill={`url(#${id})`} />
+      <path d="M8.5 23.5V11.5L16 19l7.5-7.5v12" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M26 2.8Q26 5.8 29 5.8Q26 5.8 26 8.8Q26 5.8 23 5.8Q26 5.8 26 2.8Z" fill="#fff" />
+    </svg>
   );
 }
 
