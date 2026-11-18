@@ -2,16 +2,15 @@ import { BRAND } from "@/lib/brand";
 
 /** The MenCra mark and lockup. ONE drawing, used everywhere (landing, auth, dashboard, favicon, social image).
  *
- *  The mark is an "M" inside a circle with watchful owl eyes (the assistant that never sleeps), in the product's
- *  violet-to-blue gradient. It is a raster (public/brand/mencra-mark-robot.png); app/icon.png, app/apple-icon.png and
+ *  The mark is a circle-shaped "M" in white on the product's violet-to-blue gradient rounded square. It is a raster (public/brand/mencra-mark-v2.png); app/icon.png, app/apple-icon.png and
  *  app/favicon.ico are made from the same drawing. */
 export const MARK_GRADIENT = ["#a78bfa", "#6a5af0", "#3b82f6"] as const;
 
 export function LogoMark({ size = 32, className = "", title }: { size?: number; className?: string; title?: string }) {
-  // The owl-eyed "M" in a circle (public/brand/mencra-mark-robot.png, 512x551, transparent). Height = size.
+  // public/brand/mencra-mark-v2.png: 512x512, gradient rounded square with the white circle-M.
   return (
     // eslint-disable-next-line @next/next/no-img-element
-    <img src="/brand/mencra-mark-robot.png" alt={title ?? ""} width={Math.round((size * 512) / 551)} height={size} className={className} aria-hidden={title ? undefined : true} style={{ display: "block", objectFit: "contain" }} />
+    <img src="/brand/mencra-mark-v2.png" alt={title ?? ""} width={size} height={size} className={className} aria-hidden={title ? undefined : true} style={{ display: "block", objectFit: "contain" }} />
   );
 }
 
