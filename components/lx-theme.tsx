@@ -263,9 +263,9 @@ export const LX_CSS = `
 .lx-tab{position:relative;padding:9px 12px;border-radius:10px 10px 0 0;font-size:12.5px;font-weight:500;color:var(--lx-mut);
   background:none;border:none;cursor:pointer;white-space:nowrap}
 .lx-tab:hover{color:#d6d6e4}
-.lx-tab.on{color:var(--lx-sel-text);background:var(--lx-sel-bg);box-shadow:var(--lx-sel-glow)}
+.lx-tab.on{color:var(--lx-sel-text)}
 .lx-tab.on::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;border-radius:2px;
-  background:linear-gradient(90deg,#3b82f6,#22d3ee);box-shadow:0 0 8px rgba(59,130,246,.85)}
+  background:linear-gradient(90deg,#3b82f6,#22d3ee)}
 
 /* ---- progress ---------------------------------------------------------- */
 .lx-track{height:6px;border-radius:999px;background:#191926;overflow:hidden}

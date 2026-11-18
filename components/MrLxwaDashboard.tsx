@@ -3551,19 +3551,22 @@ export default function MrLxwaDashboard({
       } ${sideOpen ? "translate-x-0" : "-translate-x-full"}`}
     >
       {/* logo */}
-      <div className={`flex items-center gap-3 pt-5 pb-4 ${mini ? "px-3 lg:justify-center" : "px-4"}`}>
-        <LogoMark size={30} />
-        <div className={`min-w-0 ${mini ? "lg:hidden" : ""}`}>
-          <div className="text-sm font-bold leading-tight">MenCra</div>
-          <div className="lx-10 lx-mut leading-tight">AI marketing team</div>
+      <div className={`pt-5 pb-3 ${mini ? "px-3" : "px-4"}`}>
+        <div className={`flex items-center gap-2.5 ${mini ? "lg:justify-center" : ""}`}>
+          <LogoMark size={30} />
+          <div className={`min-w-0 ${mini ? "lg:hidden" : ""}`}>
+            <div className="text-sm font-bold leading-tight">MenCra</div>
+            <div className="lx-10 lx-mut whitespace-nowrap leading-tight">AI marketing team</div>
+          </div>
         </div>
-        {/* rendered conditionally, not class-toggled: "hidden lg:inline-flex lg:hidden" is two
-            lg display utilities fighting, and inline-flex wins in Tailwind's output order */}
-        <div className={`flex items-center gap-1 ${mini ? "lg:hidden" : "ml-auto"}`}>
-          <ThemeToggle className="!size-8" />
+        {/* the two controls sit on their own row under the brand, so the name never wraps or crowds them.
+            Rendered conditionally, not class-toggled: "hidden lg:inline-flex lg:hidden" is two lg display
+            utilities fighting, and inline-flex wins in Tailwind's output order. */}
+        <div className={`mt-3 flex items-center gap-1.5 ${mini ? "lg:hidden" : "justify-end"}`}>
+          <ThemeToggle className="!size-7" />
           {!mini && (
-            <button className="lx-icobtn hidden lg:inline-flex" onClick={toggleMini} aria-label="Collapse sidebar" title="Collapse sidebar">
-              <PanelLeftClose size={15} />
+            <button className="lx-icobtn hidden !h-7 !w-7 !min-h-0 !min-w-0 lg:inline-flex" onClick={toggleMini} aria-label="Collapse sidebar" title="Collapse sidebar">
+              <PanelLeftClose size={14} />
             </button>
           )}
         </div>
@@ -4483,7 +4486,7 @@ export default function MrLxwaDashboard({
       {/* tabs */}
       <div className="flex items-center gap-5 border-b px-4" style={{ borderColor: "var(--lx-border)" }}>
         <button
-          className="lx-tab on"
+          className={`lx-tab ${aTab === "assistant" ? "on" : ""}`}
           style={aTab === "assistant" ? { color: "var(--lx-violet)" } : { color: "var(--lx-mut)" }}
           onClick={() => setATab("assistant")}
         >
