@@ -6,7 +6,8 @@
     "dev": "next dev",
     "dev:turbo": "next dev --turbo",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "golden:chat": "npx tsx lib/chat-golden.live.ts"
   },
   "dependencies": {
     "@radix-ui/react-accordion": "^1.2.20",
