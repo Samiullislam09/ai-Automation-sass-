@@ -36,7 +36,7 @@
  * ============================================================================
  */
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { LogoMark } from "@/components/brand/MenCraLogo";
 import { renderMarkdown } from "@/lib/md";
 import Link from "next/link";
@@ -2878,6 +2878,22 @@ export default function MrLxwaDashboard({
   const [chatBusy, setChatBusy] = useState(false);
   const chatRef = useRef<HTMLDivElement>(null);
   const msgInputRef = useRef<HTMLTextAreaElement>(null);
+  /* The message box grows with what is typed (one line -> as tall as ~40% of the screen), and only past that does
+     it scroll. Re-measured on every change, and on a resize of the window; an emptied box falls back to one line. */
+  const fitMsgInput = () => {
+    const el = msgInputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const cap = Math.min(Math.round(window.innerHeight * 0.4), 280);
+    el.style.height = `${Math.min(el.scrollHeight, cap)}px`;
+    el.style.overflowY = el.scrollHeight > cap ? "auto" : "hidden";
+  };
+  useLayoutEffect(() => {
+    fitMsgInput();
+    window.addEventListener("resize", fitMsgInput);
+    return () => window.removeEventListener("resize", fitMsgInput);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [msg, aTab, botOpen]);
   const helloSent = useRef(false); // React 18 strict-mode double-invokes effects in dev — without
   // this the real /api/chat "__hello__" greeting was requested twice on one mount.
 
@@ -4844,7 +4860,7 @@ export default function MrLxwaDashboard({
           icon buttons either side so the row reads as one deliberate unit instead
           of mismatched pieces */}
       <div className="px-3 pb-3 pt-1">
-        <div className="lx-chat-in flex items-center gap-1 px-2 py-1">
+        <div className="lx-chat-in flex items-end gap-1 px-2 py-1">
           <button className="lx-icobtn shrink-0" style={{ border: "none", background: "transparent" }} aria-label="Voice input">
             <Mic size={15} />
           </button>
@@ -4861,8 +4877,8 @@ export default function MrLxwaDashboard({
             placeholder={chatBusy ? "Replying…" : "Message…"}
             disabled={chatBusy}
             rows={1}
-            className="lx-11 w-full resize-none bg-transparent py-1.5 disabled:opacity-60"
-            style={{ border: "none", color: "var(--lx-text)", maxHeight: 88, overflowY: "auto" }}
+            className="lx-11 lx-scroll w-full resize-none bg-transparent py-1.5 disabled:opacity-60"
+            style={{ border: "none", color: "var(--lx-text)", overflowY: "hidden" }}
           />
           {/* Send/Stop share one slot, ChatGPT/Claude-style: mid-reply this is a real Stop (see
               stopGenerating — aborts the fetch and, if an order was already accepted, cancels
