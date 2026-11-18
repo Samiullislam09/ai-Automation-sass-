@@ -38,6 +38,7 @@
  *  to name what moved, so "I meant the audit, not my articles" is catchable in the same breath
  *  rather than a week later. The failure above would have been visible in its own confirmation.
  */
+import { AUTOPILOT_TOOLS, MANAGE_AUTOPILOT, runManageAutopilot } from "@/lib/autopilot";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ChatTool } from "@/lib/chat-tools";
 import {
@@ -158,10 +159,14 @@ const ONLY_FOR_RECURRING =
   "standing daily job when they asked for one run means work and money they did not agree to, every day, until " +
   "they spot it.";
 
-export const WRITE_TOOLS: ChatTool[] = RAW_WRITE_TOOLS.map((t) => ({
-  ...t,
-  function: { ...t.function, description: t.function.description + ONLY_FOR_RECURRING },
-}));
+export const WRITE_TOOLS: ChatTool[] = [
+  ...RAW_WRITE_TOOLS.map((t) => ({
+    ...t,
+    function: { ...t.function, description: t.function.description + ONLY_FOR_RECURRING },
+  })),
+  // The lead chain's master switch and settings (lib/autopilot.ts). Not the article/audit timetable, so it does not carry the recurring-timetable warning.
+  ...AUTOPILOT_TOOLS,
+];
 
 /* ── Running one ─────────────────────────────────────────────────────────────────────────── */
 
@@ -186,6 +191,8 @@ export async function runWriteTool(
     switch (name) {
       case MANAGE_SCHEDULE:
         return await manageSchedule(supabase, tenantId, args);
+      case MANAGE_AUTOPILOT:
+        return await runManageAutopilot(supabase, tenantId, args);
       default:
         return { ok: false, tool: name, note: "No such setting." };
     }

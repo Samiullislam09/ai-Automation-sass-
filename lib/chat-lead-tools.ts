@@ -396,7 +396,8 @@ export async function lookupDataSources(supabase: SupabaseClient, tenantId: stri
   return { ok: true, tool: LOOKUP_DATA_SOURCES, data: shapeDataSources(await loadDataSources(supabase, tenantId)) };
 }
 
-export async function lookupAutopilot(supabase: SupabaseClient, tenantId: string): Promise<ReadResult> {
+/** Everything the autopilot picture is made from, read in one go. Shared by the chat lookup, the Autopilot page's API and the autopilot write tool. */
+export async function loadAutopilotInputs(supabase: SupabaseClient, tenantId: string): Promise<AutopilotInput> {
   const [leads, sched, status, settings, admins, google] = await Promise.all([
     selectLeads(supabase, tenantId, [LEAD_COLS, LEAD_COLS_OLD]).catch(() => [] as any[]),
     supabase.from("schedules").select("enabled, frequency, time_of_day, timezone, count, last_run_at").eq("tenant_id", tenantId).eq("kind", "leads").maybeSingle().then((r: any) => r.data ?? null, () => null),
@@ -406,13 +407,16 @@ export async function lookupAutopilot(supabase: SupabaseClient, tenantId: string
     loadGoogle(supabase, tenantId).catch(() => null),
   ]);
   const googleCalendar = google ? ((google.scopes ?? []).includes(SCOPE_CALENDAR) ? "connected" : "needs_reconnect") : "not_connected";
-  const data = shapeAutopilot({
+  return {
     leadSchedule: sched,
     whatsapp: status?.ok ? { connected: status.status === "connected" || status.status === "reconnecting" || status.linked === true, autoReply: typeof status.autoReply === "boolean" ? status.autoReply : null } : null,
     settings: settings?.ok ? settings.settings : null,
     teamNumbers: admins?.ok && Array.isArray(admins.admins) ? admins.admins.filter((a: any) => a?.notify !== false).length : null,
     googleCalendar,
     stats: shapeLeadStats(leads),
-  });
-  return { ok: true, tool: LOOKUP_AUTOPILOT, data };
+  };
+}
+
+export async function lookupAutopilot(supabase: SupabaseClient, tenantId: string): Promise<ReadResult> {
+  return { ok: true, tool: LOOKUP_AUTOPILOT, data: shapeAutopilot(await loadAutopilotInputs(supabase, tenantId)) };
 }

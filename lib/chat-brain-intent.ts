@@ -63,6 +63,7 @@ import {
   type EnabledAction,
 } from "@/lib/chat-tools";
 import { isReadTool } from "@/lib/chat-data-tools";
+import { isWriteTool } from "@/lib/chat-schedule-tools";
 
 /** Plan §5.1's shape, exactly. `agent` and `irreversible` are the brain's to fill in. */
 export type IntentPlan = {
@@ -317,6 +318,11 @@ export function planFromToolCall(
   // collapsed into nothingOrdered() and was then answered from a pre-baked blob, which is the
   // failure lib/chat-data-tools.ts documents.
   if (isReadTool(name)) return { ...nothingOrdered(), action: String(name), params: { ...(args ?? {}) } };
+
+  // A SETTINGS WRITE (manage_schedule, manage_autopilot). It travels exactly like a lookup — name and arguments survive to the route, which runs it and hands the
+  // before/after to the reply. Until 2026-11-19 this branch did not exist: the write tools were offered to the model, the model called them, and this function turned
+  // the call into "nothing was ordered" — so "roz 9 baje audit karo" silently became an ordinary conversation. Found by the live routing check.
+  if (isWriteTool(name)) return { ...nothingOrdered(), action: String(name), params: { ...(args ?? {}) } };
 
   // An order about content that already exists (reject / publish-now / unpublish / cancel a booking). Not a registry action, so it travels like a
   // lookup: the name and arguments survive to lib/chat-brain.ts, which runs it with the same confirmation rules the old keyword path had.

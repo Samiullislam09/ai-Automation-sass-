@@ -60,6 +60,18 @@ const CASES: [string, string[]][] = [
   ["publish mat karna abhi, sirf draft rakho", ["answer_question", "write_article"]],
   ["اكتب لي مقالا عن الشهادات", ["write_article"]],
   ["আমার লিডদের সাথে কথা বলতে পারো?", ["lookup_autopilot", "answer_question"]],
+  // ── the autopilot: control and questions
+  ["autopilot on karo", ["manage_autopilot"]],
+  ["sab kuch automatic chalu kar do leads ka", ["manage_autopilot"]],
+  ["pause everything, stop messaging leads for now", ["manage_autopilot"]],
+  ["roz 20 leads dhundo", ["manage_autopilot"]],
+  ["messages sirf subah 10 se shaam 6 ke beech bhejo", ["manage_autopilot"]],
+  ["follow-up band kar do", ["manage_autopilot"]],
+  ["activa el piloto automático de leads", ["manage_autopilot"]],
+  ["autopilot kaisa chal raha hai", ["lookup_autopilot"]],
+  ["kya sab kuch auto chal raha hai", ["lookup_autopilot"]],
+  ["roz subah 9 baje article banao", ["manage_schedule"]],
+  ["abhi 10 leads dhundo", ["find_leads"]],
 ];
 
 async function main() {
