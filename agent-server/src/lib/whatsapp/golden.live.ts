@@ -42,7 +42,11 @@ for (const sc of SCENARIOS.filter((s) => s.id.includes(filter))) {
     // The production path, nets included — not the raw model.
     const d = await decideFromPrompt(built);
     reply = d.reply;
-    if (sc.expect.automated) {
+    if (sc.expect.ordinary) {
+      if (d.stop !== "no" || d.intent === "stop") problems.push(`a message with a stop-like word was read as a stop request (stop=${d.stop} intent=${d.intent})`);
+      if (d.commit === true && d.confidence >= 0.8) problems.push("a hesitant message was read as a firm decision to buy (it would auto-convert the lead)");
+      if (!(d.action === "reply" && d.reply)) problems.push("an ordinary message must get an ordinary reply");
+    } else if (sc.expect.automated) {
       if (!d.automated) problems.push("an automatic reply was not recognised as one");
       if (d.action === "reply" && d.reply) problems.push("an automatic reply must get NO reply, but one was drafted");
       if (d.call && d.call.stage !== "none") problems.push(`no call may be arranged on a machine's message (call.stage=${d.call.stage})`);

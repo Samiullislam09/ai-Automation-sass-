@@ -83,6 +83,22 @@ export function detectOptOut(text: string): boolean {
   return phrases.some((p) => t.includes(` ${p} `));
 }
 
+/** Did the customer ask us to stop? The MODEL decides (it reads any language and knows "can you stop by our office" and "please don't stop the service" are not stop
+ *  requests); the keyword list is only a BACKUP for when the model could not be reached, and the one exception is the bare word the footer of our first message promises
+ *  ("reply with the word STOP"): that always stops. Before 2026-11-19 the keyword list ran first and silently opted a customer out on "can you stop by our office tomorrow?".
+ *   stop     -> mark do-not-contact, send nothing
+ *   flag     -> send nothing, let a person look (fed up, but did not actually say stop)
+ *   continue -> an ordinary message */
+export type StopVerdict = "stop" | "flag" | "continue";
+export function stopVerdict(o: { keyword: boolean; text: string; model: { stop?: "yes" | "maybe" | "no"; intent?: string } | null }): StopVerdict {
+  const bare = String(o.text ?? "").trim().toLowerCase().replace(/[^a-z\u0900-\u097F\u0600-\u06FF\s]/g, "").replace(/\s+/g, " ");
+  if (bare === "stop" || bare === "unsubscribe") return "stop";
+  if (!o.model) return o.keyword ? "stop" : "continue"; // the model is down: the old safe direction
+  if (o.model.stop === "yes" || o.model.intent === "stop") return "stop";
+  if (o.model.stop === "maybe") return "flag";
+  return "continue";
+}
+
 /** An EXPLICIT, high-confidence buying signal — the only thing that auto-converts a lead to a paying
  *  client (§29.8, owner: fully automatic, but only on an unmistakable signal, never a lukewarm
  *  "sounds good"). Deterministic like detectOptOut so the model can't trigger a conversion on a

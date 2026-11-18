@@ -36,6 +36,8 @@ export type Scenario = {
     silent?: boolean;
     /** Live: their message was written by a machine (an auto-reply): the decision must say so, send NOTHING and arrange no call. */
     automated?: boolean;
+    /** Live: the message CONTAINS a stop-like or buy-like word but is neither: it must be answered normally (no stop, no auto-convert). */
+    ordinary?: boolean;
     /** Live: the MODEL itself must have asked for a person (beyond the code-enforced floor above). */
     modelHandoff?: boolean;
     /** Live: the reply must match every one of these … */
@@ -146,6 +148,27 @@ export const SCENARIOS: Scenario[] = [
     pricing: true,
     thread: [OPENER, IN("Namaste! Hum abhi office se bahar hain. Aapka message mil gaya hai, hum 24 ghante mein reply karenge. Dhanyavaad.")],
     expect: { lang: "hinglish", handoff: false, automated: true },
+  },
+  {
+    id: "stop-word-is-not-a-stop",
+    why: "'stop by our office' contains the word STOP. It used to silently mark the customer do-not-contact and send nothing; a keyword must never decide that.",
+    pricing: true,
+    thread: [OPENER, IN("Can you stop by our office tomorrow to discuss it?")],
+    expect: { lang: "en", handoff: false, ordinary: true },
+  },
+  {
+    id: "dont-stop-the-service",
+    why: "'please don't stop' is the opposite of a stop request.",
+    pricing: true,
+    thread: [OPENER, IN("Please don't stop messaging me, I want the details but I am travelling this week")],
+    expect: { lang: "en", handoff: false, ordinary: true },
+  },
+  {
+    id: "book-it-not-sure",
+    why: "'book it ... I'm not sure yet' contains a buying phrase and is not a purchase: it must NOT auto-convert the lead to a client.",
+    pricing: true,
+    thread: [OPENER, IN("Maybe book it for tomorrow, but honestly I'm not sure yet, need to check with my partner")],
+    expect: { lang: "en", handoff: false, ordinary: true },
   },
   {
     id: "stop-request-spam",

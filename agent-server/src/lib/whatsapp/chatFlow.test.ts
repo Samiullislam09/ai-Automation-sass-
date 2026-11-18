@@ -9,7 +9,7 @@ process.env.DATABASE_URL ||= "postgres://unit-test/none";
 process.env.SUPABASE_URL ||= "http://unit-test.invalid";
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= "unit-test";
 
-const { finalizeDecision, parseDecision, inventedSchedule, REPLY_SYSTEM } = await import("./decide.js");
+const { finalizeDecision, parseDecision, inventedSchedule, stopVerdict, detectOptOut, REPLY_SYSTEM } = await import("./decide.js");
 const { MEETING_ACK, MEETING_FALLBACK, tooLongForChat, splitForChat } = await import("./conversation.js");
 const { unsupportedAmounts } = await import("../pricing.js");
 const { ACTIVE_MIN_S, ACTIVE_MAX_S } = await import("./timing.js");
@@ -222,4 +222,19 @@ test("a bare intent 'meeting' is NOT a call request: only the customer's own wor
   assert.equal(r.needs_human, false);
   assert.equal(r.call?.stage, "none");
   assert.equal(r.reply, "Happy to share more about the process.", "the model's own reply stands; nothing is replaced by the call-asking line");
+});
+
+test("a stop-like WORD is only a hint: the model decides, the keywords are the backup, and the bare STOP of our own footer always stops", () => {
+  // the false positives that used to silently opt a customer out
+  for (const m of ["can you stop by our office tomorrow?", "please don't stop the service, I want to continue"]) {
+    assert.equal(detectOptOut(m), true, "the keyword list still sees the word");
+    assert.equal(stopVerdict({ keyword: true, text: m, model: { stop: "no", intent: "question" } }), "continue", `the model reads it correctly: ${m}`);
+  }
+  assert.equal(stopVerdict({ keyword: true, text: "please stop messaging me", model: { stop: "yes", intent: "stop" } }), "stop");
+  assert.equal(stopVerdict({ keyword: false, text: "no me escriban más", model: { stop: "yes", intent: "stop" } }), "stop", "any language, no keyword needed");
+  assert.equal(stopVerdict({ keyword: false, text: "I'm busy", model: { stop: "maybe", intent: "other" } }), "flag");
+  assert.equal(stopVerdict({ keyword: true, text: "band karo bhai", model: null }), "stop", "model down: the keyword acts, the safe direction");
+  assert.equal(stopVerdict({ keyword: false, text: "hello", model: null }), "continue");
+  for (const bare of ["STOP", "stop.", " Stop! ", "unsubscribe"]) assert.equal(stopVerdict({ keyword: true, text: bare, model: { stop: "no" } }), "stop", `the footer promises it: "${bare}"`);
+  assert.equal(stopVerdict({ keyword: true, text: "stop by tomorrow", model: { stop: "no" } }), "continue", "only the bare word is exempt");
 });

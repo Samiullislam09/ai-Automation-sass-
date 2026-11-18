@@ -20,7 +20,7 @@
  *  (outbound timeline, follow-ups), not this one. */
 import { supabase } from "../../supabase.js";
 import { enqueueWhatsappAutoReply } from "../../queues.js";
-import { decideReply, detectOptOut, detectBuyIntent, isNearDuplicate, loadRecentThread } from "./decide.js";
+import { decideReply, detectOptOut, stopVerdict, isNearDuplicate, loadRecentThread } from "./decide.js";
 import { detectLanguage, classifyLanguage, splitForChat, HOLDING, OPT_OUT_ACK } from "./conversation.js";
 import { logEvent } from "./events.js";
 import { replyTiming, delayUntilReplyS, activeDelayS } from "./timing.js";
@@ -319,10 +319,9 @@ async function handleAutoReplyLocked(job: AutoReplyJob): Promise<void> {
       console.log(`[whatsapp] auto-reply: ${leadId} opted out — stopping (${why})`);
       void logEvent(tenantId, leadId, "system", `Asked not to be messaged (${why}): marked do-not-contact, nothing was sent`, { said: String(last.body).slice(0, 200) });
     };
-    if (last.direction === "in" && detectOptOut(last.body)) {
-      await optOutNow("their words matched a stop request");
-      return;
-    }
+    // A keyword that LOOKS like a stop is only a hint now (stopVerdict): the model reads the message first, because "can you stop by our office" and "don't stop the service"
+    // contain the word and are not requests to stop. If the model cannot be reached the hint is acted on (the safe direction), below.
+    const keywordStop = last.direction === "in" && detectOptOut(last.body);
 
     const gate = autoReplyGate({
       optOut: (lead as any).opt_out === true,
@@ -365,6 +364,10 @@ async function handleAutoReplyLocked(job: AutoReplyJob): Promise<void> {
       // just written in and must not be left with silence: tell them, once, that a person will
       // answer — and make that true by flagging the lead and alerting the owner.
       console.warn(`[whatsapp] reply model failed for ${leadId}: ${e?.message}`);
+      if (stopVerdict({ keyword: keywordStop, text: last.body, model: null }) === "stop") {
+        await optOutNow("the assistant was unreachable and their words matched a stop request");
+        return;
+      }
       // The LLM lane is full (a surge): wait a little and try again before telling the customer anything.
       void logEvent(tenantId, leadId, "error", `The reply model failed: ${String(e?.message ?? e).slice(0, 160)}`);
       if (isBusy(e) && (job.deferred ?? 0) < MAX_DEFERRALS) {
@@ -388,11 +391,13 @@ async function handleAutoReplyLocked(job: AutoReplyJob): Promise<void> {
 
     // THE MODEL READ A STOP REQUEST in whatever language, spelling or slang the customer used. "yes": do-not-contact, send nothing.
     // "maybe": clearly fed up or "not interested" without saying stop — send nothing either, and let a person look.
-    if (decision.stop === "yes" || decision.intent === "stop") {
+    const verdict = stopVerdict({ keyword: keywordStop, text: last.body, model: decision });
+    if (keywordStop && verdict === "continue") void logEvent(tenantId, leadId, "system", "Their words contained a stop-like word, but the assistant read the message as an ordinary one: answered normally", { said: String(last.body).slice(0, 200) });
+    if (verdict === "stop") {
       await optOutNow(`the assistant read it as a stop request: ${decision.reason || decision.intent}`);
       return;
     }
-    if (decision.stop === "maybe") {
+    if (verdict === "flag") {
       await flagForHuman(tenantId, leadId, "May not want to be messaged", `${decision.reason || "They sound fed up or not interested"} — nothing was sent. Please look before anyone writes again.`);
       void logEvent(tenantId, leadId, "flagged", "Sounds fed up or not interested: nothing was sent, a person should look", { said: String(last.body).slice(0, 200) });
       return;
@@ -514,7 +519,7 @@ async function handleAutoReplyLocked(job: AutoReplyJob): Promise<void> {
     const STAGE = String((lead as any).stage);
     const NOT_DONE = !["won", "lost", "opted_out"].includes(STAGE);
     const who2 = (lead as any).company || (lead as any).name || phone;
-    if (last.direction === "in" && (detectBuyIntent(last.body) || (decision.commit === true && decision.confidence >= 0.8)) && NOT_DONE) {
+    if (last.direction === "in" && (decision.commit === true && decision.confidence >= 0.8) && NOT_DONE) {
       await supabase.from("leads").update({ stage: "won", needs_attention: true, needs_attention_reason: "Became a client — confirm & follow up", updated_at: new Date().toISOString() }).eq("id", leadId).eq("tenant_id", tenantId);
       await notifyAdmins(tenantId, { type: "hot_lead", title: `🎉 New client: ${who2}`, body: "An explicit buying signal — the lead was auto-converted to a client. Confirm the details.", leadId, whatsappText: `New client: ${who2} just gave a buying signal on WhatsApp. Confirm the details.` }).catch(() => {});
       const body = "That's wonderful — thank you! I'll get everything set up and our team will send the next steps right away.";
