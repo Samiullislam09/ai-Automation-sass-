@@ -118,6 +118,11 @@ const ANSWERS: Record<NoDataAnswer["missing"], string> = {
 
 /* ── The decision ─────────────────────────────────────────────────────────────────────────── */
 
+/** "kitne log" about LEADS or WhatsApp is a question about the lead pipeline, which we can count, not about website traffic. The traffic matcher
+ *  below reads "kitne log" as visitors, so "is mein se whatsapp par kitne log hain" was answered with "connect Google Analytics" (client chat,
+ *  2026-11-18) and never reached the lead-stats lookup. This is a stopgap in front of the regexes until they are replaced by the model's own routing. */
+const ABOUT_LEADS = /\b(leads?|whatsapp|whatapp|watsapp|whatsap|contacts?|prospects?|clients?|customers?|reply|replies|replied|messaged|message|jawab)\b/i;
+
 /** A free pre-filter, so the common message never pays for the "what is connected" read.
  *
  *  Deliberately the union of the matchers and nothing cleverer: it may say yes to a question
@@ -126,6 +131,7 @@ const ANSWERS: Record<NoDataAnswer["missing"], string> = {
 export function looksLikeMetricQuestion(message: string): boolean {
   const q = String(message ?? "");
   if (!q.trim()) return false;
+  if (ABOUT_LEADS.test(q) && !ASKS_SOCIAL_METRIC.test(q)) return false;
   return (
     ASKS_TRAFFIC.test(q) ||
     ASKS_SEARCH_METRIC.test(q) ||
@@ -143,6 +149,7 @@ export function looksLikeMetricQuestion(message: string): boolean {
 export function answerWhatWeCannotKnow(message: string, sources: DataSources): NoDataAnswer | null {
   const q = String(message ?? "");
   if (!q.trim()) return null;
+  if (ABOUT_LEADS.test(q) && !ASKS_SOCIAL_METRIC.test(q)) return null;
 
   // Advice about a metric is not a request for the metric. Checked before anything else,
   // because "traffic kaise badhaun" names a metric in every pattern below and is nonetheless a

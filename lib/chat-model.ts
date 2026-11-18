@@ -56,7 +56,12 @@ export const NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 // Default moved off ultra-550b (2026-10-17): it returns persistent HTTP 503 "Service temporarily
 // overloaded" on every call, so it had to stop being the primary. super-120b is alive and measured.
 // Set CHAT_MODEL to restore ultra once NVIDIA serves it again.
-export const CHAT_MODEL = process.env.CHAT_MODEL || "nvidia/nemotron-3-super-120b-a12b";
+//
+// 2026-11-18: nemotron-3-super-120b-a12b is now DEAD too (HTTP 410, end of life, probed live: 3 calls, 3x 410). Being the primary, it meant a wasted
+// failed hop before EVERY chat message and the answer always came from the fallback. Re-probed the same day: ultra-550b answers again (0.6-1.3 s) and is
+// the one measured above to get negation right ("isko publish mat karna"), so it is the primary again; 3.5-super-vl-120b (0.35-0.5 s) is the fallback.
+// Always probe a model with a real call before putting it here: the catalogue keeps listing models that return 410.
+export const CHAT_MODEL = process.env.CHAT_MODEL || "nvidia/nemotron-3-ultra-550b-a55b";
 export const CHAT_FALLBACK_MODEL = process.env.CHAT_FALLBACK_MODEL || "nvidia/nemotron-3.5-super-vl-120b-a12b";
 
 /** The per-model request fields that keep the answer short and the reasoning off. */

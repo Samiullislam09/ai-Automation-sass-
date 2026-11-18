@@ -369,6 +369,9 @@ function systemPrompt(): string {
     "Rules:",
     "- The message may be English, Hinglish or Roman Urdu, and badly typed. Read the meaning.",
     '- Negation decides everything. "article nahi likhna", "mat likho", "don\'t write it" is never an order to write.',
+    "- SEEING something that already exists is a lookup tool, never an action: \"jo keyword nikala wo dikhao\", \"sainiul ki chat history\", \"kitne leads ke paas WhatsApp hai\", " +
+      "\"autopilot kaisa chal raha hai\" read saved results. Asking for NEW work (\"naya keyword research karo\", \"leads dhundo\") is the action. If the words could be either, a result they want to see is a lookup.",
+    "- The team finds leads, talks to them on WhatsApp, answers their replies, books calls and sends reminders. Questions about that are lookups (autopilot, lead conversation, lead stats), never \"I cannot\".",
     "- A question, a greeting, a status check, or anything you are unsure about is the question tool. Starting work " +
       "nobody asked for spends the customer's money; asking one question costs nothing.",
     "- Fill only the arguments the user actually gave you. Never invent a topic, a name, or a number. Leaving a " +

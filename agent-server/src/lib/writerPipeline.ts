@@ -118,18 +118,17 @@ const STEP_TOKENS = {
  *     task a weak model can do" (articleReview's own note), and 340b is slow, so running the many
  *     small review calls on a fast model cuts the biggest remaining chunk of wall-time WITHOUT
  *     touching the main prose quality. Set WRITER_MODEL / REVIEW_MODEL to force either. */
+// Probed live 2026-11-18: nemotron-4-340b, llama-3.1-nemotron-ultra-253b, llama-3.1-nemotron-70b and nemotron-3-super-120b all answer HTTP 410 (end of
+// life) and were removed — each fresh process wasted a request on every one of them. A model goes back in only after a real call to it succeeds.
 const WRITER_MODEL_CANDIDATES = [
   process.env.WRITER_MODEL || "",
-  "nvidia/nemotron-4-340b-instruct",
-  "nvidia/llama-3.1-nemotron-ultra-253b-v1",
-  "nvidia/nemotron-3-super-120b-a12b",
   "nvidia/nemotron-3-ultra-550b-a55b",
+  "nvidia/nemotron-3.5-super-vl-120b-a12b",
 ].filter(Boolean).filter((m, i, a) => a.indexOf(m) === i);
 const FAST_MODEL_CANDIDATES = [
   process.env.REVIEW_MODEL || "",
   "nvidia/nemotron-3.5-lightning-30b-a3b",
-  "nvidia/nemotron-3-super-120b-a12b",
-  "nvidia/llama-3.1-nemotron-70b-instruct",
+  "nvidia/nemotron-3.5-super-vl-120b-a12b",
 ].filter(Boolean).filter((m, i, a) => a.indexOf(m) === i);
 const MODEL_UNAVAILABLE = new Set([400, 404, 410, 422, 503]);
 const writerCache = { model: null as string | null };

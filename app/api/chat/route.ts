@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { PLATFORM_KNOWLEDGE } from "@/lib/platform-knowledge";
 import { chatTitle, isWeakTitle } from "@/lib/chat-title";
 import { cookies } from "next/headers";
 import "@/lib/dns-fix";
@@ -70,6 +71,8 @@ function systemPrompt(ctx: any, business: string | null, awaiting: number | null
 Subscription plan: ${ctx.plan ?? "free"} · ${ctx.tokens ?? "?"} of ${ctx.tokensMax ?? "?"} tokens left
 Waiting for your approval right now: ${awaiting ?? "unknown"}
 Business: ${business ?? "not onboarded yet"}
+
+${PLATFORM_KNOWLEDGE}
 
 THE BUSINESS LINE ABOVE IS EVERYTHING WE KNOW ABOUT THIS CUSTOMER — their Site Brain (built by Mr. Analyst from their real crawled site), the facts the owner typed into the Memory page, their offerings with URLs, their crawled page titles, and the searches their site already gets impressions for with no page answering them. ANSWER FROM IT. If they ask "what do you know about my company", "mera company ka details do", "what does my site cover" — answer directly and specifically from that line. Never reply that you do not know, and never ask them to tell you their company name, website or industry: it is all on that line already, and asking for what we were given is the single most irritating thing this product can do.${business ? "" : " (This customer genuinely has nothing on file yet — only then say so, and point them at Connect.)"}
 

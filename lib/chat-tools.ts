@@ -25,6 +25,7 @@
 import type { BrainAction, BrainAgent, BrainRegistry } from "@/lib/brain";
 import { READ_TOOLS } from "@/lib/chat-data-tools";
 import { WRITE_TOOLS } from "@/lib/chat-schedule-tools";
+import { PLATFORM_KNOWLEDGE } from "@/lib/platform-knowledge";
 
 /** The tool the model calls when the user is not ordering work: a question, a greeting, small
  *  talk, a status check. It is not an agent and it starts nothing — it exists so that "none of
@@ -386,6 +387,9 @@ export function capabilitiesPrompt(registry: BrainRegistry | null | undefined): 
     parts.push("WHAT THE TEAM CAN AND CANNOT DO. This list is the truth, read from the team itself just now.", text, "");
   }
   parts.push(ownToolsPrompt(), "");
+  // The platform's other half — WhatsApp conversations, calls, reminders, the lead chain. It was missing from the lists above, and the rule
+  // below says "if it is not on them, say you cannot": so the product's biggest feature was refused.
+  parts.push("ALSO ON THE LIST — what the product does beyond the agent actions:", PLATFORM_KNOWLEDGE, "");
 
   parts.push(
     // "this list" became "the lists above" the day the second one arrived. The instruction is

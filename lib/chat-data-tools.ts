@@ -35,6 +35,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ChatTool } from "@/lib/chat-tools";
 import { callWhatsapp } from "@/lib/whatsapp-proxy";
+import {
+  LEAD_TOOLS_RAW, LOOKUP_LEAD_CONVERSATION, LOOKUP_LEAD_STATS, LOOKUP_KEYWORDS, LOOKUP_AUTOPILOT,
+  lookupLeadConversation, lookupLeadStats, lookupKeywords, lookupAutopilot, MESSAGED_STAGES, REPLIED_STAGES,
+} from "@/lib/chat-lead-tools";
+
+export { LOOKUP_LEAD_CONVERSATION, LOOKUP_LEAD_STATS, LOOKUP_KEYWORDS, LOOKUP_AUTOPILOT };
 
 /* ── The tools, as the model sees them ───────────────────────────────────────────────────── */
 
@@ -199,7 +205,7 @@ const RAW_READ_TOOLS: ChatTool[] = [
         properties: {
           focus: {
             type: "string",
-            enum: ["all", "pending_approval", "replied", "contacted", "won"],
+            enum: ["all", "pending_approval", "replied", "contacted", "meeting", "won"],
             description:
               "Narrow to one part of the pipeline: 'pending_approval' for leads awaiting the customer's yes, " +
               "'replied' for the ones who answered, 'contacted' for those messaged, 'won' for converted. " +
@@ -242,6 +248,7 @@ const RAW_READ_TOOLS: ChatTool[] = [
       },
     },
   },
+  ...LEAD_TOOLS_RAW,
 ];
 
 /** What every caller gets: the lookups, each carrying NEVER_FOR_ORDERS. */
@@ -277,6 +284,10 @@ export async function runReadTool(
       case LOOKUP_BUSINESS: return await lookupBusiness(supabase, tenantId);
       case LOOKUP_OUTREACH: return await lookupOutreach(supabase, tenantId, typeof args?.focus === "string" ? args.focus : "all");
       case LOOKUP_WHATSAPP_ACTIVITY: return await lookupWhatsappActivity(tenantId, typeof args?.focus === "string" ? args.focus : "all");
+      case LOOKUP_LEAD_CONVERSATION: return await lookupLeadConversation(supabase, tenantId, typeof args?.who === "string" ? args.who : "");
+      case LOOKUP_LEAD_STATS: return await lookupLeadStats(supabase, tenantId);
+      case LOOKUP_KEYWORDS: return await lookupKeywords(supabase, tenantId);
+      case LOOKUP_AUTOPILOT: return await lookupAutopilot(supabase, tenantId);
       default: return { ok: false, tool: name, note: "No such lookup." };
     }
   } catch (e: any) {
@@ -641,6 +652,10 @@ export function lookupOutreachShape(
     replied: count("replied"),
     in_conversation: count("in_conversation"),
     interested: count("interested"),
+    meeting_requested: count("meeting_requested"),
+    meeting_scheduled: count("meeting_scheduled"),
+    meeting_done: count("meeting_done"),
+    ready_to_buy: count("ready_to_buy"),
     won: count("won"),
     lost: count("lost"),
     rejected: count("rejected"),
@@ -651,9 +666,9 @@ export function lookupOutreachShape(
   // contacted onward, not just the literal `contacted` bucket, because a lead who has since
   // replied was still messaged. The model asking "kisko message gaya" means this, not the one
   // stage whose name matches.
-  const messagedStages = ["contacted", "delivered", "read", "replied", "in_conversation", "interested", "won", "lost"];
+  const messagedStages = MESSAGED_STAGES;
   const messaged = leads.filter((l) => messagedStages.includes(String(l.stage))).length;
-  const replied = leads.filter((l) => l.stage === "replied" || l.stage === "in_conversation" || !!l.replied_at).length;
+  const replied = leads.filter((l) => REPLIED_STAGES.includes(String(l.stage)) || !!l.replied_at).length;
 
   // The people who replied, with what they said, so "kaun reply diya" is answerable by name.
   // The latest inbound message per lead, newest first.
@@ -672,7 +687,8 @@ export function lookupOutreachShape(
   // capped, most-promising first (already sorted by score in the query).
   const focusStages: Record<string, string[]> = {
     pending_approval: ["pending_approval"],
-    replied: ["replied", "in_conversation"],
+    replied: REPLIED_STAGES,
+    meeting: ["meeting_requested", "meeting_scheduled", "meeting_done"],
     contacted: messagedStages,
     won: ["won"],
   };

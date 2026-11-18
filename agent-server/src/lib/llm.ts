@@ -27,12 +27,12 @@ import { nvidiaFetch } from "./nvidia.js";
  *  account+key actually answers. NVIDIA_MODEL (if set) is tried first. Self-heals when a model dies. */
 // Removed 2026-11-15: llama-3.1-nemotron-ultra-253b, nemotron-4-340b and llama-3.1-nemotron-70b reached end of life (410 Gone) —
 // each fresh process wasted a request on each of them before reaching a working model.
-// Order matters: fast-failing 404s (model not in this account) first; the 503-overloaded ultra is
-// LAST because nvidiaFetch retries 5xx with backoff (slow), so we only wait on it as a last resort.
+// Order matters. Probed 2026-11-18: ultra-550b answers again and is first; 3.5-super-vl is the second. (Older note: ultra was once persistent-503, so it was
+// last; nvidiaFetch retries 5xx with backoff, so if it overloads again move it back behind a fast model.)
 const MODEL_CANDIDATES = [
   process.env.NVIDIA_MODEL || "",
-  "nvidia/nemotron-3-super-120b-a12b",
   "nvidia/nemotron-3-ultra-550b-a55b",
+  "nvidia/nemotron-3.5-super-vl-120b-a12b",
 ].filter(Boolean).filter((m, i, a) => a.indexOf(m) === i);
 
 /** The model confirmed working for this process (set on first success), so we probe only once. */
