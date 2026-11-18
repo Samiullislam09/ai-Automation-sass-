@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  shapeLeadStats, matchLeads, editDistance, startOfLocalDay, windowStart, shapeOutreachActivity, shapeConnections, LOOKUP_OUTREACH_ACTIVITY, LOOKUP_CONNECTIONS, shapeLeadConversation, shapeRecentConversations, shapeKeywords, shapeAutopilot,
+  shapeLeadStats, matchLeads, describeCall, windowEnd, editDistance, startOfLocalDay, windowStart, shapeOutreachActivity, shapeConnections, LOOKUP_OUTREACH_ACTIVITY, LOOKUP_CONNECTIONS, shapeLeadConversation, shapeRecentConversations, shapeKeywords, shapeAutopilot,
   LOOKUP_LEAD_CONVERSATION, LOOKUP_LEAD_STATS, LOOKUP_KEYWORDS, LOOKUP_AUTOPILOT, LOOKUP_DATA_SOURCES, LEAD_TOOLS_RAW, FUNNEL,
 } from "./chat-lead-tools";
 import { READ_TOOLS, isReadTool, lookupOutreachShape } from "./chat-data-tools";
@@ -85,7 +85,7 @@ test("one lead's conversation: oldest first, who said what, calls included — t
   assert.equal(out.conversation[0].at, "2026-11-14T11:27:00Z");
   assert.equal(out.lead.needs_you, true);
   assert.equal(out.lead.needs_you_reason, "Wants a call — tonight");
-  assert.equal(out.calls[0].status, "offered");
+  assert.match(out.calls[0].state, /has not chosen/);
   assert.match(out.note, /ONLY from `conversation`/);
   const recent: any = shapeRecentConversations([{ ...LEADS[1], last: { direction: "in", body: "ok thanks", created_at: "2026-11-14T10:00:00Z" } }] as any);
   assert.equal(recent.recent_conversations[0].last_message_from, "the lead");
@@ -208,12 +208,12 @@ test("outreach activity names who was messaged, which was a FIRST message, who r
   assert.equal(r.counts.follow_ups_and_answers, 2);
   assert.equal(r.counts.replies_received_from_leads, 1);
   assert.equal(r.counts.leads_found, 1, "only Alpha was created in the window");
-  assert.equal(r.most_recent_message_sent.lead, "Beta Ltd");
-  assert.equal(r.most_recent_message_sent.by, "the AI");
+  assert.equal(r.most_recent_message_sent_in_this_window.lead, "Beta Ltd");
+  assert.equal(r.most_recent_message_sent_in_this_window.by, "the AI");
   assert.deepEqual(r.people_messaged.map((p: any) => p.lead).sort(), ["Alpha Co", "Beta Ltd"]);
   assert.deepEqual(r.first_messages.map((x: any) => x.lead), ["Alpha Co"]);
   assert.equal(r.replies[0].said, "yes send price");
-  assert.deepEqual(shapeOutreachActivity({ window: "today", since: new Date("2026-11-19T00:00:00Z"), msgs, leads, foundLeads: leads, earliestOut }).most_recent_message_sent, null, "nothing today = null, never a guess");
+  assert.deepEqual(shapeOutreachActivity({ window: "today", since: new Date("2026-11-19T00:00:00Z"), msgs, leads, foundLeads: leads, earliestOut }).most_recent_message_sent_in_this_window, null, "nothing in the window = null, never a guess");
 });
 
 test("connections: what is linked, what is not, and 'could not check' for what could not be read", () => {
@@ -230,4 +230,39 @@ test("connections: what is linked, what is not, and 'could not check' for what c
   assert.ok(READ_TOOLS.some((x) => x.function.name === LOOKUP_OUTREACH_ACTIVITY) && READ_TOOLS.some((x) => x.function.name === LOOKUP_CONNECTIONS));
   const d = READ_TOOLS.find((x) => x.function.name === LOOKUP_OUTREACH_ACTIVITY)!.function.description;
   for (const w of ["last whatsapp pe kisko msg kiya", "un 15 ka list do", "aaj kitne leads find kiye", "latest message sent"]) assert.ok(d.includes(w), w);
+});
+
+test("'last message' never comes back empty because the window was quiet: the latest message ever sent rides along", () => {
+  const leads = [{ id: "a", company: "Alpha Co", stage: "contacted" }];
+  const old = { lead_id: "a", direction: "out", body: "Hello Alpha, this was two days ago.", created_at: "2026-11-16T12:00:00Z", answered_by: "brain" };
+  const r: any = shapeOutreachActivity({ window: "today", since: new Date("2026-11-18T18:30:00Z"), msgs: [], leads, foundLeads: leads, earliestOut: { a: "2026-11-16T12:00:00Z" }, lastEver: old });
+  assert.equal(r.counts.messages_sent, 0, "nothing today");
+  assert.equal(r.most_recent_message_sent_in_this_window, null);
+  assert.equal(r.most_recent_message_sent_ever.lead, "Alpha Co");
+  assert.equal(r.most_recent_message_sent_ever.at, "2026-11-16T12:00:00Z");
+  assert.match(r.most_recent_message_sent_ever.text, /two days ago/);
+  // yesterday is a closed window: it has an end
+  const now = new Date("2026-11-18T20:00:00Z");
+  assert.equal(windowStart("yesterday", now, "UTC")!.toISOString(), "2026-11-17T00:00:00.000Z");
+  assert.equal(windowEnd("yesterday", now, "UTC")!.toISOString(), "2026-11-18T00:00:00.000Z");
+  assert.equal(windowEnd("today", now, "UTC"), null);
+  const y: any = shapeOutreachActivity({ window: "yesterday", since: windowStart("yesterday", now, "UTC"), until: windowEnd("yesterday", now, "UTC"), msgs: [
+    { lead_id: "a", direction: "out", body: "yesterday msg", created_at: "2026-11-17T10:00:00Z" },
+    { lead_id: "a", direction: "out", body: "today msg", created_at: "2026-11-18T10:00:00Z" },
+  ], leads, foundLeads: leads, earliestOut: {} });
+  assert.equal(y.counts.messages_sent, 1, "today's message is outside 'yesterday'");
+});
+
+test("a call is described by what the system KNOWS: 'done' means the time passed, never that it took place — the Sainiul case", () => {
+  const passed: any = describeCall({ status: "done", outcome: "unconfirmed", start_at: "2026-11-16T15:00:00Z", meet_link: "https://meet.google.com/x" });
+  assert.match(passed.state, /time has passed \(not confirmed whether it took place\)/);
+  assert.match(passed.attendance, /NOT KNOWN/);
+  assert.equal(describeCall({ status: "done", start_at: null }).attendance.includes("NOT KNOWN"), true, "an old row with no outcome is also unknown");
+  assert.match(describeCall({ status: "done", outcome: "attended" }).attendance, /confirmed they joined/);
+  assert.match(describeCall({ status: "no_show", outcome: "no_show" }).attendance, /did NOT join/);
+  assert.match(describeCall({ status: "scheduled" }).state, /time has not passed/);
+  assert.match(describeCall({ status: "offered" }).state, /has not chosen/);
+  const conv: any = shapeLeadConversation({ id: "1", company: "Sainiul", stage: "meeting_done" } as any, [], [{ status: "done", outcome: "unconfirmed", start_at: "2026-11-16T15:00:00Z" }]);
+  assert.match(conv.note, /never say it happened or did not happen/);
+  assert.equal(conv.calls[0].has_meet_link, false);
 });

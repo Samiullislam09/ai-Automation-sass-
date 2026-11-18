@@ -1179,3 +1179,13 @@ test("model-chosen orders: reject runs at once; take-down, publish-now and cance
   assert.equal(later.rec.legacy[0].scheduled, true);
   assert.ok(later.rec.legacy[0].whenAt, "the model's resolved instant travels to the executor");
 });
+
+test("manage_schedule with repeats=false is placed as a ONE-OFF order with the customer's own time words, never a standing job", () => {
+  const plan = planFromToolCall("manage_schedule", { repeats: false, kind: "article", when_phrase: "kal subah 8 baje" }, { message: "ek task schudle karo article writing ka kal suabh sirf kal 8 baje", registry: REGISTRY, tz: "Asia/Kolkata", now: new Date("2026-11-18T20:00:00Z") });
+  assert.equal(plan.action, "write_article");
+  assert.ok(plan.when, "the time was parsed");
+  assert.equal(plan.when!.kind, "absolute");
+  // a real timetable request still goes to the timetable
+  const real = planFromToolCall("manage_schedule", { repeats: true, kind: "article", frequency: "daily" }, { message: "roz article", registry: REGISTRY, tz: "Asia/Kolkata" });
+  assert.equal(real.action, "manage_schedule");
+});

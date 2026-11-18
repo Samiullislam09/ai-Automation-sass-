@@ -134,9 +134,10 @@ export const SCHEDULE_KINDS = {
   // unit: what `count` counts, or null where a count is meaningless. maxCount: the per-kind
   // ceiling applySchedule clamps to — the DB check (1..50, migration 028) is the outer wall,
   // this is the sensible one. takesAutoPublish: only articles publish anything.
-  article: { runs: "the writing team plans topics and writes `count` articles", unit: "articles", maxCount: 5, takesAutoPublish: true },
-  audit: { runs: "Mr. Audit checks the site and files a report", unit: null, maxCount: 1, takesAutoPublish: false },
+  article: { action: "write_article", runs: "the writing team plans topics and writes `count` articles", unit: "articles", maxCount: 5, takesAutoPublish: true },
+  audit: { action: "audit_site", runs: "Mr. Audit checks the site and files a report", unit: null, maxCount: 1, takesAutoPublish: false },
   leads: {
+    action: "find_leads",
     runs: "Mr. Leads hunts businesses matching the ICP, scores them and files them in the CRM as pending approval",
     unit: "leads",
     maxCount: 50,

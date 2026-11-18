@@ -39,6 +39,7 @@
  *  rather than a week later. The failure above would have been visible in its own confirmation.
  */
 import { AUTOPILOT_TOOLS, MANAGE_AUTOPILOT, runManageAutopilot } from "@/lib/autopilot";
+import { MEETING_OUTCOME_TOOLS, MANAGE_MEETING_OUTCOME, runManageMeetingOutcome } from "@/lib/meeting-outcome";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ChatTool } from "@/lib/chat-tools";
 import {
@@ -74,9 +75,12 @@ const RAW_WRITE_TOOLS: ChatTool[] = [
     function: {
       name: MANAGE_SCHEDULE,
       description:
-        "Change the customer's RECURRING timetable — the standing instruction for work that repeats by itself. " +
+        "Change the customer's RECURRING timetable — the standing instruction for work that REPEATS by itself (every day, every weekday, every week). " +
+        "NEVER for a single run: when they want it ONCE, for one particular time or day (\"sirf kal subah 8 baje\", \"just tomorrow\", \"only once\", \"aaj raat\", \"on Friday\", \"solo mañana\"), " +
+        "that is NOT a timetable — it is a one-off order: call the action that does the work itself (write the article, find the leads) and pass their time words in `when_phrase`. " +
+        "Using this tool for a one-off creates a standing weekly/daily job they never asked for. " +
         'Call this for "roz subah 9 baje 2 article banao", "har Monday article likho", "har roz site ka audit ' +
-        'report do", "ek naya task add karo", "schedule daily kar do", "change my schedule to weekdays" — and for ' +
+        'report do", "schedule daily kar do", "change my schedule to weekdays" — and for ' +
         'STOPPING one just the same: "is schedule ko close kar do", "automation band kar do", "rok do", "pause ' +
         'karo", "turn it off", "schedule hata do" (that is enabled=false; the timetable is kept so they can switch ' +
         "it back on, and nothing is deleted). " +
@@ -89,6 +93,16 @@ const RAW_WRITE_TOOLS: ChatTool[] = [
       parameters: {
         type: "object",
         properties: {
+          repeats: {
+            type: "boolean",
+            description:
+              "Does the customer want this to REPEAT on its own (every day / weekday / week, or 'schedule it daily')? false when they want a SINGLE run at one time " +
+              "('sirf kal 8 baje', 'just tomorrow', 'only once', 'aaj raat', 'solo mañana') — then do not use this tool at all, place the one-off order instead. Answer this first.",
+          },
+          when_phrase: {
+            type: "string",
+            description: "ONLY when repeats is false: the customer's own time words for the single run, copied exactly (\"kal subah 8 baje\", \"tomorrow at 8\").",
+          },
           kind: {
             type: "string",
             enum: KIND_ENUM,
@@ -139,7 +153,7 @@ const RAW_WRITE_TOOLS: ChatTool[] = [
               "Approvals. Only ever set true when the customer has clearly asked for it in this message.",
           },
         },
-        required: ["kind"],
+        required: ["repeats", "kind"],
         additionalProperties: false,
       },
     },
@@ -166,6 +180,7 @@ export const WRITE_TOOLS: ChatTool[] = [
   })),
   // The lead chain's master switch and settings (lib/autopilot.ts). Not the article/audit timetable, so it does not carry the recurring-timetable warning.
   ...AUTOPILOT_TOOLS,
+  ...MEETING_OUTCOME_TOOLS,
 ];
 
 /* ── Running one ─────────────────────────────────────────────────────────────────────────── */
@@ -193,6 +208,8 @@ export async function runWriteTool(
         return await manageSchedule(supabase, tenantId, args);
       case MANAGE_AUTOPILOT:
         return await runManageAutopilot(supabase, tenantId, args);
+      case MANAGE_MEETING_OUTCOME:
+        return await runManageMeetingOutcome(supabase, tenantId, args);
       default:
         return { ok: false, tool: name, note: "No such setting." };
     }
@@ -221,6 +238,15 @@ async function manageSchedule(
         `Nothing was changed. ${kind == null ? "No kind of schedule was named" : `"${String(kind)}" is not something this product can put on a timetable`}. ` +
         `What can be scheduled: ${KIND_HELP}. Tell the customer plainly that this particular thing cannot be ` +
         `scheduled yet, and do not offer to set up one of the others unless that is what they meant.`,
+    };
+  }
+
+  // A single run is not a timetable. Nothing is written: the customer asked for ONE thing at one time, and a standing job would keep running after they thought it was done.
+  if (args?.repeats === false) {
+    return {
+      ok: false,
+      tool: MANAGE_SCHEDULE,
+      note: "Nothing was changed. The customer asked for a single run, not a repeating schedule, and this tool only edits repeating ones. Tell them in their language that a one-time run at a set time is placed as a normal order (for example: write one article tomorrow at 8), and ask if they want you to place it that way.",
     };
   }
 

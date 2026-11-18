@@ -67,6 +67,9 @@ export const ROUTING: RoutingCase[] = [
   { id: "ap-es", lang: "es", message: "activa el piloto automático de leads", expect: ["manage_autopilot"], why: "any language" },
   { id: "ap-status", lang: "hinglish", message: "autopilot kaisa chal raha hai", expect: ["lookup_autopilot"], why: "a question is a lookup, not a change" },
   { id: "ap-status-2", lang: "hinglish", message: "kya sab kuch auto chal raha hai", expect: ["lookup_autopilot"], why: "same failure, another phrasing" },
+  { id: "once-tomorrow-article", lang: "hinglish", message: "ek task schudle karo article writing ka kal suabh sirf kal 8 baje", expect: ["write_article"], why: "ONE run tomorrow ('sirf kal') became a standing 'Every Monday 8:00' job" },
+  { id: "once-en", lang: "en", message: "write one article tomorrow at 8am, just that once", expect: ["write_article"], why: "same, English" },
+  { id: "once-es", lang: "es", message: "programa un artículo solo para mañana a las 8", expect: ["write_article"], why: "same, Spanish" },
   { id: "schedule-set", lang: "hinglish", message: "roz subah 9 baje article banao", expect: ["manage_schedule"], why: "the article timetable, not the lead chain" },
   { id: "find-now", lang: "hinglish", message: "abhi 10 leads dhundo", expect: ["find_leads"], why: "a one-off, not a standing setting" },
   // ── the follow-up chat of 2026-11-19: "I don't have that" for things the data holds
@@ -80,6 +83,13 @@ export const ROUTING: RoutingCase[] = [
   { id: "lead-or-client", lang: "hinglish", message: "hamara leads ha ya client", expect: ["lookup_lead_stats"], why: "stage counts" },
   { id: "what-connected", lang: "hinglish", message: "hamne abhi tak kya kya connect kiya ha", expect: ["lookup_connections"], why: "was answered with the leads contacted" },
   { id: "next-msg", lang: "hinglish", message: "agla whatsapp message kisko jayega", expect: ["lookup_whatsapp_activity"], why: "NEXT is the queue; LAST is the activity lookup" },
+  // ── the third client chat (2026-11-19): a call "that happened" which never did, and answers in the wrong script
+  { id: "meeting-happened", lang: "hinglish", message: "kiya ye meting huwa tha ya nahi", expect: ["lookup_lead_conversation"], why: "a question about a call is a lookup, never an outcome being recorded" },
+  { id: "meeting-no-show", lang: "hinglish", message: "sainul meeting pe aya hi nahi hai, koi call nahi hua", expect: ["manage_meeting_outcome"], why: "the owner states what happened: it must be RECORDED (a typo in the name, too)" },
+  { id: "meeting-no-show-en", lang: "en", message: "he never joined the call, mark it as a no-show", expect: ["manage_meeting_outcome"], why: "same, English" },
+  { id: "meeting-attended", lang: "hinglish", message: "alfam wale aaye the, meeting ho gayi achhi", expect: ["manage_meeting_outcome"], why: "the other outcome" },
+  { id: "yesterday-msgs", lang: "hinglish", message: "ok kal kisko veja tha", expect: ["lookup_outreach_activity"], why: "a day in the past" },
+  { id: "last-msg-ever", lang: "hinglish", message: "acch last msg hamne kisko kiya tha", expect: ["lookup_outreach_activity"], why: "was 'no message today' (a window problem) in Devanagari script" },
   { id: "leads-fr", lang: "fr", message: "Peux-tu écrire à mes leads sur WhatsApp ?", expect: ["lookup_autopilot", "answer_question"], why: "any language" },
 ];
 
@@ -132,6 +142,11 @@ const CONNECTIONS = shapeConnections({
   integrations: [{ type: "wordpress", status: "connected", label: "https://wca-global.com" }],
   whatsapp: { connected: true, phone: "971500000000" }, google: "connected", googleSources: { ga4: false, gsc: false }, bookingLink: false, teamNumbers: 1,
 });
+const CALL_PASSED = shapeLeadConversation({ id: "1", company: "Sainiul Traders", name: "Sainiul", stage: "meeting_done" } as any, [
+  { direction: "in", body: "Aj rat ko", created_at: "2026-11-14T11:28:00Z" },
+  { direction: "out", body: "Noted. Here is your Google Meet link.", created_at: "2026-11-14T11:30:00Z", answered_by: "brain" },
+  { direction: "in", body: "hi", created_at: "2026-11-17T09:00:00Z" },
+], [{ status: "done", outcome: "unconfirmed", start_at: "2026-11-16T15:00:00Z", meet_link: "https://meet.google.com/abc" }]);
 const NO_SOURCES = shapeDataSources({ ga4: false, gsc: false, social: [] });
 
 /** What each check looks for. `must` all match; `mustNot` none match. Plain regexes over the reply text. */
@@ -149,32 +164,35 @@ const CANNOT_MESSAGE = /\b(i can(?:'|’)?t|i cannot|i am not able|i'm not able|
 
 export const ANSWERS: AnswerCase[] = [
   { id: "ans-leads-can-you", lang: "hinglish", message: "Kiya tum hamare leads se bat kr sakte ho ?", tool: "lookup_autopilot", fixture: AUTOPILOT_PARTLY_OFF, why: "the headline failure: it said it could not",
-    must: [/whatsapp/i], mustNot: [CANNOT_MESSAGE], maxChars: 600 },
+    must: [/whatsapp/i], mustNot: [CANNOT_MESSAGE], maxChars: 600, script: "latin" },
   { id: "ans-leads-can-you-en", lang: "en", message: "Can you communicate with our leads?", tool: "lookup_autopilot", fixture: AUTOPILOT_PARTLY_OFF, why: "same, English",
     must: [/whatsapp/i], mustNot: [CANNOT_MESSAGE], maxChars: 600, script: "latin" },
   { id: "ans-missing-team", lang: "en", message: "is everything set up for my leads to reach me when they want a call?", tool: "lookup_autopilot", fixture: AUTOPILOT_PARTLY_OFF, why: "the autopilot tool says no team number is set; the answer must say so",
     must: [/(team|number)/i], mustNot: [/everything is (set up|fine|ready)/i], script: "latin" },
   { id: "ans-whatsapp-count", lang: "hinglish", message: "Is main se whatapp par kitne log ha", tool: "lookup_lead_stats", fixture: FIXTURE_STATS, why: "was a Google Analytics refusal",
     // 5 leads have a number on file, 3 are confirmed on WhatsApp: either figure is a correct answer to "kitne log".
-    must: [/\b(5|3)\b/], mustNot: [/google analytics/i, /connect google/i], noInventedNumbers: true },
+    must: [/\b(5|3)\b/], mustNot: [/google analytics/i, /connect google/i], noInventedNumbers: true, script: "latin" },
   { id: "ans-leads-total", lang: "en", message: "how many leads do we have in total?", tool: "lookup_lead_stats", fixture: FIXTURE_STATS, why: "the total, exactly",
     must: [/\b6\b/], noInventedNumbers: true, script: "latin" },
   { id: "ans-keyword-show", lang: "hinglish", message: "Apne abhi jo keyword nikala ha usko chat pe do", tool: "lookup_keywords", fixture: KEYWORDS, why: "must show the result, not start a job",
-    must: [/iso 9001 2025 transition checklist uae/i], mustNot: [/(shuru kar|started|starting|queued)/i] },
+    must: [/iso 9001 2025 transition checklist uae/i], mustNot: [/(shuru kar|started|starting|queued)/i], script: "latin" },
   { id: "ans-keyword-no-volume", lang: "en", message: "what is the search volume of that keyword?", tool: "lookup_keywords", fixture: KEYWORDS, why: "volume was not measured: it must say so, not make one up",
     mustNot: [/\b\d{2,}(,\d{3})*\s*(searches|per month|monthly)/i], noInventedNumbers: true, script: "latin" },
   { id: "ans-lead-summary", lang: "hinglish", message: "sainiul ki chat history ka summary do", tool: "lookup_lead_conversation", fixture: CONVERSATION, why: "one lead's conversation, summarised only from what was said",
     // No invented-number check here: the fixture holds the call as "16:00Z", and a reply that says "4 PM" or "14 Nov" is converting, not inventing.
     // The summary may say "pricing" or "$2,400", but must not state any OTHER amount (ISO 9001 is a standard number, not a price).
-    must: [/(2,?400|pric)/i], mustNot: [/(AED|USD|INR|₹|Rs\.?)\s?\d/i, /\$\s?(?!2,?400)\d/] },
+    must: [/(2,?400|pric|keemat|kimat|daam|rate)/i], mustNot: [/(AED|USD|INR|₹|Rs\.?)\s?\d/i, /\$\s?(?!2,?400)\d/], script: "latin" },
   { id: "ans-last-message", lang: "hinglish", message: "last whstapp pe kisko msg kiya ha", tool: "lookup_outreach_activity", fixture: ACTIVITY, why: "was 'the details are not available'",
-    must: [/Beta Ltd/], mustNot: [/(not available|nahi hai|isn.t recorded|aren.t available)/i] },
+    must: [/Beta Ltd/], mustNot: [/(not available|nahi hai|isn.t recorded|aren.t available)/i], script: "latin" },
   { id: "ans-list-today", lang: "hinglish", message: "un logo ka list do jinko msg gaya", tool: "lookup_outreach_activity", fixture: ACTIVITY, why: "the list WAS available",
-    must: [/Alpha Co/, /Beta Ltd/, /Gamma LLC/], mustNot: [/(not available|nahi hai|isn.t available)/i] },
+    must: [/Alpha Co/, /Beta Ltd/, /Gamma LLC/], mustNot: [/(not available|nahi hai|isn.t available)/i], script: "latin" },
   { id: "ans-first-vs-followup", lang: "en", message: "how many of those were first-time messages?", tool: "lookup_outreach_activity", fixture: ACTIVITY, why: "first messages are told apart from follow-ups",
     must: [/(?<!\d)2(?!\d)|two/i], noInventedNumbers: true, script: "latin" },
   { id: "ans-connected", lang: "hinglish", message: "hamne abhi tak kya kya connect kiya ha", tool: "lookup_connections", fixture: CONNECTIONS, why: "was answered with the leads contacted",
-    must: [/whatsapp/i, /wordpress|wca-global/i], mustNot: [/\d{2,} leads/i] },
+    must: [/whatsapp/i, /wordpress|wca-global/i], mustNot: [/\d{2,} leads/i], script: "latin" },
+  { id: "ans-call-not-confirmed", lang: "hinglish", message: "kiya ye meting huwa tha ya nahi", tool: "lookup_lead_conversation", fixture: CALL_PASSED, why: "the record only says the TIME passed: the assistant told the owner 'yes, it took place' about a call the lead never joined",
+    must: [/(pata nahi|confirm|not known|unknown|cannot see|can't see|nahi dekh|nahi bata sakta|aap bataiye|aap bata|did .* join|join)/i],
+    mustNot: [/\b(haan|yes)\b[^.?!\n]{0,40}\b(hui|hua|ho gayi|took place|happened|was held|attended)\b/i, /call status .?done/i], script: "latin" },
   { id: "ans-followers-es", lang: "es", message: "¿cuántos seguidores tengo en Instagram?", tool: "lookup_data_sources", fixture: NO_SOURCES, why: "must say it cannot see this, in Spanish, with no invented number",
     must: [/\b(no (puedo|tengo|se pueden|es posible)|no me es posible|no está disponible|no hay)\b/i], mustNot: [/\b\d{2,}\b/], script: "latin" },
   { id: "ans-traffic-en", lang: "en", message: "how many people visited our site this week?", tool: "lookup_data_sources", fixture: NO_SOURCES, why: "Google is not connected: say that, with the way to fix it",

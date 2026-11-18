@@ -64,6 +64,7 @@ import {
 } from "@/lib/chat-tools";
 import { isReadTool } from "@/lib/chat-data-tools";
 import { isWriteTool } from "@/lib/chat-schedule-tools";
+import { SCHEDULE_KINDS, isScheduleKind, type ScheduleKind } from "@/lib/chat-schedule";
 
 /** Plan §5.1's shape, exactly. `agent` and `irreversible` are the brain's to fill in. */
 export type IntentPlan = {
@@ -308,6 +309,13 @@ export function planFromToolCall(
   ctx: { message: string; registry: BrainRegistry | null | undefined; tz: string; now?: Date }
 ): IntentPlan {
   const now = ctx.now ?? new Date();
+  // A SINGLE RUN dressed as a timetable. The model picked manage_schedule but itself said repeats=false ("sirf kal 8 baje"): that is a one-off order for the same kind of work,
+  // placed with the customer's own time words — never a standing job (client chat 2026-11-19: it became "Every Monday 8:00").
+  if (name === "manage_schedule" && (args ?? {}).repeats === false && isScheduleKind((args ?? {}).kind)) {
+    const asOrder = SCHEDULE_KINDS[(args as any).kind as ScheduleKind].action;
+    const wp = (args as any).when_phrase;
+    return planFromToolCall(asOrder, { ...(typeof wp === "string" && wp ? { [WHEN_FIELD]: wp } : {}) }, ctx);
+  }
   const actions = enabledActions(ctx.registry);
   const found = actions.get(String(name ?? ""));
 

@@ -125,14 +125,14 @@ export const LEAD_TOOLS_RAW: ChatTool[] = [
       name: LOOKUP_OUTREACH_ACTIVITY,
       description:
         "WHAT HAPPENED in a period, by name: which leads were FOUND, which leads got a FIRST message, which got a follow-up or an answer, who REPLIED — with counts and the actual list " +
-        "(lead name, time, and the message text), newest first, plus the single most recent message we sent. `window` is the period: today, 24h, 7d, 30d or all. " +
+        "(lead name, time, and the message text), newest first, plus the single most recent message we sent. `window` is the period: today, yesterday, 24h, 7d, 30d or all. The most recent message ever sent is ALWAYS included, so 'last message / akhri message / latest' needs no particular window. " +
         'Call this for "last whatsapp pe kisko msg kiya", "aaj kitne logo ko msg kiya aur kaun kaun", "un 15 ka list do", "aaj kitne leads find kiye", "kitne naye logo ko pehli baar msg gaya", ' +
         '"is hafte kisne reply diya", "kal kya hua", "show me who we messaged today", "who did we contact in the last 24 hours", "latest message sent", and for a SUMMARY of those messages. ' +
         'For "next / agla message" (what is QUEUED) use the WhatsApp activity lookup instead; for one lead\'s whole chat use the lead-conversation lookup; for plain totals use lead-stats.',
       parameters: {
         type: "object",
         properties: {
-          window: { type: "string", enum: ["today", "24h", "7d", "30d", "all"], description: "today = since midnight in their time zone; 24h = the last 24 hours. Default 24h." },
+          window: { type: "string", enum: ["today", "yesterday", "24h", "7d", "30d", "all"], description: "today = since midnight in their time zone; yesterday = the whole of yesterday; 24h = the last 24 hours. Default 24h. The reply ALWAYS carries the most recent message ever sent, whatever the window." },
         },
         required: [],
         additionalProperties: false,
@@ -206,7 +206,25 @@ export function shapeLeadStats(leads: LeadRow[]) {
 }
 
 export type MessageRow = { direction?: string | null; body?: string | null; created_at?: string | null; answered_by?: string | null; status?: string | null };
-export type MeetingRow = { status?: string | null; start_at?: string | null; meet_link?: string | null };
+export type MeetingRow = { status?: string | null; start_at?: string | null; meet_link?: string | null; outcome?: string | null };
+
+/** What a call's record really says. The system books calls and sees the time pass; it does NOT see whether the lead joined (nothing reads Google Meet attendance). So "done"
+ *  means "the time passed", never "it took place" — only an outcome the OWNER recorded says what happened. */
+export function describeCall(m: MeetingRow): { booked_for: string | null; state: string; attendance: string; has_meet_link: boolean } {
+  const outcome = String(m.outcome ?? "");
+  const attendance =
+    outcome === "attended" ? "the owner confirmed they joined"
+    : outcome === "no_show" ? "the owner confirmed they did NOT join"
+    : "NOT KNOWN — the system cannot see whether they joined; only the owner can say";
+  const state =
+    m.status === "offered" ? "slots were offered, the lead has not chosen one"
+    : m.status === "scheduled" ? "booked, the time has not passed yet"
+    : m.status === "cancelled" ? "cancelled"
+    : m.status === "no_show" ? "marked as a no-show"
+    : m.status === "done" ? (outcome === "attended" ? "done (the owner confirmed it took place)" : outcome === "no_show" ? "did not take place (owner confirmed)" : "the booked time has passed (not confirmed whether it took place)")
+    : String(m.status ?? "unknown");
+  return { booked_for: m.start_at ?? null, state, attendance, has_meet_link: !!m.meet_link };
+}
 
 /** Which lead did the customer mean? Phone digits first (exact tail match), then company/name: exact, then starts-with, then contains.
  *  Returns every candidate that ties for the best match, so the caller can ask instead of guessing. */
@@ -275,8 +293,8 @@ export function shapeLeadConversation(lead: LeadRow & { needs_attention_reason?:
       from: m.direction === "in" ? "the lead" : m.answered_by === "person" ? "the owner" : "the AI assistant",
       text: clip(m.body, 420),
     })),
-    calls: meetings.map((m) => ({ status: m.status, at: m.start_at ?? null, has_meet_link: !!m.meet_link })),
-    note: "Summarise ONLY from `conversation`. If it is empty, say no messages are saved for this lead.",
+    calls: meetings.map(describeCall),
+    note: "Summarise ONLY from `conversation`. If it is empty, say no messages are saved for this lead. For a call: say only what `calls` says. If attendance is NOT KNOWN, never say it happened or did not happen: say the time passed and ask the owner whether the lead joined; if they tell you, record it with the meeting-outcome tool.",
   };
 }
 
@@ -353,9 +371,15 @@ export function startOfLocalDay(now: Date, tz: string): Date {
 }
 
 export type WindowName = "today" | "24h" | "7d" | "30d" | "all";
+/** The end of a window: only "yesterday" stops before now. */
+export function windowEnd(w: string, now: Date, tz: string): Date | null {
+  return w === "yesterday" ? startOfLocalDay(now, tz) : null;
+}
+
 export function windowStart(w: string, now: Date, tz: string): Date | null {
   switch (w) {
     case "today": return startOfLocalDay(now, tz);
+    case "yesterday": return startOfLocalDay(new Date(startOfLocalDay(now, tz).getTime() - 3_600_000), tz);
     case "7d": return new Date(now.getTime() - 7 * 86_400_000);
     case "30d": return new Date(now.getTime() - 30 * 86_400_000);
     case "all": return null;
@@ -367,10 +391,10 @@ export type OutMsg = { lead_id: string; direction: string; body: string; created
 type NamedLead = { id: string; company?: string | null; name?: string | null; stage?: string | null; created_at?: string | null };
 
 /** What happened in a window, by name. `earliestOut` = the first outbound message time per lead EVER (so a "first message" is first for real, not just first in the window). */
-export function shapeOutreachActivity(opts: { window: string; since: Date | null; msgs: OutMsg[]; leads: NamedLead[]; foundLeads: NamedLead[]; earliestOut: Record<string, string> }) {
+export function shapeOutreachActivity(opts: { window: string; since: Date | null; until?: Date | null; msgs: OutMsg[]; leads: NamedLead[]; foundLeads: NamedLead[]; earliestOut: Record<string, string>; lastEver?: OutMsg | null }) {
   const byId = new Map(opts.leads.map((l) => [l.id, l]));
   const nm = (id: string) => { const l = byId.get(id); return l?.company || l?.name || "(unknown lead)"; };
-  const inWin = (iso: string) => !opts.since || Date.parse(iso) >= opts.since.getTime();
+  const inWin = (iso: string) => (!opts.since || Date.parse(iso) >= opts.since.getTime()) && (!opts.until || Date.parse(iso) < opts.until.getTime());
   const msgs = opts.msgs.filter((m) => inWin(m.created_at)).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
   const outs = msgs.filter((m) => m.direction === "out");
   const ins = msgs.filter((m) => m.direction === "in");
@@ -392,7 +416,9 @@ export function shapeOutreachActivity(opts: { window: string; since: Date | null
       replies_received_from_leads: ins.length,
       different_people_who_replied: new Set(ins.map((m) => m.lead_id)).size,
     },
-    most_recent_message_sent: sent[0] ?? null,
+    most_recent_message_sent_in_this_window: sent[0] ?? null,
+    // The latest message we ever sent, whatever the window: "last message" must never come back empty just because today was quiet.
+    most_recent_message_sent_ever: opts.lastEver ? { lead: nm(opts.lastEver.lead_id), at: opts.lastEver.created_at, kind: kindOf(opts.lastEver), by: opts.lastEver.answered_by === "human" ? "the owner" : opts.lastEver.answered_by === "brain" ? "the AI" : "the timeline", text: clip(opts.lastEver.body, 220) } : null,
     people_messaged: peopleMessaged.slice(0, 40).map((id) => ({ lead: nm(id), stage: byId.get(id)?.stage ?? null })),
     messages_sent: sent.slice(0, 25),
     first_messages: firsts.slice(0, 25).map((x) => ({ lead: x.lead, at: x.at })),
@@ -481,7 +507,7 @@ const LEAD_COLS = "id, company, name, whatsapp, phone, stage, wa_status, needs_a
 const LEAD_COLS_OLD = "id, company, name, whatsapp, phone, stage, needs_attention, opt_out, icp_score, replied_at, contacted_at, city, country";
 
 /** Select with the newest columns, and again without the ones an older database may lack (wa_status, last_intent…) so a missing column is not an outage. */
-async function selectLeads(supabase: SupabaseClient, tenantId: string, cols: [string, string], limit = 2000) {
+export async function selectLeads(supabase: SupabaseClient, tenantId: string, cols: [string, string], limit = 2000) {
   let r: any = await supabase.from("leads").select(cols[0]).eq("tenant_id", tenantId).limit(limit);
   if (r.error && /column .* does not exist/i.test(r.error.message)) r = await supabase.from("leads").select(cols[1]).eq("tenant_id", tenantId).limit(limit);
   if (r.error) throw new Error(r.error.message);
@@ -518,7 +544,7 @@ export async function lookupLeadConversation(supabase: SupabaseClient, tenantId:
   if (error) throw new Error(error.message);
   let meetings: MeetingRow[] = [];
   try {
-    const m = await supabase.from("lead_meetings").select("status, start_at, meet_link").eq("tenant_id", tenantId).eq("lead_id", lead.id).order("created_at", { ascending: false }).limit(5);
+    const m = await supabase.from("lead_meetings").select("status, start_at, meet_link, outcome").eq("tenant_id", tenantId).eq("lead_id", lead.id).order("created_at", { ascending: false }).limit(5);
     if (!m.error) meetings = (m.data ?? []) as any[];
   } catch { /* meetings table not migrated: no calls to report */ }
   return { ok: true, tool: LOOKUP_LEAD_CONVERSATION, data: shapeLeadConversation(lead as any, (msgs ?? []) as any[], meetings) };
@@ -546,11 +572,14 @@ async function tenantZone(supabase: SupabaseClient, tenantId: string): Promise<s
 }
 
 export async function lookupOutreachActivity(supabase: SupabaseClient, tenantId: string, window: string): Promise<ReadResult> {
-  const w = ["today", "24h", "7d", "30d", "all"].includes(window) ? window : "24h";
+  const w = ["today", "yesterday", "24h", "7d", "30d", "all"].includes(window) ? window : "24h";
   const tz = await tenantZone(supabase, tenantId);
-  const since = windowStart(w, new Date(), tz);
+  const now = new Date();
+  const since = windowStart(w, now, tz);
+  const until = windowEnd(w, now, tz);
   let mq = supabase.from("outreach_messages").select("lead_id, direction, body, created_at, answered_by").eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(1500);
   if (since) mq = mq.gte("created_at", since.toISOString());
+  if (until) mq = mq.lt("created_at", until.toISOString());
   let lq = supabase.from("leads").select("id, company, name, stage, created_at").eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(1500);
   const [{ data: msgData, error: me }, { data: leadData, error: le }] = await Promise.all([mq, lq]);
   if (me && !/does not exist/i.test(me.message)) throw new Error(me.message);
@@ -560,11 +589,15 @@ export async function lookupOutreachActivity(supabase: SupabaseClient, tenantId:
   // The first outbound message of each lead that appears in the window: read its history, so "first message" means first EVER.
   const ids = Array.from(new Set(msgs.filter((m) => m.direction === "out").map((m) => m.lead_id)));
   const earliestOut: Record<string, string> = {};
+  // The newest message we ever sent, regardless of the window.
+  const { data: lastRows } = await supabase.from("outreach_messages").select("lead_id, direction, body, created_at, answered_by").eq("tenant_id", tenantId).eq("direction", "out").order("created_at", { ascending: false }).limit(1);
+  const lastEver = ((lastRows ?? []) as OutMsg[])[0] ?? null;
+  if (lastEver && !ids.includes(lastEver.lead_id)) ids.push(lastEver.lead_id);
   for (let i = 0; i < ids.length; i += 150) {
     const { data } = await supabase.from("outreach_messages").select("lead_id, created_at").eq("tenant_id", tenantId).eq("direction", "out").in("lead_id", ids.slice(i, i + 150)).order("created_at", { ascending: true }).limit(2000);
     for (const r of (data ?? []) as any[]) if (!earliestOut[r.lead_id]) earliestOut[r.lead_id] = r.created_at;
   }
-  return { ok: true, tool: LOOKUP_OUTREACH_ACTIVITY, data: shapeOutreachActivity({ window: w, since, msgs, leads, foundLeads: leads, earliestOut }) };
+  return { ok: true, tool: LOOKUP_OUTREACH_ACTIVITY, data: shapeOutreachActivity({ window: w, since, until, msgs, leads, foundLeads: leads, earliestOut, lastEver }) };
 }
 
 export async function lookupConnections(supabase: SupabaseClient, tenantId: string): Promise<ReadResult> {

@@ -80,7 +80,7 @@ test("every write tool is named like one, and is never mistaken for a read", () 
 
 test("kind is the one required field — the model cannot write a schedule without naming it", () => {
   const spec = WRITE_TOOLS.find((t) => t.function.name === MANAGE_SCHEDULE)!;
-  assert.deepEqual(spec.function.parameters.required, ["kind"]);
+  assert.deepEqual(spec.function.parameters.required, ["repeats", "kind"]);
   const kind = spec.function.parameters.properties.kind as any;
   assert.ok(Array.isArray(kind.enum) && kind.enum.includes("article") && kind.enum.includes("audit"));
 });
@@ -238,4 +238,15 @@ test("the leads count clamps to its own ceiling (50), not the articles' 5", asyn
     TENANT
   );
   assert.equal((res.data as any).after.leads_per_run, 50, "50 must survive — the old global clamp cut it to 5");
+});
+
+test("a single run is not a timetable: repeats=false writes NOTHING and the existing timetable is untouched ('sirf kal 8 baje' once became 'Every Monday 8:00')", async () => {
+  const { db, state } = fakeDb([WEEKLY_ARTICLES]);
+  const res = await runWriteTool(MANAGE_SCHEDULE, { repeats: false, kind: "article", frequency: "weekly", day_of_week: 1, time_of_day: "08:00" }, db, TENANT);
+  assert.equal(res.ok, false);
+  assert.match(res.note!, /single run/);
+  assert.equal(state.upserts.length, 0, "nothing was written");
+  assert.equal(state.rows[0].frequency, "weekly");
+  const real = WRITE_TOOLS.find((t) => t.function.name === MANAGE_SCHEDULE)!.function.parameters as any;
+  assert.ok(real.required.includes("repeats"), "the model must answer the question every time");
 });

@@ -157,7 +157,11 @@ export async function tickMeetingNoShows(now: Date = new Date()): Promise<number
       // If the lead messaged after the meeting ended, they're engaged — leave it to the human/reactive.
       const { data: lastIn } = await supabase.from("outreach_messages").select("created_at").eq("tenant_id", m.tenant_id).eq("lead_id", m.lead_id).eq("direction", "in").order("created_at", { ascending: false }).limit(1).maybeSingle();
       if (lastIn?.created_at && Date.parse(lastIn.created_at) > Date.parse(m.end_at)) {
-        await supabase.from("lead_meetings").update({ status: "done", updated_at: new Date().toISOString() }).eq("id", m.id);
+        // THE LEAD WROTE AGAIN AFTER THE CALL TIME. That does not mean they joined: a "hi" the next day looks exactly the same as a real follow-up. This used to mark the call
+        // "done" and the assistant then told the owner it "took place" (client chat 2026-11-19: Sainiul never joined). The system CANNOT see attendance, so it records only what it
+        // knows — the time passed — leaves the outcome unconfirmed, and asks the owner once. The owner answers in the chat ("he did not come" / "he came") and that is recorded.
+        await supabase.from("lead_meetings").update({ status: "done", outcome: "unconfirmed", updated_at: new Date().toISOString() }).eq("id", m.id);
+        await supabase.from("leads").update({ needs_attention: true, needs_attention_reason: "The call time has passed. Did they join? Tell MenCra in the chat (\"he did not come\" / \"he came\") so it is recorded and the next step is right.", updated_at: new Date().toISOString() }).eq("id", m.lead_id).eq("tenant_id", m.tenant_id);
         continue;
       }
       const hoursSince = (nowMs - Date.parse(m.end_at)) / 3_600_000;
