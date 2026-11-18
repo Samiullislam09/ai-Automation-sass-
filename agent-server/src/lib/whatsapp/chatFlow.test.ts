@@ -195,3 +195,31 @@ test("the prompt tells the model to read stop requests, anger, price, buying and
   assert.match(REPLY_SYSTEM, /judged from its MEANING in any language/);
   assert.match(REPLY_SYSTEM, /asking for the invoice or for how to pay IS a commitment/);
 });
+
+test("an AUTOMATIC reply (auto-responder, 'send us an email') is never answered and never gets a call offered — the Royal Joinery case", async () => {
+  const autoReply = "Thank you for contacting Royal Joinery! To ensure faster processing of your inquiries, quotations and project requirements, kindly send us an email at rj.marketing@royalric.ae";
+  const r = await finalizeDecision(
+    D("Thanks for the email address. I'm Sami from WCA Global.", { automated: true, redirect: "rj.marketing@royalric.ae", intent: "meeting", call: { stage: "wants_call", when: null } }),
+    ctx({ lastInbound: autoReply }),
+  );
+  assert.equal(r.action, "ignore", "nothing is sent back to a machine");
+  assert.equal(r.reply, "");
+  assert.equal(r.needs_human, true, "the owner is told");
+  assert.match(r.reason, /rj\.marketing@royalric\.ae/, "...with where the message says to go instead");
+  assert.equal(r.call?.stage, "none", "and no call is arranged, whatever else the model said");
+  assert.equal(r.meeting_pref, undefined);
+  assert.ok((r.notes ?? []).some((n: string) => /automatic reply/.test(n)));
+  // parsing: the flag and the address survive, junk does not
+  const p = parseDecision({ intent: "other", reply: "", automated: true, redirect: "  info@x.ae  " });
+  assert.equal(p.automated, true);
+  assert.equal(p.redirect, "info@x.ae");
+  assert.equal(parseDecision({ intent: "other", reply: "x", automated: "yes" }).automated, false, "only a real true counts");
+});
+
+test("a bare intent 'meeting' is NOT a call request: only the customer's own words (call.stage) arrange one", async () => {
+  const r = await finalizeDecision(D("Happy to share more about the process.", { intent: "meeting" }), ctx({ lastInbound: "tell me more about your process" }));
+  assert.equal(r.meeting_pref, undefined, "no preference, no team alert");
+  assert.equal(r.needs_human, false);
+  assert.equal(r.call?.stage, "none");
+  assert.equal(r.reply, "Happy to share more about the process.", "the model's own reply stands; nothing is replaced by the call-asking line");
+});

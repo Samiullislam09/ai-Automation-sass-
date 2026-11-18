@@ -12,6 +12,7 @@
  *  one sendText, so it inherits the onWhatsApp check and timeouts. */
 import { supabase } from "../../supabase.js";
 import { sendText } from "./session.js";
+import { logEvent } from "./events.js";
 
 export type Admin = { id: string; name: string | null; phone: string; role: string; notify: boolean };
 
@@ -97,12 +98,21 @@ export async function notifyAdmins(
   await createNotification(tenantId, n);
   if (opts.whatsapp === false) return;
   const text = n.whatsappText ?? `${n.title}${n.body ? `\n${n.body}` : ""}`;
-  const admins = (await listAdmins(tenantId)).filter((a) => a.notify && digits(a.phone).length >= 8);
+  const all = await listAdmins(tenantId);
+  const admins = all.filter((a) => a.notify && digits(a.phone).length >= 8);
+  // The Team view on the WhatsApp page reads these rows: WHO was told WHAT, and whether it reached them. Recorded per person, and also when nobody could be told
+  // (otherwise "my boss got nothing" has no answer anywhere).
+  if (admins.length === 0) {
+    void logEvent(tenantId, n.leadId ?? null, "alert", all.length ? `Nobody was told: every team number is muted. ${n.title}` : `Nobody was told: no team number is set (add one under Settings > Team). ${n.title}`, { to: null, ok: false, text: n.title });
+  }
   for (const a of admins) {
+    const who = a.name || a.phone;
     try {
       await sendText(tenantId, a.phone, `🔔 ${text}`);
+      void logEvent(tenantId, n.leadId ?? null, "alert", `Told ${who}: ${text}`.slice(0, 400), { to: a.phone, name: a.name, role: a.role, ok: true, text });
     } catch (e: any) {
       console.warn(`[team] admin alert to ${a.phone} failed:`, e?.message);
+      void logEvent(tenantId, n.leadId ?? null, "alert", `Could NOT reach ${who} (${String(e?.message ?? "send failed").slice(0, 80)}): ${text}`.slice(0, 400), { to: a.phone, name: a.name, role: a.role, ok: false, text, error: String(e?.message ?? "") });
     }
   }
 }

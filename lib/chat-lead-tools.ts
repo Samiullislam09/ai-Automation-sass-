@@ -22,6 +22,8 @@ export const LOOKUP_LEAD_STATS = "lookup_lead_stats";
 export const LOOKUP_KEYWORDS = "lookup_keywords";
 export const LOOKUP_AUTOPILOT = "lookup_autopilot";
 export const LOOKUP_DATA_SOURCES = "lookup_data_sources";
+export const LOOKUP_OUTREACH_ACTIVITY = "lookup_outreach_activity";
+export const LOOKUP_CONNECTIONS = "lookup_connections";
 
 type ReadResult = { ok: boolean; tool: string; data?: unknown; note?: string };
 
@@ -120,6 +122,38 @@ export const LEAD_TOOLS_RAW: ChatTool[] = [
   {
     type: "function",
     function: {
+      name: LOOKUP_OUTREACH_ACTIVITY,
+      description:
+        "WHAT HAPPENED in a period, by name: which leads were FOUND, which leads got a FIRST message, which got a follow-up or an answer, who REPLIED — with counts and the actual list " +
+        "(lead name, time, and the message text), newest first, plus the single most recent message we sent. `window` is the period: today, 24h, 7d, 30d or all. " +
+        'Call this for "last whatsapp pe kisko msg kiya", "aaj kitne logo ko msg kiya aur kaun kaun", "un 15 ka list do", "aaj kitne leads find kiye", "kitne naye logo ko pehli baar msg gaya", ' +
+        '"is hafte kisne reply diya", "kal kya hua", "show me who we messaged today", "who did we contact in the last 24 hours", "latest message sent", and for a SUMMARY of those messages. ' +
+        'For "next / agla message" (what is QUEUED) use the WhatsApp activity lookup instead; for one lead\'s whole chat use the lead-conversation lookup; for plain totals use lead-stats.',
+      parameters: {
+        type: "object",
+        properties: {
+          window: { type: "string", enum: ["today", "24h", "7d", "30d", "all"], description: "today = since midnight in their time zone; 24h = the last 24 hours. Default 24h." },
+        },
+        required: [],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: LOOKUP_CONNECTIONS,
+      description:
+        "What is CONNECTED to this account right now: WhatsApp (linked or not), Google (sign-in, Calendar, Analytics, Search Console), WordPress and any other site or social connection, " +
+        "the booking link, and the team numbers that receive alerts. " +
+        'Call this for "hamne abhi tak kya kya connect kiya hai", "kya kya connected hai", "is WordPress connected?", "Google jura hai?", "what is linked", "which accounts are connected". ' +
+        "Do NOT use it for how many leads were contacted (lead-stats / outreach-activity).",
+      parameters: { type: "object", properties: {}, required: [], additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: LOOKUP_DATA_SOURCES,
       description:
         "Which kinds of numbers this product can and cannot measure for the customer: website visitors and traffic, search clicks / impressions / rankings, " +
@@ -189,7 +223,33 @@ export function matchLeads(leads: LeadRow[], who: string): LeadRow[] {
   if (exact.length) return exact;
   const starts = leads.filter((l) => names(l).some((n) => n.startsWith(q)));
   if (starts.length) return starts;
-  return leads.filter((l) => names(l).some((n) => n.includes(q) || (n.length >= 3 && q.includes(n))));
+  const contains = leads.filter((l) => names(l).some((n) => n.includes(q) || (n.length >= 3 && q.includes(n))));
+  if (contains.length) return contains;
+  // A TYPO. "Sainul" for "Sainiul" is one letter off; a customer typing fast, or in another script's habits, will do this all the time. Nearest by edit distance
+  // over each word of the name (so "falcon mech" still finds "Falcon Mechanical" above, and "sainul" finds "Sainiul"), accepted only when it is close.
+  const limit = q.length >= 7 ? 2 : q.length >= 4 ? 1 : 0;
+  if (!limit) return [];
+  let best = limit + 1;
+  let hits: LeadRow[] = [];
+  for (const l of leads) {
+    const d = Math.min(...names(l).flatMap((n) => [n, ...n.split(/[^a-z0-9\u00C0-\u024F\u0600-\u06FF\u0900-\u097F\u0980-\u09FF]+/).filter((w) => w.length >= 3)]).map((w) => editDistance(q, w)), 99);
+    if (d < best) { best = d; hits = [l]; } else if (d === best && d <= limit) hits.push(l);
+  }
+  return best <= limit ? hits : [];
+}
+
+/** Levenshtein distance. Small strings only (names), so the plain two-row version is plenty. */
+export function editDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[b.length];
 }
 
 export function shapeLeadConversation(lead: LeadRow & { needs_attention_reason?: string | null; last_intent?: string | null; city?: string | null; country?: string | null }, messages: MessageRow[], meetings: MeetingRow[]) {
@@ -278,6 +338,89 @@ export function shapeKeywords(choices: KeywordChoiceRow[], jobs: KeywordJobRow[]
   return {
     research_runs: runs,
     note: runs.length ? "These are saved results. Read the numbers exactly; a null means it was not measured. The FIRST run is the latest." : "No keyword research has been saved yet.",
+  };
+}
+
+/** The instant a local day began, in an IANA time zone ("today" means the customer's today, not UTC's). Pure; DST edges are handled to the hour, which is all a count needs. */
+export function startOfLocalDay(now: Date, tz: string): Date {
+  let zone = "UTC";
+  try { new Intl.DateTimeFormat("en-GB", { timeZone: tz }); zone = tz || "UTC"; } catch { zone = "UTC"; }
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(now);
+  const g = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
+  const asIfUtc = Date.UTC(g("year"), g("month") - 1, g("day"), g("hour"), g("minute"), g("second"));
+  const offsetMs = asIfUtc - Math.floor(now.getTime() / 1000) * 1000; // how far the local wall clock is ahead of UTC right now
+  return new Date(Date.UTC(g("year"), g("month") - 1, g("day")) - offsetMs);
+}
+
+export type WindowName = "today" | "24h" | "7d" | "30d" | "all";
+export function windowStart(w: string, now: Date, tz: string): Date | null {
+  switch (w) {
+    case "today": return startOfLocalDay(now, tz);
+    case "7d": return new Date(now.getTime() - 7 * 86_400_000);
+    case "30d": return new Date(now.getTime() - 30 * 86_400_000);
+    case "all": return null;
+    default: return new Date(now.getTime() - 86_400_000);
+  }
+}
+
+export type OutMsg = { lead_id: string; direction: string; body: string; created_at: string; answered_by?: string | null };
+type NamedLead = { id: string; company?: string | null; name?: string | null; stage?: string | null; created_at?: string | null };
+
+/** What happened in a window, by name. `earliestOut` = the first outbound message time per lead EVER (so a "first message" is first for real, not just first in the window). */
+export function shapeOutreachActivity(opts: { window: string; since: Date | null; msgs: OutMsg[]; leads: NamedLead[]; foundLeads: NamedLead[]; earliestOut: Record<string, string> }) {
+  const byId = new Map(opts.leads.map((l) => [l.id, l]));
+  const nm = (id: string) => { const l = byId.get(id); return l?.company || l?.name || "(unknown lead)"; };
+  const inWin = (iso: string) => !opts.since || Date.parse(iso) >= opts.since.getTime();
+  const msgs = opts.msgs.filter((m) => inWin(m.created_at)).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+  const outs = msgs.filter((m) => m.direction === "out");
+  const ins = msgs.filter((m) => m.direction === "in");
+  const kindOf = (m: OutMsg): "first message" | "answer to the lead" | "follow-up / later message" =>
+    opts.earliestOut[m.lead_id] === m.created_at ? "first message" : m.answered_by === "brain" || m.answered_by === "human" ? "answer to the lead" : "follow-up / later message";
+  const sent = outs.map((m) => ({ lead: nm(m.lead_id), at: m.created_at, kind: kindOf(m), by: m.answered_by === "human" ? "the owner" : m.answered_by === "brain" ? "the AI" : "the timeline", text: clip(m.body, 220) }));
+  const firsts = sent.filter((x) => x.kind === "first message");
+  const found = opts.foundLeads.filter((l) => inWin(String(l.created_at ?? ""))).sort((a, b) => Date.parse(String(b.created_at)) - Date.parse(String(a.created_at)));
+  const peopleMessaged = Array.from(new Set(outs.map((m) => m.lead_id)));
+  return {
+    window: opts.window,
+    since: opts.since ? opts.since.toISOString() : null,
+    counts: {
+      leads_found: found.length,
+      messages_sent: outs.length,
+      different_people_messaged: peopleMessaged.length,
+      first_messages_to_new_people: firsts.length,
+      follow_ups_and_answers: outs.length - firsts.length,
+      replies_received_from_leads: ins.length,
+      different_people_who_replied: new Set(ins.map((m) => m.lead_id)).size,
+    },
+    most_recent_message_sent: sent[0] ?? null,
+    people_messaged: peopleMessaged.slice(0, 40).map((id) => ({ lead: nm(id), stage: byId.get(id)?.stage ?? null })),
+    messages_sent: sent.slice(0, 25),
+    first_messages: firsts.slice(0, 25).map((x) => ({ lead: x.lead, at: x.at })),
+    replies: ins.slice(0, 15).map((m) => ({ lead: nm(m.lead_id), at: m.created_at, said: clip(m.body, 200) })),
+    leads_found: found.slice(0, 25).map((l) => ({ lead: l.company || l.name || "(no name)", at: l.created_at, stage: l.stage })),
+    note: "Lists are capped (newest first); the counts are the full figures. To summarise, use only the texts shown. Say which window you used.",
+  };
+}
+
+export type ConnectionsInput = {
+  integrations: { type?: string | null; status?: string | null; label?: string | null }[];
+  whatsapp: { connected: boolean; phone?: string | null } | null;
+  google: "connected" | "needs_reconnect" | "not_connected";
+  googleSources?: { ga4: boolean; gsc: boolean } | null;
+  bookingLink: boolean | null;
+  teamNumbers: number | null;
+};
+
+export function shapeConnections(i: ConnectionsInput) {
+  const live = i.integrations.filter((x) => x.status === "connected" && x.type !== "google");
+  return {
+    whatsapp: i.whatsapp == null ? "could not be checked just now" : i.whatsapp.connected ? `linked${i.whatsapp.phone ? ` (+${String(i.whatsapp.phone).replace(/^\+/, "")})` : ""}` : "not linked",
+    google_account: i.google === "connected" ? "connected (Calendar allowed)" : i.google === "needs_reconnect" ? "connected, but Calendar permission is missing: reconnect" : "not connected",
+    google_analytics_and_search_console: i.googleSources ? { analytics_data_flowing: i.googleSources.ga4, search_console_data_flowing: i.googleSources.gsc } : "not connected",
+    websites_and_other_connections: live.map((x) => ({ type: x.type, name: x.label ?? null })),
+    booking_link_set: i.bookingLink,
+    team_numbers_for_alerts: i.teamNumbers,
+    note: "Only what is listed is connected. Say what is missing, and where to connect it (the Connect page).",
   };
 }
 
@@ -390,6 +533,58 @@ export async function lookupKeywords(supabase: SupabaseClient, tenantId: string)
   const jobRows = jobs.error ? [] : ((jobs.data ?? []) as any[]);
   if (choices.error && jobs.error) throw new Error(jobs.error.message);
   return { ok: true, tool: LOOKUP_KEYWORDS, data: shapeKeywords(choiceRows, jobRows) };
+}
+
+/** The tenant's time zone, from any schedule row (the same place the chat reads it elsewhere); UTC when there is none. */
+async function tenantZone(supabase: SupabaseClient, tenantId: string): Promise<string> {
+  try {
+    const { data } = await supabase.from("schedules").select("timezone").eq("tenant_id", tenantId).limit(1);
+    const tz = (data as any)?.[0]?.timezone;
+    if (typeof tz === "string" && tz.trim()) { new Intl.DateTimeFormat("en-GB", { timeZone: tz }); return tz; }
+  } catch { /* UTC */ }
+  return "UTC";
+}
+
+export async function lookupOutreachActivity(supabase: SupabaseClient, tenantId: string, window: string): Promise<ReadResult> {
+  const w = ["today", "24h", "7d", "30d", "all"].includes(window) ? window : "24h";
+  const tz = await tenantZone(supabase, tenantId);
+  const since = windowStart(w, new Date(), tz);
+  let mq = supabase.from("outreach_messages").select("lead_id, direction, body, created_at, answered_by").eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(1500);
+  if (since) mq = mq.gte("created_at", since.toISOString());
+  let lq = supabase.from("leads").select("id, company, name, stage, created_at").eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(1500);
+  const [{ data: msgData, error: me }, { data: leadData, error: le }] = await Promise.all([mq, lq]);
+  if (me && !/does not exist/i.test(me.message)) throw new Error(me.message);
+  if (le) throw new Error(le.message);
+  const msgs = (msgData ?? []) as OutMsg[];
+  const leads = (leadData ?? []) as NamedLead[];
+  // The first outbound message of each lead that appears in the window: read its history, so "first message" means first EVER.
+  const ids = Array.from(new Set(msgs.filter((m) => m.direction === "out").map((m) => m.lead_id)));
+  const earliestOut: Record<string, string> = {};
+  for (let i = 0; i < ids.length; i += 150) {
+    const { data } = await supabase.from("outreach_messages").select("lead_id, created_at").eq("tenant_id", tenantId).eq("direction", "out").in("lead_id", ids.slice(i, i + 150)).order("created_at", { ascending: true }).limit(2000);
+    for (const r of (data ?? []) as any[]) if (!earliestOut[r.lead_id]) earliestOut[r.lead_id] = r.created_at;
+  }
+  return { ok: true, tool: LOOKUP_OUTREACH_ACTIVITY, data: shapeOutreachActivity({ window: w, since, msgs, leads, foundLeads: leads, earliestOut }) };
+}
+
+export async function lookupConnections(supabase: SupabaseClient, tenantId: string): Promise<ReadResult> {
+  const [integ, status, settings, admins, google, sources] = await Promise.all([
+    supabase.from("integrations").select("type, status, label").eq("tenant_id", tenantId).then((r: any) => r.data ?? [], () => []),
+    callWhatsapp(tenantId, "status").catch(() => null as any),
+    callWhatsapp(tenantId, "settings").catch(() => null as any),
+    callWhatsapp(tenantId, "admins").catch(() => null as any),
+    loadGoogle(supabase, tenantId).catch(() => null),
+    loadDataSources(supabase, tenantId).catch(() => null),
+  ]);
+  const data = shapeConnections({
+    integrations: integ as any[],
+    whatsapp: status?.ok ? { connected: status.status === "connected" || status.status === "reconnecting" || status.linked === true, phone: status.phone ?? null } : null,
+    google: google ? ((google.scopes ?? []).includes(SCOPE_CALENDAR) ? "connected" : "needs_reconnect") : "not_connected",
+    googleSources: google && sources ? { ga4: sources.ga4, gsc: sources.gsc } : null,
+    bookingLink: settings?.ok ? !!String(settings.settings?.booking_link ?? "").trim() : null,
+    teamNumbers: admins?.ok && Array.isArray(admins.admins) ? admins.admins.filter((a: any) => a?.notify !== false).length : null,
+  });
+  return { ok: true, tool: LOOKUP_CONNECTIONS, data };
 }
 
 export async function lookupDataSources(supabase: SupabaseClient, tenantId: string): Promise<ReadResult> {

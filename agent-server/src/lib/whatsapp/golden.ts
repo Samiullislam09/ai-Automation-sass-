@@ -34,6 +34,8 @@ export type Scenario = {
     intent?: string;
     /** Live: the customer asked not to be messaged (in any language): the decision must be a stop, with NOTHING to send. */
     silent?: boolean;
+    /** Live: their message was written by a machine (an auto-reply): the decision must say so, send NOTHING and arrange no call. */
+    automated?: boolean;
     /** Live: the MODEL itself must have asked for a person (beyond the code-enforced floor above). */
     modelHandoff?: boolean;
     /** Live: the reply must match every one of these … */
@@ -130,6 +132,20 @@ export const SCENARIOS: Scenario[] = [
     pricing: true,
     thread: [OPENER, IN("Honestly your service has been terrible, I am very disappointed with how you handled my last enquiry")],
     expect: { lang: "en", handoff: false, replyAvoids: [EMPTY_PROMISE] },
+  },
+  {
+    id: "auto-reply-email-us",
+    why: "A company's auto-responder ('send us an email') is a template, not a person: it gets NO reply and NO call offer (a real lead was once offered three call slots because of one).",
+    pricing: true,
+    thread: [OPENER, IN("Thank you for contacting Royal Joinery! To ensure faster processing of your inquiries, quotations and project requirements, kindly send us an email at: rj.marketing@royalric.ae. Our team will get back to you as soon as possible.")],
+    expect: { lang: "en", handoff: false, automated: true },
+  },
+  {
+    id: "auto-reply-away-hinglish",
+    why: "An away message in another register is still a machine.",
+    pricing: true,
+    thread: [OPENER, IN("Namaste! Hum abhi office se bahar hain. Aapka message mil gaya hai, hum 24 ghante mein reply karenge. Dhanyavaad.")],
+    expect: { lang: "hinglish", handoff: false, automated: true },
   },
   {
     id: "stop-request-spam",

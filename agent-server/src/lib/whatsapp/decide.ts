@@ -54,6 +54,11 @@ export type Decision = {
   commit?: boolean;
   /** Which details ABOUT THE BUSINESS the customer asked for (address, phone, hours, licence) — checked against our facts in code. */
   asks_missing?: DetailKey[];
+  /** The customer's last message was written by a MACHINE (an auto-reply, away message, "send us an email" template, ticket acknowledgement, bot menu) in any
+   *  language. Such a message is not a person showing interest: nothing is sent back and no call is offered. */
+  automated?: boolean;
+  /** Where that automated message tells us to go instead (an email address, a phone number, a form link), copied exactly. */
+  redirect?: string | null;
 };
 export type CallStage = "none" | "wants_call" | "time_given" | "wants_now" | "unclear";
 const CALL_STAGES: CallStage[] = ["none", "wants_call", "time_given", "wants_now", "unclear"];
@@ -123,7 +128,7 @@ export function parseDecision(raw: unknown): Decision {
   };
   const stop = o.stop === "yes" || o.stop === "maybe" ? o.stop : "no";
   const asks_missing = (Array.isArray(o.asks_missing) ? o.asks_missing : []).filter((k): k is DetailKey => DETAIL_KEYS.includes(k as DetailKey));
-  return { intent, confidence, action, reply, reason, needs_human, call: { stage, when }, read, stop, commit: o.commit === true, asks_missing };
+  return { intent, confidence, action, reply, reason, needs_human, call: { stage, when }, read, stop, commit: o.commit === true, asks_missing, automated: o.automated === true, redirect: typeof o.redirect === "string" && o.redirect.trim() ? o.redirect.trim().slice(0, 160) : null };
 }
 
 /** Does the reply carry a clock time ("5 pm", "17:30") or a link that neither the customer's last message nor the business facts
@@ -257,7 +262,9 @@ export async function completeReplyJson(user: string, system: string, call: type
 export const REPLY_SYSTEM = [
   "You are the person answering on a business's WhatsApp, deciding how to handle a lead's latest message. Be genuinely useful, fast and honest — like the best salesperson at a well-run company, never a bot reading a script.",
   "",
-  "Return ONLY JSON: " + '{"intent":"...","confidence":0.0,"action":"...","reply":"...","handoff":false,"reason":"...","call":{"stage":"none","when":null},"read":{"price":false,"details":false,"document":false,"delay_complaint":false,"who_are_you":false,"bot_question":false,"angry":false,"wants_call":false},"stop":"no","commit":false,"asks_missing":[]}',
+  "Return ONLY JSON: " + '{"intent":"...","confidence":0.0,"action":"...","reply":"...","handoff":false,"reason":"...","call":{"stage":"none","when":null},"read":{"price":false,"details":false,"document":false,"delay_complaint":false,"who_are_you":false,"bot_question":false,"angry":false,"wants_call":false},"stop":"no","commit":false,"asks_missing":[],"automated":false,"redirect":null}',
+  '- "automated": true if their LAST message was written by a MACHINE, not a person: an auto-reply, an away / out-of-office message, "thank you for contacting us, please send an email to…", a ticket acknowledgement, a bot greeting or a numbered menu — in any language. It is a template that answers every sender the same way, so it shows NO interest and expects no reply. When true: action "ignore", reply "", intent "other". A real person who happens to mention an email address is NOT automated.',
+  '- "redirect": when an automated message tells us where to go instead (an email address, a phone number, a web form), copy it EXACTLY; otherwise null.',
   '- "read": what their LAST message is doing, as true/false, judged from its MEANING in any language, spelling or slang: price (asks cost, fees, a rate, a budget or a quote), details (asks for information, an outline, a brochure, "send me…"), document (asks for a file we cannot attach), delay_complaint (complains about slow replies or being ignored), who_are_you, bot_question (asks whether they are talking to a bot or a human), angry (upset, rude, calls us a scam or spam), wants_call (asks to talk to a person or to be called).',
   '- "stop": "yes" if, in ANY form — any language, spelling, slang, emoji or hint — they do not want us to message them any more (stop, do not message, remove me, wrong number, leave me alone, unsubscribe, I will block you, a spam complaint, "not interested, do not contact me"). "maybe" if they sound clearly fed up or say they are not interested but did not actually ask us to stop. Otherwise "no". When "yes" or "maybe": action "ignore" and reply "" — nothing is sent to them.',
   '- "commit": true ONLY for an unmistakable decision to buy or start now ("send the invoice", "send me the invoice", "let us start", "I will pay", "how do I pay", "sign me up") in any language — asking for the invoice or for how to pay IS a commitment. Hesitation, price questions and polite interest are false.',
@@ -304,7 +311,7 @@ export const REPLY_SYSTEM = [
   "- When they HAVE said when — in any wording or language — do NOT ask again and do NOT ask for a 'specific time'. Acknowledge it warmly in one short line, say our team will confirm the exact time and send the meeting link right here, and set call.stage \"time_given\" with call.when. If they want it right now, say you are letting the team know straight away and set \"wants_now\". Echo their own words for the time; never turn it into a clock time they did not say.",
   "- Read the whole conversation before you ask when: if you have already asked when twice and still have nothing usable, do not ask a third time — say a team member will message them directly to fix a time, and set call.stage \"unclear\". Never ask the same question twice in a row; if their answer was a question of their own (is it possible now?), answer THAT first.",
   "- Never say how soon the team will answer ('in 5-10 minutes', 'within the hour') — you cannot promise that. And do not introduce yourself or the business again in a reply about a call: one short line.",
-  "- Whenever call.stage is not \"none\", set intent to \"meeting\".",
+  "- Whenever call.stage is not \"none\", set intent to \"meeting\". And the other way round: call.stage stays \"none\" (and intent is not \"meeting\") unless the CUSTOMER's own words ask for, accept or discuss a call. An automated reply, a question about our service, interest in the topic, or our own offer of a call that they have not answered is NOT a call request — never offer or arrange a call on a guess.",
   "- To move toward a call, offer it ONCE, and only when they have shown real interest (given their need or size, asked the price, raised an objection you have answered): e.g. 'Would a short call help? I can send you a few time slots.' When they say yes or ask for a call, set intent to \"meeting\".",
   "- Do not bring a call up in every message. If you already offered one and they did not take it, do not repeat it unless they raise it. Do not end every message with the same kind of question either — answer, and ask something only when it genuinely moves things on.",
   "",
@@ -446,6 +453,14 @@ export async function finalizeDecision(
   let d = first;
   const note = (s: string) => { d = { ...d, notes: [...(d.notes ?? []), s] }; };
 
+  // 00. A MACHINE'S MESSAGE (auto-reply, away message, "email us" template). Nothing is sent back — answering a template is a bot talking to a bot, it can loop,
+  //     and the customer-facing "reply" the model drafted would only be noise — and no call is offered. The owner is told where it asks them to go instead.
+  if (d.automated) {
+    d = { ...d, action: "ignore", reply: "", intent: "other", needs_human: true, reason: d.redirect ? `automatic reply — they ask you to use ${d.redirect}` : "automatic reply, not a person", call: { stage: "none", when: null } };
+    note("their message is an automatic reply: nothing sent, no call offered");
+    return d;
+  }
+
   // 0. TOO LONG FOR A CHAT. First, so every net below checks the text that will actually be sent. One rewrite asking for the
   //    short version; if the model still writes an essay, autoReply sends it as two or three short messages instead.
   if (d.action === "reply" && tooLongForChat(d.reply)) {
@@ -535,7 +550,9 @@ export async function finalizeDecision(
     //   · a call in play is a meeting request (the team is told, with what they said about when);
     //   · the reply never carries a clock time or a link the customer or the facts did not supply;
     //   · a reply that is empty falls back to a short standard line, in the customer's language where we have one.
-    const stage: CallStage = d.call && d.call.stage !== "none" ? d.call.stage : d.intent === "meeting" ? "wants_call" : "none";
+    // A call is arranged ONLY when the customer's own words made it one (the model's `call.stage`). A bare intent "meeting" is not enough: an auto-responder
+    // that mentioned "inquiries and project requirements" was once offered three call slots because the intent alone said so.
+    const stage: CallStage = d.call && d.call.stage !== "none" ? d.call.stage : "none";
     if (stage !== "none") {
       d = { ...d, intent: "meeting" };
       if (stage !== "wants_call") {

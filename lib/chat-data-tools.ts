@@ -36,11 +36,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ChatTool } from "@/lib/chat-tools";
 import { callWhatsapp } from "@/lib/whatsapp-proxy";
 import {
-  LEAD_TOOLS_RAW, LOOKUP_LEAD_CONVERSATION, LOOKUP_LEAD_STATS, LOOKUP_KEYWORDS, LOOKUP_AUTOPILOT, LOOKUP_DATA_SOURCES,
-  lookupLeadConversation, lookupLeadStats, lookupKeywords, lookupAutopilot, lookupDataSources, MESSAGED_STAGES, REPLIED_STAGES,
+  LEAD_TOOLS_RAW, LOOKUP_LEAD_CONVERSATION, LOOKUP_LEAD_STATS, LOOKUP_KEYWORDS, LOOKUP_AUTOPILOT, LOOKUP_DATA_SOURCES, LOOKUP_OUTREACH_ACTIVITY, LOOKUP_CONNECTIONS,
+  lookupLeadConversation, lookupLeadStats, lookupKeywords, lookupAutopilot, lookupDataSources, lookupOutreachActivity, lookupConnections, MESSAGED_STAGES, REPLIED_STAGES,
 } from "@/lib/chat-lead-tools";
 
-export { LOOKUP_LEAD_CONVERSATION, LOOKUP_LEAD_STATS, LOOKUP_KEYWORDS, LOOKUP_AUTOPILOT, LOOKUP_DATA_SOURCES };
+export { LOOKUP_LEAD_CONVERSATION, LOOKUP_LEAD_STATS, LOOKUP_KEYWORDS, LOOKUP_AUTOPILOT, LOOKUP_DATA_SOURCES, LOOKUP_OUTREACH_ACTIVITY, LOOKUP_CONNECTIONS };
 
 /* ── The tools, as the model sees them ───────────────────────────────────────────────────── */
 
@@ -289,6 +289,8 @@ export async function runReadTool(
       case LOOKUP_KEYWORDS: return await lookupKeywords(supabase, tenantId);
       case LOOKUP_AUTOPILOT: return await lookupAutopilot(supabase, tenantId);
       case LOOKUP_DATA_SOURCES: return await lookupDataSources(supabase, tenantId);
+      case LOOKUP_OUTREACH_ACTIVITY: return await lookupOutreachActivity(supabase, tenantId, typeof args?.window === "string" ? args.window : "24h");
+      case LOOKUP_CONNECTIONS: return await lookupConnections(supabase, tenantId);
       default: return { ok: false, tool: name, note: "No such lookup." };
     }
   } catch (e: any) {

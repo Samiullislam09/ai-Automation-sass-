@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useStore } from "@/lib/store";
 import WhatsAppConnectModal from "./WhatsAppConnectModal";
 import ActivityPanel, { type Overview } from "./whatsapp/ActivityPanel";
+import TeamPanel from "./whatsapp/TeamPanel";
 import TeamAlerts from "./whatsapp/TeamAlerts";
 
 /** /dashboard/whatsapp — Mr. WhatsApp, made to look and feel like WhatsApp itself.
@@ -96,7 +97,7 @@ export default function WhatsAppSection() {
   const [adminOpen, setAdminOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const { setup: meetSetup, reload: reloadMeetSetup } = useMeetingSetup();
-  const [view, setView] = useState<"chats" | "activity">("chats");
+  const [view, setView] = useState<"chats" | "activity" | "team">("chats");
   const [focusLead, setFocusLead] = useState<string | null>(null);
   const [activity, setActivity] = useState<Overview | null>(null);
   const [activityLoading, setActivityLoading] = useState(false);
@@ -196,7 +197,7 @@ export default function WhatsAppSection() {
       {connected && (
         <div className="flex shrink-0 items-center justify-between gap-3 px-4 py-2.5" style={{ borderBottom: `1px solid ${WA.divider}` }}>
           <div role="tablist" aria-label="WhatsApp view" className="inline-flex rounded-lg p-0.5" style={{ background: WA.listHover }}>
-            {([["chats", "Chats"], ["activity", "Activity"]] as const).map(([k, label]) => (
+            {([["chats", "Chats"], ["activity", "Activity"], ["team", "Team"]] as const).map(([k, label]) => (
               <button key={k} role="tab" aria-selected={view === k} onClick={() => setView(k)} className="inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium transition-colors duration-150 ease-out"
                 style={{ background: view === k ? "#fff" : "transparent", color: view === k ? WA.text : WA.sub, boxShadow: view === k ? "0 1px 2px rgba(0,0,0,.08)" : "none" }}>
                 {label}
@@ -274,6 +275,7 @@ export default function WhatsAppSection() {
           <div className={view === "chats" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
             <Inbox search={search} setSearch={setSearch} online={status.status === "connected" || !status.loaded} focusLead={focusLead} />
           </div>
+          {view === "team" && <TeamPanel onOpenChat={(id) => { setFocusLead(id); setView("chats"); }} onOpenSettings={() => setSettingsOpen(true)} />}
           {view === "activity" && <ActivityPanel data={activity} loading={activityLoading} showAll={activityFull} onShowAll={setActivityFull} onOpenChat={(id) => { setFocusLead(id); setView("chats"); }} />}
         </>
       ) : (
@@ -758,7 +760,7 @@ function Inbox({ search, setSearch, online, focusLead }: { search: string; setSe
   const [newChat, setNewChat] = useState(false);
   const [onWa, setOnWa] = useState<Record<string, boolean | null>>({}); // leadId → on WhatsApp?
   const q = search;
-  const [tab, setTab] = useState<"all" | "unread" | "nowa">("all");
+  const [tab, setTab] = useState<"all" | "needs" | "unread" | "nowa">("all");
 
   // Which chats are on WhatsApp. Asked by lead id, so the server can use the lead's country to turn a local
   // number into a dialable one and reuse an answer it already stored. Each lead is asked about once, and an
@@ -849,10 +851,12 @@ function Inbox({ search, setSearch, online, focusLead }: { search: string; setSe
   const chatLeads = leads.filter((l) => !noWhatsApp(l));
   const noWaLeads = leads.filter(noWhatsApp);
   const unreadCount = chatLeads.filter((l) => (inbox[l.id]?.unanswered ?? 0) > 0).length;
-  const tabs: [typeof tab, string, number][] = [["all", "All", chatLeads.length], ["unread", "Unread", unreadCount]];
+  // Leads the assistant handed to a person (a call wanted, a question it could not settle, someone upset): the ones the owner / a manager must look at.
+  const needsYou = chatLeads.filter((l) => !!l.needs_attention);
+  const tabs: [typeof tab, string, number][] = [["all", "All", chatLeads.length], ["needs", "Needs you", needsYou.length], ["unread", "Unread", unreadCount]];
   if (noWaLeads.length) tabs.push(["nowa", "No WhatsApp", noWaLeads.length]);
   const needle = q.trim().toLowerCase();
-  const pool = tab === "nowa" ? noWaLeads : chatLeads;
+  const pool = tab === "nowa" ? noWaLeads : tab === "needs" ? needsYou : chatLeads;
   const visible = pool
     .filter((l) => (tab === "unread" ? (inbox[l.id]?.unanswered ?? 0) > 0 : true))
     .filter((l) => !needle || [l.company, l.name, l.whatsapp, l.phone, inbox[l.id]?.body].some((v) => String(v ?? "").toLowerCase().includes(needle)))
@@ -884,7 +888,7 @@ function Inbox({ search, setSearch, online, focusLead }: { search: string; setSe
             {tabs.map(([k, label, n]) => (
               <button key={k} onClick={() => setTab(k)} className="flex shrink-0 items-center gap-1.5 whitespace-nowrap pb-2" style={{ color: tab === k ? WA.green : WA.sub, borderBottom: `2px solid ${tab === k ? WA.green : "transparent"}` }}>
                 {label}
-                <span className="rounded-full px-1.5 text-[11px] font-bold" style={{ background: tab === k ? WA.green : WA.divider, color: tab === k ? "#fff" : WA.sub }}>{n}</span>
+                <span className="rounded-full px-1.5 text-[11px] font-bold" style={{ background: k === "needs" && n > 0 ? "#f5a623" : tab === k ? WA.green : WA.divider, color: k === "needs" && n > 0 ? "#fff" : tab === k ? "#fff" : WA.sub }}>{n}</span>
               </button>
             ))}
           </div>
@@ -923,7 +927,7 @@ function Inbox({ search, setSearch, online, focusLead }: { search: string; setSe
                     <span className="mt-0.5 flex items-center justify-between gap-2">
                       <span className="flex min-w-0 items-center gap-1 text-[13px]" style={{ color: WA.sub }}>
                         {last?.direction === "out" && last.status && <Ticks status={last.status} />}
-                        <span className="truncate">{last ? last.body : tab === "nowa" ? (l.dial ? `+${l.dial}` : l.phone || "No WhatsApp") : "Tap to open"}</span>
+                        <span className="truncate" style={tab === "needs" && l.needs_attention_reason ? { color: "#7a5b00", fontWeight: 500 } : undefined}>{tab === "needs" && l.needs_attention_reason ? l.needs_attention_reason : last ? last.body : tab === "nowa" ? (l.dial ? `+${l.dial}` : l.phone || "No WhatsApp") : "Tap to open"}</span>
                       </span>
                       <span className="flex shrink-0 items-center gap-1.5">
                         {l.needs_attention && <span title={l.needs_attention_reason ?? "Needs your attention"} className="h-2 w-2 rounded-full" style={{ background: "#f5a623" }} aria-label="Needs you" />}

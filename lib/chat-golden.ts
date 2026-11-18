@@ -13,7 +13,7 @@
  *   · lib/chat-golden.test.ts — offline, every test run: the data is sound (every expected tool exists, languages covered, the checks themselves work). No network.
  *   · lib/chat-golden.live.ts — by hand, against the real model: `npm run golden:chat`. Run it before a deploy that touches the chat, the tools or the prompt.
  *     A model's wording varies run to run, so it is a gate you run, not a flaky CI step. Exit code 1 on any failure. */
-import { shapeLeadStats, shapeAutopilot, shapeKeywords, shapeLeadConversation } from "@/lib/chat-lead-tools";
+import { shapeLeadStats, shapeAutopilot, shapeKeywords, shapeLeadConversation, shapeOutreachActivity, shapeConnections } from "@/lib/chat-lead-tools";
 import { shapeDataSources } from "@/lib/data-sources";
 
 export type Lang = "en" | "hinglish" | "hi" | "es" | "ar" | "bn" | "fr";
@@ -69,6 +69,17 @@ export const ROUTING: RoutingCase[] = [
   { id: "ap-status-2", lang: "hinglish", message: "kya sab kuch auto chal raha hai", expect: ["lookup_autopilot"], why: "same failure, another phrasing" },
   { id: "schedule-set", lang: "hinglish", message: "roz subah 9 baje article banao", expect: ["manage_schedule"], why: "the article timetable, not the lead chain" },
   { id: "find-now", lang: "hinglish", message: "abhi 10 leads dhundo", expect: ["find_leads"], why: "a one-off, not a standing setting" },
+  // ── the follow-up chat of 2026-11-19: "I don't have that" for things the data holds
+  { id: "last-msg", lang: "hinglish", message: "last whstapp pe kisko msg kiya ha", expect: ["lookup_outreach_activity"], why: "was answered with the NEXT queued message, then 'not available'" },
+  { id: "last-not-next", lang: "hinglish", message: "next nahi last konsa pe msg kiya ha", expect: ["lookup_outreach_activity"], why: "same: last, not next" },
+  { id: "msgs-today", lang: "hinglish", message: "yar hamne aj totoal kitne logo ko msg kiya ha", expect: ["lookup_outreach_activity"], why: "a count for a period" },
+  { id: "list-15", lang: "hinglish", message: "un 15 ka list do", expect: ["lookup_outreach_activity"], why: "'the list is not available' — it was" },
+  { id: "found-today", lang: "hinglish", message: "aj hamne kitne leads find kiya ha", expect: ["lookup_outreach_activity"], why: "'I don't have a figure for today'" },
+  { id: "first-time", lang: "hinglish", message: "kitne new logo ko hamne aj first time msg bheja ha", expect: ["lookup_outreach_activity"], why: "first messages versus follow-ups" },
+  { id: "who-typo", lang: "hinglish", message: "accha sainul kon ha", expect: ["lookup_lead_conversation"], why: "typed 'Sainul': 'nobody by that name' (the lead is Sainiul)" },
+  { id: "lead-or-client", lang: "hinglish", message: "hamara leads ha ya client", expect: ["lookup_lead_stats"], why: "stage counts" },
+  { id: "what-connected", lang: "hinglish", message: "hamne abhi tak kya kya connect kiya ha", expect: ["lookup_connections"], why: "was answered with the leads contacted" },
+  { id: "next-msg", lang: "hinglish", message: "agla whatsapp message kisko jayega", expect: ["lookup_whatsapp_activity"], why: "NEXT is the queue; LAST is the activity lookup" },
   { id: "leads-fr", lang: "fr", message: "Peux-tu écrire à mes leads sur WhatsApp ?", expect: ["lookup_autopilot", "answer_question"], why: "any language" },
 ];
 
@@ -103,6 +114,24 @@ const CONVERSATION = shapeLeadConversation(LEADS[0] as any, [
   { direction: "out", body: "Essential fits you. Would a short call help?", created_at: "2026-11-13T15:03:00Z", answered_by: "brain" },
   { direction: "in", body: "Aj rat ko", created_at: "2026-11-14T11:28:00Z" },
 ], [{ status: "scheduled", start_at: "2026-11-14T16:00:00Z", meet_link: "https://meet.google.com/abc-defg-hij" }]);
+const ACT_LEADS = [
+  { id: "a", company: "Alpha Co", stage: "contacted", created_at: "2026-11-18T10:00:00Z" },
+  { id: "b", company: "Beta Ltd", stage: "replied", created_at: "2026-11-10T10:00:00Z" },
+  { id: "c", company: "Gamma LLC", stage: "contacted", created_at: "2026-11-18T09:00:00Z" },
+];
+const ACTIVITY = shapeOutreachActivity({
+  window: "24h", since: new Date("2026-11-17T20:00:00Z"), leads: ACT_LEADS, foundLeads: ACT_LEADS,
+  msgs: [
+    { lead_id: "a", direction: "out", body: "Hello Alpha, we are WCA Global, an ISO consultancy.", created_at: "2026-11-18T12:00:00Z", answered_by: null },
+    { lead_id: "c", direction: "out", body: "Hello Gamma, we help firms get ISO 9001.", created_at: "2026-11-18T12:30:00Z", answered_by: null },
+    { lead_id: "b", direction: "out", body: "Following up on ISO 9001 for your firm.", created_at: "2026-11-18T13:00:00Z", answered_by: null },
+  ],
+  earliestOut: { a: "2026-11-18T12:00:00Z", c: "2026-11-18T12:30:00Z", b: "2026-11-12T09:00:00Z" },
+});
+const CONNECTIONS = shapeConnections({
+  integrations: [{ type: "wordpress", status: "connected", label: "https://wca-global.com" }],
+  whatsapp: { connected: true, phone: "971500000000" }, google: "connected", googleSources: { ga4: false, gsc: false }, bookingLink: false, teamNumbers: 1,
+});
 const NO_SOURCES = shapeDataSources({ ga4: false, gsc: false, social: [] });
 
 /** What each check looks for. `must` all match; `mustNot` none match. Plain regexes over the reply text. */
@@ -136,7 +165,16 @@ export const ANSWERS: AnswerCase[] = [
     mustNot: [/\b\d{2,}(,\d{3})*\s*(searches|per month|monthly)/i], noInventedNumbers: true, script: "latin" },
   { id: "ans-lead-summary", lang: "hinglish", message: "sainiul ki chat history ka summary do", tool: "lookup_lead_conversation", fixture: CONVERSATION, why: "one lead's conversation, summarised only from what was said",
     // No invented-number check here: the fixture holds the call as "16:00Z", and a reply that says "4 PM" or "14 Nov" is converting, not inventing.
-    must: [/(2,?400|price)/i], mustNot: [/(^|[^\d,])[5-9]\d{3}([^\d]|$)/] },
+    // The summary may say "pricing" or "$2,400", but must not state any OTHER amount (ISO 9001 is a standard number, not a price).
+    must: [/(2,?400|pric)/i], mustNot: [/(AED|USD|INR|₹|Rs\.?)\s?\d/i, /\$\s?(?!2,?400)\d/] },
+  { id: "ans-last-message", lang: "hinglish", message: "last whstapp pe kisko msg kiya ha", tool: "lookup_outreach_activity", fixture: ACTIVITY, why: "was 'the details are not available'",
+    must: [/Beta Ltd/], mustNot: [/(not available|nahi hai|isn.t recorded|aren.t available)/i] },
+  { id: "ans-list-today", lang: "hinglish", message: "un logo ka list do jinko msg gaya", tool: "lookup_outreach_activity", fixture: ACTIVITY, why: "the list WAS available",
+    must: [/Alpha Co/, /Beta Ltd/, /Gamma LLC/], mustNot: [/(not available|nahi hai|isn.t available)/i] },
+  { id: "ans-first-vs-followup", lang: "en", message: "how many of those were first-time messages?", tool: "lookup_outreach_activity", fixture: ACTIVITY, why: "first messages are told apart from follow-ups",
+    must: [/(?<!\d)2(?!\d)|two/i], noInventedNumbers: true, script: "latin" },
+  { id: "ans-connected", lang: "hinglish", message: "hamne abhi tak kya kya connect kiya ha", tool: "lookup_connections", fixture: CONNECTIONS, why: "was answered with the leads contacted",
+    must: [/whatsapp/i, /wordpress|wca-global/i], mustNot: [/\d{2,} leads/i] },
   { id: "ans-followers-es", lang: "es", message: "¿cuántos seguidores tengo en Instagram?", tool: "lookup_data_sources", fixture: NO_SOURCES, why: "must say it cannot see this, in Spanish, with no invented number",
     must: [/\b(no (puedo|tengo|se pueden|es posible)|no me es posible|no está disponible|no hay)\b/i], mustNot: [/\b\d{2,}\b/], script: "latin" },
   { id: "ans-traffic-en", lang: "en", message: "how many people visited our site this week?", tool: "lookup_data_sources", fixture: NO_SOURCES, why: "Google is not connected: say that, with the way to fix it",

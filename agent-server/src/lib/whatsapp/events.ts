@@ -7,7 +7,7 @@
  *  replied / a person replied / what the assistant decided — which is the "live log" on the Activity page. */
 import { supabase } from "../../supabase.js";
 
-export type EventKind = "sent" | "skipped" | "flagged" | "meeting" | "system" | "error";
+export type EventKind = "sent" | "skipped" | "flagged" | "meeting" | "system" | "error" | "alert";
 
 let warnedMissing = false;
 
@@ -38,16 +38,19 @@ export type LogItem = {
 const nameOf = (l?: any) => l?.company || l?.name || l?.phone || l?.whatsapp || "A customer";
 
 /** The newest `limit` things that happened, messages and decisions together. `leadId` narrows it to one customer. */
-export async function listLog(tenantId: string, opts: { limit?: number; leadId?: string | null; before?: string | null } = {}): Promise<LogItem[]> {
+export async function listLog(tenantId: string, opts: { limit?: number; leadId?: string | null; before?: string | null; kind?: string | null } = {}): Promise<LogItem[]> {
   const limit = Math.min(Math.max(opts.limit ?? 80, 10), 200);
   const before = opts.before && !isNaN(Date.parse(opts.before)) ? opts.before : null;
 
+  // `kind` narrows the log to decisions of one kind (the Team view asks for "alert"): then the messages are not read at all.
+  const onlyKind = opts.kind && /^[a-z_]{2,20}$/.test(opts.kind) ? opts.kind : null;
   let mq = supabase.from("outreach_messages").select("id, lead_id, direction, body, answered_by, created_at").eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(limit);
   let eq = supabase.from("wa_events").select("id, lead_id, kind, summary, detail, at").eq("tenant_id", tenantId).order("at", { ascending: false }).limit(limit);
   if (opts.leadId) { mq = mq.eq("lead_id", opts.leadId); eq = eq.eq("lead_id", opts.leadId); }
   if (before) { mq = mq.lt("created_at", before); eq = eq.lt("at", before); }
 
-  const [{ data: msgs }, { data: evs }] = await Promise.all([mq, eq]);
+  if (onlyKind) eq = eq.eq("kind", onlyKind);
+  const [{ data: msgs }, { data: evs }] = await Promise.all([onlyKind ? Promise.resolve({ data: [] as any[] }) : mq, eq]);
   const items: LogItem[] = [];
   for (const m of (msgs ?? []) as any[]) {
     items.push({

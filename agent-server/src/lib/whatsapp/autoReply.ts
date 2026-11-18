@@ -398,6 +398,15 @@ async function handleAutoReplyLocked(job: AutoReplyJob): Promise<void> {
       return;
     }
 
+    // A MACHINE wrote that (an auto-reply, an away message, "send us an email"): do not answer it and do not offer anything. Tell the owner, with the address or number
+    // it points to, so a person can use it. (Answering a template is a bot talking to a bot; it can loop, and it makes the lead look engaged when nobody read our message.)
+    if (decision.automated) {
+      const where = decision.redirect ? ` They ask you to use: ${decision.redirect}.` : "";
+      await flagForHuman(tenantId, leadId, "Automatic reply from their side", `That reply was written by a machine, not a person, so nothing was sent back.${where}`);
+      void logEvent(tenantId, leadId, "skipped", `An automatic reply from their side (not a person): not answered, no call offered.${where}`, { said: String(last.body).slice(0, 240), redirect: decision.redirect ?? null });
+      return;
+    }
+
     // Record what we understood on the lead — so the Leads page / MenCra can show "kahaan tak baat
     // hui" and flag the ones a human should look at — regardless of whether we send now.
     await supabase
@@ -425,7 +434,8 @@ async function handleAutoReplyLocked(job: AutoReplyJob): Promise<void> {
       const { data } = await supabase.from("lead_meetings").select("id").eq("tenant_id", tenantId).eq("lead_id", leadId).eq("status", "offered").gt("created_at", new Date(Date.now() - 30 * 60_000).toISOString()).limit(1);
       return !!data?.length;
     };
-    if ((decision.meeting_pref || decision.intent === "meeting") && !(await slotsRecentlyOffered())) {
+    const callAsked = !!decision.call && decision.call.stage !== "none"; // the customer's own words asked for / accepted a call
+    if ((decision.meeting_pref || callAsked) && !(await slotsRecentlyOffered())) {
       if (await offerMeeting(tenantId, leadId, phone).catch(() => false)) {
         const whoS = (lead as any).company || (lead as any).name || phone;
         await supabase.from("leads").update({ stage: "meeting_requested", updated_at: new Date().toISOString() }).eq("id", leadId).eq("tenant_id", tenantId);
@@ -468,7 +478,7 @@ async function handleAutoReplyLocked(job: AutoReplyJob): Promise<void> {
     // about timing doesn't re-fire the alert on every message. The actual slot-offering is P7; here
     // the normal reply still goes (the model acknowledges), and a human/P7 takes the booking from here.
     const MEETING_PRE = ["new", "approved", "contacted", "delivered", "read", "replied", "in_conversation", "interested"];
-    if (decision.intent === "meeting" && !decision.meeting_pref && MEETING_PRE.includes(String((lead as any).stage))) {
+    if (callAsked && !decision.meeting_pref && MEETING_PRE.includes(String((lead as any).stage))) {
       const who = (lead as any).company || (lead as any).name || phone;
       await supabase.from("leads").update({ stage: "meeting_requested", updated_at: new Date().toISOString() }).eq("id", leadId).eq("tenant_id", tenantId);
 

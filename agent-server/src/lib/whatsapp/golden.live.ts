@@ -42,7 +42,11 @@ for (const sc of SCENARIOS.filter((s) => s.id.includes(filter))) {
     // The production path, nets included — not the raw model.
     const d = await decideFromPrompt(built);
     reply = d.reply;
-    if (sc.expect.silent) {
+    if (sc.expect.automated) {
+      if (!d.automated) problems.push("an automatic reply was not recognised as one");
+      if (d.action === "reply" && d.reply) problems.push("an automatic reply must get NO reply, but one was drafted");
+      if (d.call && d.call.stage !== "none") problems.push(`no call may be arranged on a machine's message (call.stage=${d.call.stage})`);
+    } else if (sc.expect.silent) {
       if (!(d.stop === "yes" || d.intent === "stop")) problems.push(`should be read as a stop request, got stop=${d.stop} intent=${d.intent}`);
       if (d.action === "reply" && d.reply) problems.push("a stop request must send NOTHING, but there is a reply");
     } else {

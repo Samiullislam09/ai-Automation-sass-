@@ -102,7 +102,8 @@ export function mountWhatsapp(app: Express): void {
       const lead = typeof req.query.lead === "string" && req.query.lead ? req.query.lead : null;
       const before = typeof req.query.before === "string" ? req.query.before : null;
       const limit = Number(req.query.limit) || 80;
-      res.json({ ok: true, items: await listLog(req.params.tenantId, { limit, leadId: lead, before }) });
+      const kind = typeof req.query.kind === "string" && req.query.kind ? req.query.kind : null;
+      res.json({ ok: true, items: await listLog(req.params.tenantId, { limit, leadId: lead, before, kind }) });
     } catch (e: any) {
       res.status(500).json({ ok: false, error: e?.message ?? "could not read the log" });
     }

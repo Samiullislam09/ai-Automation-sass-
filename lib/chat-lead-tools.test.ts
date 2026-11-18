@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  shapeLeadStats, matchLeads, shapeLeadConversation, shapeRecentConversations, shapeKeywords, shapeAutopilot,
+  shapeLeadStats, matchLeads, editDistance, startOfLocalDay, windowStart, shapeOutreachActivity, shapeConnections, LOOKUP_OUTREACH_ACTIVITY, LOOKUP_CONNECTIONS, shapeLeadConversation, shapeRecentConversations, shapeKeywords, shapeAutopilot,
   LOOKUP_LEAD_CONVERSATION, LOOKUP_LEAD_STATS, LOOKUP_KEYWORDS, LOOKUP_AUTOPILOT, LOOKUP_DATA_SOURCES, LEAD_TOOLS_RAW, FUNNEL,
 } from "./chat-lead-tools";
 import { READ_TOOLS, isReadTool, lookupOutreachShape } from "./chat-data-tools";
@@ -165,4 +165,69 @@ test("what we can measure is DATA the model reads (any language), not a keyword 
   assert.ok(READ_TOOLS.some((t) => t.function.name === LOOKUP_DATA_SOURCES));
   const desc = READ_TOOLS.find((t) => t.function.name === LOOKUP_DATA_SOURCES)!.function.description;
   for (const w of ["kitne visitor", "cuántos seguidores", "how many people visited"]) assert.ok(desc.includes(w), w);
+});
+
+test("a typo still finds the lead: 'Sainul' for 'Sainiul' (the client typed it that way and was told nobody matched)", () => {
+  assert.equal(editDistance("sainul", "sainiul"), 1);
+  assert.equal(editDistance("abc", "abc"), 0);
+  assert.deepEqual(matchLeads(LEADS, "sainul").map((l) => l.id), ["1"]);
+  assert.deepEqual(matchLeads(LEADS, "Saynul traders").map((l) => l.id), ["1"], "company words are matched too");
+  assert.deepEqual(matchLeads(LEADS, "falkon").map((l) => l.id).sort(), ["2", "3"], "two Falcons stay ambiguous: ask, never pick");
+  assert.deepEqual(matchLeads(LEADS, "xq"), [], "too short to be a typo of anything");
+  assert.deepEqual(matchLeads(LEADS, "zzzzzzzzzz"), [], "nothing close: no guess");
+});
+
+test("'today' is the customer's today, not UTC's", () => {
+  const now = new Date("2026-11-18T20:00:00Z"); // 01:30 on 19 Nov in Calcutta, 00:00 on 19 Nov in Dubai... and still 18 Nov in UTC
+  assert.equal(startOfLocalDay(now, "Asia/Calcutta").toISOString(), "2026-11-18T18:30:00.000Z");
+  assert.equal(startOfLocalDay(now, "UTC").toISOString(), "2026-11-18T00:00:00.000Z");
+  assert.equal(startOfLocalDay(now, "Not/AZone").toISOString(), "2026-11-18T00:00:00.000Z", "a bad zone falls back to UTC");
+  assert.equal(windowStart("24h", now, "UTC")!.toISOString(), "2026-11-17T20:00:00.000Z");
+  assert.equal(windowStart("7d", now, "UTC")!.toISOString(), "2026-11-11T20:00:00.000Z");
+  assert.equal(windowStart("all", now, "UTC"), null);
+});
+
+test("outreach activity names who was messaged, which was a FIRST message, who replied, and what was said last", () => {
+  const leads = [
+    { id: "a", company: "Alpha Co", stage: "contacted", created_at: "2026-11-18T10:00:00Z" },
+    { id: "b", company: "Beta Ltd", stage: "replied", created_at: "2026-11-10T10:00:00Z" },
+    { id: "c", company: "Old Co", stage: "contacted", created_at: "2026-10-01T10:00:00Z" },
+  ];
+  const msgs = [
+    { lead_id: "a", direction: "out", body: "Hello Alpha, we are WCA Global.", created_at: "2026-11-18T12:00:00Z", answered_by: null },
+    { lead_id: "b", direction: "out", body: "Following up on ISO 9001.", created_at: "2026-11-18T13:00:00Z", answered_by: null },
+    { lead_id: "b", direction: "in", body: "yes send price", created_at: "2026-11-18T13:30:00Z" },
+    { lead_id: "b", direction: "out", body: "Essential starts from $2,400.", created_at: "2026-11-18T13:31:00Z", answered_by: "brain" },
+    { lead_id: "c", direction: "out", body: "Too old to count today.", created_at: "2026-11-01T13:00:00Z", answered_by: null },
+  ];
+  const earliestOut = { a: "2026-11-18T12:00:00Z", b: "2026-11-12T09:00:00Z", c: "2026-11-01T13:00:00Z" };
+  const r: any = shapeOutreachActivity({ window: "24h", since: new Date("2026-11-17T20:00:00Z"), msgs, leads, foundLeads: leads, earliestOut });
+  assert.equal(r.counts.messages_sent, 3, "the old message is outside the window");
+  assert.equal(r.counts.different_people_messaged, 2);
+  assert.equal(r.counts.first_messages_to_new_people, 1, "only Alpha was messaged for the first time");
+  assert.equal(r.counts.follow_ups_and_answers, 2);
+  assert.equal(r.counts.replies_received_from_leads, 1);
+  assert.equal(r.counts.leads_found, 1, "only Alpha was created in the window");
+  assert.equal(r.most_recent_message_sent.lead, "Beta Ltd");
+  assert.equal(r.most_recent_message_sent.by, "the AI");
+  assert.deepEqual(r.people_messaged.map((p: any) => p.lead).sort(), ["Alpha Co", "Beta Ltd"]);
+  assert.deepEqual(r.first_messages.map((x: any) => x.lead), ["Alpha Co"]);
+  assert.equal(r.replies[0].said, "yes send price");
+  assert.deepEqual(shapeOutreachActivity({ window: "today", since: new Date("2026-11-19T00:00:00Z"), msgs, leads, foundLeads: leads, earliestOut }).most_recent_message_sent, null, "nothing today = null, never a guess");
+});
+
+test("connections: what is linked, what is not, and 'could not check' for what could not be read", () => {
+  const none: any = shapeConnections({ integrations: [], whatsapp: null, google: "not_connected", bookingLink: null, teamNumbers: null });
+  assert.equal(none.whatsapp, "could not be checked just now");
+  assert.equal(none.google_account, "not connected");
+  const full: any = shapeConnections({
+    integrations: [{ type: "wordpress", status: "connected", label: "https://wca-global.com" }, { type: "google", status: "connected" }, { type: "linkedin", status: "disconnected" }],
+    whatsapp: { connected: true, phone: "971500000000" }, google: "connected", googleSources: { ga4: false, gsc: true }, bookingLink: false, teamNumbers: 1,
+  });
+  assert.match(full.whatsapp, /linked \(\+971500000000\)/);
+  assert.deepEqual(full.websites_and_other_connections, [{ type: "wordpress", name: "https://wca-global.com" }], "google has its own line; a disconnected one is not listed");
+  assert.deepEqual(full.google_analytics_and_search_console, { analytics_data_flowing: false, search_console_data_flowing: true });
+  assert.ok(READ_TOOLS.some((x) => x.function.name === LOOKUP_OUTREACH_ACTIVITY) && READ_TOOLS.some((x) => x.function.name === LOOKUP_CONNECTIONS));
+  const d = READ_TOOLS.find((x) => x.function.name === LOOKUP_OUTREACH_ACTIVITY)!.function.description;
+  for (const w of ["last whatsapp pe kisko msg kiya", "un 15 ka list do", "aaj kitne leads find kiye", "latest message sent"]) assert.ok(d.includes(w), w);
 });

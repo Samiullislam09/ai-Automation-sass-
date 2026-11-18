@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
  *  what it decided and why. Messages and decisions share one list (GET /api/whatsapp/log), newest first,
  *  refreshed by itself every few seconds while the tab is visible. */
 
-type Kind = "customer" | "assistant" | "person" | "sent" | "skipped" | "flagged" | "meeting" | "system" | "error";
+type Kind = "customer" | "assistant" | "person" | "sent" | "skipped" | "flagged" | "meeting" | "system" | "error" | "alert";
 type Item = { id: string; at: string; lead_id: string | null; name: string; kind: Kind; text: string; detail?: Record<string, any> };
 
 const C = { green: "#008069", ink: "#111b21", sub: "#667781", line: "#e9edef", soft: "#f5f6f6", blue: "#2f9bd6", amber: "#d98a0b", amberSoft: "#fff8e1", amberText: "#7a5b00", red: "#b42318", redSoft: "#fdeaea", greenSoft: "#e7f6ec", greenText: "#067647" };
@@ -20,6 +20,7 @@ const LOOK: Record<Kind, { label: string; dot: string; bg: string; fg: string }>
   meeting: { label: "Call request", dot: "#7a4bd6", bg: "#f2ecfc", fg: "#5b34ad" },
   system: { label: "System", dot: "#98a2b3", bg: C.soft, fg: C.sub },
   error: { label: "Problem", dot: "#e11d48", bg: C.redSoft, fg: C.red },
+  alert: { label: "Team alert", dot: "#7a4bd6", bg: "#f2ecfc", fg: "#5b34ad" },
 };
 
 type Filter = "all" | "talk" | "attention";

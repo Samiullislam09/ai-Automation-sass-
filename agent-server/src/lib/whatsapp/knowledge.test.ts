@@ -324,7 +324,7 @@ test("small talk: a claimed experience is caught; an honest deflection is not", 
 
 test("finalizeDecision: a meeting reply with an invented time is rewritten; invented times are stripped elsewhere; small-talk claims replaced", async () => {
   const base = { handoffFloor: { yes: false, reason: "" }, unverified: [] as string[], lang: "hinglish" as const, rewrite: async () => D("Kaunsa din theek rahega?"), recentOut: [] as string[], callWanted: false };
-  const m = await finalizeDecision(D("Badhiya — main time slots bhejta hu. Kaam ke din (Mon-Fri) 10 AM - 4 PM theek?", { intent: "meeting" }), base);
+  const m = await finalizeDecision(D("Badhiya — main time slots bhejta hu. Kaam ke din (Mon-Fri) 10 AM - 4 PM theek?", { intent: "meeting", call: { stage: "wants_call", when: null } }), base);
   assert.equal(m.reply, "Kaunsa din theek rahega?");
   const t = await finalizeDecision(D("Hum audit tak saath rehte hain. Kal subah 10 baje call karein?", { intent: "question" }), { ...base, rewrite: async () => D("x") });
   assert.equal(t.reply, "Hum audit tak saath rehte hain.");
