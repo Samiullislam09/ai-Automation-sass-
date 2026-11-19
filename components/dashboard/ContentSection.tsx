@@ -8,9 +8,10 @@ import ApprovalsSection from "@/components/dashboard/ApprovalsSection";
  *  Create new button, rather than a second, drifting design of the same data.
  *
  *  Same real data as the old table here: GET /api/content, nothing mocked. */
-export default function ContentSection() {
+export default function ContentSection({ initialItems }: { initialItems?: any[] } = {}) {
   return (
     <ApprovalsSection
+      initialItems={initialItems}
       heading="Content"
       subtitle="Everything your team has written — drafts, published and rejected"
       createHref="/dashboard"

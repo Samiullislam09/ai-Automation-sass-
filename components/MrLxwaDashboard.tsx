@@ -40,7 +40,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { LogoMark } from "@/components/brand/MenCraLogo";
 import { renderMarkdown } from "@/lib/md";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import ChatHistory from "@/components/ChatHistory";
 import { LxGlobalStyle } from "@/components/lx-theme";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -2611,6 +2611,24 @@ export default function MrLxwaDashboard({
   children?: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
+  // PREFETCH. The pages read their data on the server, so a page that was not asked for in advance waits for the server on the click. A sidebar item is therefore fetched
+  // in full (router.prefetch) the moment the pointer or a finger reaches it, which is usually a good fraction of a second before the click lands; and the three pages used
+  // most are fetched once while the browser is idle. Not every link on every load: each prefetch runs that page's queries.
+  const warmed = useRef<Set<string>>(new Set());
+  const warm = (href: string | undefined) => {
+    if (!href || href === pathname || warmed.current.has(href)) return;
+    warmed.current.add(href);
+    try { router.prefetch(href); } catch { /* a failed prefetch just means the click loads it */ }
+  };
+  useEffect(() => {
+    const hot = ["/dashboard/leads", "/dashboard/whatsapp", "/dashboard/approvals"];
+    const w = window as any;
+    const run = () => hot.forEach((h) => warm(h));
+    const id = w.requestIdleCallback ? w.requestIdleCallback(run, { timeout: 6000 }) : setTimeout(run, 4000);
+    return () => { if (w.cancelIdleCallback && w.requestIdleCallback) w.cancelIdleCallback(id); else clearTimeout(id); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Real account/plan/sign-out — the same lib/store.tsx StoreProvider AppShell reads from,
   // mounted globally in app/layout.tsx, so it's already live here without any extra fetch.
   const { s: account, signOut, patch } = useStore();
@@ -3639,7 +3657,7 @@ export default function MrLxwaDashboard({
           );
           const cls = `lx-nav relative ${active ? "on" : ""} ${mini ? "lg:justify-center lg:px-0" : ""}`;
           return it.href ? (
-            <Link key={it.label} href={it.href} className={cls} title={mini ? it.label : undefined}>
+            <Link key={it.label} href={it.href} prefetch={false} onMouseEnter={() => warm(it.href)} onFocus={() => warm(it.href)} onTouchStart={() => warm(it.href)} className={cls} title={mini ? it.label : undefined}>
               {inner}
             </Link>
           ) : (
