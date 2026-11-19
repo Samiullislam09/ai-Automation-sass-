@@ -1,6 +1,7 @@
 "use client";
 import { useMeetingSetup, MeetingSetupBanner, googleOk, type MeetingSetup } from "./whatsapp/MeetingSetup";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useMounted } from "./leads/shared";
 import { useStore } from "@/lib/store";
 import WhatsAppConnectModal from "./WhatsAppConnectModal";
 import ActivityPanel, { type Overview } from "./whatsapp/ActivityPanel";
@@ -85,9 +86,24 @@ function dayLabel(iso: string): string {
 }
 type Msg = { id: string; direction: "in" | "out"; status: string; body: string; answered_by?: string | null; created_at: string };
 
-export default function WhatsAppSection() {
+/** The last message and unread count of each chat, keyed by lead: one mapping for the first state and for every refresh. */
+type InboxMap = Record<string, { body: string; direction: string; created_at: string; status?: string; unanswered?: number; replied?: boolean }>;
+function inboxMap(ib: any[] | null | undefined): InboxMap {
+  const map: InboxMap = {};
+  for (const m of ib ?? []) map[m.lead_id] = { body: m.body, direction: m.direction, created_at: m.created_at, status: m.status, unanswered: m.unanswered, replied: m.replied };
+  return map;
+}
+
+/** `initial` is read on the SERVER (app/dashboard/(app)/whatsapp/page.tsx): the chat list, and the link status as the database last recorded it (the live answer from the agent server
+ *  still arrives a moment later and corrects it). The page therefore opens on the real inbox, not on "checking…" and a skeleton. Without it the component loads as before. */
+export type WhatsAppInitial = { chats: { items: any[]; inbox: any[] } | null; session: { status: string; phone: string | null } | null };
+
+export default function WhatsAppSection({ initial = null }: { initial?: WhatsAppInitial | null } = {}) {
   const { toast } = useStore();
-  const [status, setStatus] = useState<Status & { loaded: boolean }>({ status: "checking", qr: null, phone: null, loaded: false });
+  const [status, setStatus] = useState<Status & { loaded: boolean }>(() =>
+    initial?.session
+      ? { status: initial.session.status, qr: null, phone: initial.session.phone, linked: initial.session.status === "connected", loaded: true }
+      : { status: "checking", qr: null, phone: null, loaded: false });
   const [hint, setHint] = useState(false); // this browser has seen a linked WhatsApp
   useEffect(() => { setHint(readLinked()); }, []);
   const [modal, setModal] = useState(false);
@@ -273,7 +289,7 @@ export default function WhatsAppSection() {
             </div>
           )}
           <div className={view === "chats" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
-            <Inbox search={search} setSearch={setSearch} online={status.status === "connected" || !status.loaded} focusLead={focusLead} />
+            <Inbox search={search} setSearch={setSearch} online={status.status === "connected" || !status.loaded} focusLead={focusLead} initialChats={initial?.chats ?? null} />
           </div>
           {view === "team" && <TeamPanel onOpenChat={(id) => { setFocusLead(id); setView("chats"); }} onOpenSettings={() => setSettingsOpen(true)} />}
           {view === "activity" && <ActivityPanel data={activity} loading={activityLoading} showAll={activityFull} onShowAll={setActivityFull} onOpenChat={(id) => { setFocusLead(id); setView("chats"); }} />}
@@ -752,10 +768,11 @@ function InboxSkeleton() {
 }
 
 /* ── the inbox ───────────────────────────────────────────────────────────────────────────── */
-function Inbox({ search, setSearch, online, focusLead }: { search: string; setSearch: (v: string) => void; online: boolean; focusLead: string | null }) {
+function Inbox({ search, setSearch, online, focusLead, initialChats = null }: { search: string; setSearch: (v: string) => void; online: boolean; focusLead: string | null; initialChats?: { items: any[]; inbox: any[] } | null }) {
   const { toast } = useStore();
-  const [leads, setLeads] = useState<Lead[] | null>(null);
-  const [inbox, setInbox] = useState<Record<string, { body: string; direction: string; created_at: string; status?: string; unanswered?: number; replied?: boolean }>>({});
+  const [leads, setLeads] = useState<Lead[] | null>((initialChats?.items as Lead[] | undefined) ?? null);
+  const [inbox, setInbox] = useState<InboxMap>(() => inboxMap(initialChats?.inbox))
+  const mounted = useMounted();;
   const [active, setActive] = useState<Lead | null>(null);
   const [newChat, setNewChat] = useState(false);
   const [onWa, setOnWa] = useState<Record<string, boolean | null>>({}); // leadId → on WhatsApp?
@@ -791,9 +808,7 @@ function Inbox({ search, setSearch, online, focusLead }: { search: string; setSe
   const applyChats = useCallback((all: Lead[], ib: any[]) => {
     setLeads(all);
     void checkOnWhatsApp(all);
-    const map: Record<string, any> = {};
-    for (const m of ib ?? []) map[m.lead_id] = { body: m.body, direction: m.direction, created_at: m.created_at, status: m.status, unanswered: m.unanswered, replied: m.replied };
-    setInbox(map);
+    setInbox(inboxMap(ib));
     // No chat opens by itself, like WhatsApp: you pick one. The only exception is a ?lead=<id> deep link (the
     // WhatsApp button on a lead row), which opens that conversation, even if the lead has no messages yet.
     const wanted = deepLink.current;
@@ -827,6 +842,7 @@ function Inbox({ search, setSearch, online, focusLead }: { search: string; setSe
   // First paint from the last visit, before the network answers.
   useEffect(() => {
     deepLink.current = new URLSearchParams(window.location.search).get("lead");
+    if (initialChats) return; // the server already sent the chats: an older copy from this browser must not replace them
     try {
       const raw = sessionStorage.getItem(CHATS_KEY);
       if (raw) { const c = JSON.parse(raw); if (Array.isArray(c?.items)) applyChats(c.items, c.inbox ?? []); }
@@ -922,7 +938,7 @@ function Inbox({ search, setSearch, online, focusLead }: { search: string; setSe
                   <span className="min-w-0 flex-1">
                     <span className="flex items-baseline justify-between gap-2">
                       <span className="truncate text-[15px]" style={{ color: WA.text, fontWeight: 500 }}>{l.company || l.name || "Lead"}</span>
-                      {last?.created_at && <span className="shrink-0 text-[11.5px] tabular-nums" style={{ color: unread ? WA.green : WA.sub }}>{listTime(last.created_at)}</span>}
+                      {last?.created_at && <span key={String(mounted)} suppressHydrationWarning className="shrink-0 text-[11.5px] tabular-nums" style={{ color: unread ? WA.green : WA.sub }}>{listTime(last.created_at)}</span>}
                     </span>
                     <span className="mt-0.5 flex items-center justify-between gap-2">
                       <span className="flex min-w-0 items-center gap-1 text-[13px]" style={{ color: WA.sub }}>

@@ -127,25 +127,55 @@ function countdown(ms: number): string {
 }
 
 /* ═════════════════════════════════════════════════════════════════════════ */
-export default function ScheduleSection() {
+/** What GET /api/schedule means for the page. One function for the first state (read on the server) and the refresh (read by the browser), so they cannot differ. */
+function parseSchedule(d: any, tz: string) {
+  const blank = { article: DEFAULT("article", tz), leads: DEFAULT("leads", tz), audit: DEFAULT("audit", tz) } as Record<Kind, Sched>;
+  if (!d?.ok) return { scheds: blank, loadError: String(d?.error ?? "Couldn't load the schedule."), migration: !!d?.needsMigration, autoPublishAvailable: true, serverNow: d?.serverNow ?? null };
+  const next = { ...blank };
+  for (const row of d.schedules ?? []) {
+    const k = row.kind as Kind;
+    if (k !== "article" && k !== "leads" && k !== "audit") continue;
+    next[k] = {
+      kind: k, enabled: row.enabled, frequency: row.frequency, dayOfWeek: row.day_of_week,
+      timeOfDay: row.time_of_day, timezone: row.timezone, count: row.count,
+      autoPublish: row.auto_publish === true, lastRunAt: row.last_run_at, nextRunAt: row.nextRunAt ?? null,
+    };
+  }
+  return { scheds: next, loadError: "", migration: false, autoPublishAvailable: d.autoPublishAvailable !== false, serverNow: d.serverNow ?? null };
+}
+const ordersOf = (d: any) => (d?.ok ? [...(d.pending ?? []), ...(d.recent ?? [])] : []);
+const publishTargetOf = (d: any): { can: boolean; target: string | null } => {
+  if (!d?.ok) return { can: false, target: null };
+  const t = (d.items ?? []).find((i: any) => (i.type === "wordpress" || i.type === "webhook") && i.status === "connected");
+  return { can: !!t, target: t ? (t.type === "wordpress" ? "WordPress" : "Webhook") : null };
+};
+
+/** `initial` = the four things the page needs, read on the SERVER with the page (app/dashboard/(app)/schedule/page.tsx): the page arrives with the real switches, the runs and
+ *  the bookings, instead of painting every switch OFF and flipping them a moment later. Without it (a server error) the component loads them itself, as before. */
+export type ScheduleInitial = { schedule: any; history: any; orders: any; integrations: any };
+
+export default function ScheduleSection({ initial = null }: { initial?: ScheduleInitial | null } = {}) {
   const { toast, confirmAction } = useStore();
+  const first = initial?.schedule ? parseSchedule(initial.schedule, "UTC") : null;
   const router = useRouter();
   // Seeded with (disabled) defaults so the page paints instantly instead of flashing a
   // full-panel "Loading…" on every visit; the real rows arrive from /api/schedule a moment
   // later. "UTC" keeps the first paint deterministic for SSR — loadSchedule swaps in the real
   // timezone right away.
-  const [scheds, setScheds] = useState<Record<Kind, Sched>>(() => ({
+  const [scheds, setScheds] = useState<Record<Kind, Sched>>(() => first?.scheds ?? ({
     article: DEFAULT("article", "UTC"), leads: DEFAULT("leads", "UTC"), audit: DEFAULT("audit", "UTC"),
   }));
-  const [autoPublishAvailable, setAutoPublishAvailable] = useState(true);
-  const [canPublish, setCanPublish] = useState<boolean | null>(null);
-  const [publishTarget, setPublishTarget] = useState<string | null>(null);
-  const [migration, setMigration] = useState(false);
-  const [loadError, setLoadError] = useState("");
-  const [runs, setRuns] = useState<Run[] | null>(null);
+  const [autoPublishAvailable, setAutoPublishAvailable] = useState(first?.autoPublishAvailable ?? true);
+  const firstPublish = initial?.integrations ? publishTargetOf(initial.integrations) : null;
+  const [canPublish, setCanPublish] = useState<boolean | null>(firstPublish ? firstPublish.can : null);
+  const [publishTarget, setPublishTarget] = useState<string | null>(firstPublish ? firstPublish.target : null);
+  const [migration, setMigration] = useState(first?.migration ?? false);
+  const [loadError, setLoadError] = useState(first?.loadError ?? "");
+  const [runs, setRuns] = useState<Run[] | null>(initial?.history?.ok ? (initial.history.runs ?? []) : null);
   const [historyError, setHistoryError] = useState("");
-  const [orders, setOrders] = useState<any[] | null>(null);
-  const [now, setNow] = useState<number>(Date.now());
+  const [orders, setOrders] = useState<any[] | null>(initial?.orders?.ok ? ordersOf(initial.orders) : null);
+  // The server's own clock when it rendered: the countdowns it draws and the ones the browser draws while hydrating start from the same instant, then tick on from now.
+  const [now, setNow] = useState<number>(first?.serverNow ? Date.parse(first.serverNow) : Date.now());
   const [tab, setTab] = useState<"auto" | "up" | "hist">("auto");
 
   // modal editor
@@ -168,27 +198,15 @@ export default function ScheduleSection() {
 
   const loadSchedule = useCallback(async () => {
     const tz = browserTz();
-    const blank = { article: DEFAULT("article", tz), leads: DEFAULT("leads", tz), audit: DEFAULT("audit", tz) };
     try {
       const d = await fetch("/api/schedule", { cache: "no-store" }).then((r) => r.json());
       if (d.serverNow) skewRef.current = Date.parse(d.serverNow) - Date.now();
-      if (!d.ok) { setLoadError(d.error ?? "Couldn't load the schedule."); setMigration(!!d.needsMigration); setScheds(blank); return; }
-      setLoadError(""); setMigration(false);
-      setAutoPublishAvailable(d.autoPublishAvailable !== false);
-      const next = { ...blank };
-      for (const row of d.schedules ?? []) {
-        const k = row.kind as Kind;
-        if (k !== "article" && k !== "leads" && k !== "audit") continue;
-        next[k] = {
-          kind: k, enabled: row.enabled, frequency: row.frequency, dayOfWeek: row.day_of_week,
-          timeOfDay: row.time_of_day, timezone: row.timezone, count: row.count,
-          autoPublish: row.auto_publish === true, lastRunAt: row.last_run_at, nextRunAt: row.nextRunAt ?? null,
-        };
-      }
-      setScheds(next);
+      const p = parseSchedule(d, tz);
+      setLoadError(p.loadError); setMigration(p.migration);
+      if (d.ok) setAutoPublishAvailable(p.autoPublishAvailable);
+      setScheds(p.scheds);
     } catch (e: any) {
       setLoadError(e?.message ?? "Network error.");
-      setScheds((s) => s ?? blank);
     }
   }, []);
 
@@ -203,17 +221,20 @@ export default function ScheduleSection() {
   const loadOrders = useCallback(async () => {
     try {
       const d = await fetch("/api/scheduled-orders", { cache: "no-store" }).then((r) => r.json());
-      setOrders(d.ok ? [...(d.pending ?? []), ...(d.recent ?? [])] : []);
+      setOrders(ordersOf(d));
     } catch { setOrders([]); }
   }, []);
 
   useEffect(() => {
-    void loadSchedule(); void loadHistory(); void loadOrders();
+    // Always: the schedule itself (it also sets the clock offset and fills any missing kind with the browser's time zone). The other three arrived with the page.
+    void loadSchedule();
+    if (initial) return;
+    void loadHistory(); void loadOrders();
     fetch("/api/integrations", { cache: "no-store" }).then((r) => r.json()).then((d) => {
-      if (!d.ok) { setCanPublish(false); return; }
-      const t = (d.items ?? []).find((i: any) => (i.type === "wordpress" || i.type === "webhook") && i.status === "connected");
-      setCanPublish(!!t); setPublishTarget(t ? (t.type === "wordpress" ? "WordPress" : "Webhook") : null);
+      const p = publishTargetOf(d);
+      setCanPublish(p.can); setPublishTarget(p.target);
     }).catch(() => setCanPublish(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadSchedule, loadHistory, loadOrders]);
 
   useEffect(() => {
