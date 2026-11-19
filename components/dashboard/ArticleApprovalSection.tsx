@@ -8,6 +8,7 @@ import {
   Check, MoreVertical, Pencil, Pilcrow, Redo2, Send, Sparkles, Undo2, X, XCircle,
 } from "lucide-react";
 import { renderMarkdown } from "@/lib/md";
+import { nearestCategory } from "@/lib/article-category";
 import { htmlToMarkdown } from "@/lib/html-to-md";
 import { useStore } from "@/lib/store";
 import { LxGlobalStyle } from "@/components/lx-theme";
@@ -147,22 +148,6 @@ function categorizeSeo(seo: SeoMeta | undefined): { label: string; status: CatSt
 /** A trimmed port of agent-server's nearestCluster() — same token-overlap idea, run here
  *  because there is no API exposing it yet. Real Site Brain data in, real answer out; "no
  *  match" is Uncategorized, never a guess. */
-function tokens(s: string): string[] {
-  return s.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2);
-}
-function nearestCategory(primary: string | null, clusters: { name: string; page_urls: string[] }[]): string | null {
-  if (!primary || !clusters.length) return null;
-  const wanted = new Set(tokens(primary));
-  let best: string | null = null;
-  let bestScore = 0;
-  for (const c of clusters) {
-    const have = new Set(tokens(`${c.name} ${(c.page_urls ?? []).slice(0, 8).join(" ")}`));
-    let score = 0;
-    wanted.forEach((w) => { if (have.has(w)) score++; });
-    if (score > bestScore) { bestScore = score; best = c.name; }
-  }
-  return bestScore > 0 ? best : null;
-}
 
 // Locale AND time zone pinned (not the environment default) — the server's Node locale/TZ and
 // the browser's can format the same Date differently ("29 Aug 2026, 09:00 am" in server UTC vs
@@ -205,6 +190,8 @@ export default function ArticleApprovalSection({
   siteUrl,
   media,
   story,
+  neighbors: neighborsProp,
+  category: categoryProp,
 }: {
   item: Item;
   editable: boolean;
@@ -213,6 +200,9 @@ export default function ArticleApprovalSection({
   siteUrl: string | null;
   media: MediaRow[];
   story: StoryRow | null;
+  /** Worked out on the server with the article (lib/article-category.ts). Left out (undefined) = the component asks for them itself, as it used to. */
+  neighbors?: { prev: string | null; next: string | null };
+  category?: string | null;
 }) {
   const { toast, confirmAction } = useStore();
   const router = useRouter();
@@ -333,8 +323,9 @@ export default function ArticleApprovalSection({
   }, [moreOpen]);
 
   // Prev/Next — real neighbours in this tenant's content list, not a fixed demo order.
-  const [neighbors, setNeighbors] = useState<{ prev: string | null; next: string | null }>({ prev: null, next: null });
+  const [neighbors, setNeighbors] = useState<{ prev: string | null; next: string | null }>(neighborsProp ?? { prev: null, next: null });
   useEffect(() => {
+    if (neighborsProp !== undefined) return; // the server already worked them out
     // Deferred: the arrows are a convenience, so they wait until the article itself has painted.
     const t = setTimeout(() => {
       fetch("/api/content?status=all")
@@ -352,8 +343,9 @@ export default function ArticleApprovalSection({
   }, [id]);
 
   // Category — real Site Brain topic clusters, matched client-side (see nearestCategory above).
-  const [category, setCategory] = useState<string | null | "loading">("loading");
+  const [category, setCategory] = useState<string | null | "loading">(categoryProp !== undefined ? categoryProp : "loading");
   useEffect(() => {
+    if (categoryProp !== undefined) return; // the server already worked it out
     const t = setTimeout(() => {
       fetch("/api/site-brain")
         .then((r) => r.json())
