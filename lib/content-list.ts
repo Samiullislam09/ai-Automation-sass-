@@ -9,6 +9,16 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  *  or web_story belongs under, and the rows are rebuilt into that exact shape below. */
 const COLUMNS = "id, type, status, title, cluster, meta, parent_article_id:blueprint->>parent_article_id, created_at, updated_at";
 
+/** How many items wait in a status, WITHOUT reading them. The sidebar badge only needs the number; it used to download the whole list (up to 100 rows) every minute to count it.
+ *  Capped at the list's own limit (100) so the badge never promises more than the Approvals page can show. */
+export async function countContentItems(supabase: SupabaseClient, tenantId: string, status = "awaiting_approval"): Promise<number | null> {
+  let query = supabase.from("content_items").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId);
+  if (status !== "all") query = query.eq("status", status);
+  const { count, error } = await query;
+  if (error || count == null) return null;
+  return Math.min(count, 100);
+}
+
 export async function listContentItems(
   supabase: SupabaseClient,
   tenantId: string,

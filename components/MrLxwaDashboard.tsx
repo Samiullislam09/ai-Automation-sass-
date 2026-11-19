@@ -2596,10 +2596,13 @@ function toThread(messages: any[]): ThreadMsg[] {
 export default function MrLxwaDashboard({
   tenantId = null,
   initialChat = null,
+  initialApprovals = null,
   children,
 }: {
   tenantId?: string | null;
   initialChat?: InitialChat | null;
+  /** The pending-approvals number, read on the server with the layout. Null = unknown, so the shell asks for it itself. */
+  initialApprovals?: number | null;
   /** When provided (a real /dashboard/** sub-page's own content — e.g. Connect), this
    *  replaces the default workflow/agent-network content in the main slot. The shell around
    *  it (sidebar, mobile topbar, Assistant chat) stays exactly the same, so navigating
@@ -2770,10 +2773,13 @@ export default function MrLxwaDashboard({
   // navigation), and the full /dashboard/account page's own "Refresh" button is there for
   // anyone who wants it re-checked on demand right now.
   const [acctData, setAcctData] = useState<any>(null);
-  useEffect(() => {
-    // Deferred ~1.2s: this route runs several queries and is only needed when the account panel
-    // is opened, so it must not compete with the page's own first load.
-    const wait = setTimeout(() => fetch("/api/account", { cache: "no-store" })
+  const acctAsked = useRef(false);
+  // Asked once: when the account menu is first opened, or after 10 s of idle (so the chip's plan name gets corrected on its own). It used to fire 1.2 s after EVERY full page load
+  // and run several queries that nobody had asked to see yet.
+  const loadAcct = () => {
+    if (acctAsked.current) return;
+    acctAsked.current = true;
+    fetch("/api/account", { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => {
         setAcctData(d);
@@ -2781,7 +2787,10 @@ export default function MrLxwaDashboard({
         // `account.plan`) stops showing a plan the database no longer agrees with.
         if (d?.ok && d.plan && PLANS[d.plan]) patch({ plan: d.plan, tokensMax: PLANS[d.plan].tokens });
       })
-      .catch(() => setAcctData({ ok: false })), 1200);
+      .catch(() => setAcctData({ ok: false }));
+  };
+  useEffect(() => {
+    const wait = setTimeout(loadAcct, 10_000);
     // `patch` deliberately excluded — lib/store.tsx hands out a new function identity on every
     // one of its own re-renders (it isn't wrapped in useCallback), and StoreProvider re-renders
     // often (toasts, chat, live polling all live in the same context). With `patch` in this
@@ -2794,19 +2803,20 @@ export default function MrLxwaDashboard({
 
   // Real pending-approvals count for the sidebar badge — same /api/content endpoint the
   // Approvals page itself reads. Polled, not fake: 0 means the badge doesn't render at all.
-  const [approvalsCount, setApprovalsCount] = useState(0);
+  const [approvalsCount, setApprovalsCount] = useState(initialApprovals ?? 0);
   useEffect(() => {
     let alive = true;
+    // Only the NUMBER is asked for (?count=1): this used to download the whole approvals list every minute just to count it.
     const load = () =>
-      fetch("/api/content?status=awaiting_approval")
+      fetch("/api/content?status=awaiting_approval&count=1")
         .then((r) => r.json())
-        .then((d) => { if (alive && d.ok) setApprovalsCount(d.items?.length ?? 0); })
+        .then((d) => { if (alive && d.ok && typeof d.count === "number") setApprovalsCount(d.count); })
         .catch(() => {});
-    // Deferred: the badge is decoration, so its request waits until the page's own data has had
-    // the network to itself (it was racing the page's list on every navigation).
-    const first = setTimeout(load, 2500);
+    // The server already sent the number: no request at load, only the minute-by-minute refresh. Unknown (null): ask once, after the page's own data has had the network.
+    const first = initialApprovals == null ? setTimeout(load, 2500) : null;
     const stop = startPolling(load, 60_000);
-    return () => { alive = false; clearTimeout(first); stop(); };
+    return () => { alive = false; if (first) clearTimeout(first); stop(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const [nav, setNav] = useState("Dashboard");
@@ -3678,6 +3688,7 @@ export default function MrLxwaDashboard({
           className={`lx-card2 flex w-full items-center gap-2 text-left ${mini ? "p-1 lg:justify-center" : "p-1.5"}`}
           ref={acctBtnRef}
           onClick={() => {
+            loadAcct();
             setConfirmSignOut(false);
             const wide = typeof window !== "undefined" && window.innerWidth >= 1024;
             if (mini && wide) {

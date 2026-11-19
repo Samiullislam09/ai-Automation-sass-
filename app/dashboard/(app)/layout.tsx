@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import MrLxwaDashboard from "@/components/MrLxwaDashboard";
 import { getRequestContext } from "@/lib/supabase/request";
 import { loadChatHistory } from "@/lib/chat-history";
+import { countContentItems } from "@/lib/content-list";
 
 /** The dashboard shell (sidebar, top bar, Assistant chat) lives HERE, in a layout, so it is
  *  mounted once and stays mounted while you move between pages. Before, every page wrapped
@@ -27,12 +28,17 @@ export default async function DashboardShellLayout({ children }: { children: Rea
     return !error && data?.onboarded === false;
   };
 
-  const [needsOnboarding, history] = await Promise.all([gate(), tenantId ? loadChatHistory(supabase, tenantId) : Promise.resolve(null)]);
+  const [needsOnboarding, history, approvals] = await Promise.all([
+    gate(),
+    tenantId ? loadChatHistory(supabase, tenantId) : Promise.resolve(null),
+    // the sidebar's "waiting for approval" badge: the number, read with everything else, so the shell does not ask for it again after it loads
+    tenantId ? countContentItems(supabase, tenantId).catch(() => null) : Promise.resolve(null),
+  ]);
   if (needsOnboarding) redirect("/onboarding");
 
   const initialChat = history && !history.error ? { conversations: history.conversations, latestMessages: history.latestMessages } : null;
   return (
-    <MrLxwaDashboard tenantId={tenantId} initialChat={initialChat}>
+    <MrLxwaDashboard tenantId={tenantId} initialChat={initialChat} initialApprovals={approvals}>
       {children}
     </MrLxwaDashboard>
   );
