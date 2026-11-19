@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronLeft, ChevronRight, Download, Ellipsis, Mail, Plus, Search, SlidersHorizontal, Sparkles, PenLine, TriangleAlert, UserRound, Users, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useStore } from "@/lib/store";
-import { C, D, STAGE, SOURCE_LABEL, SORT_LABEL, REJECT_REASONS, ago, scoreColor, isToday, fmtDay, siteLabel, initials, cityOf, countryOf, phoneDisplay, StageChip, Tag, WaGlyph, RejectMenu, DATE_LABEL, SCORE_LABEL, MSG_LABEL, msgValue, msgFlags, type Lead, type Gen } from "./leads/shared";
+import { useMounted, C, D, STAGE, SOURCE_LABEL, SORT_LABEL, REJECT_REASONS, ago, scoreColor, isToday, fmtDay, siteLabel, initials, cityOf, countryOf, phoneDisplay, StageChip, Tag, WaGlyph, RejectMenu, DATE_LABEL, SCORE_LABEL, MSG_LABEL, msgValue, msgFlags, type Lead, type Gen } from "./leads/shared";
 import type { Flt } from "./leads/FilterPanel";
 import Select from "./leads/Select";
 import ScheduledRunCard from "./ScheduledRunCard";
@@ -107,16 +107,17 @@ function Score({ s, compact }: { s: number | null; compact?: boolean }) {
 
 /** What happened last, in words. No badges. */
 function ActivityCell({ l }: { l: Lead }) {
+  const mounted = useMounted();
   const inAt = l.last_in_at ? new Date(l.last_in_at).getTime() : 0;
   const outAt = l.last_out_at ? new Date(l.last_out_at).getTime() : 0;
   if (!inAt && !outAt) {
-    return <span className="text-[13px]" style={{ color: C.sub }}>{isToday(l.created_at) ? "Added today" : `Added ${fmtDay(l.created_at)}`}</span>;
+    return <span key={String(mounted)} suppressHydrationWarning className="text-[13px]" style={{ color: C.sub }}>{isToday(l.created_at) ? "Added today" : `Added ${fmtDay(l.created_at)}`}</span>;
   }
   const replied = inAt >= outAt;
   const snippet = (replied ? l.last_in_body : l.last_out_body) ?? "";
   return (
     <div className="min-w-0">
-      <div className="text-[13px]" style={{ color: C.ink }}>{replied ? "Replied" : "Message sent"} <span style={{ color: C.sub }}>· {ago(replied ? l.last_in_at : l.last_out_at)}</span></div>
+      <div className="text-[13px]" style={{ color: C.ink }}>{replied ? "Replied" : "Message sent"} <span key={String(mounted)} suppressHydrationWarning style={{ color: C.sub }}>· {ago(replied ? l.last_in_at : l.last_out_at)}</span></div>
       {snippet && <div className="mt-0.5 truncate text-[12px]" style={{ color: C.sub, maxWidth: 260 }}>{snippet}</div>}
     </div>
   );
@@ -161,9 +162,11 @@ function SkeletonRows() {
 
 /* ------------------------------------------------------------------ the page */
 
-export default function LeadsSection() {
+/** `initialBoard` is read on the SERVER by app/dashboard/(app)/leads/page.tsx, so the page arrives with its rows already in it: no skeleton, no waiting for a second request.
+ *  Without it (an error on the server, or any other caller) the component loads like before. */
+export default function LeadsSection({ initialBoard }: { initialBoard?: { leads: Lead[]; gen: Gen | null } | null } = {}) {
   const { toast } = useStore();
-  const [leads, setLeads] = useState<Lead[] | null>(null);
+  const [leads, setLeads] = useState<Lead[] | null>(initialBoard?.leads ?? null);
   const [tab, setTab] = useState("all");
   const [q, setQ] = useState("");
   const [qInput, setQInput] = useState("");
@@ -172,7 +175,7 @@ export default function LeadsSection() {
   const [addOpen, setAddOpen] = useState(false);
   const [buyerOpen, setBuyerOpen] = useState(false);
   const [err, setErr] = useState("");
-  const [gen, setGen] = useState<Gen | null>(null);
+  const [gen, setGen] = useState<Gen | null>(initialBoard?.gen ?? null);
   const [genBusy, setGenBusy] = useState(false);
   // The lead-generation panel under the summary cards: closed → nothing; manual → the inline
   // "what & where" form; live → the real-time progress card; done → the "found N" summary.
@@ -207,7 +210,8 @@ export default function LeadsSection() {
 
   // First paint from the last board we saw (if any), then refresh in the background.
   useEffect(() => {
-    const c = readCache();
+    // Rows from the server are already on screen; otherwise paint from the last board this browser saw, then refresh behind it.
+    const c = initialBoard ? null : readCache();
     if (c) { setLeads(c.leads); setGen(c.gen); }
     load();
   }, [load]);

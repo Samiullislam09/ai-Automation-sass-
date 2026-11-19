@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { MessageCircle, X } from "lucide-react";
 
 /** Shared pieces of the Leads page: the palette, types, small helpers and the few components used by
@@ -75,8 +75,16 @@ export function ago(iso: string | null): string {
   return `${Math.floor(days / 7)}w ago`;
 }
 export function scoreColor(s: number | null) { return s == null ? C.sub : s >= 70 ? C.green : s >= 40 ? "#d97706" : C.red; }
+/** False while the server renders and during hydration, true from the first client effect on. The page now arrives with its rows already rendered on the server, and a label
+ *  that depends on the clock or the viewer's time zone ("5m ago", "Added 19 Nov") would not match what the browser computes: such text is keyed on this, so it is replaced
+ *  with the browser's own value right after hydration instead of staying as the server's guess. */
+export function useMounted(): boolean {
+  const [m, setM] = useState(false);
+  useEffect(() => setM(true), []);
+  return m;
+}
 export function isToday(iso: string) { return Date.now() - new Date(iso).getTime() < 86_400_000; }
-export function fmtDay(iso: string) { return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" }); }
+export function fmtDay(iso: string) { return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" }); }
 export function siteLabel(url: string) { return url.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, ""); }
 export function initials(l: Lead) { return (l.company || l.name || "?").slice(0, 2).toUpperCase(); }
 export function cityOf(l: Lead): string { return (l.city ?? "").trim(); }

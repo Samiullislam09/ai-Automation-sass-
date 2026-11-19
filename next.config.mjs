@@ -13,7 +13,9 @@ const nextConfig = {
   // request take 5-30s and eventually corrupting the webpack cache. Pinning the root to this
   // project folder stops the climb. (Next 14.2.x still nests this under `experimental` — it's a
   // top-level option in newer versions.)
-  experimental: { outputFileTracingRoot: __dirname },
+  // staleTimes.dynamic: a dashboard page you opened in the last 30 s comes back from the browser's own cache the instant you click it (a page whose data is read on the server
+  // otherwise waits for that request); the page still refreshes its numbers behind the scenes.
+  experimental: { outputFileTracingRoot: __dirname, staleTimes: { dynamic: 30, static: 180 } },
   // The old /app/** area was retired in favour of /dashboard/**. Old bookmarks and links already
   // stored in chat messages / emails keep working through these redirects (temporary, 307).
   poweredByHeader: false,
