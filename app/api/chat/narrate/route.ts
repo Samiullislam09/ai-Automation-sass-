@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { openFastCompletion } from "@/lib/ai/fastChat";
+import { authUser } from "@/lib/supabase/auth-user";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,7 +34,7 @@ const SYSTEM_PROMPT = [
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await authUser(supabase);
   if (!user) return NextResponse.json({ ok: false, error: "Not signed in." }, { status: 401 });
 
   const body = await req.json().catch(() => null);

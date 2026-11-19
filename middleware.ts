@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { authUser } from "@/lib/supabase/auth-user";
 // NOTE: do NOT import lib/dns-fix here — middleware runs in the Edge runtime, which
 // doesn't support Node's `dns` module at all (this broke every guarded request when
 // tried). The dns-fix is only safe in normal Node.js routes (app/api/*/route.ts).
@@ -55,7 +56,7 @@ export async function middleware(request: NextRequest) {
   // result; on a transient fetch/network error, fail open and let the request through
   // (the page's own client-side data fetching will retry and sort itself out).
   try {
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await authUser(supabase); // verifies the JWT locally: no Supabase Auth round trip on every page and API call
     if (!user && guarded) {
       const url = request.nextUrl.clone();
       url.pathname = "/login";

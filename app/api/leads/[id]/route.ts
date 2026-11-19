@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
+import { authUser } from "@/lib/supabase/auth-user";
 
 /** A CRM stage change by a human — including THE APPROVAL GATE (migration 028).
  *
@@ -90,7 +91,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const patch: Record<string, unknown> = { stage, updated_at: new Date().toISOString() };
   if (stage === "approved") {
-    const { data: u } = await supabase.auth.getUser();
+    const u = { user: await authUser(supabase) };
     patch.approved_at = new Date().toISOString();
     patch.approved_by = u?.user?.id ?? null;
   } else if (stage === "rejected") {

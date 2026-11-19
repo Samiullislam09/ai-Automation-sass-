@@ -22,9 +22,6 @@ const SHOWN = [
 export async function GET() {
   try {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ ok: false, error: "Not signed in." }, { status: 401 });
-
     const tenantId = await getCurrentTenantId(supabase);
     if (!tenantId) return NextResponse.json({ ok: false, error: "No workspace yet." }, { status: 401 });
 

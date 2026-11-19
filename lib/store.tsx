@@ -201,7 +201,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
-    supabase.auth.getUser().then(({ data }) => syncFromSession(data.user));
+    supabase.auth.getSession().then(({ data }) => syncFromSession(data.session?.user)); // local read: no Auth round trip on every page load
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       syncFromSession(session?.user);
     });

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
 import { normalizeLabel } from "@/lib/eval/intent-labels";
+import { authUser } from "@/lib/supabase/auth-user";
 
 /** /api/eval — the intent evaluation set for the current tenant (lib/eval/README.md).
  *
@@ -63,7 +64,7 @@ export async function PATCH(req: NextRequest) {
     patch.human_label = label;
   }
   if (status !== "auto") {
-    const { data: u } = await supabase.auth.getUser();
+    const u = { user: await authUser(supabase) };
     patch.reviewed_by = u.user?.id ?? null;
     patch.reviewed_at = new Date().toISOString();
   } else {

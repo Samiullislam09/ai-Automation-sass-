@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
 import { resolveWebsiteUrl } from "@/lib/website-url";
+import { authUser } from "@/lib/supabase/auth-user";
 import {
   PROFILE_FIELDS,
   coerceField,
@@ -113,7 +114,7 @@ export async function PATCH(req: NextRequest) {
   const tenantId = await getCurrentTenantId(supabase);
   if (!tenantId) return NextResponse.json({ ok: false, error: "Not signed in." }, { status: 401 });
 
-  const { data: userData } = await supabase.auth.getUser();
+  const userData = { user: await authUser(supabase) };
   const userId = userData?.user?.id ?? null;
 
   let body: PatchBody;

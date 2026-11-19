@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "./admin";
+import { authUser } from "./auth-user";
 
 /** Looks up the current user's tenant_id via their membership row. Self-healing: if a
  *  signed-in user somehow has no tenant/membership yet (e.g. they logged in via a path
@@ -30,9 +31,9 @@ const TENANT_TTL_MS = 5 * 60_000;
 const tenantMemo = new Map<string, { id: string; at: number }>();
 
 export async function getCurrentTenantId(supabase: SupabaseClient): Promise<string | null> {
-  const { data: userData, error: userErr } = await supabase.auth.getUser();
-  if (userErr) console.error("[getCurrentTenantId] auth.getUser() error:", userErr.message);
-  if (!userData.user) return null;
+  const authed = await authUser(supabase);
+  if (!authed) return null;
+  const userData = { user: { id: authed.id, email: authed.email } };
 
   const memo = tenantMemo.get(userData.user.id);
   if (memo && Date.now() - memo.at < TENANT_TTL_MS) return memo.id;

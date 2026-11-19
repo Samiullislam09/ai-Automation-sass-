@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
+import { authUser } from "@/lib/supabase/auth-user";
 
 /** Writes a team report into the transcript ("Mr. Keyword found these five keywords…").
  *
@@ -14,7 +15,7 @@ import { getCurrentTenantId } from "@/lib/supabase/tenant";
  */
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await authUser(supabase);
   const tenantId = await getCurrentTenantId(supabase);
   if (!tenantId) return NextResponse.json({ ok: false, error: "Not signed in." }, { status: 401 });
 

@@ -27,6 +27,7 @@ import { localizeOrder } from "@/lib/chat-localize";
 import { isReadTool, runReadTool, toolResultBlock } from "@/lib/chat-data-tools";
 import { isWriteTool, runWriteTool, writeResultBlock } from "@/lib/chat-schedule-tools";
 import { lastSuccessfulRun } from "@/lib/reuse";
+import { authUser } from "@/lib/supabase/auth-user";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -893,7 +894,7 @@ async function resolveWho(supabase: SupabaseClient): Promise<{ userId: string | 
   const sk = sessionKey((await cookies()).getAll());
   if (!sk) return null;
   return cached(sk, TTL.session, async () => {
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await authUser(supabase);
     return { userId: user?.id ?? null, tenantId: user ? await getCurrentTenantId(supabase) : null };
   });
 }
@@ -948,7 +949,7 @@ export async function POST(req: NextRequest) {
   const sk = sessionKey((await cookies()).getAll());
   const who = sk
     ? await cached(sk, TTL.session, async () => {
-        const { data: { user } } = await supabase.auth.getUser();
+        const user = await authUser(supabase);
         return { userId: user?.id ?? null, tenantId: user ? await getCurrentTenantId(supabase) : null };
       })
     : { userId: null, tenantId: null };

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
 import { callAgentServer } from "@/lib/agent-jobs";
+import { authUser } from "@/lib/supabase/auth-user";
 
 /** The buyer-profile screen's back-end (high-quality-leads plan, Phase 1).
  *
@@ -19,7 +20,7 @@ async function tenant(): Promise<{ tenantId: string; userId: string | null } | n
   const supabase = await createClient();
   const tenantId = await getCurrentTenantId(supabase);
   if (!tenantId) return null;
-  const { data } = await supabase.auth.getUser();
+  const data = { user: await authUser(supabase) };
   return { tenantId, userId: data?.user?.id ?? null };
 }
 

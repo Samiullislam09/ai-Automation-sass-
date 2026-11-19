@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentTenantId } from "@/lib/supabase/tenant";
 import { loadChatHistory } from "@/lib/chat-history";
+import { authUser } from "@/lib/supabase/auth-user";
 
 /** The chat sidebar's list — every conversation this workspace has had with MenCra,
  *  newest activity first, with a preview so the list is scannable without opening each one.
@@ -29,7 +30,7 @@ export async function GET() {
 /** Start a fresh one. No message rows yet — /api/chat fills those in as they're sent. */
 export async function POST() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await authUser(supabase);
   const tenantId = await getCurrentTenantId(supabase);
   if (!tenantId) return NextResponse.json({ ok: false, error: "Not signed in." }, { status: 401 });
 
