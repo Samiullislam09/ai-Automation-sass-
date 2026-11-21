@@ -732,7 +732,7 @@ const KeywordScreen = ({
   return (
     <div>
       {pickedCard}
-      <KeywordOpportunities items={items} onWriteArticle={onWriteArticle} />
+      <KeywordOpportunities items={items} onWriteArticle={onWriteArticle} pickedKeyword={picked?.payload?.keyword ? String(picked.payload.keyword) : null} />
     </div>
   );
 };
@@ -747,9 +747,12 @@ const KeywordScreen = ({
 const KeywordOpportunities = ({
   items,
   onWriteArticle,
+  pickedKeyword,
 }: {
   items: { key: string; payload: any }[];
   onWriteArticle: (keyword: string) => void;
+  /** The keyword the agent actually chose (keyword_picked) — its row is marked "Selected". */
+  pickedKeyword?: string | null;
 }) => {
   const [showAll, setShowAll] = useState(false);
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
@@ -777,6 +780,10 @@ const KeywordOpportunities = ({
     if (f != null && f > bestFit) { bestFit = f; bestKey = it.key; }
   }
   if (bestKey == null && items.length) bestKey = items[0].key;
+  // The agent's own pick wins over "highest fit": it is the keyword the article is really about.
+  const norm = (v: unknown) => String(v ?? "").trim().toLowerCase();
+  const pickedRow = pickedKeyword ? items.find((it) => norm(it.payload?.keyword) === norm(pickedKeyword)) : null;
+  if (pickedRow) bestKey = pickedRow.key;
 
   const LIMIT = 5;
   const visible = showAll ? items : items.slice(0, LIMIT);
@@ -808,12 +815,14 @@ const KeywordOpportunities = ({
         const fit = num(p.fitScore);
         const fitPct = fit != null ? Math.round(fit * 100) : null;
         const best = it.key === bestKey;
+        const chosen = !!pickedRow && it.key === pickedRow.key;
         return (
-          <div key={it.key} className={`lx-kwo-grid lx-kwo-row${best ? " best" : ""}`}>
+          <div key={it.key} className={`lx-kwo-grid lx-kwo-row${best ? " best" : ""}${chosen ? " selected" : ""}`}>
             <div className="lx-kwo-kw">
               <span className="lx-kwo-mark">{best ? <Star size={12} /> : <span className="h-2 w-2 rounded-sm" style={{ background: "currentColor", opacity: 0.4 }} />}</span>
               <span className="lx-kwo-text">
                 {p.keyword ?? "?"}
+                {chosen ? <span className="lx-pill green ml-2" style={{ padding: "1px 7px", fontSize: 10, fontWeight: 700 }}>Selected for you</span> : null}
                 {p.gsc ? <span className="lx-pill green ml-2" style={{ padding: "1px 7px", fontSize: 10 }}>already ranking</span> : null}
               </span>
             </div>
