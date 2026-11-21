@@ -1,20 +1,14 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { hasAuthCookie } from "@/lib/auth-cookie";
 
-/** True once we know there is a signed-in session. getSession() reads the local cookie (no
- *  network round trip), so the swap happens right after the page becomes interactive. Starts
- *  false, i.e. the logged-out wording, which is also what is rendered on the server. */
+/** True once we know there is a signed-in session: a session cookie is present. Read synchronously, with no Supabase code downloaded (the home page used to ship the whole Supabase client just
+ *  for this). Starts false, i.e. the logged-out wording, which is also what is rendered on the server. If the cookie has expired, the link still goes to /dashboard and the middleware
+ *  sends the visitor to the login page. */
 export function useSignedIn() {
   const [signedIn, setSignedIn] = useState(false);
-  useEffect(() => {
-    let alive = true;
-    try {
-      createClient().auth.getSession().then(({ data }) => { if (alive) setSignedIn(!!data.session); }).catch(() => {});
-    } catch { /* no Supabase env in this context: stay logged-out */ }
-    return () => { alive = false; };
-  }, []);
+  useEffect(() => { setSignedIn(hasAuthCookie()); }, []);
   return signedIn;
 }
 

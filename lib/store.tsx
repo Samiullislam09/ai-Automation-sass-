@@ -9,7 +9,7 @@
  */
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { CheckCircle2, Info, X, XCircle } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
+import { hasAuthCookie } from "@/lib/auth-cookie";
 import { AGENTS } from "@/lib/agents-data";
 
 import { TOKEN_COST, PLANS } from "./plans";
@@ -147,6 +147,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   // Memory/content are still local demo state — TODO(backend): wire once the real
   // content pipeline (agent-server, Step 9+) lands.
   useEffect(() => {
+    // No session cookie: nobody is signed in, and every way of signing in ends in a full page load, so this provider starts fresh then. Nothing to ask Supabase, so its client
+    // is never downloaded on a public page. (With a cookie it is loaded on demand, below.)
+    if (!hasAuthCookie()) {
+      setS(prev => ({ ...prev, user: null, onboardedChecked: true }));
+      return;
+    }
+    let cancelled = false;
+    let unsubscribe: (() => void) | null = null;
+    void import("@/lib/supabase/client").then(({ createClient }) => {
+    if (cancelled) return;
     const supabase = createClient();
     const toUser = (u: { email?: string | null } | null | undefined) =>
       u?.email ? { name: u.email.split("@")[0].replace(/^\w/, (c: string) => c.toUpperCase()), email: u.email } : null;
@@ -205,7 +215,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       syncFromSession(session?.user);
     });
-    return () => sub.subscription.unsubscribe();
+    unsubscribe = () => sub.subscription.unsubscribe();
+    });
+    return () => { cancelled = true; unsubscribe?.(); };
   }, []);
 
   /** Returns a dismiss function so a caller can take the toast down early (e.g. after Undo). */
@@ -367,6 +379,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
+    const { createClient } = await import("@/lib/supabase/client");
     const supabase = createClient();
     await supabase.auth.signOut();
     setS(initial);

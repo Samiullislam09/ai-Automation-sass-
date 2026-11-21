@@ -9,8 +9,6 @@ import React from "react";
  *  drifting apart over time is worse than one import. Tailwind core layout classes are used
  *  alongside these — see MrLxwaDashboard.tsx's own header comment for that split. */
 export const LX_CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-
 .lx-root{
   --lx-bg:#06060b;
   --lx-panel:#08080f;
@@ -35,7 +33,7 @@ export const LX_CSS = `
   --lx-sel-text:#fff;
   background:var(--lx-bg);
   color:var(--lx-text);
-  font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  font-family:var(--font-inter),'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
   -webkit-font-smoothing:antialiased;
 
   /* ---- legacy /app/** theme bridge ------------------------------------

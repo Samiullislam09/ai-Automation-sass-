@@ -598,11 +598,14 @@ const KeywordScreen = ({
   // the agent's own: the keyword it handed the writer, its own sentence for why, and (only when
   // the agent actually reported one) the strongest related keyword it found alongside it.
   const pickedCard = picked?.payload ? (
-    <div className="lx-live-anim lx-in mb-3 rounded-lg px-3.5 py-3">
-      <div className="flex items-center gap-1.5 lx-10 lx-mut">
-        <CheckCircle2 size={12} style={{ color: "#3f9166" }} /> Keyword selected
+    <div
+      className="lx-live-anim lx-in mb-3 rounded-lg px-3.5 py-3"
+      style={{ border: "1.5px solid #3f9166", boxShadow: "0 0 0 3px rgba(63,145,102,0.12)" }}
+    >
+      <div className="flex items-center gap-1.5 lx-11 font-bold" style={{ color: "#3f9166" }}>
+        <CheckCircle2 size={14} /> Selected for you — this is the keyword we chose
       </div>
-      <div className="lx-13 mt-1 font-bold leading-snug">{String(picked.payload.keyword ?? "—")}</div>
+      <div className="lx-13 mt-1.5 font-bold leading-snug">{String(picked.payload.keyword ?? "—")}</div>
       {picked.payload.why && <div className="lx-11 lx-mut mt-1">{String(picked.payload.why)}</div>}
       {picked.payload.best?.keyword && (
         <div className="lx-10 lx-dim mt-1.5">
@@ -2593,6 +2596,18 @@ function toThread(messages: any[]): ThreadMsg[] {
     );
 }
 
+/** The top progress bar and the "page is loading" dim. A short delay on the dim means a navigation that finishes at once never flickers. */
+const NAVBAR_CSS = `
+.lx-navbar{position:fixed;top:0;left:0;right:0;height:2px;z-index:200;pointer-events:none;opacity:0;transition:opacity .25s ease .05s}
+.lx-navbar i{display:block;height:100%;width:100%;background:linear-gradient(90deg,#a78bfa,#6a5af0 55%,#3b82f6);box-shadow:0 0 8px rgba(106,90,240,.6)}
+.lx-navbar[data-on="1"]{opacity:1;transition:none}
+.lx-navbar[data-on="1"] i{animation:lxnav 8s cubic-bezier(.1,.7,.2,1) forwards}
+@keyframes lxnav{0%{width:0}10%{width:32%}40%{width:68%}100%{width:93%}}
+.lx-main{transition:opacity .2s ease}
+.lx-main[data-pending="1"]{opacity:.7;transition:opacity .2s ease .15s}
+@media (prefers-reduced-motion:reduce){.lx-navbar[data-on="1"] i{animation:none;width:70%}}
+`;
+
 export default function MrLxwaDashboard({
   tenantId = null,
   initialChat = null,
@@ -2615,6 +2630,29 @@ export default function MrLxwaDashboard({
   // PREFETCH. The pages read their data on the server, so a page that was not asked for in advance waits for the server on the click. A sidebar item is therefore fetched
   // in full (router.prefetch) the moment the pointer or a finger reaches it, which is usually a good fraction of a second before the click lands; and the three pages used
   // most are fetched once while the browser is idle. Not every link on every load: each prefetch runs that page's queries.
+  // INSTANT FEEDBACK. A page whose data is read on the server answers a click after a short wait. For that wait the screen must not look dead: the clicked item lights up in the
+  // sidebar at once, a thin progress bar runs across the top, and the page under it dims slightly. It ends the moment the new path arrives. One listener covers every internal
+  // dashboard link (the sidebar, the buttons inside pages), so no link needs wiring by hand.
+  const [navPending, setNavPending] = useState<string | null>(null);
+  useEffect(() => { setNavPending(null); }, [pathname]);
+  useEffect(() => {
+    if (!navPending) return;
+    const t = setTimeout(() => setNavPending(null), 10_000); // never stay "loading" for ever (a blocked navigation, a failed request)
+    return () => clearTimeout(t);
+  }, [navPending]);
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const a = (e.target as HTMLElement | null)?.closest?.("a");
+      if (!a || a.target === "_blank" || a.hasAttribute("download")) return;
+      const href = a.getAttribute("href") || "";
+      if (!href.startsWith("/dashboard")) return;
+      const path = href.split(/[?#]/)[0];
+      if (path && path !== pathname) setNavPending(path);
+    };
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
+  }, [pathname]);
   const warmed = useRef<Set<string>>(new Set());
   const warm = (href: string | undefined) => {
     if (!href || href === pathname || warmed.current.has(href)) return;
@@ -3635,8 +3673,9 @@ export default function MrLxwaDashboard({
           // A sub-page keeps its section lit — /dashboard/content/<id> (the article reviewer)
           // is still "Content". Exact match everywhere else, so /dashboard never lights up for
           // every /dashboard/** page.
+          const here = navPending ?? pathname; // the item you just clicked is lit before its page has arrived
           const active = it.href
-            ? pathname === it.href || (it.href !== "/dashboard" && pathname.startsWith(it.href + "/"))
+            ? here === it.href || (it.href !== "/dashboard" && here.startsWith(it.href + "/"))
             : nav === it.label;
           const badge = it.label === "Approvals" ? approvalsCount : it.badge;
           const inner = (
@@ -5043,7 +5082,9 @@ export default function MrLxwaDashboard({
             and every page whose header has buttons on the right had them sitting under it
             (owner, 2026-09-05: the Audit page's "Export as PDF" half-covered by it). The
             reserved strip is only on >=lg, which is the only size that button exists at. */}
-        <main className="lx-scroll lx-main flex-1 overflow-y-auto p-3 sm:p-4">
+        <div className="lx-navbar" data-on={navPending ? "1" : "0"} aria-hidden><i /></div>
+        <style dangerouslySetInnerHTML={{ __html: NAVBAR_CSS }} />
+        <main className="lx-scroll lx-main flex-1 overflow-y-auto p-3 sm:p-4" data-pending={navPending ? "1" : "0"} aria-busy={navPending ? true : undefined}>
           {pathname === "/dashboard" || children == null ? (
             <>
               {Workflow}

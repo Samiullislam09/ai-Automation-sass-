@@ -102,7 +102,6 @@ export function StackAgents() {
 
   return (
     <section id="team" aria-labelledby="team-h" className="mx-auto w-full max-w-[1280px] scroll-mt-[84px] px-6 pt-[72px] max-md:px-4 max-md:pt-10">
-      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@800&family=JetBrains+Mono:wght@500&display=swap" />
       <div className="text-center">
         <p className="text-[14px] font-semibold uppercase tracking-[0.08em] text-[#6a5af0]">Your AI team</p>
         <h2 id="team-h" className="lv-h2 mt-3">Meet the agents that work for you</h2>
@@ -115,12 +114,12 @@ export function StackAgents() {
             style={{ background: `radial-gradient(120% 70% at 0% 0%, rgba(${s.glow},.38), transparent 60%), #0B1220`, zIndex: i + 1 }}>
             <span aria-hidden className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100" style={{ background: "radial-gradient(300px 300px at var(--gx,50%) var(--gy,50%), rgba(167,139,250,.3), transparent 70%)" }} />
             <div className="relative flex flex-col justify-center gap-[clamp(10px,1.6vw,18px)]">
-              <div className="flex items-center justify-between text-[14px]" style={{ fontFamily: "'JetBrains Mono',monospace" }}>
+              <div className="flex items-center justify-between text-[14px]" style={{ fontFamily: "var(--font-jbmono),'JetBrains Mono',monospace" }}>
                 <span>{s.n}</span>
                 <span className="rounded-full px-2.5 py-1 text-[12px] font-semibold text-[#0B1220]" style={{ background: s.badge === "BETA" ? "linear-gradient(135deg,#fbbf24,#fde68a)" : "linear-gradient(135deg,#3b82f6,#a78bfa)" }}>{s.badge}</span>
               </div>
               <p className="text-[13px] font-medium uppercase tracking-[0.08em] text-white/60">{s.eyebrow}</p>
-              <h3 className="text-[clamp(28px,4.2vw,60px)] font-extrabold leading-[.98] tracking-[-0.035em]" style={{ fontFamily: "'Bricolage Grotesque','Google Sans Flex',sans-serif" }}>{s.title}</h3>
+              <h3 className="text-[clamp(28px,4.2vw,60px)] font-extrabold leading-[.98] tracking-[-0.035em]" style={{ fontFamily: "var(--font-bricolage),'Bricolage Grotesque','Google Sans Flex',sans-serif" }}>{s.title}</h3>
               <p className="text-[clamp(15px,1.4vw,17px)] leading-[1.45] text-white/80">{s.text}</p>
               {s.agents.length > 0 && <div className="mt-1 flex flex-wrap gap-2">{s.agents.map(id => <Chip key={id} id={id} />)}</div>}
             </div>
@@ -131,8 +130,8 @@ export function StackAgents() {
         <article ref={el => { refs.current[SLIDES.length] = el; }} onMouseMove={move} onMouseLeave={leave} className={cardCls}
           style={{ background: "radial-gradient(120% 70% at 0% 0%, rgba(106,90,240,.38), transparent 60%), #0B1220", zIndex: count, minHeight: "min(46vh,420px)" }}>
           <div className="relative flex flex-col justify-center gap-[clamp(10px,1.6vw,18px)]">
-            <div className="flex items-center justify-between text-[14px]" style={{ fontFamily: "'JetBrains Mono',monospace" }}><span>10</span><span className="rounded-full bg-white/10 px-2.5 py-1 text-[12px] font-semibold text-white/80">SOON</span></div>
-            <h3 className="text-[clamp(28px,4.2vw,60px)] font-extrabold leading-[.98] tracking-[-0.035em]" style={{ fontFamily: "'Bricolage Grotesque','Google Sans Flex',sans-serif" }}>More agents are on the way</h3>
+            <div className="flex items-center justify-between text-[14px]" style={{ fontFamily: "var(--font-jbmono),'JetBrains Mono',monospace" }}><span>10</span><span className="rounded-full bg-white/10 px-2.5 py-1 text-[12px] font-semibold text-white/80">SOON</span></div>
+            <h3 className="text-[clamp(28px,4.2vw,60px)] font-extrabold leading-[.98] tracking-[-0.035em]" style={{ fontFamily: "var(--font-bricolage),'Bricolage Grotesque','Google Sans Flex',sans-serif" }}>More agents are on the way</h3>
             <p className="text-[clamp(15px,1.4vw,17px)] leading-[1.45] text-white/80">We are building the rest of the team. They will join your plan as they are ready.</p>
           </div>
           <div className="relative flex flex-wrap content-center gap-2.5">
