@@ -28,6 +28,13 @@ export default function OnboardingWizard() {
   const router = useRouter();
   const [step, setStep] = useState(0);
   const [site, setSite] = useState("");
+  // A website typed on the home page ("Connect your site") before signing up: fill the first step with it, once.
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem("mencra.pendingSite");
+      if (v) { setSite((cur) => cur || v); localStorage.removeItem("mencra.pendingSite"); }
+    } catch { /* storage blocked: the field just starts empty */ }
+  }, []);
   const [noSite, setNoSite] = useState(false);
   const [siteSaving, setSiteSaving] = useState(false);
   const [siteError, setSiteError] = useState<string | null>(null);

@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { AuthLink } from "./AuthLink";
+import { AuthLink, useSignedIn } from "./AuthLink";
 import { useEffect, useRef, useState } from "react";
 import { ArrowRight, Search, PenLine, ShieldCheck, Send, MessageSquare, Brain, Check } from "lucide-react";
 
@@ -60,6 +60,39 @@ function Stage({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** "Connect your site" first, account second. The visitor types their website here; it is kept in this browser (it survives the Google sign-in redirect) and the onboarding's first
+ *  step opens with it already filled in (components/OnboardingWizard.tsx reads PENDING_SITE_KEY). Signed-in visitors just get the dashboard button. */
+export const PENDING_SITE_KEY = "mencra.pendingSite";
+function ConnectSiteForm() {
+  const signedIn = useSignedIn();
+  const [url, setUrl] = useState("");
+  if (signedIn) {
+    return (
+      <AuthLink guestHref="/signup" guestLabel="Connect your site" authedLabel="Go to dashboard" className="inline-flex h-12 items-center gap-2 rounded-full bg-[#262626] pl-6 pr-[22px] text-[16px] font-semibold text-[#fafafa] transition-colors hover:bg-[#3d3d3d]"><ArrowRight size={18} /></AuthLink>
+    );
+  }
+  const go = (e: React.FormEvent) => {
+    e.preventDefault();
+    try { if (url.trim()) localStorage.setItem(PENDING_SITE_KEY, url.trim()); } catch { /* private mode: the onboarding just asks again */ }
+    window.location.href = "/signup";
+  };
+  return (
+    <div className="flex w-full max-w-[560px] flex-col items-center gap-3">
+      <form onSubmit={go} className="flex w-full items-center gap-2 rounded-full border border-[#e5e5e5] bg-white p-1.5 pl-5 shadow-[0_6px_24px_-12px_rgba(26,46,77,0.25)] max-sm:flex-col max-sm:rounded-3xl max-sm:p-3">
+        <input
+          type="text" inputMode="url" autoComplete="url" value={url} onChange={(e) => setUrl(e.target.value)}
+          placeholder="yourbusiness.com" aria-label="Your website address"
+          className="h-11 min-w-0 flex-1 bg-transparent text-[16px] text-[#0a0a0a] outline-none placeholder:text-[#a3a3a3] max-sm:w-full"
+        />
+        <button type="submit" className="inline-flex h-11 shrink-0 items-center gap-2 rounded-full bg-[#262626] pl-6 pr-5 text-[15px] font-semibold text-[#fafafa] transition-colors hover:bg-[#3d3d3d] max-sm:w-full max-sm:justify-center">
+          Connect your site<ArrowRight size={17} />
+        </button>
+      </form>
+      <span className="flex items-center gap-2 text-[13px] text-[#737373]"><span className="h-2 w-2 rounded-full bg-[#6a5af0]" />Free to start. We read your site, then you sign in with Google in one click.</span>
+    </div>
+  );
+}
+
 export function Hero() {
   const [i, setI] = useState(0);
   return (
@@ -79,12 +112,7 @@ export function Hero() {
               <p className="lv-sub max-w-[760px] text-center">
                 AI agents research keywords, write ranking articles in your voice and publish to your website, while you approve every step.
               </p>
-              <div className="flex items-center gap-[10px] max-sm:flex-col">
-                <AuthLink guestHref="/signup" guestLabel="Start free" authedLabel="Go to dashboard" className="inline-flex h-12 items-center gap-2 rounded-full bg-[#262626] pl-6 pr-[22px] text-[16px] font-semibold text-[#fafafa] transition-colors hover:bg-[#3d3d3d]"><ArrowRight size={18} /></AuthLink>
-                <span className="flex h-10 items-center gap-2 px-4 text-[16px] font-semibold text-[#0a0a0a] max-[601px]:text-[14px]">
-                  <span className="h-2 w-2 rounded-full bg-[#6a5af0]" />Connect your site in minutes
-                </span>
-              </div>
+              <ConnectSiteForm />
             </div>
           </div>
 
