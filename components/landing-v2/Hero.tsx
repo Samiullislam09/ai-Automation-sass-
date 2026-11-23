@@ -72,19 +72,24 @@ function ConnectSiteForm() {
     );
   }
   const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
   const go = async (e: React.FormEvent) => {
     e.preventDefault();
     if (busy) return;
     setBusy(true);
     try { if (url.trim()) localStorage.setItem(PENDING_SITE_KEY, url.trim()); } catch { /* private mode: the onboarding just asks again */ }
-    // No login or register screen: a guest session is opened right here (Supabase anonymous sign-in) and the visitor lands straight on the onboarding's website step.
-    // If guest sign-in is switched off in Supabase, or fails, fall back to the normal signup page.
+    // No login or register screen, ever: a guest workspace is created and signed in right here, then the visitor lands on the onboarding's website step.
     try {
+      const res = await fetch("/api/guest", { method: "POST" });
+      const g = await res.json();
+      if (!g?.ok) throw new Error(g?.error || "could not open a workspace");
       const { createClient } = await import("@/lib/supabase/client");
-      const { error } = await createClient().auth.signInAnonymously();
-      window.location.href = error ? "/signup" : "/onboarding";
-    } catch {
-      window.location.href = "/signup";
+      const { error } = await createClient().auth.signInWithPassword({ email: g.email, password: g.password });
+      if (error) throw error;
+      window.location.href = "/onboarding";
+    } catch (err) {
+      setBusy(false);
+      setProblem(err instanceof Error ? err.message : "Something went wrong. Please try again.");
     }
   };
   return (
@@ -92,13 +97,14 @@ function ConnectSiteForm() {
       <form onSubmit={go} className="flex w-full items-center gap-2 rounded-full border border-[#e5e5e5] bg-white p-1.5 pl-5 shadow-[0_6px_24px_-12px_rgba(26,46,77,0.25)] max-sm:flex-col max-sm:rounded-3xl max-sm:p-3">
         <input
           type="text" inputMode="url" autoComplete="url" value={url} onChange={(e) => setUrl(e.target.value)}
-          placeholder="yourbusiness.com" aria-label="Your website address"
-          className="h-11 min-w-0 flex-1 bg-transparent text-[16px] text-[#0a0a0a] outline-none placeholder:text-[#a3a3a3] max-sm:w-full"
+          placeholder="yourbusiness.com" aria-label="Your website address" style={{ background: "transparent", color: "#0a0a0a", border: "none" }}
+          className="h-11 min-w-0 flex-1 !bg-transparent !shadow-none text-[16px] text-[#0a0a0a] outline-none placeholder:text-[#a3a3a3] max-sm:w-full"
         />
         <button type="submit" className="inline-flex h-11 shrink-0 items-center gap-2 rounded-full bg-[#262626] pl-6 pr-5 text-[15px] font-semibold text-[#fafafa] transition-colors hover:bg-[#3d3d3d] max-sm:w-full max-sm:justify-center">
           {busy ? "Opening…" : "Connect your site"}{!busy && <ArrowRight size={17} />}
         </button>
       </form>
+      {problem && <span className="text-[13px] font-medium text-[#dc2626]">{problem}</span>}
       <span className="flex items-center gap-2 text-[13px] text-[#737373]"><span className="h-2 w-2 rounded-full bg-[#6a5af0]" />Free to start. No sign-up form: we read your site first.</span>
     </div>
   );
