@@ -1,22 +1,18 @@
 """Where this service is and is not allowed to send a request.
 
-This service fetches whatever URL it is given, for 500+ tenants' own lead searches. Two separate
-checks, for two separate reasons:
+This service fetches whatever URL it is given, for 500+ tenants' own lead searches. Two checks:
 
   * `assert_public_host` — SSRF. A URL is attacker/tenant-controlled input; without this check a
     caller could point the service at the Railway network's own internal services or its cloud
     metadata endpoint (169.254.169.254) and read back whatever answers. This runs BEFORE every
     DNS lookup this service makes.
-  * `RobotsGate` — manners, not security. The pages we read belong to strangers who did not ask
-    us to come; `Disallow` is an answer, not an obstacle. A `Crawl-delay` is honoured too.
+  * `HostPacer` — a minimum gap between two requests to the same host.
 """
 import ipaddress
 import socket
 import time
-import urllib.request
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
-from urllib.robotparser import RobotFileParser
 
 USER_AGENT = "MrLxwaLeadBot/1.0 (+https://mrlxwa.com/bot; researching a business before writing to it)"
 
@@ -67,57 +63,17 @@ def assert_public_host(url: str) -> str:
 
 
 @dataclass
-class RobotsRules:
-    parser: RobotFileParser
-    crawl_delay: float = 0.0
-
-
-@dataclass
-class RobotsGate:
-    """One robots.txt cache + a minimum gap enforced per host, shared across every request this
-    process makes — so one tenant's search can never hit a stranger's server faster than a lone
-    polite visitor would."""
+class HostPacer:
+    """A minimum gap enforced per host, shared across every request this process makes — so one
+    tenant's search can never hit a single site faster than a lone visitor would."""
 
     min_gap_seconds: float = 1.5
-    ttl_seconds: float = 6 * 60 * 60
-    _cache: dict[str, tuple[float, RobotsRules]] = field(default_factory=dict)
     _last_fetch: dict[str, float] = field(default_factory=dict)
 
-    def _rules_for(self, origin: str) -> RobotsRules:
-        hit = self._cache.get(origin)
-        if hit and time.time() - hit[0] < self.ttl_seconds:
-            return hit[1]
-        parser = RobotFileParser()
-        parser.set_url(origin + "/robots.txt")
-        try:
-            req = urllib.request.Request(origin + "/robots.txt", headers={"User-Agent": USER_AGENT})
-            with urllib.request.urlopen(req, timeout=8) as res:
-                status = res.status
-                body = res.read().decode("utf-8", "ignore")
-            if status >= 500:
-                # A broken robots.txt reads as "stay out" — the polite assumption, not a free pass.
-                parser.parse(["User-agent: *", "Disallow: /"])
-            elif status >= 400:
-                parser.parse([])  # no robots.txt = no restriction, the standard's own reading
-            else:
-                parser.parse(body.splitlines())
-        except Exception:
-            parser.parse([])  # unreachable host: the page fetch that follows will fail on its own
-        delay = parser.crawl_delay("mrlxwaleadbot") or parser.crawl_delay("*") or 0.0
-        rules = RobotsRules(parser=parser, crawl_delay=min(float(delay or 0.0), 30.0))
-        self._cache[origin] = (time.time(), rules)
-        return rules
-
-    def allowed(self, url: str, origin: str) -> bool:
-        rules = self._rules_for(origin)
-        return rules.parser.can_fetch("mrlxwaleadbot", url) and rules.parser.can_fetch("*", url)
-
     def wait_for_turn(self, origin: str) -> None:
-        """Blocks until this host may be hit again — its own crawl-delay, or the default gap."""
-        rules = self._rules_for(origin)
-        gap = max(rules.crawl_delay, self.min_gap_seconds)
+        """Blocks until this host may be hit again."""
         last = self._last_fetch.get(origin, 0.0)
-        wait = last + gap - time.time()
+        wait = last + self.min_gap_seconds - time.time()
         if wait > 0:
             time.sleep(wait)
         self._last_fetch[origin] = time.time()

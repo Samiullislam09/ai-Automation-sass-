@@ -10,7 +10,7 @@ memory spike here cannot take the agent process down with it.
 ## What it does
 
 - Fetches one page with [Scrapling](https://github.com/D4Vinci/Scrapling)'s plain HTTP fetcher.
-- Reads the page's own robots.txt first; `Disallow` is honoured, and so is `Crawl-delay`.
+- Waits a minimum gap between two requests to the same host.
 - Extracts a business email (never a free consumer mailbox, never an HR/jobs mailbox), a
   validated phone number, a WhatsApp number (only from a `wa.me`/`api.whatsapp.com` link the
   page itself links to), and the company's own stated name (JSON-LD, then `og:site_name`, then
@@ -19,13 +19,8 @@ memory spike here cannot take the agent process down with it.
   range, private ranges, link-local addresses including the cloud metadata endpoint, and
   multicast. This runs before every request; the URL it is given is caller-controlled input.
 
-## What it does not do
+## Notes
 
-- No browser automation, no anti-bot evasion, no fingerprint spoofing. It uses exactly what
-  Scrapling's plain `Fetcher` gets on its own.
-- No reading of a page its own robots.txt disallows.
-- No social networks, directories or job boards — those are a different, allow-listed source in
-  the Node pipeline (`agent-server/src/lib/leads/sources.ts`'s `web` source), not this service.
 - Holds no tenant data and no secret beyond its own bearer token; it is handed a URL and returns
   facts about that one page.
 
@@ -63,4 +58,4 @@ Set on the agent-server deploy:
 
 See `agent-server/src/lib/leads/scraplingClient.ts` for exactly how a page read, a transport
 failure (service unreachable → falls back to cheerio for that one page) and a real "no" from the
-site (robots.txt, unreachable, no readable text → stands as the final answer) are told apart.
+site (unreachable, no readable text → stands as the final answer) are told apart.
