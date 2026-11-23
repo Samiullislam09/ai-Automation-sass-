@@ -561,7 +561,7 @@ function mentionsRecentDate(text: string, now: Date): boolean {
 }
 
 function sourceName(s: string): string {
-  return ({ serper: "Google Maps", osm: "OpenStreetMap", places: "Google Places", jobs: "a job board", apollo: "Apollo", news: "the news", directory: "a business directory", clients: "a competitor's client list" } as Record<string, string>)[s] ?? s;
+  return ({ serper: "Google Maps", osm: "OpenStreetMap", places: "Google Places", jobs: "a job board", apollo: "Apollo", news: "the news", linkedin: "LinkedIn", directory: "a business directory", clients: "a competitor's client list" } as Record<string, string>)[s] ?? s;
 }
 
 /** Score a candidate from its LISTING alone — no website read — for the never-0 fallback. A Google

@@ -44,6 +44,7 @@ import { domainOf } from "./compliance.js";
 import { competitorClientsSearch, directoryConfigured, directorySearch } from "./discoverySources.js";
 import { scraplingConfigured } from "./scraplingClient.js";
 import { domainMatchesName, newsIntentSearch, type LlmJson, type ResolveWebsite } from "./intentNews.js";
+import { linkedinSearch, type WebSearch } from "./linkedinSnippets.js";
 
 // ── identity: who we are, on every request we make ──────────────────────────────────────────
 
@@ -55,7 +56,7 @@ export const OSM_ATTRIBUTION = "© OpenStreetMap contributors (ODbL)";
 
 // ── the shape a source returns ──────────────────────────────────────────────────────────────
 
-export type SourceId = "osm" | "places" | "serper" | "apollo" | "jobs" | "web" | "directory" | "clients" | "news";
+export type SourceId = "osm" | "places" | "serper" | "apollo" | "jobs" | "web" | "directory" | "clients" | "news" | "linkedin";
 
 /** WHY NOW: a dated, citable reason this company may need the offer today, as the source found it
  *  (a hiring ad, a news story about an expansion, a competitor naming them a client). Scored by
@@ -727,6 +728,22 @@ export function webSearchEnabled(): boolean {
   return serperConfigured() && process.env.LEADS_WEB_SEARCH !== "0";
 }
 
+/** One plain web search -> Serper's organic results, cached for the day like the other searches. null
+ *  when no search key is set. No operators are ever added (the free tier rejects them). */
+export function makeSerperSearch(fetchImpl: typeof fetch = fetch): WebSearch | null {
+  if (!serperConfigured()) return null;
+  return async (query, geo) => {
+    const gl = countryCodeFor(geo);
+    const cacheKey = `serp:${query.toLowerCase()}:${gl ?? ""}`;
+    const hit = cached<any[]>(cacheKey);
+    if (hit) return hit;
+    const json = await throttled(SERPER_HOST, SERPER_GAP_MS, () => serperCall("search", { q: query, num: 20, ...(gl ? { gl } : {}) }, fetchImpl));
+    const rows: any[] = Array.isArray(json?.organic) ? json.organic : [];
+    remember(cacheKey, rows);
+    return rows;
+  };
+}
+
 /** Find a named company's own website with one Serper search, keeping only a result whose domain
  *  plausibly IS that company (intentNews.domainMatchesName). null when no search key is set — which
  *  is also what switches the news source off. One search per lookup, so callers cap how many. */
@@ -1079,6 +1096,23 @@ export async function discover(icp: Icp, limit: number, deps: DiscoverDeps = {})
   const directoryRows: Candidate[] = [];
   const clientsRows: Candidate[] = [];
   const newsRows: Candidate[] = [];
+  const linkedinRows: Candidate[] = [];
+
+  // LinkedIn company listings, read from public search results (never from linkedin.com itself).
+  {
+    let note = "";
+    try {
+      const r = await linkedinSearch(icp, Math.min(limit, 15), { search: makeSerperSearch(fetchImpl), resolveWebsite: makeSerperResolver(fetchImpl) });
+      linkedinRows.push(...r.candidates);
+      note = r.note;
+    } catch (e: any) {
+      note = `LinkedIn listing search failed: ${String(e?.message ?? e).slice(0, 120)}`;
+    }
+    reports.push({
+      id: "linkedin", label: "LinkedIn listings", configured: serperConfigured(), wired: true,
+      envVars: ["SERPER_API_KEY"], used: linkedinRows.length > 0, found: linkedinRows.length, note,
+    });
+  }
 
   // News: companies in the news for a growth event — the freshest "why now" there is. Needs the
   // model (to read headlines) and a search key (to find each company's website), else it says so.
@@ -1264,6 +1298,7 @@ export async function discover(icp: Icp, limit: number, deps: DiscoverDeps = {})
       { rows: rankByQuality(serperRows), weight: 1 },
       { rows: rankByQuality(placesRows), weight: 1 },
       { rows: directoryRows, weight: 1 },
+      { rows: linkedinRows, weight: 1 },
     ]),
     ...jobsRows, ...osmRows,
   ];
