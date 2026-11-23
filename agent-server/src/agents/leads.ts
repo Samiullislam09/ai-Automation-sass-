@@ -311,10 +311,15 @@ export class LeadsAgent extends Agent {
 
     ctx.progress(1, `${result.leads.length} leads, ${result.leads.filter((l) => l.band === "strong").length} strong`);
 
+    // What each source was WORTH this run: leads that survived the pipeline, by the source that found them.
+    const keptBySource: Record<string, number> = {};
+    for (const l of result.leads) keptBySource[l.source] = (keptBySource[l.source] ?? 0) + 1;
+    ctx.log(`leads by source: ${Object.entries(keptBySource).map(([s, n]) => `${s}=${n}`).join(", ") || "none"}`);
+
     const output = buildFindLeadsOutput({
       result,
       icpLabel: describeIcp(icp),
-      sources,
+      sources: describeSources(reports, keptBySource),
       warnings: [...warnings, ...(saved.warning ? [saved.warning] : [])],
       considered: candidates.length,
     });

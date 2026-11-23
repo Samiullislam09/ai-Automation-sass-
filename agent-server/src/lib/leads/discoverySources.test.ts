@@ -120,3 +120,14 @@ test("competitorClientsSearch says so when there are no competitor sites yet", a
     assert.match(r.note, /no competitor sites/);
   });
 });
+
+test("describeSources: with a kept-count each used source shows how many became leads", async () => {
+  const { describeSources } = await import("./sources.js");
+  const reports = [
+    { id: "web", label: "Web search", configured: true, wired: true, envVars: [], used: true, found: 20, note: "ok" },
+    { id: "news", label: "Growth news", configured: false, wired: true, envVars: [], used: false, found: 0, note: "off" },
+  ] as any;
+  assert.deepEqual(describeSources(reports), ["Web search: 20 found — ok", "Growth news: skipped — off"]);
+  assert.deepEqual(describeSources(reports, { web: 3 }), ["Web search: 20 found, 3 became leads — ok", "Growth news: skipped — off"]);
+  assert.match(describeSources(reports, {})[0], /0 became leads/);
+});

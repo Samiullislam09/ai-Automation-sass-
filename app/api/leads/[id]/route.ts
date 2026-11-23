@@ -35,16 +35,26 @@ const REJECT_REASONS = ["competitor", "wrong_industry", "wrong_city", "too_small
 const FEEDBACK_TO_NEGATIVE = new Set(["competitor", "wrong_industry"]);
 
 /** Append a domain to this tenant's lead negative list in agent_settings (merge, idempotent).
+ *  With `asCompetitor` the domain ALSO joins `competitor_sites`: a human who says "this is a
+ *  competitor" has just named a company whose public client list is a source of buyers (the
+ *  Scrapling "clients" source). Kept to the same cap as agent-server's addCompetitorSites (40).
  *  Best-effort: a feedback-loop failure must never fail the reject the user asked for. */
-async function addNegativeDomain(supabase: any, tenantId: string, domain: string) {
+async function addNegativeDomain(supabase: any, tenantId: string, domain: string, asCompetitor = false) {
   const d = String(domain || "").trim().toLowerCase().replace(/^www\./, "");
   if (!d) return;
   try {
     const { data } = await supabase.from("agent_settings").select("settings").eq("tenant_id", tenantId).eq("agent", "leads").maybeSingle();
     const settings = (data?.settings && typeof data.settings === "object" ? data.settings : {}) as Record<string, any>;
     const list: string[] = Array.isArray(settings.negative_domains) ? settings.negative_domains : [];
-    if (list.includes(d)) return;
-    const next = { ...settings, negative_domains: [...list, d].slice(-2000) };
+    const sites: string[] = Array.isArray(settings.competitor_sites) ? settings.competitor_sites : [];
+    const addNegative = !list.includes(d);
+    const addSite = asCompetitor && !sites.includes(d);
+    if (!addNegative && !addSite) return;
+    const next = {
+      ...settings,
+      negative_domains: addNegative ? [...list, d].slice(-2000) : list,
+      ...(addSite ? { competitor_sites: [...sites, d].slice(-40) } : {}),
+    };
     await supabase.from("agent_settings").upsert(
       { tenant_id: tenantId, agent: "leads", settings: next, updated_at: new Date().toISOString() },
       { onConflict: "tenant_id,agent" },
@@ -119,7 +129,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (stage === "rejected" && rejectReason && FEEDBACK_TO_NEGATIVE.has(rejectReason)) {
     const { data: lead } = await supabase.from("leads").select("domain, website").eq("id", id).eq("tenant_id", tenantId).maybeSingle();
     const dom = lead?.domain || (lead?.website ? String(lead.website).replace(/^https?:\/\/(www\.)?/i, "").replace(/[/:?#].*$/, "") : "");
-    if (dom) await addNegativeDomain(supabase, tenantId, dom);
+    if (dom) await addNegativeDomain(supabase, tenantId, dom, rejectReason === "competitor");
   }
 
   return NextResponse.json({ ok: true });

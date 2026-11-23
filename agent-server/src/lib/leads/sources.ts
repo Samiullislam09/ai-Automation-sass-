@@ -1306,6 +1306,11 @@ export async function discover(icp: Icp, limit: number, deps: DiscoverDeps = {})
 }
 
 /** One line per source for the agent's output and the chat card. */
-export function describeSources(reports: readonly SourceReport[]): string[] {
-  return reports.map((r) => `${r.label}: ${r.used ? `${r.found} found` : "skipped"} — ${r.note}`);
+export function describeSources(reports: readonly SourceReport[], kept?: Readonly<Record<string, number>>): string[] {
+  return reports.map((r) => {
+    // With `kept` (leads that SURVIVED the pipeline, by source id) the line shows what each source
+    // was worth, not just what it returned — "20 found, 1 became a lead" says more than "20 found".
+    const tail = kept && r.used ? `, ${kept[r.id] ?? 0} became leads` : "";
+    return `${r.label}: ${r.used ? `${r.found} found${tail}` : "skipped"} — ${r.note}`;
+  });
 }
