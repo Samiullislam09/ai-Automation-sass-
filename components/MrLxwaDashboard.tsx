@@ -2605,6 +2605,16 @@ function toThread(messages: any[]): ThreadMsg[] {
     );
 }
 
+/** A chat message's clock time. A message the server seeded is formatted in the BROWSER's timezone after mount: formatting it during server render gives the server's timezone, so
+ *  the HTML and the first client render disagreed (React error #425) and React threw the server HTML away and rebuilt the whole page on the client - a slow, flashing load. */
+const MsgTime = ({ time, at }: { time?: string; at?: string }) => {
+  const [t, setT] = useState(at ? "" : time ?? "");
+  useEffect(() => {
+    if (at) setT(new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }).toUpperCase());
+  }, [at]);
+  return <span className="lx-10 lx-dim ml-auto">{t}</span>;
+};
+
 /** The top progress bar and the "page is loading" dim. A short delay on the dim means a navigation that finishes at once never flickers. */
 const NAVBAR_CSS = `
 .lx-navbar{position:fixed;top:0;left:0;right:0;height:2px;z-index:200;pointer-events:none;opacity:0;transition:opacity .25s ease .05s}
@@ -4669,7 +4679,7 @@ export default function MrLxwaDashboard({
                       <span className="lx-pulse h-1.5 w-1.5 rounded-full" style={{ background: "#22c55e" }} /> working
                     </span>
                   )}
-                  <span className="lx-10 lx-dim ml-auto">{m.time}</span>
+                  <MsgTime time={m.time} at={m.at} />
                 </div>
                 <div
                   className="lx-ai lx-11 mt-1.5 px-3 py-2.5 leading-relaxed"
