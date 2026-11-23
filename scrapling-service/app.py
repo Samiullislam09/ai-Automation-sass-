@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from scrapling.fetchers import Fetcher
 
 from extract import business_emails, company_name, phone_numbers, whatsapp_number
+from listing import client_page_links, companies_from_html, next_page_url, same_site
 from safety import HostPacer, UnsafeUrl, USER_AGENT, assert_public_host
 
 AUTH_TOKEN = os.environ.get("SCRAPLING_SERVICE_TOKEN", "").strip()
@@ -122,10 +123,11 @@ def read(req: ReadRequest, authorization: Optional[str] = Header(default=None)):
 # ── discovery: directories and a competitor's client pages ─────────────────────────────────────
 #
 # These two endpoints FIND companies (name + their own website); /read above is what later reads
-# one company. Same rules as /read: public hosts only, robots.txt honoured, one polite request at
-# a time per host, plain HTTP fetcher. A directory is somebody else's database, so /list refuses
-# every host that is not on LIST_ALLOWED_HOSTS — empty means "no directory is allowed yet", which
-# is the safe default; the owner names the sites they have decided to read.
+# one company. Same gates as /read: public hosts only (SSRF check), per-host pacing, plain HTTP
+# fetcher. NOTE: this service no longer checks robots.txt (removed from /read and safety.py before
+# these endpoints were written), so neither do these. A directory is somebody else's database, so
+# /list refuses every host that is not on LIST_ALLOWED_HOSTS — empty means "no directory is
+# allowed yet", the safe default; the owner names the sites they have decided to read.
 
 MAX_LIST_PAGES = 3
 MAX_CLIENT_PAGES = 3
@@ -165,14 +167,12 @@ class ListResponse(BaseModel):
 
 
 def _get_html(url: str) -> tuple[Optional[str], Optional[str]]:
-    """One polite page fetch -> (html, None) or (None, why). Same gates as /read."""
+    """One paced page fetch -> (html, None) or (None, why). Same gates as /read."""
     try:
         origin = assert_public_host(url)
     except UnsafeUrl as e:
         return None, str(e)
-    if not robots.allowed(url, origin):
-        return None, f"{origin} disallows this page in its robots.txt"
-    robots.wait_for_turn(origin)
+    pacer.wait_for_turn(origin)
     try:
         page = Fetcher.get(
             url,

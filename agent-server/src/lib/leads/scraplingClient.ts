@@ -104,6 +104,59 @@ export async function readPageViaScrapling(
   }
 }
 
+// ── discovery: companies a directory or a competitor's client pages point to ───────────────────
+
+export type FoundCompany = { name: string; website: string | null; domain: string | null; sourceUrl: string | null };
+
+export type ScraplingListResult =
+  | { ok: true; companies: FoundCompany[]; pagesRead: number }
+  | { ok: false; reason: string };
+
+const LIST_TIMEOUT_MS = 60_000; // a few paced page reads, each ~1.5s apart, not one
+
+async function postForCompanies(
+  path: "list" | "clients",
+  body: Record<string, unknown>,
+  fetchImpl: typeof fetch,
+): Promise<ScraplingListResult | null> {
+  const base = serviceUrl();
+  if (!base) return null; // not configured: the caller reports "service not set up"
+  const token = (process.env.SCRAPLING_SERVICE_TOKEN ?? "").trim();
+  try {
+    const res = await fetchImpl(`${base}/${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(LIST_TIMEOUT_MS),
+    });
+    if (!res.ok) return { ok: false, reason: `the page reader answered HTTP ${res.status}` };
+    const data: any = await res.json();
+    if (!data?.ok) return { ok: false, reason: String(data?.reason ?? "no companies found") };
+    const companies: FoundCompany[] = (Array.isArray(data.items) ? data.items : [])
+      .map((i: any) => ({
+        name: String(i?.name ?? "").trim(),
+        website: typeof i?.website === "string" && i.website.trim() ? i.website.trim() : null,
+        domain: typeof i?.domain === "string" && i.domain.trim() ? i.domain.trim().toLowerCase() : null,
+        sourceUrl: typeof i?.source_url === "string" ? i.source_url : null,
+      }))
+      .filter((c: FoundCompany) => c.name);
+    return { ok: true, companies, pagesRead: Number(data.pages_read) || 0 };
+  } catch (e: any) {
+    return { ok: false, reason: `could not reach the page reader (${String(e?.message ?? e).slice(0, 100)})` };
+  }
+}
+
+/** Companies a directory / member list links to (the service only reads hosts on its own
+ *  LIST_ALLOWED_HOSTS). null = the Scrapling service is not configured. */
+export function listViaScrapling(url: string, opts: { maxPages?: number; limit?: number } = {}, fetchImpl: typeof fetch = fetch) {
+  return postForCompanies("list", { url, max_pages: opts.maxPages ?? 2, limit: opts.limit ?? 40 }, fetchImpl);
+}
+
+/** The customers a (competitor's) website publicly lists on its own client/case-study pages. */
+export function clientsViaScrapling(url: string, opts: { limit?: number } = {}, fetchImpl: typeof fetch = fetch) {
+  return postForCompanies("clients", { url, limit: opts.limit ?? 40 }, fetchImpl);
+}
+
 /** `fetchPageForResearch`-compatible wrapper: tries the Scrapling service first (when configured),
  *  falls back to `fallback` (sources.fetchPageForResearch) on misconfiguration or failure — so a
  *  deploy with the service down degrades to the old behaviour instead of losing every lead. */

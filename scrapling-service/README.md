@@ -40,6 +40,24 @@ No browser install step is needed — this only uses the HTTP fetcher.
   optional, ISO 3166-1 alpha-2, used only to help phone-number parsing pick the right format).
   Requires `Authorization: Bearer <SCRAPLING_SERVICE_TOKEN>` when that env var is set.
 
+### Discovery endpoints (find companies, not just read one)
+
+- `POST /list` — body `{"url": "<directory search url>", "max_pages": 2, "limit": 40}`. Reads a
+  business directory / member list / exhibitor list (following its "next" link for up to 3 pages)
+  and returns every company it links to: `{ok, items:[{name, website, domain, source_url}], pages_read}`.
+  **Refuses every host not on `LIST_ALLOWED_HOSTS`** (comma-separated, e.g. `clutch.co,europages.co.uk`);
+  empty means no directory is allowed, which is the safe default.
+- `POST /clients` — body `{"url": "https://competitor.com", "limit": 40}`. Finds the competitor's own
+  "clients / case studies / testimonials" pages from its home page, reads up to 3, and returns the
+  companies named there (linked-out companies, plus client logos by their alt text).
+
+Both use the same public-host (SSRF) check and per-host pacing as `/read`. Page-shape rules live in
+`listing.py` (pure, no network) and are covered by `test_listing.py`.
+
+The Node agent reads them through `agent-server/src/lib/leads/discoverySources.ts`; see the
+`LEADS_DIRECTORY_URLS` / `LEADS_DIRECTORY_MAX_QUERIES` / `LEADS_CLIENTS_COMPETITORS_PER_RUN` /
+`LEADS_QUERY_EXPAND` variables in `agent-server/.env.example`.
+
 ### Tests
 
 ```bash

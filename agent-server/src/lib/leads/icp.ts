@@ -53,6 +53,10 @@ export type Icp = {
   count: number;
   /** What discovery types into a search box. Ordered: most specific first. */
   searchTerms: string[];
+  /** Extra BARE phrases (no place attached) for the same buyer segment, written by queryExpand.ts.
+   *  Only the free Scrapling sources use them (directory search); the paid-quota search sources
+   *  keep to `searchTerms`, so widening the net never spends more Serper searches. */
+  expandedTerms?: string[];
   evidence: IcpEvidence[];
 };
 

@@ -24,13 +24,19 @@ export type LeadSettings = {
   negative_domains: string[];
   negative_cues: string[];
   daily_cap: number | null;
+  /** Competitors' websites, whose public client lists are a source of buyers (Scrapling "clients"
+   *  source). Grown automatically from the competitors the fit gate screens out; capped. */
+  competitor_sites: string[];
 };
+
+export const MAX_COMPETITOR_SITES = 40;
 
 export const DEFAULT_LEAD_SETTINGS: LeadSettings = {
   segment_cursor: 0,
   negative_domains: [],
   negative_cues: [],
   daily_cap: null,
+  competitor_sites: [],
 };
 
 /** Read a tenant's lead settings, merged onto the defaults. Never throws — a missing table or row
@@ -232,5 +238,19 @@ function mergeSettings(raw: unknown): LeadSettings {
     negative_domains: Array.isArray(o.negative_domains) ? o.negative_domains.map((x) => String(x)).filter(Boolean) : [],
     negative_cues: Array.isArray(o.negative_cues) ? o.negative_cues.map((x) => String(x)).filter(Boolean) : [],
     daily_cap: Number.isFinite(Number(o.daily_cap)) && Number(o.daily_cap) > 0 ? Math.floor(Number(o.daily_cap)) : null,
+    competitor_sites: Array.isArray(o.competitor_sites) ? o.competitor_sites.map((x) => String(x)).filter(Boolean).slice(-MAX_COMPETITOR_SITES) : [],
   };
+}
+
+/** Add competitor domains to the tenant's list (idempotent, lower-cased, newest kept when over the cap).
+ *  `exclude` is the tenant's own domain so they are never filed as their own competitor. */
+export async function addCompetitorSites(tenantId: string, domains: string[], exclude: string | null = null): Promise<void> {
+  const clean = domains
+    .map((d) => String(d ?? "").trim().toLowerCase().replace(/^www\./, ""))
+    .filter((d) => d && d !== exclude);
+  if (!clean.length) return;
+  const s = await getLeadSettings(tenantId);
+  const next = [...new Set([...s.competitor_sites, ...clean])].slice(-MAX_COMPETITOR_SITES);
+  if (next.length === s.competitor_sites.length) return;
+  await patchLeadSettings(tenantId, { competitor_sites: next });
 }

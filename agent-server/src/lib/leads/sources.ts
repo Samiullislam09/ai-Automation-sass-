@@ -41,6 +41,8 @@
 import * as cheerio from "cheerio";
 import type { Icp } from "./icp.js";
 import { domainOf } from "./compliance.js";
+import { competitorClientsSearch, directoryConfigured, directorySearch } from "./discoverySources.js";
+import { scraplingConfigured } from "./scraplingClient.js";
 
 // ── identity: who we are, on every request we make ──────────────────────────────────────────
 
@@ -52,7 +54,7 @@ export const OSM_ATTRIBUTION = "© OpenStreetMap contributors (ODbL)";
 
 // ── the shape a source returns ──────────────────────────────────────────────────────────────
 
-export type SourceId = "osm" | "places" | "serper" | "apollo" | "jobs" | "web";
+export type SourceId = "osm" | "places" | "serper" | "apollo" | "jobs" | "web" | "directory" | "clients";
 
 export type Candidate = {
   name: string;
@@ -972,7 +974,13 @@ function jobToCandidate(j: any): Candidate | null {
 
 // ── the discovery layer ─────────────────────────────────────────────────────────────────────
 
-export type DiscoverDeps = { fetchImpl?: typeof fetch };
+export type DiscoverDeps = {
+  fetchImpl?: typeof fetch;
+  /** Competitor websites whose public client lists are read (settings.competitor_sites). */
+  competitorSites?: string[];
+  /** The tenant's own domain, so it is never offered back to them as a "client". */
+  ownDomain?: string | null;
+};
 
 /** Round-robin merge: one from each group in turn, every group keeping its own order. Without this
  *  the first source to answer (Google Maps) fills the whole target and the web-search companies are
@@ -1029,6 +1037,40 @@ export async function discover(icp: Icp, limit: number, deps: DiscoverDeps = {})
   const placesRows: Candidate[] = [];
   const jobsRows: Candidate[] = [];
   const osmRows: Candidate[] = [];
+  const directoryRows: Candidate[] = [];
+  const clientsRows: Candidate[] = [];
+
+  // Scrapling-powered sources (our own page reader, no search API): the customers a competitor
+  // publicly names, and companies listed in the directories the owner configured. Run first in the
+  // report order because they cost no search quota and the first is the highest-intent source we have.
+  {
+    let note = "";
+    try {
+      const r = await competitorClientsSearch(deps.competitorSites ?? [], deps.ownDomain ?? null, limit, fetchImpl);
+      clientsRows.push(...r.candidates);
+      note = r.note;
+    } catch (e: any) {
+      note = `competitor-client search failed: ${String(e?.message ?? e).slice(0, 120)}`;
+    }
+    reports.push({
+      id: "clients", label: "Competitors' clients", configured: scraplingConfigured(), wired: true,
+      envVars: ["SCRAPLING_SERVICE_URL"], used: scraplingConfigured() && (deps.competitorSites?.length ?? 0) > 0, found: clientsRows.length, note,
+    });
+  }
+  {
+    let note = "";
+    try {
+      const r = await directorySearch(icp, limit, fetchImpl);
+      directoryRows.push(...r.candidates);
+      note = r.note;
+    } catch (e: any) {
+      note = `directory search failed: ${String(e?.message ?? e).slice(0, 120)}`;
+    }
+    reports.push({
+      id: "directory", label: "Business directories", configured: directoryConfigured(), wired: true,
+      envVars: ["SCRAPLING_SERVICE_URL", "LEADS_DIRECTORY_URLS"], used: directoryConfigured(), found: directoryRows.length, note,
+    });
+  }
 
   // Serper (Google Maps, free + no card) — FIRST, because it is the one source that gives real
   // Google Maps leads without a billing card, which is the constraint this install lives under.
@@ -1151,7 +1193,15 @@ export async function discover(icp: Icp, limit: number, deps: DiscoverDeps = {})
   // the back as top-ups, exactly where they were, so a weaker source never jumps ahead of a better one.
   // Web search leads, two for every Maps / Places one, each source best-first (website + usable phone first).
   const candidates = [
-    ...blend([{ rows: rankByQuality(webRows), weight: 2 }, { rows: rankByQuality(serperRows), weight: 1 }, { rows: rankByQuality(placesRows), weight: 1 }]),
+    // A competitor's named client is the strongest buyer evidence we have, so it leads (weight 2);
+    // directory companies are a broad net like Maps (weight 1).
+    ...blend([
+      { rows: clientsRows, weight: 2 },
+      { rows: rankByQuality(webRows), weight: 2 },
+      { rows: rankByQuality(serperRows), weight: 1 },
+      { rows: rankByQuality(placesRows), weight: 1 },
+      { rows: directoryRows, weight: 1 },
+    ]),
     ...jobsRows, ...osmRows,
   ];
   return { candidates, reports };

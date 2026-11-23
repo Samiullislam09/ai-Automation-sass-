@@ -6,8 +6,10 @@ import { completeJson } from "../lib/llm.js";
 import { loadActiveProfile, saveProfile, buyerProfileUsable, type SiteProfile } from "../lib/siteProfile.js";
 import { draftBuyerProfile } from "../lib/leads/buyerProfile.js";
 import { buildIcp, buildIcpFromBuyerSegment, describeIcp } from "../lib/leads/icp.js";
-import { getLeadSettings, patchLeadSettings, leadsDailyStatus } from "../lib/outreach/settings.js";
+import { getLeadSettings, patchLeadSettings, leadsDailyStatus, addCompetitorSites } from "../lib/outreach/settings.js";
 import { discover, describeSources, fetchPageForResearch, countryForGeo } from "../lib/leads/sources.js";
+import { expandTerms } from "../lib/leads/queryExpand.js";
+import { directoryConfigured } from "../lib/leads/discoverySources.js";
 import { buildFindLeadsOutput, runPipeline, type LeadRecord, type PipelineDeps } from "../lib/leads/pipeline.js";
 import { makeScraplingAwareFetcher, scraplingConfigured } from "../lib/leads/scraplingClient.js";
 import { POLICY, RunLedger, assertDraftOnly, domainOf, nameKey, phoneKey, stripWww, type SenderIdentity, type SuppressionEntry } from "../lib/leads/compliance.js";
@@ -120,6 +122,21 @@ export class LeadsAgent extends Agent {
     const { icp, warnings } = icpResult;
     ctx.log(`ICP: ${describeIcp(icp)} (${icp.evidence.map((e) => `${e.field}<-${e.from}`).join(", ")})`);
 
+    // Widen the segment into the other names the web files those buyers under. Only the free
+    // directory source uses these, so it is skipped (no model call) when no directory is configured.
+    if (directoryConfigured() && process.env.LEADS_QUERY_EXPAND !== "0") {
+      const segIdx = sourceSegment ? profile?.buyer_profile?.buyer_segments.findIndex((s) => s.name === sourceSegment) ?? -1 : -1;
+      const whyBuy = segIdx >= 0 ? profile!.buyer_profile!.buyer_segments[segIdx].why_buy || null : null;
+      const extra = await expandTerms(
+        { segment: icp.industry, whyBuy, offer: profile?.buyer_profile?.offer ?? profile?.what_they_do ?? null, have: [icp.industry] },
+        (p) => completeJson(p),
+      );
+      if (extra.length) {
+        icp.expandedTerms = extra;
+        ctx.log(`query expansion: +${extra.length} phrases (${extra.slice(0, 4).join(", ")}…)`);
+      }
+    }
+
     // The buyer-vs-competitor gate (Phase 3) runs whenever the tenant has a USABLE buyer profile
     // (drafted or confirmed — no confirm needed), so a peer is screened out on Auto and on explicit
     // queries alike. With no buyer profile at all the gate stays off and discovery is unchanged.
@@ -170,7 +187,10 @@ export class LeadsAgent extends Agent {
     // reach it; the RunLedger below still caps what's SAVED at `count`, and Serper already returns
     // ~20 results per query, so keeping more of each is nearly free on the quota.
     const discoverLimit = Math.min(60, Math.max(icp.count * 4, icp.count + 15));
-    const { candidates, reports } = await discover(icp, discoverLimit);
+    const { candidates, reports } = await discover(icp, discoverLimit, {
+      competitorSites: settings.competitor_sites,
+      ownDomain: tenant?.website_url ? domainOf(tenant.website_url) : null,
+    });
     const sources = describeSources(reports);
     ctx.log(`discovery: ${candidates.length} candidates for a target of ${icp.count} — ${sources.join(" | ")}`);
 
@@ -226,6 +246,9 @@ export class LeadsAgent extends Agent {
     };
 
     const found: LeadRecord[] = [];
+    // Competitors the fit gate screens out are remembered: their public client lists are a source of
+    // buyers on later runs. A do-not-contact hit is a rejected domain, not necessarily a competitor.
+    const competitorDomains = new Set<string>();
 
     const result = await runPipeline({
       candidates: fresh,
@@ -261,9 +284,20 @@ export class LeadsAgent extends Agent {
         // only at the end, so the DB row count stays 0 until then — this is the live number).
         ctx.onProgress({ phase: "pipeline", label: `${found.length} of ${icp.count} found`, done: found.length, total: icp.count, found: found.length });
       },
-      onDrop: (d) => ctx.log(`dropped ${d.name} at ${d.stage}: ${d.reason}`),
+      onDrop: (d) => {
+        ctx.log(`dropped ${d.name} at ${d.stage}: ${d.reason}`);
+        if (d.stage === "competitor" && d.domain && !/^on your do-not-contact/i.test(d.reason)) competitorDomains.add(d.domain);
+      },
       onProgress: (done, total, label) => ctx.onProgress({ phase: "pipeline", label, done, total, considered: done }),
     });
+
+    if (competitorDomains.size) {
+      try {
+        await addCompetitorSites(tenantId, [...competitorDomains], tenant?.website_url ? domainOf(tenant.website_url) : null);
+      } catch (e) {
+        ctx.log(`could not remember competitors: ${(e as Error).message}`);
+      }
+    }
 
     // ── 6 · durable ───────────────────────────────────────────────────────────────────────
     ctx.onProgress({ phase: "saving", label: `Saving ${result.leads.length} leads...` });
