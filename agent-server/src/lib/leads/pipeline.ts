@@ -485,13 +485,37 @@ export function qualifyBuyer(researched: Researched, icp: Icp, signals: { name: 
     add("geography", "timing", inAddr ? 4 : inText ? 2 : 0, 4, inAddr ? `their address is in ${icp.geo}` : inText ? `${icp.geo} is mentioned on their site` : `nothing places them in ${icp.geo}`);
   }
 
+  // ── 5 · why NOW (0-20, on top: only a dated, citable event earns it) ────────────────────────
+  const intent = intentPoints(candidate.intent, now);
+  if (intent) add("buying-intent", "signals", intent.points, 20, intent.why);
+
   let score = Math.max(0, Math.min(100, components.reduce((n, c) => n + c.points, 0)));
   // The low-intent cap: we may contact them, but without a single verified signal they are never
-  // "strong". Only applies when the tenant actually defined signals to look for.
-  if (signals.length && verified === 0) score = Math.min(score, 55);
+  // "strong". Only applies when the tenant actually defined signals to look for. A cited event
+  // (a hiring ad, a news story, a competitor naming them a client) IS evidence, so it lifts the cap.
+  if (signals.length && verified === 0 && !intent) score = Math.min(score, 55);
 
   const band: Qualified["band"] = score >= 75 ? "strong" : score >= POLICY.MIN_SCORE_BUYER ? "worth-a-look" : "below-the-line";
   return { score, band, components, why: explainScore(components, score), disqualified: null };
+}
+
+/** Points for a cited "why now" event, and the sentence that says so. Deterministic: points come
+ *  from the KIND of event and how recent it is, never from a model. Undated events (a competitor's
+ *  client list) get a fixed middle value; a dated one decays — a news story from this month beats
+ *  one from last quarter, and anything past a year earns nothing. Exported for tests. */
+export function intentPoints(intent: Candidate["intent"], now: Date = new Date()): { points: number; why: string } | null {
+  if (!intent) return null;
+  const text = clip(intent.text, 90);
+  if (intent.kind === "competitor-client") return { points: 12, why: `a competitor publicly names them a client (${text})` };
+
+  const ageDays = intent.at ? Math.max(0, (now.getTime() - Date.parse(intent.at)) / 86_400_000) : null;
+  if (ageDays !== null && ageDays > 365) return null;
+  const base = intent.kind === "news" ? 20 : 14; // an expansion story outranks a job ad
+  const factor = ageDays === null ? 0.5 : ageDays <= 30 ? 1 : ageDays <= 90 ? 0.6 : 0.3;
+  const points = Math.round(base * factor);
+  if (points <= 0) return null;
+  const when = ageDays === null ? "undated" : ageDays < 1 ? "today" : `${Math.round(ageDays)}d ago`;
+  return { points, why: `${intent.kind === "news" ? "in the news" : "hiring"} ${when}: ${text}` };
 }
 
 /** A buying signal's evidence on the page, or null. Deterministic and keyword-based: the
@@ -537,7 +561,7 @@ function mentionsRecentDate(text: string, now: Date): boolean {
 }
 
 function sourceName(s: string): string {
-  return ({ serper: "Google Maps", osm: "OpenStreetMap", places: "Google Places", jobs: "a job board", apollo: "Apollo" } as Record<string, string>)[s] ?? s;
+  return ({ serper: "Google Maps", osm: "OpenStreetMap", places: "Google Places", jobs: "a job board", apollo: "Apollo", news: "the news", directory: "a business directory", clients: "a competitor's client list" } as Record<string, string>)[s] ?? s;
 }
 
 /** Score a candidate from its LISTING alone — no website read — for the never-0 fallback. A Google

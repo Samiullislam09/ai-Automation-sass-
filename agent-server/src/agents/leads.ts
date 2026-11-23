@@ -189,6 +189,8 @@ export class LeadsAgent extends Agent {
     const discoverLimit = Math.min(60, Math.max(icp.count * 4, icp.count + 15));
     const { candidates, reports } = await discover(icp, discoverLimit, {
       competitorSites: settings.competitor_sites,
+      llmJson: (p) => completeJson(p),
+      offer: profile?.buyer_profile?.offer ?? profile?.what_they_do ?? null,
       ownDomain: tenant?.website_url ? domainOf(tenant.website_url) : null,
     });
     const sources = describeSources(reports);

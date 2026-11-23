@@ -59,7 +59,7 @@ export const STAGE: Record<string, { label: string; dot: string }> = {
 };
 // The real-world source a lead came from, not the tool/API name. "serper" is just the API we
 // query Google Maps through, so a lead from it IS a Google Maps / Google Business listing.
-export const SOURCE_LABEL: Record<string, string> = { serper: "Google Maps", osm: "OpenStreetMap", places: "Google Places", jobs: "Job board", web: "Web search", directory: "Business directory", clients: "Competitor's client", manual: "Manual", apollo: "Apollo" };
+export const SOURCE_LABEL: Record<string, string> = { serper: "Google Maps", osm: "OpenStreetMap", places: "Google Places", jobs: "Job board", web: "Web search", directory: "Business directory", clients: "Competitor's client", news: "In the news", manual: "Manual", apollo: "Apollo" };
 export const SORT_LABEL: Record<string, string> = { newest: "Newest first", oldest: "Oldest first", score: "Highest score", name: "Name A–Z" };
 
 export function ago(iso: string | null): string {

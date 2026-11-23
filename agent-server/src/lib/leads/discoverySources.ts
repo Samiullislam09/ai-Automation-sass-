@@ -77,6 +77,9 @@ function toCandidate(c: FoundCompany, source: "directory" | "clients", why: stri
   if (!c.website) return null; // see the header: no site, nothing to research or reach
   const domain = c.domain ?? domainOf(c.website);
   return {
+    // A competitor naming them as a client is dated by nothing, but it is the owner's best evidence
+    // that this company buys what we sell — scored as intent (pipeline.intentPoints).
+    ...(source === "clients" ? { intent: { kind: "competitor-client" as const, text: why, url: c.sourceUrl, at: null } } : {}),
     name: c.name,
     website: c.website,
     domain,

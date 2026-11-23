@@ -43,6 +43,7 @@ import type { Icp } from "./icp.js";
 import { domainOf } from "./compliance.js";
 import { competitorClientsSearch, directoryConfigured, directorySearch } from "./discoverySources.js";
 import { scraplingConfigured } from "./scraplingClient.js";
+import { domainMatchesName, newsIntentSearch, type LlmJson, type ResolveWebsite } from "./intentNews.js";
 
 // ── identity: who we are, on every request we make ──────────────────────────────────────────
 
@@ -54,7 +55,18 @@ export const OSM_ATTRIBUTION = "© OpenStreetMap contributors (ODbL)";
 
 // ── the shape a source returns ──────────────────────────────────────────────────────────────
 
-export type SourceId = "osm" | "places" | "serper" | "apollo" | "jobs" | "web" | "directory" | "clients";
+export type SourceId = "osm" | "places" | "serper" | "apollo" | "jobs" | "web" | "directory" | "clients" | "news";
+
+/** WHY NOW: a dated, citable reason this company may need the offer today, as the source found it
+ *  (a hiring ad, a news story about an expansion, a competitor naming them a client). Scored by
+ *  pipeline.intentPoints. Never invented: `text` is the source's own words and `url` is where to check it. */
+export type Intent = {
+  kind: "hiring" | "news" | "competitor-client";
+  text: string;
+  url: string | null;
+  /** ISO date the source gave for it; null when the source dates nothing (a client list). */
+  at: string | null;
+};
 
 export type Candidate = {
   name: string;
@@ -72,6 +84,8 @@ export type Candidate = {
   /** The country, read off the address where the source gives one (Google Maps addresses end
    *  with it). Null when it can't be told. Stamped on the lead so the CRM's Country column fills. */
   country?: string | null;
+  /** Set only by the sources that find a company BECAUSE of an event (jobs, news, competitor clients). */
+  intent?: Intent;
 };
 
 /** Country from any text (a postal address, or a run's geo). STRICT: only a recognised country
@@ -424,6 +438,11 @@ function toCandidate(row: any): Candidate | null {
   };
 }
 
+function isoOrNull(v: unknown): string | null {
+  const t = Date.parse(String(v ?? ""));
+  return Number.isFinite(t) ? new Date(t).toISOString() : null;
+}
+
 function firstString(...values: unknown[]): string | null {
   for (const v of values) {
     const s = String(v ?? "").trim();
@@ -708,6 +727,21 @@ export function webSearchEnabled(): boolean {
   return serperConfigured() && process.env.LEADS_WEB_SEARCH !== "0";
 }
 
+/** Find a named company's own website with one Serper search, keeping only a result whose domain
+ *  plausibly IS that company (intentNews.domainMatchesName). null when no search key is set — which
+ *  is also what switches the news source off. One search per lookup, so callers cap how many. */
+export function makeSerperResolver(fetchImpl: typeof fetch = fetch): ResolveWebsite | null {
+  if (!serperConfigured()) return null;
+  return async (name, geo) => {
+    const gl = countryCodeFor(geo);
+    const q = `${name} ${geo ?? ""} official website`.replace(/\s+/g, " ").trim();
+    const json = await throttled(SERPER_HOST, SERPER_GAP_MS, () => serperCall("search", { q, num: 6, ...(gl ? { gl } : {}) }, fetchImpl));
+    const rows: Candidate[] = Array.isArray(json?.organic) ? json.organic.map(webResultToCandidate).filter((c: Candidate | null): c is Candidate => !!c) : [];
+    const hit = rows.find((c) => c.domain && domainMatchesName(name, c.domain));
+    return hit?.website && hit.domain ? { website: hit.website, domain: hit.domain } : null;
+  };
+}
+
 /** Appended to every web query. A generic query such as "manufacturing companies in Dubai" is
  *  answered mostly by directories and "Top 10" pages, which are pages ABOUT companies. Google's own
  *  operators remove them at the source, so the 20 results a search returns are spent on actual
@@ -969,6 +1003,7 @@ function jobToCandidate(j: any): Candidate | null {
     source: "jobs",
     sourceRef: firstString(j?.id, j?.redirect_url),
     attribution: "Job data via Adzuna",
+    intent: { kind: "hiring", text: title ? `hiring: ${title}` : "hiring", url: firstString(j?.redirect_url), at: isoOrNull(j?.created) },
   };
 }
 
@@ -980,6 +1015,10 @@ export type DiscoverDeps = {
   competitorSites?: string[];
   /** The tenant's own domain, so it is never offered back to them as a "client". */
   ownDomain?: string | null;
+  /** The model, for the news source (reads headlines). Absent = no news source. */
+  llmJson?: LlmJson;
+  /** What the tenant sells, so the news source can skip peers. */
+  offer?: string | null;
 };
 
 /** Round-robin merge: one from each group in turn, every group keeping its own order. Without this
@@ -1039,6 +1078,29 @@ export async function discover(icp: Icp, limit: number, deps: DiscoverDeps = {})
   const osmRows: Candidate[] = [];
   const directoryRows: Candidate[] = [];
   const clientsRows: Candidate[] = [];
+  const newsRows: Candidate[] = [];
+
+  // News: companies in the news for a growth event — the freshest "why now" there is. Needs the
+  // model (to read headlines) and a search key (to find each company's website), else it says so.
+  {
+    let note = "";
+    if (!deps.llmJson) note = "no model wired in — off";
+    else {
+      try {
+        const r = await newsIntentSearch(icp, Math.min(limit, 15), {
+          fetchImpl, llmJson: deps.llmJson, resolveWebsite: makeSerperResolver(fetchImpl), gl: countryCodeFor(icp.geo), offer: deps.offer ?? null,
+        });
+        newsRows.push(...r.candidates);
+        note = r.note;
+      } catch (e: any) {
+        note = `news search failed: ${String(e?.message ?? e).slice(0, 120)}`;
+      }
+    }
+    reports.push({
+      id: "news", label: "Growth news", configured: serperConfigured() && !!deps.llmJson, wired: true,
+      envVars: ["SERPER_API_KEY"], used: newsRows.length > 0, found: newsRows.length, note,
+    });
+  }
 
   // Scrapling-powered sources (our own page reader, no search API): the customers a competitor
   // publicly names, and companies listed in the directories the owner configured. Run first in the
@@ -1197,6 +1259,7 @@ export async function discover(icp: Icp, limit: number, deps: DiscoverDeps = {})
     // directory companies are a broad net like Maps (weight 1).
     ...blend([
       { rows: clientsRows, weight: 2 },
+      { rows: newsRows, weight: 2 },
       { rows: rankByQuality(webRows), weight: 2 },
       { rows: rankByQuality(serperRows), weight: 1 },
       { rows: rankByQuality(placesRows), weight: 1 },
