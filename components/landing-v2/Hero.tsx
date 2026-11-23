@@ -71,10 +71,21 @@ function ConnectSiteForm() {
       <AuthLink guestHref="/signup" guestLabel="Connect your site" authedLabel="Go to dashboard" className="inline-flex h-12 items-center gap-2 rounded-full bg-[#262626] pl-6 pr-[22px] text-[16px] font-semibold text-[#fafafa] transition-colors hover:bg-[#3d3d3d]"><ArrowRight size={18} /></AuthLink>
     );
   }
-  const go = (e: React.FormEvent) => {
+  const [busy, setBusy] = useState(false);
+  const go = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (busy) return;
+    setBusy(true);
     try { if (url.trim()) localStorage.setItem(PENDING_SITE_KEY, url.trim()); } catch { /* private mode: the onboarding just asks again */ }
-    window.location.href = "/signup";
+    // No login or register screen: a guest session is opened right here (Supabase anonymous sign-in) and the visitor lands straight on the onboarding's website step.
+    // If guest sign-in is switched off in Supabase, or fails, fall back to the normal signup page.
+    try {
+      const { createClient } = await import("@/lib/supabase/client");
+      const { error } = await createClient().auth.signInAnonymously();
+      window.location.href = error ? "/signup" : "/onboarding";
+    } catch {
+      window.location.href = "/signup";
+    }
   };
   return (
     <div className="flex w-full max-w-[560px] flex-col items-center gap-3">
@@ -85,10 +96,10 @@ function ConnectSiteForm() {
           className="h-11 min-w-0 flex-1 bg-transparent text-[16px] text-[#0a0a0a] outline-none placeholder:text-[#a3a3a3] max-sm:w-full"
         />
         <button type="submit" className="inline-flex h-11 shrink-0 items-center gap-2 rounded-full bg-[#262626] pl-6 pr-5 text-[15px] font-semibold text-[#fafafa] transition-colors hover:bg-[#3d3d3d] max-sm:w-full max-sm:justify-center">
-          Connect your site<ArrowRight size={17} />
+          {busy ? "Opening…" : "Connect your site"}{!busy && <ArrowRight size={17} />}
         </button>
       </form>
-      <span className="flex items-center gap-2 text-[13px] text-[#737373]"><span className="h-2 w-2 rounded-full bg-[#6a5af0]" />Free to start. We read your site, then you sign in with Google in one click.</span>
+      <span className="flex items-center gap-2 text-[13px] text-[#737373]"><span className="h-2 w-2 rounded-full bg-[#6a5af0]" />Free to start. No sign-up form: we read your site first.</span>
     </div>
   );
 }
