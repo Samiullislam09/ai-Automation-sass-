@@ -7,7 +7,7 @@ import { loadActiveProfile, saveProfile, buyerProfileUsable, type SiteProfile } 
 import { draftBuyerProfile } from "../lib/leads/buyerProfile.js";
 import { buildIcp, buildIcpFromBuyerSegment, describeIcp } from "../lib/leads/icp.js";
 import { getLeadSettings, patchLeadSettings, leadsDailyStatus, addCompetitorSites } from "../lib/outreach/settings.js";
-import { discover, describeSources, fetchPageForResearch, countryForGeo } from "../lib/leads/sources.js";
+import { discover, describeSources, fetchPageForResearch, countryForGeo, serperConfigured } from "../lib/leads/sources.js";
 import { expandTerms } from "../lib/leads/queryExpand.js";
 import { directoryConfigured } from "../lib/leads/discoverySources.js";
 import { buildFindLeadsOutput, runPipeline, type LeadRecord, type PipelineDeps } from "../lib/leads/pipeline.js";
@@ -124,7 +124,7 @@ export class LeadsAgent extends Agent {
 
     // Widen the segment into the other names the web files those buyers under. Only the free
     // directory source uses these, so it is skipped (no model call) when no directory is configured.
-    if (directoryConfigured() && process.env.LEADS_QUERY_EXPAND !== "0") {
+    if (directoryConfigured(serperConfigured()) && process.env.LEADS_QUERY_EXPAND !== "0") {
       const segIdx = sourceSegment ? profile?.buyer_profile?.buyer_segments.findIndex((s) => s.name === sourceSegment) ?? -1 : -1;
       const whyBuy = segIdx >= 0 ? profile!.buyer_profile!.buyer_segments[segIdx].why_buy || null : null;
       const extra = await expandTerms(

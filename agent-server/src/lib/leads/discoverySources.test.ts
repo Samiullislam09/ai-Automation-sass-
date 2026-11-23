@@ -131,3 +131,81 @@ test("describeSources: with a kept-count each used source shows how many became 
   assert.deepEqual(describeSources(reports, { web: 3 }), ["Web search: 20 found, 3 became leads — ok", "Growth news: skipped — off"]);
   assert.match(describeSources(reports, {})[0], /0 became leads/);
 });
+
+// ── directories found by web search (no templates) ───────────────────────────────────────────
+
+test("directoryPageFromResult keeps directory/list pages and drops social, jobs, files and ordinary pages", () => {
+  const keep = (r: any) => ds.directoryPageFromResult(r) !== null;
+  assert.ok(keep({ link: "https://uae-business-directory.com/manufacturers", title: "Manufacturers in Dubai" }));
+  assert.ok(keep({ link: "https://example.com/blog/x", title: "Top 10 steel manufacturers in Dubai" }));
+  assert.ok(keep({ link: "https://example.com/suppliers/dubai", title: "Dubai" }));
+  assert.ok(keep({ link: "https://clutch.co/it-services", title: "Best IT services" })); // aggregators are the point
+  assert.ok(!keep({ link: "https://www.linkedin.com/directory/companies", title: "Company directory" }));
+  assert.ok(!keep({ link: "https://www.facebook.com/groups/x", title: "Directory of suppliers" }));
+  assert.ok(!keep({ link: "https://ae.indeed.com/jobs", title: "Manufacturers jobs" }));
+  assert.ok(!keep({ link: "https://example.com/list.pdf", title: "List of suppliers" }));
+  assert.ok(!keep({ link: "https://acme.ae/about", title: "About Acme" }));
+  assert.ok(!keep({ link: "not a url", title: "Directory" }));
+});
+
+test("findDirectoryPages asks plain-word queries, dedupes and caps", async () => {
+  const queries: string[] = [];
+  const search = async (q: string) => {
+    queries.push(q);
+    return [
+      { link: "https://dir-a.com/manufacturers", title: "Manufacturers directory" },
+      { link: "https://dir-a.com/manufacturers", title: "Manufacturers directory" },
+      { link: "https://dir-b.com/list", title: "List of manufacturers" },
+      { link: "https://acme.ae/", title: "Acme" },
+    ];
+  };
+  const pages = await ds.findDirectoryPages({ ...icp, industry: "Manufacturers" }, search, 5, 1);
+  assert.deepEqual(pages, ["https://dir-a.com/manufacturers", "https://dir-b.com/list"]);
+  assert.ok(queries.every((q) => !q.includes("site:") && /Dubai/.test(q)));
+  assert.equal((await ds.findDirectoryPages({ ...icp, industry: "Manufacturers" }, search, 1, 1)).length, 1);
+});
+
+test("directoryConfigured: templates OR a search key (with the auto switch) is enough, with the service", async () => {
+  await withEnv({ SCRAPLING_SERVICE_URL: "http://svc", LEADS_DIRECTORY_URLS: undefined, LEADS_DIRECTORY_AUTO: undefined }, () => {
+    assert.equal(ds.directoryConfigured(false), false);
+    assert.equal(ds.directoryConfigured(true), true);
+  });
+  await withEnv({ SCRAPLING_SERVICE_URL: "http://svc", LEADS_DIRECTORY_URLS: undefined, LEADS_DIRECTORY_AUTO: "0" }, () => {
+    assert.equal(ds.directoryConfigured(true), false);
+  });
+  await withEnv({ SCRAPLING_SERVICE_URL: "http://svc", LEADS_DIRECTORY_URLS: "https://d.example/s?q={q}" }, () => {
+    assert.equal(ds.directoryConfigured(false), true);
+  });
+  await withEnv({ SCRAPLING_SERVICE_URL: undefined, LEADS_DIRECTORY_URLS: "https://d.example/s?q={q}" }, () => {
+    assert.equal(ds.directoryConfigured(true), false);
+  });
+});
+
+test("directorySearch with NO templates: finds directory pages by search and reads them through /list", async () => {
+  ds.__resetDiscoveryCache();
+  await withEnv({ SCRAPLING_SERVICE_URL: "http://svc", LEADS_DIRECTORY_URLS: undefined, LEADS_DIRECTORY_AUTO: undefined }, async () => {
+    const calls: { url: string; body: any }[] = [];
+    const items = [
+      { name: "Gulf Steel", website: "https://gulfsteel.ae", domain: "gulfsteel.ae", source_url: "x" },
+      { name: "Delta Pack", website: "https://deltapack.com", domain: "deltapack.com", source_url: "x" },
+    ];
+    const search = async () => [{ link: "https://uae-directory.com/manufacturers", title: "Manufacturers directory Dubai" }];
+    const r = await ds.directorySearch(icp, 10, serviceReturning(items, calls), { search });
+    assert.deepEqual(r.candidates.map((c) => c.domain), ["gulfsteel.ae", "deltapack.com"]);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].body.url, "https://uae-directory.com/manufacturers");
+    assert.match(r.note, /0 configured \+ 1 found by search/);
+  });
+});
+
+test("directorySearch: no templates and no search key is off with the reason; the auto switch turns the search off", async () => {
+  await withEnv({ SCRAPLING_SERVICE_URL: "http://svc", LEADS_DIRECTORY_URLS: undefined }, async () => {
+    assert.match((await ds.directorySearch(icp, 10, fetch, { search: null })).note, /no search key/);
+  });
+  await withEnv({ SCRAPLING_SERVICE_URL: "http://svc", LEADS_DIRECTORY_URLS: undefined, LEADS_DIRECTORY_AUTO: "0" }, async () => {
+    let searched = false;
+    const r = await ds.directorySearch(icp, 10, fetch, { search: async () => ((searched = true), []) });
+    assert.equal(searched, false);
+    assert.equal(r.candidates.length, 0);
+  });
+});

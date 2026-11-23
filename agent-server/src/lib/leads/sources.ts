@@ -1156,15 +1156,15 @@ export async function discover(icp: Icp, limit: number, deps: DiscoverDeps = {})
   {
     let note = "";
     try {
-      const r = await directorySearch(icp, limit, fetchImpl);
+      const r = await directorySearch(icp, limit, fetchImpl, { search: makeSerperSearch(fetchImpl) });
       directoryRows.push(...r.candidates);
       note = r.note;
     } catch (e: any) {
       note = `directory search failed: ${String(e?.message ?? e).slice(0, 120)}`;
     }
     reports.push({
-      id: "directory", label: "Business directories", configured: directoryConfigured(), wired: true,
-      envVars: ["SCRAPLING_SERVICE_URL", "LEADS_DIRECTORY_URLS"], used: directoryConfigured(), found: directoryRows.length, note,
+      id: "directory", label: "Business directories", configured: directoryConfigured(serperConfigured()), wired: true,
+      envVars: ["SCRAPLING_SERVICE_URL", "LEADS_DIRECTORY_URLS", "SERPER_API_KEY"], used: directoryConfigured(serperConfigured()), found: directoryRows.length, note,
     });
   }
 

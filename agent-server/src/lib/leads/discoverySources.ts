@@ -22,6 +22,7 @@ import type { Candidate } from "./sources.js";
 import type { Icp } from "./icp.js";
 import { domainOf } from "./compliance.js";
 import { clientsViaScrapling, listViaScrapling, scraplingConfigured, type FoundCompany } from "./scraplingClient.js";
+import type { WebSearch } from "./linkedinSnippets.js";
 
 export type ExtraSourceResult = { candidates: Candidate[]; note: string };
 
@@ -50,8 +51,87 @@ export function directoryTemplates(env: NodeJS.ProcessEnv = process.env): string
     .filter((t) => /^https?:\/\/.+\{q\}/i.test(t));
 }
 
-export function directoryConfigured(): boolean {
-  return scraplingConfigured() && directoryTemplates().length > 0;
+/** LEADS_DIRECTORY_AUTO=0 turns off finding directory pages by web search. */
+export function autoDirectoriesEnabled(): boolean {
+  return process.env.LEADS_DIRECTORY_AUTO !== "0";
+}
+
+/** Can the directory source do anything? Needs the Scrapling service AND either hand-written
+ *  templates or a web search to find directory pages with (`searchAvailable` = a search key is set). */
+export function directoryConfigured(searchAvailable = false): boolean {
+  return scraplingConfigured() && (directoryTemplates().length > 0 || (autoDirectoriesEnabled() && searchAvailable));
+}
+
+// ── finding directory pages by web search (no templates to write) ────────────────────────────
+
+/** Hosts that are never a directory of companies: social, search, marketplaces, job boards, wikis,
+ *  code and file hosts. (Business directories and review aggregators are NOT here: they are the point.) */
+const NOT_A_DIRECTORY_HOST = new RegExp(
+  "(^|\\.)(" +
+    [
+      "linkedin\\.com", "facebook\\.com", "instagram\\.com", "twitter\\.com", "x\\.com", "youtube\\.com", "tiktok\\.com",
+      "pinterest\\.com", "reddit\\.com", "quora\\.com", "medium\\.com", "wikipedia\\.org", "google\\.[a-z.]+", "bing\\.com",
+      "yahoo\\.com", "amazon\\.[a-z.]+", "ebay\\.[a-z.]+", "indeed\\.com", "glassdoor\\.[a-z.]+", "naukri\\.com", "bayt\\.com",
+      "monster\\.com", "ziprecruiter\\.com", "github\\.com", "gitlab\\.com", "slideshare\\.net", "scribd\\.com",
+      "issuu\\.com", "pdfcoffee\\.com", "blogspot\\.com", "wordpress\\.com", "substack\\.com", "gov\\.[a-z]{2}", "[a-z]+\\.gov",
+    ].join("|") +
+    ")$",
+  "i",
+);
+
+/** Words that say "this page is a list of companies": in the title, the path or the host. */
+const DIRECTORY_SIGNAL =
+  /\b(directory|directories|yellow ?pages|business ?list|company ?list|companies list|list of|top\s*\d+|best\s*\d+|suppliers?|manufacturers?|exporters?|importers?|members?|exhibitors?|listings?|companies in|firms in|vendors?)\b/i;
+
+/** Hosts that ARE directories whatever a page's title says: the word in the name, or a well-known
+ *  company-listing / review aggregator. */
+const DIRECTORY_HOST = /(directory|yellow-?pages|business-?list|clutch\.co|g2\.com|capterra|goodfirms|sortlist|justdial|indiamart|tradeindia|europages|kompass|thomasnet|exporthub|ec21|tradekey)/i;
+
+/** A search result that is probably a page LISTING companies, or null. Judged from the result itself
+ *  (no request spent): a real http(s) page, not a file, not a social/search/job host, with a
+ *  directory-ish title, path or host. A single company's own site rarely matches, and if one slips
+ *  through, /list simply finds few companies on it. Exported for tests. */
+export function directoryPageFromResult(r: any): string | null {
+  const link = String(r?.link ?? "").trim();
+  const title = String(r?.title ?? "");
+  let u: URL;
+  try {
+    u = new URL(link);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+  const host = u.hostname.toLowerCase().replace(/^www\./, "");
+  if (NOT_A_DIRECTORY_HOST.test(host)) return null;
+  if (/\.(pdf|docx?|xlsx?|pptx?|zip)$/i.test(u.pathname)) return null;
+  const path = u.pathname.replace(/[-_/]+/g, " ");
+  if (!(DIRECTORY_SIGNAL.test(title) || DIRECTORY_SIGNAL.test(path) || DIRECTORY_HOST.test(host))) return null;
+  return u.toString();
+}
+
+/** Ask the web search for pages that list the companies of this buyer segment, and keep the
+ *  directory-looking ones. Plain words (no operators: the free search tier rejects them). */
+export async function findDirectoryPages(icp: Icp, search: WebSearch, maxPages: number, maxQueries: number): Promise<string[]> {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const q of directoryQueries(icp, maxQueries)) {
+    for (const query of [`${q} companies directory${icp.geo ? ` ${icp.geo}` : ""}`, `list of ${q}${icp.geo ? ` in ${icp.geo}` : ""}`]) {
+      let rows: any[] = [];
+      try {
+        rows = await search(query, icp.geo);
+      } catch {
+        continue;
+      }
+      for (const r of rows) {
+        const url = directoryPageFromResult(r);
+        if (!url || seen.has(url)) continue;
+        seen.add(url);
+        out.push(url);
+        if (out.length >= maxPages) return out;
+      }
+    }
+  }
+  return out;
 }
 
 /** The bare phrases to look a directory up by: the buyer segment first, then the AI-expanded ones. */
@@ -92,43 +172,63 @@ function toCandidate(c: FoundCompany, source: "directory" | "clients", why: stri
   };
 }
 
-/** Companies from the configured business directories for this ICP. */
-export async function directorySearch(icp: Icp, limit: number, fetchImpl: typeof fetch = fetch): Promise<ExtraSourceResult> {
+/** Companies from business directories for this ICP: the owner's templates (LEADS_DIRECTORY_URLS)
+ *  AND directory pages found by web search (when a search is available). Either alone is enough. */
+export async function directorySearch(
+  icp: Icp,
+  limit: number,
+  fetchImpl: typeof fetch = fetch,
+  opts: { search?: WebSearch | null } = {},
+): Promise<ExtraSourceResult> {
   if (!scraplingConfigured()) return { candidates: [], note: "no SCRAPLING_SERVICE_URL — directory search is off" };
   const templates = directoryTemplates();
-  if (!templates.length) return { candidates: [], note: "no LEADS_DIRECTORY_URLS — no directory is configured" };
+  const search = autoDirectoriesEnabled() ? opts.search ?? null : null;
+  if (!templates.length && !search) {
+    return { candidates: [], note: "no LEADS_DIRECTORY_URLS, and no search key to find directories with — off" };
+  }
 
   const maxQ = Math.max(1, Math.min(6, Number(process.env.LEADS_DIRECTORY_MAX_QUERIES) || 3));
   const queries = directoryQueries(icp, maxQ);
+
+  // Every page to read, with the phrase it stands for: the owner's templates first (they chose
+  // them), then the directory pages the search turned up.
+  const targets: { url: string; q: string }[] = [];
+  for (const template of templates) for (const q of queries) targets.push({ url: fillTemplate(template, q, icp.geo), q });
+  let autoFound = 0;
+  if (search) {
+    const maxPages = Math.max(1, Math.min(8, Number(process.env.LEADS_DIRECTORY_AUTO_PAGES) || 3));
+    const pages = await findDirectoryPages(icp, search, maxPages, Math.min(2, maxQ)).catch(() => [] as string[]);
+    autoFound = pages.length;
+    for (const url of pages) targets.push({ url, q: icp.industry });
+  }
+
   const out: Candidate[] = [];
   const seen = new Set<string>();
   const problems: string[] = [];
-
-  outer: for (const template of templates) {
-    for (const q of queries) {
-      const url = fillTemplate(template, q, icp.geo);
-      const rows = await memoised(`dir:${url}`, async () => {
-        const r = await listViaScrapling(url, { maxPages: 2, limit: Math.min(60, limit) }, fetchImpl);
-        if (!r) return null;
-        if (!r.ok) {
-          problems.push(r.reason);
-          return null;
-        }
-        return r.companies;
-      });
-      for (const c of rows ?? []) {
-        const cand = toCandidate(c, "directory", `listed in a directory for "${q}"`, `Found in a business directory (${hostOnly(url)})`);
-        const key = cand?.domain;
-        if (!cand || !key || seen.has(key)) continue;
-        seen.add(key);
-        out.push(cand);
-        if (out.length >= limit) break outer;
+  for (const { url, q } of targets) {
+    if (out.length >= limit) break;
+    const rows = await memoised(`dir:${url}`, async () => {
+      const r = await listViaScrapling(url, { maxPages: 2, limit: Math.min(60, limit) }, fetchImpl);
+      if (!r) return null;
+      if (!r.ok) {
+        problems.push(r.reason);
+        return null;
       }
+      return r.companies;
+    });
+    for (const c of rows ?? []) {
+      const cand = toCandidate(c, "directory", `listed in a directory for "${q}"`, `Found in a business directory (${hostOnly(url)})`);
+      const key = cand?.domain;
+      if (!cand || !key || seen.has(key)) continue;
+      seen.add(key);
+      out.push(cand);
+      if (out.length >= limit) break;
     }
   }
 
-  if (out.length) return { candidates: out, note: `${out.length} companies from ${templates.length} director${templates.length === 1 ? "y" : "ies"}` };
-  return { candidates: [], note: problems.length ? `directory search found nothing — ${problems[0]}` : "directories had no matching companies" };
+  const from = `${templates.length} configured + ${autoFound} found by search`;
+  if (out.length) return { candidates: out, note: `${out.length} companies (${from})` };
+  return { candidates: [], note: problems.length ? `directory search found nothing (${from}) — ${problems[0]}` : `directories had no matching companies (${from})` };
 }
 
 // ── competitors' clients ─────────────────────────────────────────────────────────────────────
