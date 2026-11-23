@@ -97,6 +97,9 @@ import {
   Pause,
   Play,
   MessageCircle,
+  BellRing,
+  Mail,
+  FileBarChart,
 } from "lucide-react";
 
 /* ========================================================================== */
@@ -171,12 +174,13 @@ type ThreadMsg = {
   at?: string;
 };
 
-type AgentStatus = "Completed" | "Working" | "Waiting" | "Planned";
-type Agent = { id: string; name: string; role: string; status: AgentStatus; icon: React.ElementType; color: string };
+type AgentStatus = "Completed" | "Working" | "Waiting" | "Planned" | "Active";
+/** `href`: a card for an always-on service (WhatsApp, reminders, daily summary) opens its own page instead of the live-run panel. */
+type Agent = { id: string; name: string; role: string; status: AgentStatus; icon: React.ElementType; color: string; href?: string };
 /** Static per-agent identity (name/role/icon/color/id). `status` is NOT here — it's derived
  *  at render time from the real current task's steps (see `statusForAgent` in the main
  *  component), except `fixedStatus` agents which are always "Planned" regardless. */
-type AgentMeta = Omit<Agent, "status"> & { fixedStatus?: "Planned" };
+type AgentMeta = Omit<Agent, "status"> & { fixedStatus?: "Planned" | "Active" };
 
 /** The full roster per MASTER_PLAN.html: all 11 real agents (`id` matches agent-server's
  *  AGENT_TYPES/task_steps.agent_id — boss IS the brain node in the middle, not a 12th orbiting
@@ -204,7 +208,17 @@ const AGENT_META_RIGHT: AgentMeta[] = [
   { id: "leads", name: "Mr. Leads", role: "Lead Discovery", icon: UserRound, color: "#f97316" },
 ];
 
+/** The always-on services that run on their own (no task, no "Working" state): they talk to the leads, set the meetings, remind and report to the owner. Shown as a fifth row so
+ *  an owner can see everything MenCra does for them, not only the content pipeline. Mr. Email is announced as coming soon. */
+const AGENT_META_SERVICES: AgentMeta[] = [
+  { id: "whatsapp", name: "Mr. WhatsApp", role: "Talks to leads · books meetings", icon: MessageCircle, color: "#25d366", fixedStatus: "Active", href: "/dashboard/whatsapp" },
+  { id: "reminder", name: "Mr. Reminder", role: "Meeting reminders", icon: BellRing, color: "#38bdf8", fixedStatus: "Active", href: "/dashboard/schedule" },
+  { id: "digest", name: "Mr. Digest", role: "Daily summary to the boss", icon: FileBarChart, color: "#f472b6", fixedStatus: "Active", href: "/dashboard/reports" },
+  { id: "email", name: "Mr. Email", role: "Email outreach", icon: Mail, color: "#a1a1b5", fixedStatus: "Planned" },
+];
+
 const STATUS_COLOR: Record<AgentStatus, string> = {
+  Active: "#22c55e",
   Completed: "#22c55e",
   Working: "#3b82f6",
   Waiting: "#6a6a80",
@@ -324,7 +338,7 @@ const NetCard = ({ a, area, onClick }: { a: Agent; area: string; onClick?: () =>
       className={`lx-net-card ${working ? "lx-net-card-working" : ""}`}
       data-net={area}
       data-agent-id={a.id}
-      title={planned ? `${a.name} is not built yet` : `See what ${a.name} is doing`}
+      title={planned ? `${a.name} is coming soon` : `See what ${a.name} is doing`}
       style={{
         gridArea: area,
         cursor: planned ? "default" : "pointer",
@@ -349,7 +363,7 @@ const NetCard = ({ a, area, onClick }: { a: Agent; area: string; onClick?: () =>
           <Icon size={20} />
         </span>
         {planned ? (
-          <span className="lx-10 font-semibold" style={{ color: statusColor }}>Planned</span>
+          <span className="lx-10 font-semibold" style={{ color: statusColor }}>Coming soon</span>
         ) : (
           <MoreVertical size={14} style={{ color: "var(--lx-mut)", opacity: 0.6 }} />
         )}
@@ -2433,6 +2447,7 @@ const AgentNetwork = ({
   left,
   right,
   bottom,
+  services,
   bossAgent,
   totalActive,
   running,
@@ -2444,6 +2459,7 @@ const AgentNetwork = ({
   left: Agent[];
   right: Agent[];
   bottom: Agent[];
+  services: Agent[];
   bossAgent: Agent;
   totalActive: number;
   running: number;
@@ -2521,6 +2537,9 @@ const AgentNetwork = ({
           ))}
           {bottom.map((a, i) => (
             <NetCard key={a.id} a={a} area={`o${i + 1}`} onClick={() => onOpen(a)} />
+          ))}
+          {services.map((a, i) => (
+            <NetCard key={a.id} a={a} area={`p${i + 1}`} onClick={() => onOpen(a)} />
           ))}
         </div>
       </div>
@@ -2798,6 +2817,7 @@ export default function MrLxwaDashboard({
   // grid on purpose — it still isn't a NetCard peer — but fed into every OTHER lookup below.
   const publishMeta: AgentMeta = { id: "publish", name: "Mr. Publish", role: "Publishing", icon: Send, color: "#c98a2b" };
   const publishAgent: Agent = { ...publishMeta, status: statusForAgent(publishMeta) };
+  const serviceAgents: Agent[] = AGENT_META_SERVICES.map((m) => ({ ...m, status: m.fixedStatus ?? "Waiting" }));
   const allAgents: Agent[] = [...agentsLeft, ...agentsRight];
   const realAgents = allAgents.filter((a) => a.status !== "Planned");
   const workingAgentsCount = realAgents.filter((a) => a.status === "Working").length;
@@ -3880,6 +3900,7 @@ export default function MrLxwaDashboard({
   // 2026-09-05/06) — this guard is kept for the day a genuinely unbuilt agent joins the roster.
   const openAgentPanel = (a: Agent) => {
     if (a.status === "Planned") return;
+    if (a.href) { router.push(a.href); return; }
     setFocusedRun(null);
     setSelectedAgentId(a.id);
     setShowPanel(true);
@@ -3928,8 +3949,9 @@ export default function MrLxwaDashboard({
         left={netLeft}
         right={netRight}
         bottom={netBottom}
+        services={serviceAgents}
         bossAgent={bossAgent}
-        totalActive={realAgents.length + 1}
+        totalActive={realAgents.length + 1 + serviceAgents.filter((a) => a.status === "Active").length}
         running={realAgents.filter((a) => a.status === "Working").length}
         completed={realAgents.filter((a) => a.status === "Completed").length}
         workingAgent={workingAgent}

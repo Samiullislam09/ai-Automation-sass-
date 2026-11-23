@@ -298,11 +298,12 @@ export const LX_CSS = `
    to the right and left only one card on screen. On a phone they simply flow, two per row. */
 @container (max-width:439px){ .lx-net > [data-net]{grid-area:auto!important} }
 @container (min-width:440px){
-  .lx-net{grid-template-columns:repeat(12,1fr);grid-template-rows:repeat(4,auto);
+  .lx-net{grid-template-columns:repeat(12,1fr);grid-template-rows:repeat(5,auto);
     grid-template-areas:
       "t1 t1 t1 t2 t2 t2 t3 t3 t3 t4 t4 t4"
       "l1 l1 l1 l1 b  b  b  b  r1 r1 r1 r1"
-      "o1 o1 o1 o2 o2 o2 o3 o3 o3 o4 o4 o4"}
+      "o1 o1 o1 o2 o2 o2 o3 o3 o3 o4 o4 o4"
+      "p1 p1 p1 p2 p2 p2 p3 p3 p3 p4 p4 p4"}
   /* side cards sit centred on the brain, single-card height; the brain card itself does
      not stretch to fill the row — it keeps the reference's compact size */
   [data-net='l1'],[data-net='r1'],[data-net='b']{align-self:center}
