@@ -125,19 +125,20 @@ const GlobalStyle = LxGlobalStyle;
  *  Every remaining item with no href is a deliberate local action, not a missing page: Chat
  *  opens the built-in Assistant panel. Nothing still-planned (Mr. Image/Mr. Story, Mr. Support)
  *  gets a nav entry — they show as "Planned" in the agent network instead, same honesty rule. */
-type NavItem = { label: string; icon: React.ElementType; badge?: number; href?: string };
+type NavItem = { label: string; icon: React.ElementType; badge?: number; href?: string; group?: string; hint?: string };
+/** Grouped by what the owner gets, with a one-line plain-words hint under each name, so a new user can read the menu as the list of services MenCra provides.
+ *  Hidden on purpose (still reachable by URL, just not in the menu): Memory (technical; its business facts live in Site Brain), Content, Autopilot, Eval and Office/Workspace. */
 const NAV: NavItem[] = [
-  { label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
-  { label: "Approvals", icon: ListChecks, href: "/dashboard/approvals" },
-  { label: "Connect", icon: Link2, href: "/dashboard/connect" },
-  { label: "Schedule", icon: CalendarDays, href: "/dashboard/schedule" },
-  { label: "Leads", icon: UserRound, href: "/dashboard/leads" },
-  { label: "WhatsApp", icon: MessageCircle, href: "/dashboard/whatsapp" },
-  { label: "Site Brain", icon: Globe, href: "/dashboard/site-brain" },
-  { label: "Audit", icon: TrendingUp, href: "/dashboard/audit" },
-  { label: "Reports", icon: ClipboardList, href: "/dashboard/reports" },
-  { label: "Memory", icon: BrainCircuit, href: "/dashboard/memory" },
-  { label: "Account", icon: Settings, href: "/dashboard/account" },
+  { label: "Dashboard", icon: LayoutDashboard, href: "/dashboard", group: "Overview", hint: "Your AI team at work" },
+  { label: "Leads", icon: UserRound, href: "/dashboard/leads", group: "Get customers", hint: "Finds new customers for you" },
+  { label: "WhatsApp", icon: MessageCircle, href: "/dashboard/whatsapp", hint: "AI talks to leads, books meetings" },
+  { label: "Approvals", icon: ListChecks, href: "/dashboard/approvals", group: "Grow your website", hint: "Review articles before they go live" },
+  { label: "Site Brain", icon: Globe, href: "/dashboard/site-brain", hint: "What the AI knows about your business" },
+  { label: "Audit", icon: TrendingUp, href: "/dashboard/audit", hint: "Website health and SEO check" },
+  { label: "Schedule", icon: CalendarDays, href: "/dashboard/schedule", group: "Automatic work", hint: "Daily jobs and meeting reminders" },
+  { label: "Reports", icon: ClipboardList, href: "/dashboard/reports", hint: "Daily summary of what was done" },
+  { label: "Connect", icon: Link2, href: "/dashboard/connect", group: "Setup", hint: "Link your website and accounts" },
+  { label: "Account", icon: Settings, href: "/dashboard/account", hint: "Plan and settings" },
 ];
 
 /** A chat bubble. `live` = still streaming in (the loop below keeps appending to `text`);
@@ -3708,7 +3709,7 @@ export default function MrLxwaDashboard({
             <PanelLeftOpen size={16} strokeWidth={1.8} />
           </button>
         )}
-        {NAV.map((it) => {
+        {NAV.map((it, idx) => {
           // A sub-page keeps its section lit — /dashboard/content/<id> (the article reviewer)
           // is still "Content". Exact match everywhere else, so /dashboard never lights up for
           // every /dashboard/** page.
@@ -3720,7 +3721,10 @@ export default function MrLxwaDashboard({
           const inner = (
             <>
               <it.icon size={16} strokeWidth={1.8} />
-              <span className={`truncate ${mini ? "lg:hidden" : ""}`}>{it.label}</span>
+              <span className={`min-w-0 flex-1 ${mini ? "lg:hidden" : ""}`}>
+                <span className="block truncate">{it.label}</span>
+                {it.hint && <span className="lx-10 lx-dim block truncate font-normal" style={{ marginTop: 1 }}>{it.hint}</span>}
+              </span>
               {badge ? (
                 <span
                   className={`flex items-center justify-center rounded-full font-bold text-white ${
@@ -3734,7 +3738,14 @@ export default function MrLxwaDashboard({
             </>
           );
           const cls = `lx-nav relative ${active ? "on" : ""} ${mini ? "lg:justify-center lg:px-0" : ""}`;
-          return it.href ? (
+          const heading = it.group ? (
+            mini ? (
+              idx > 0 ? <div key={`g-${it.group}`} className="mx-2 my-2 hidden border-t lg:block" style={{ borderColor: "var(--lx-border)" }} /> : null
+            ) : (
+              <div key={`g-${it.group}`} className="lx-10 lx-dim px-2.5 pb-1 pt-3 font-semibold uppercase tracking-wider">{it.group}</div>
+            )
+          ) : null;
+          const row = it.href ? (
             <Link key={it.label} href={it.href} prefetch={false} onMouseEnter={() => warm(it.href)} onFocus={() => warm(it.href)} onTouchStart={() => warm(it.href)} className={cls} title={mini ? it.label : undefined}>
               {inner}
             </Link>
@@ -3743,6 +3754,7 @@ export default function MrLxwaDashboard({
               {inner}
             </button>
           );
+          return <React.Fragment key={it.label}>{heading}{row}</React.Fragment>;
         })}
 
         {/* system status — every number below reads off `live` (lib/live.ts's useLiveEvents),
