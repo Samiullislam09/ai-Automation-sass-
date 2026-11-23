@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from scrapling.fetchers import Fetcher
 
 from extract import business_emails, company_name, phone_numbers, whatsapp_number
-from listing import client_page_links, companies_from_html, next_page_url, same_site
+from listing import client_page_links, companies_from_html, host_allowed, next_page_url
 from safety import HostPacer, UnsafeUrl, USER_AGENT, assert_public_host
 
 AUTH_TOKEN = os.environ.get("SCRAPLING_SERVICE_TOKEN", "").strip()
@@ -126,8 +126,8 @@ def read(req: ReadRequest, authorization: Optional[str] = Header(default=None)):
 # one company. Same gates as /read: public hosts only (SSRF check), per-host pacing, plain HTTP
 # fetcher. NOTE: this service no longer checks robots.txt (removed from /read and safety.py before
 # these endpoints were written), so neither do these. A directory is somebody else's database, so
-# /list refuses every host that is not on LIST_ALLOWED_HOSTS — empty means "no directory is
-# allowed yet", the safe default; the owner names the sites they have decided to read.
+# /list reads any public site by default; set LIST_ALLOWED_HOSTS (comma-separated) to restrict it
+# to the sites the owner has named. "*" or empty = any public host.
 
 MAX_LIST_PAGES = 3
 MAX_CLIENT_PAGES = 3
@@ -138,7 +138,7 @@ def list_allowed_hosts() -> list[str]:
 
 
 def host_is_listed(url: str) -> bool:
-    return any(same_site(url, f"https://{h}") for h in list_allowed_hosts())
+    return host_allowed(url, list_allowed_hosts())
 
 
 class ListRequest(BaseModel):
@@ -206,7 +206,7 @@ def _merge(into: list[FoundCompany], seen: set[str], rows: list[dict], source_ur
 @app.post("/list", response_model=ListResponse)
 def list_directory(req: ListRequest, authorization: Optional[str] = Header(default=None)):
     """Companies a directory / member list / exhibitor list links to, following its "next" links
-    for up to `max_pages` pages. Only for hosts on LIST_ALLOWED_HOSTS."""
+    for up to `max_pages` pages. Any public host, unless LIST_ALLOWED_HOSTS restricts it."""
     check_auth(authorization)
     url = req.url if "://" in req.url else f"https://{req.url}"
     if not host_is_listed(url):

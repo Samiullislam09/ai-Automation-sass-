@@ -89,6 +89,15 @@ def same_site(a: str, b: str) -> bool:
     return ha == hb or ha.endswith("." + hb) or hb.endswith("." + ha)
 
 
+def host_allowed(url: str, allowed: list[str]) -> bool:
+    """May /list read this host? An EMPTY list or "*" means any public site (the SSRF check in
+    safety.assert_public_host still runs on every request); otherwise only the named hosts and
+    their subdomains."""
+    if not allowed or "*" in allowed:
+        return True
+    return any(same_site(url, f"https://{h}") for h in allowed)
+
+
 def _text(el) -> str:
     return " ".join((el.text_content() or "").split())
 

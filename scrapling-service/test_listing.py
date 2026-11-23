@@ -98,3 +98,13 @@ def test_next_page_url_rel_next_and_text_next():
     assert next_page_url('<a href="/list?page=3">Next</a>', DIR) == "https://members.example-assoc.org/list?page=3"
     assert next_page_url('<a href="https://elsewhere.com/p2">Next</a>', DIR) is None
     assert next_page_url("<p>nothing</p>", DIR) is None
+
+
+def test_host_allowed_open_by_default_restricted_when_listed():
+    from listing import host_allowed
+
+    assert host_allowed("https://any-directory.com/x", [])
+    assert host_allowed("https://any-directory.com/x", ["*"])
+    assert host_allowed("https://www.clutch.co/search", ["clutch.co"])
+    assert host_allowed("https://sub.clutch.co/search", ["clutch.co"])
+    assert not host_allowed("https://other.com/x", ["clutch.co"])

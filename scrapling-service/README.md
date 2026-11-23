@@ -45,8 +45,8 @@ No browser install step is needed — this only uses the HTTP fetcher.
 - `POST /list` — body `{"url": "<directory search url>", "max_pages": 2, "limit": 40}`. Reads a
   business directory / member list / exhibitor list (following its "next" link for up to 3 pages)
   and returns every company it links to: `{ok, items:[{name, website, domain, source_url}], pages_read}`.
-  **Refuses every host not on `LIST_ALLOWED_HOSTS`** (comma-separated, e.g. `clutch.co,europages.co.uk`);
-  empty means no directory is allowed, which is the safe default.
+  Reads any public host by default; set `LIST_ALLOWED_HOSTS` (comma-separated, e.g. `clutch.co,europages.co.uk`) to restrict it;
+  empty or `*` means any public site (the SSRF check still runs on every request).
 - `POST /clients` — body `{"url": "https://competitor.com", "limit": 40}`. Finds the competitor's own
   "clients / case studies / testimonials" pages from its home page, reads up to 3, and returns the
   companies named there (linked-out companies, plus client logos by their alt text).
