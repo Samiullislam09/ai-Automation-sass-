@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
-import { Manrope, Plus_Jakarta_Sans } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { StoreProvider } from "@/lib/store";
 import { BRAND, SITE_URL } from "@/lib/brand";
 import { ThemeProvider } from "@/components/theme-provider";
 
-const manrope = Manrope({ subsets: ["latin"], variable: "--font-manrope" });
-const jakarta = Plus_Jakarta_Sans({ subsets: ["latin"], variable: "--font-jakarta" });
+// Self-hosted (app/fonts/README.md): no download from Google at build time, so a Google Fonts hiccup can no longer fail a deployment.
+const manrope = localFont({ src: "./fonts/manrope-latin-wght-normal.woff2", weight: "200 800", variable: "--font-manrope", display: "swap", adjustFontFallback: "Arial" });
+const jakarta = localFont({ src: "./fonts/plus-jakarta-sans-latin-wght-normal.woff2", weight: "200 800", variable: "--font-jakarta", display: "swap", adjustFontFallback: "Arial" });
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
