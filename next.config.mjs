@@ -27,8 +27,9 @@ const nextConfig = {
   async headers() {
     const csp = [
       "default-src 'self'",
-      `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === "production" ? "" : " 'unsafe-eval'"}`,
-      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      // accounts.google.com/gsi/*: Google One Tap (components/GoogleOneTap.tsx) loads its script and styles from there; connect-src and frame-src already allow https:.
+      `script-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/client${process.env.NODE_ENV === "production" ? "" : " 'unsafe-eval'"}`,
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style",
       "font-src 'self' data: https://fonts.gstatic.com",
       "img-src 'self' data: blob: https:",
       "media-src 'self' blob: https:",

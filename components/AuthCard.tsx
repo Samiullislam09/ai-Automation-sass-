@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { BRAND } from "@/lib/brand";
 import { Logo } from "@/components/landing-v2/Logo";
 import { AsyncFont } from "@/components/landing-v2/AsyncFont";
+import { GoogleOneTap } from "@/components/GoogleOneTap";
 
 /** /login and /signup. Restyled to match the home page: one centred column on a white page with
  *  a soft mint glow at the top, a dark pill "Continue with Google" button, an "or continue with
@@ -104,6 +105,7 @@ export function AuthCard({ mode }: { mode: "login" | "signup" }) {
 
   return (
     <div className="lg-page">
+      <GoogleOneTap />
       <AsyncFont href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@300..800&display=swap" />
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
 
