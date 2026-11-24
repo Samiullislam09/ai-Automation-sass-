@@ -65,14 +65,16 @@ function Stage({ children }: { children: React.ReactNode }) {
 export const PENDING_SITE_KEY = "mencra.pendingSite";
 function ConnectSiteForm() {
   const signedIn = useSignedIn();
+  // EVERY hook runs before the early return below. useSignedIn() starts false and flips to true once the session is read, so a hook placed after the
+  // `if (signedIn) return` ran on the first render and not on the next one: React error #300 ("rendered fewer hooks than expected").
   const [url, setUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
   if (signedIn) {
     return (
       <AuthLink guestHref="/signup" guestLabel="Connect your site" authedLabel="Go to dashboard" className="inline-flex h-12 items-center gap-2 rounded-full bg-[#262626] pl-6 pr-[22px] text-[16px] font-semibold text-[#fafafa] transition-colors hover:bg-[#3d3d3d]"><ArrowRight size={18} /></AuthLink>
     );
   }
-  const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
   const go = async (e: React.FormEvent) => {
     e.preventDefault();
     if (busy) return;
